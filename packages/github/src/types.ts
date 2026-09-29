@@ -12,6 +12,12 @@ export type CheckContext = {
 
 export type PrSnapshot = {
   number: number;
+  title: string;
+  draft: boolean;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  updatedAt: string;
   url: string;
   headSha: string;
   headRef: string;

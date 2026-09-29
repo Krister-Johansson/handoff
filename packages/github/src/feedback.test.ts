@@ -5,6 +5,12 @@ import type { PrSnapshot } from "./types.ts";
 
 const base: PrSnapshot = {
   number: 7,
+  title: "t",
+  draft: false,
+  additions: 1,
+  deletions: 0,
+  changedFiles: 1,
+  updatedAt: "now",
   url: "https://github.com/octo/sample/pull/7",
   headSha: "abc",
   headRef: "handoff/x",

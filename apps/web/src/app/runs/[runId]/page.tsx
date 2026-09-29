@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeftIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
 import { RunLive } from "@/components/runs/run-live";
 import { getDb } from "@/lib/db";
 import { getRunDetail } from "@/server/queries";
@@ -13,16 +14,18 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
   const { runId } = await params;
   const detail = await getRunDetail(getDb(), runId);
   if (!detail) notFound();
-  const { run, project, executions, events, graph } = detail;
+  const { run, project, executions, events, graph, openQuestions, failed } = detail;
+  const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <div>
+      <div className="flex items-center justify-between">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/runs">
             <ArrowLeftIcon data-icon="inline-start" />
             Runs
           </Link>
         </Button>
+        {active && <CancelRunButton runId={run.id} />}
       </div>
       <Card>
         <CardHeader>
@@ -40,6 +43,19 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
           </CardDescription>
         </CardHeader>
       </Card>
+      {openQuestions.map((q) => (
+        <QuestionCard
+          key={q.id}
+          compact
+          item={{ ...q, runId: run.id, task: run.task, projectName: project.name, reason: typeof q.context.reason === "string" ? q.context.reason : "approval" }}
+        />
+      ))}
+      {run.status === "failed" && failed && (
+        <FailedRunCard
+          compact
+          item={{ runId: run.id, task: run.task, projectName: project.name, executionId: failed.id, nodeKey: failed.nodeKey, attempt: failed.attempt, error: failed.error ?? null }}
+        />
+      )}
       <RunLive
         runId={run.id}
         initialStatus={run.status}

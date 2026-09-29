@@ -4,7 +4,20 @@
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@handoff/web", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@handoff/web",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "web-with-github",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "GITHUB_TOKEN=$(gh auth token) exec pnpm --filter @handoff/web dev"
+      ],
       "port": 3000
     }
   ]

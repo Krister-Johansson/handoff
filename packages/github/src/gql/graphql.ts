@@ -87,7 +87,7 @@ export type PullRequestSnapshotQueryVariables = Exact<{
 }>;
 
 
-export type PullRequestSnapshotQuery = { repository: { pullRequest: { number: number, url: string, headRefOid: string, headRefName: string, state: PullRequestState, merged: boolean, mergeable: MergeableState, reviewDecision: PullRequestReviewDecision | null, commits: { nodes: Array<{ commit: { statusCheckRollup: { state: StatusState, contexts: { nodes: Array<
+export type PullRequestSnapshotQuery = { repository: { pullRequest: { number: number, title: string, isDraft: boolean, additions: number, deletions: number, changedFiles: number, updatedAt: string, url: string, headRefOid: string, headRefName: string, state: PullRequestState, merged: boolean, mergeable: MergeableState, reviewDecision: PullRequestReviewDecision | null, commits: { nodes: Array<{ commit: { statusCheckRollup: { state: StatusState, contexts: { nodes: Array<
                   | { __typename: 'CheckRun', databaseId: number | null, name: string, status: CheckStatusState, conclusion: CheckConclusionState | null, detailsUrl: string | null }
                   | { __typename: 'StatusContext', context: string, state: StatusState, targetUrl: string | null }
                  | null> | null } } | null } } | null> | null }, reviewThreads: { nodes: Array<{ isResolved: boolean, comments: { nodes: Array<{ body: string, path: string, line: number | null, url: string, author:
@@ -128,6 +128,12 @@ export const PullRequestSnapshotDocument = new TypedDocumentString(`
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       number
+      title
+      isDraft
+      additions
+      deletions
+      changedFiles
+      updatedAt
       url
       headRefOid
       headRefName

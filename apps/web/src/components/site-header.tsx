@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { InboxLink } from "@/components/inbox-link";
 
 const links = [
   { href: "/projects", label: "Projects" },
@@ -20,6 +21,7 @@ export function SiteHeader() {
               <Link href={link.href}>{link.label}</Link>
             </Button>
           ))}
+          <InboxLink />
         </nav>
       </div>
     </header>
