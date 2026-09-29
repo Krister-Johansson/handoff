@@ -40,6 +40,7 @@ export class ClaudeCliExecutor implements CliExecutor {
       session: request.session,
       ...(request.mcpConfigPath ? { mcpConfigPath: request.mcpConfigPath } : {}),
       ...(request.model ? { model: request.model } : {}),
+      ...(request.agents ? { agents: request.agents } : {}),
     });
 
     const child = spawn(this.options.command.file, [...this.options.command.prefixArgs, ...argv], {

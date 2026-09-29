@@ -8,10 +8,12 @@ export type NodeType = z.infer<typeof NodeTypeSchema>;
 export const ExecutorKindSchema = z.enum(["cli", "shell", "github", "human", "function"]);
 export type ExecutorKind = z.infer<typeof ExecutorKindSchema>;
 
-const LibrarySelectionSchema = z.object({
+export const LibrarySelectionSchema = z.object({
   skills: z.array(z.string()).default([]),
   mcp: z.array(z.string()).default([]),
+  agents: z.array(z.string()).default([]),
 });
+export type LibrarySelection = z.infer<typeof LibrarySelectionSchema>;
 
 /** As stored. `type` is a plain string so compileGraph can report unknown types by node. */
 export const NodeAttributesSchema = z.object({
