@@ -193,6 +193,9 @@ importers:
       '@handoff/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@handoff/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@handoff/github':
         specifier: workspace:*
         version: link:../../packages/github
@@ -226,6 +229,9 @@ importers:
       tw-animate-css:
         specifier: 1.4.0
         version: 1.4.0
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@tailwindcss/postcss':
         specifier: 4.3.3

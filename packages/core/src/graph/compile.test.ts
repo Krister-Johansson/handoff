@@ -94,3 +94,24 @@ describe("compileGraph", () => {
     expect(codes(compileGraph(doc))).toEqual(["invalid_document"]);
   });
 });
+
+describe("compileGraph with the loop fixture", () => {
+  test("compileGraph accepts the loop fixture with loops back to the Coder", async () => {
+    const loop = (await import("../fixtures/loop.graph.json", { with: { type: "json" } })).default;
+    const result = compileGraph(loop);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.graph.inEdges("coder").filter((e) => e.loop).map((e) => e.key).sort()).toEqual(["gate->coder", "pr->coder", "reviewer->coder", "tester->coder"]);
+  });
+
+  test("compileGraph rejects an exhaustion target that is not a human gate", () => {
+    const doc = clone();
+    (doc.attributes as Record<string, unknown>).exhaustedGate = "merge";
+    expect(codes(compileGraph(doc))).toContain("invalid_exhausted_gate");
+  });
+
+  test("compileGraph rejects an edge onExhausted that does not exist", () => {
+    const doc = clone();
+    doc.edges.push({ key: "pr->coder", source: "pr", target: "coder", attributes: { loop: true, maxAttempts: 2, onExhausted: "ghost" } as never });
+    expect(codes(compileGraph(doc))).toContain("invalid_exhausted_gate");
+  });
+});

@@ -8,7 +8,7 @@ const TAIL_LINES = 200;
 
 export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined };
 
-async function shell(command: string, cwd: string, timeoutMs: number): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
+export async function shell(command: string, cwd: string, timeoutMs: number): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const child = spawn("sh", ["-c", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
     const lines: string[] = [];

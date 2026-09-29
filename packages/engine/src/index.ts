@@ -9,3 +9,6 @@ export * from "./scheduler/complete.ts";
 export * from "./workdir/git-worktree.ts";
 export * from "./executors/cli-node.ts";
 export * from "./executors/github.ts";
+export * from "./operations.ts";
+export * from "./executors/human-gate.ts";
+export * from "./executors/tester.ts";

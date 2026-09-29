@@ -33,6 +33,7 @@ describe("migrations", () => {
       "graphs",
       "node_executions",
       "projects",
+      "questions",
       "runs",
       "webhook_deliveries",
       "workers",

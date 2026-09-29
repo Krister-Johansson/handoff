@@ -37,7 +37,7 @@ export async function createRun(
     const start = graph.node(graph.startNode);
     const [execution] = await tx
       .insert(nodeExecutions)
-      .values({ runId: id, nodeKey: start.key, nodeType: start.type, executorKind: graph.executorKind(start.key), attempt: 1 })
+      .values({ runId: id, nodeKey: start.key, nodeType: start.type, executorKind: graph.executorKind(start.key), attempt: 1, trigger: { kind: "start" } })
       .returning();
     await appendEvents(tx, id, [
       { type: "run.created", payload: { task: input.task, graphVersionId: input.graphVersionId, branchName: run!.branchName } },

@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { compileGraph } from "@handoff/core";
-import { and, desc, eq, graphs, graphVersions, listEventsAfter, projects, runs, sql, type Db } from "@handoff/db";
-import { createRun } from "@handoff/engine";
+import { and, desc, eq, graphs, graphVersions, listEventsAfter, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
+import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
 
 export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string };
 
@@ -10,7 +10,10 @@ const USAGE = `usage:
   handoff project add --name <name> --repo <owner/name> [--branch <default>] [--clone <path>]
   handoff graph import --project <name> --name <graph> <file.json>
   handoff run --project <name> --graph <graph> --task "<task>" [--follow]
-  handoff runs`;
+  handoff runs
+  handoff run cancel <runId>
+  handoff run repair <runId> --node <key> [--note "<text>"]
+  handoff answer <questionId> "<answer>" [--option <option>]`;
 
 function need(values: Record<string, unknown>, key: string): string {
   const value = values[key];
@@ -66,6 +69,39 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
       return row!;
     });
     out(`graph ${name} version ${version.version} imported for ${project.name}`);
+    return;
+  }
+
+  if (command === "run" && sub === "cancel") {
+    const runId = rest[0];
+    if (!runId) throw new Error(USAGE);
+    await cancelRun(db, runId, { reason: "cancelled from the CLI" });
+    out(`run ${runId} cancelled`);
+    return;
+  }
+
+  if (command === "run" && sub === "repair") {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { node: { type: "string" }, note: { type: "string" } } });
+    const runId = positionals[0];
+    if (!runId) throw new Error(USAGE);
+    const [failed] = await db
+      .select()
+      .from(nodeExecutions)
+      .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.nodeKey, need(values, "node")), eq(nodeExecutions.status, "failed")))
+      .orderBy(desc(nodeExecutions.attempt))
+      .limit(1);
+    if (!failed) throw new Error(`no failed execution of ${values.node} in run ${runId}`);
+    const created = await repairNodeExecution(db, failed.id, values.note ? { note: values.note } : {});
+    out(`repair queued: ${created.nodeKey} attempt ${created.attempt}`);
+    return;
+  }
+
+  if (command === "answer") {
+    const { values, positionals } = parseArgs({ args: [sub ?? "", ...rest], allowPositionals: true, options: { option: { type: "string" } } });
+    const [questionId, answer] = positionals;
+    if (!questionId || !answer) throw new Error(USAGE);
+    await answerQuestion(db, questionId, { answer, answeredBy: "cli", ...(values.option ? { option: values.option } : {}) });
+    out(`question ${questionId} answered`);
     return;
   }
 

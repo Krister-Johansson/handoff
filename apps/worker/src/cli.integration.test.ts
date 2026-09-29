@@ -64,3 +64,38 @@ test("unknown commands print usage and fail", async () => {
   const { out } = capture();
   await expect(runCli(["frobnicate"], { db, out })).rejects.toThrow(/usage/i);
 });
+
+async function queuedRun(out: (l: string) => void) {
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out });
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out });
+  await runCli(["run", "--project", "scratch", "--graph", "linear", "--task", "t"], { db, out });
+  const [run] = await db.select().from(runs);
+  return run!;
+}
+
+test("handoff run cancel marks the run cancelled", async () => {
+  const { out, lines } = capture();
+  const run = await queuedRun(out);
+  await runCli(["run", "cancel", run.id], { db, out });
+  const [row] = await db.select().from(runs).where(eq(runs.id, run.id));
+  expect(row?.status).toBe("cancelled");
+  expect(lines.at(-1)).toContain("cancelled");
+});
+
+test("handoff run repair requires a failed node", async () => {
+  const { out } = capture();
+  const run = await queuedRun(out);
+  await expect(runCli(["run", "repair", run.id, "--node", "planner"], { db, out })).rejects.toThrow(/no failed execution/);
+});
+
+test("handoff answer records the answer for an open question", async () => {
+  const { out, lines } = capture();
+  const run = await queuedRun(out);
+  const [exec] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, run.id));
+  const { questions } = await import("@handoff/db");
+  const [q] = await db.insert(questions).values({ runId: run.id, nodeExecutionId: exec!.id, question: "ISO?", options: ["ISO", "US"] }).returning();
+  await runCli(["answer", q!.id, "Use ISO", "--option", "ISO"], { db, out });
+  const [after] = await db.select().from(questions).where(eq(questions.id, q!.id));
+  expect(after).toMatchObject({ answer: "Use ISO", option: "ISO", answeredBy: "cli" });
+  expect(lines.at(-1)).toContain("answered");
+});
