@@ -55,7 +55,10 @@ export type CompiledGraph = {
 export type CompileResult = { ok: true; graph: CompiledGraph } | { ok: false; errors: CompileError[] };
 
 /** Token shapes that must never be stored in a graph: GitHub, Anthropic, Slack, AWS, OpenAI. */
-const SECRET_PATTERN = /\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{32,})\b/;
+export const SECRET_PATTERN = /\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{32,})\b/;
+
+/** True when a string contains something shaped like a credential. */
+export const looksLikeSecret = (value: string) => SECRET_PATTERN.test(value);
 
 function findSecret(value: unknown, path: string): string | undefined {
   if (typeof value === "string") return SECRET_PATTERN.test(value) ? path : undefined;

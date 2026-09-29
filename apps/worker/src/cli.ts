@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { compileGraph } from "@handoff/core";
-import { and, desc, eq, graphs, graphVersions, listEventsAfter, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
+import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibrary, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
 
 export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string };
@@ -13,7 +14,31 @@ const USAGE = `usage:
   handoff runs
   handoff run cancel <runId>
   handoff run repair <runId> --node <key> [--note "<text>"]
-  handoff answer <questionId> "<answer>" [--option <option>]`;
+  handoff answer <questionId> "<answer>" [--option <option>]
+  handoff library import-skill <dir-with-SKILL.md>
+  handoff library list`;
+
+function readSkillDir(dir: string) {
+  const raw = readFileSync(join(dir, "SKILL.md"), "utf8");
+  const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(raw);
+  const meta = Object.fromEntries(
+    (match?.[1] ?? "")
+      .split("\n")
+      .map((line) => /^([a-zA-Z_-]+):\s*(.*)$/.exec(line))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => [m[1]!, m[2]!.replace(/^["']|["']$/g, "")]),
+  );
+  const files: { path: string; content: string }[] = [];
+  const walk = (current: string) => {
+    for (const entry of readdirSync(current)) {
+      const full = join(current, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (full !== join(dir, "SKILL.md") && statSync(full).size < 512 * 1024) files.push({ path: relative(dir, full), content: readFileSync(full, "utf8") });
+    }
+  };
+  walk(dir);
+  return { name: meta.name ?? basename(dir), description: meta.description ?? "", body: (match?.[2] ?? raw).trim(), files };
+}
 
 function need(values: Record<string, unknown>, key: string): string {
   const value = values[key];
@@ -122,6 +147,22 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     out(`run ${run.id} queued on branch ${run.branchName}`);
     out(`${io.webUrl ?? "http://localhost:3000"}/runs/${run.id}`);
     if (values.follow) await follow(db, run.id, out);
+    return;
+  }
+
+  if (command === "library" && sub === "import-skill") {
+    const dir = rest[0];
+    if (!dir) throw new Error(USAGE);
+    const skill = await upsertSkill(db, readSkillDir(dir));
+    out(`skill ${skill.name} version ${skill.version} (${skill.files.length} supporting files)`);
+    return;
+  }
+
+  if (command === "library" && sub === "list") {
+    const { skills, mcp, agents } = await listLibrary(db);
+    for (const s of skills) out(`skill  ${s.name} v${s.version}  ${s.description}`);
+    for (const m of mcp) out(`mcp    ${m.name} v${m.version}  ${m.transport}`);
+    for (const a of agents) out(`agent  ${a.name} v${a.version}  ${a.description}`);
     return;
   }
 

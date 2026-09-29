@@ -99,3 +99,18 @@ test("handoff answer records the answer for an open question", async () => {
   expect(after).toMatchObject({ answer: "Use ISO", option: "ISO", answeredBy: "cli" });
   expect(lines.at(-1)).toContain("answered");
 });
+
+test("handoff library import-skill reads SKILL.md frontmatter and supporting files", async () => {
+  const { out, lines } = capture();
+  const dir = mkdtempSync(join(tmpdir(), "skill-"));
+  const { mkdirSync } = await import("node:fs");
+  writeFileSync(join(dir, "SKILL.md"), "---\nname: ci-triage\ndescription: Use when CI failed.\n---\n\n# CI triage\n\nStart from the failing test.\n");
+  mkdirSync(join(dir, "refs"));
+  writeFileSync(join(dir, "refs", "logs.md"), "How to read logs.");
+  await runCli(["library", "import-skill", dir], { db, out });
+  const { librarySkills } = await import("@handoff/db");
+  const [skill] = await db.select().from(librarySkills);
+  expect(skill).toMatchObject({ name: "ci-triage", description: "Use when CI failed.", files: [{ path: "refs/logs.md", content: "How to read logs." }] });
+  expect(skill!.body).toBe("# CI triage\n\nStart from the failing test.");
+  expect(lines.at(-1)).toContain("ci-triage");
+});

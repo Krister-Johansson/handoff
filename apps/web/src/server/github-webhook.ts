@@ -42,11 +42,8 @@ export async function handleGitHubWebhook(db: Db, request: Request, secret: stri
     .returning({ id: webhookDeliveries.id });
   if (!stored) return json({ duplicate: true }, 200);
 
-  const touched: string[] = [];
-  for (const key of keys) {
-    const result = await wakeByKey(db, key, { reason: "webhook", payload: { deliveryId, event, action } });
-    touched.push(...result.woken, ...result.flagged);
-  }
+  const results = await Promise.all(keys.map((key) => wakeByKey(db, key, { reason: "webhook", payload: { deliveryId, event, action } })));
+  const touched = results.flatMap((r) => [...r.woken, ...r.flagged]);
   await db
     .update(webhookDeliveries)
     .set({ wokeExecutionIds: touched, processedAt: sql`now()` })
@@ -57,17 +54,19 @@ export async function handleGitHubWebhook(db: Db, request: Request, secret: stri
       .select({ id: nodeExecutions.id, runId: nodeExecutions.runId })
       .from(nodeExecutions)
       .where(inArray(nodeExecutions.id, touched));
-    for (const runId of new Set(rows.map((r) => r.runId))) {
-      await db.transaction((tx) =>
-        appendEvents(tx, runId, [
-          {
-            type: "github.webhook",
-            payload: { event, action, deliveryId, keys },
-            nodeExecutionId: rows.find((r) => r.runId === runId)?.id ?? null,
-          },
-        ]),
-      );
-    }
+    await Promise.all(
+      [...new Set(rows.map((r) => r.runId))].map((runId) =>
+        db.transaction((tx) =>
+          appendEvents(tx, runId, [
+            {
+              type: "github.webhook",
+              payload: { event, action, deliveryId, keys },
+              nodeExecutionId: rows.find((r) => r.runId === runId)?.id ?? null,
+            },
+          ]),
+        ),
+      ),
+    );
   }
   return json({ keys, woke: touched.length }, 202);
 }
