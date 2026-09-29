@@ -39,6 +39,10 @@ pnpm doctor:react   # after any change under apps/web
 pnpm db:generate    # after a schema change; review the SQL, commit it. Never drizzle-kit push.
 pnpm db:migrate
 pnpm dev:web
+pnpm dev:worker     # needs CLAUDE_CODE_OAUTH_TOKEN and GITHUB_TOKEN (or a GitHub App) in .env
+pnpm demo           # seeds a demo run with simulated Claude events
+pnpm handoff <cmd>  # project add, graph import, run, runs
+pnpm --filter @handoff/github codegen   # after editing packages/github/src/queries/*.graphql
 ```
 
 Test files: `*.test.ts` unit, `*.integration.test.ts` real Postgres or subprocesses, `*.test.tsx` web components.

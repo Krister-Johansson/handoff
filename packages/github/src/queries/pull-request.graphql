@@ -1,0 +1,65 @@
+query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number
+      url
+      headRefOid
+      headRefName
+      state
+      merged
+      mergeable
+      reviewDecision
+      commits(last: 1) {
+        nodes {
+          commit {
+            statusCheckRollup {
+              state
+              contexts(first: 100) {
+                nodes {
+                  __typename
+                  ... on CheckRun {
+                    databaseId
+                    name
+                    status
+                    conclusion
+                    detailsUrl
+                  }
+                  ... on StatusContext {
+                    context
+                    state
+                    targetUrl
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          comments(first: 1) {
+            nodes {
+              author {
+                login
+              }
+              body
+              path
+              line
+              url
+            }
+          }
+        }
+      }
+      comments(last: 50) {
+        nodes {
+          author {
+            login
+          }
+          body
+          url
+        }
+      }
+    }
+  }
+}

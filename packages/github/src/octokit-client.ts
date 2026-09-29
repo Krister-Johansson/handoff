@@ -1,47 +1,13 @@
 import { App, Octokit } from "octokit";
-import type { GitHubPort, PrInfo, PrSnapshot, RepoRef } from "./types.ts";
+import { PullRequestSnapshotDocument, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
+import type { CheckContext, GitHubPort, PrInfo, PrSnapshot, RepoRef } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
-const PR_QUERY = `
-query($owner: String!, $name: String!, $number: Int!) {
-  repository(owner: $owner, name: $name) {
-    pullRequest(number: $number) {
-      number url headRefOid headRefName state merged mergeable reviewDecision
-      commits(last: 1) { nodes { commit { statusCheckRollup {
-        state
-        contexts(first: 100) { nodes {
-          __typename
-          ... on CheckRun { databaseId name status conclusion detailsUrl }
-          ... on StatusContext { context state targetUrl }
-        } }
-      } } } }
-      reviewThreads(first: 100) { nodes { isResolved comments(first: 1) { nodes { author { login } body path line url } } } }
-      comments(last: 50) { nodes { author { login } body url } }
-    }
-  }
-}`;
-
-type GqlAuthor = { login: string } | null;
-type GqlPullRequest = {
-  number: number;
-  url: string;
-  headRefOid: string;
-  headRefName: string;
-  state: "OPEN" | "CLOSED" | "MERGED";
-  merged: boolean;
-  mergeable: string;
-  reviewDecision: PrSnapshot["reviewDecision"];
-  commits: { nodes: { commit: { statusCheckRollup: { state: string; contexts: { nodes: GqlContext[] } } | null } }[] };
-  reviewThreads: {
-    nodes: { isResolved: boolean; comments: { nodes: { author: GqlAuthor; body: string; path: string | null; line: number | null; url: string }[] } }[];
-  };
-  comments: { nodes: { author: GqlAuthor; body: string; url: string }[] };
-};
-
-type GqlContext =
-  | { __typename: "CheckRun"; databaseId: number; name: string; status: string; conclusion: string | null; detailsUrl: string | null }
-  | { __typename: "StatusContext"; context: string; state: string; targetUrl: string | null };
+type GqlPullRequest = NonNullable<NonNullable<PullRequestSnapshotQuery["repository"]>["pullRequest"]>;
+type GqlContext = NonNullable<
+  NonNullable<NonNullable<NonNullable<GqlPullRequest["commits"]["nodes"]>[number]>["commit"]["statusCheckRollup"]>["contexts"]["nodes"]
+>[number];
 
 /** GitHubPort over Octokit, authenticated as a GitHub App installation or with a personal token. */
 export class OctokitGitHub implements GitHubPort {
@@ -97,13 +63,15 @@ export class OctokitGitHub implements GitHubPort {
 
   async getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot> {
     const octokit = await this.clientFor(repo);
-    const { repository } = await octokit.graphql<{ repository: { pullRequest: GqlPullRequest } }>(PR_QUERY, {
+    const { repository } = await octokit.graphql<PullRequestSnapshotQuery>(PullRequestSnapshotDocument.toString(), {
       owner: repo.owner,
       name: repo.name,
       number,
     });
-    const pr = repository.pullRequest;
-    const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup ?? null;
+    const pr = repository?.pullRequest;
+    if (!pr) throw new Error(`pull request ${repo.owner}/${repo.name}#${number} not found`);
+    const rollup = pr.commits.nodes?.[0]?.commit.statusCheckRollup ?? null;
+    const present = <T>(items: readonly (T | null | undefined)[] | null | undefined): T[] => (items ?? []).filter((x): x is T => x != null);
     return {
       number: pr.number,
       url: pr.url,
@@ -114,18 +82,11 @@ export class OctokitGitHub implements GitHubPort {
       mergeable: pr.mergeable,
       reviewDecision: pr.reviewDecision ?? null,
       checks: rollup
-        ? {
-            state: rollup.state,
-            contexts: rollup.contexts.nodes.map((c) =>
-              c.__typename === "CheckRun"
-                ? { name: c.name, status: c.status, conclusion: c.conclusion, url: c.detailsUrl ?? "", checkRunId: c.databaseId }
-                : { name: c.context, status: "COMPLETED", conclusion: c.state === "PENDING" ? null : c.state, url: c.targetUrl ?? "" },
-            ),
-          }
+        ? { state: rollup.state, contexts: present<NonNullable<GqlContext>>(rollup.contexts.nodes).flatMap((c) => toCheckContext(c)) }
         : null,
-      reviewThreads: pr.reviewThreads.nodes.map((t) => ({
+      reviewThreads: present(pr.reviewThreads.nodes).map((t) => ({
         isResolved: t.isResolved,
-        comments: t.comments.nodes.map((c) => ({
+        comments: present(t.comments.nodes).map((c) => ({
           author: c.author?.login ?? "ghost",
           body: c.body,
           ...(c.path ? { path: c.path } : {}),
@@ -133,7 +94,7 @@ export class OctokitGitHub implements GitHubPort {
           url: c.url,
         })),
       })),
-      comments: pr.comments.nodes.map((c) => ({ author: c.author?.login ?? "ghost", body: c.body, url: c.url })),
+      comments: present(pr.comments.nodes).map((c) => ({ author: c.author?.login ?? "ghost", body: c.body, url: c.url })),
     };
   }
 
@@ -163,4 +124,14 @@ export class OctokitGitHub implements GitHubPort {
     const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
     return ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`];
   }
+}
+
+function toCheckContext(c: NonNullable<GqlContext>): CheckContext[] {
+  if (c.__typename === "CheckRun") {
+    return [{ name: c.name, status: c.status, conclusion: c.conclusion ?? null, url: c.detailsUrl ?? "", ...(c.databaseId ? { checkRunId: c.databaseId } : {}) }];
+  }
+  if (c.__typename === "StatusContext") {
+    return [{ name: c.context, status: "COMPLETED", conclusion: c.state === "PENDING" || c.state === "EXPECTED" ? null : c.state, url: c.targetUrl ?? "" }];
+  }
+  return [];
 }

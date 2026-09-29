@@ -1,7 +1,7 @@
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["**/node_modules/**", "apps/web/**", "**/drizzle/**", "**/.next/**", ".claude/**"] },
+  { ignores: ["**/node_modules/**", "apps/web/**", "**/drizzle/**", "**/.next/**", ".claude/**", "**/src/gql/**"] },
   ...tseslint.configs.recommended,
   {
     rules: {
