@@ -18,7 +18,7 @@ pnpm, TypeScript strict, Next.js App Router, shadcn/ui on Tailwind CSS for all d
 
 ## Installed skills
 
-`.claude/skills` holds tdd, vitest, react-flow, github-webhooks, drizzle-best-practices, frontend-design, webapp-testing, vercel-react-best-practices, vercel-composition-patterns, web-design-guidelines and setup-matt-pocock-skills, installed with `npx skills add` and pinned in `skills-lock.json`. Use the matching skill when working in that area.
+`.claude/skills` holds tdd, vitest, react-flow, github-webhooks, drizzle-best-practices, frontend-design, webapp-testing, vercel-react-best-practices, vercel-composition-patterns, web-design-guidelines, shadcn and setup-matt-pocock-skills, installed with `npx skills add` and pinned in `skills-lock.json`. Use the matching skill when working in that area.
 
 ## Implementation plan
 
