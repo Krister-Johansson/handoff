@@ -8,14 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PullRequestList } from "@/components/pulls/pr-list";
 import { getDb } from "@/lib/db";
+import { getGitHub } from "@/lib/github";
+import { listProjectPulls } from "@/server/pulls";
 import { getProjectDetail, TEMPLATES } from "@/server/graphs";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProjectPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = await params;
-  const detail = await getProjectDetail(getDb(), projectId);
+  const db = getDb();
+  const [detail, pulls] = await Promise.all([getProjectDetail(db, projectId), listProjectPulls(db, getGitHub(), projectId)]);
   if (!detail) notFound();
   const { project, graphs, runs } = detail;
   const templates = Object.entries(TEMPLATES).map(([value, t]) => ({ value, label: t.label }));
@@ -27,6 +31,17 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
           {project.repoOwner}/{project.repoName}
         </a>
       </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Pull requests</CardTitle>
+          <CardDescription>
+            {pulls.live ? "Live state from GitHub for PRs opened by this project's runs." : "Set GITHUB_TOKEN or a GitHub App for the dashboard to show live CI and review state."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PullRequestList items={pulls.items} />
+        </CardContent>
+      </Card>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <Card>
           <CardHeader>

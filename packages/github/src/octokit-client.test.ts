@@ -52,6 +52,12 @@ test("getPrSnapshot maps the GraphQL pull request, rollup and review threads", a
           repository: {
             pullRequest: {
               number: 7,
+              title: "Add a changelog",
+              isDraft: false,
+              additions: 12,
+              deletions: 3,
+              changedFiles: 1,
+              updatedAt: "2026-09-30T10:00:00Z",
               url: "https://github.com/octo/sample/pull/7",
               headRefOid: "abc",
               headRefName: "handoff/x",
@@ -88,7 +94,7 @@ test("getPrSnapshot maps the GraphQL pull request, rollup and review threads", a
   });
   const gh = OctokitGitHub.withToken("t", { fetch });
   const snap = await gh.getPrSnapshot(repo, 7);
-  expect(snap).toMatchObject({ number: 7, headSha: "abc", state: "open", reviewDecision: "CHANGES_REQUESTED" });
+  expect(snap).toMatchObject({ number: 7, headSha: "abc", state: "open", reviewDecision: "CHANGES_REQUESTED", title: "Add a changelog", additions: 12, deletions: 3, changedFiles: 1, draft: false });
   expect(snap.checks).toEqual({
     state: "FAILURE",
     contexts: [

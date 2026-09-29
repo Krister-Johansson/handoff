@@ -1,6 +1,6 @@
 import type { GitHubPort, PrInfo, PrSnapshot, RepoRef } from "../types.ts";
 
-type FakePr = PrSnapshot & { base: string; title: string; body: string };
+type FakePr = PrSnapshot & { base: string; body: string };
 
 /** In-memory GitHub for engine tests. Tests mutate PR state directly to simulate CI and reviews. */
 export class FakeGitHub implements GitHubPort {
@@ -23,11 +23,16 @@ export class FakeGitHub implements GitHubPort {
     const number = this.next++;
     const pr: FakePr = {
       number,
+      title: input.title,
+      draft: false,
+      additions: 1,
+      deletions: 0,
+      changedFiles: 1,
+      updatedAt: new Date().toISOString(),
       url: `https://github.com/octo/sample/pull/${number}`,
       headSha: "sha-1",
       headRef: input.head,
       base: input.base,
-      title: input.title,
       body: input.body,
       state: "open",
       merged: false,

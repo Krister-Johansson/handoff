@@ -74,6 +74,12 @@ export class OctokitGitHub implements GitHubPort {
     const present = <T>(items: readonly (T | null | undefined)[] | null | undefined): T[] => (items ?? []).filter((x): x is T => x != null);
     return {
       number: pr.number,
+      title: pr.title,
+      draft: pr.isDraft,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      changedFiles: pr.changedFiles,
+      updatedAt: pr.updatedAt,
       url: pr.url,
       headSha: pr.headRefOid,
       headRef: pr.headRefName,

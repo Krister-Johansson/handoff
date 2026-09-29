@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { compileGraph } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibrary, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
+import { gcClaudeSessions } from "./gc.ts";
 
 export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string };
 
@@ -16,7 +17,8 @@ const USAGE = `usage:
   handoff run repair <runId> --node <key> [--note "<text>"]
   handoff answer <questionId> "<answer>" [--option <option>]
   handoff library import-skill <dir-with-SKILL.md>
-  handoff library list`;
+  handoff library list
+  handoff gc [--days 7]`;
 
 function readSkillDir(dir: string) {
   const raw = readFileSync(join(dir, "SKILL.md"), "utf8");
@@ -163,6 +165,13 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     for (const s of skills) out(`skill  ${s.name} v${s.version}  ${s.description}`);
     for (const m of mcp) out(`mcp    ${m.name} v${m.version}  ${m.transport}`);
     for (const a of agents) out(`agent  ${a.name} v${a.version}  ${a.description}`);
+    return;
+  }
+
+  if (command === "gc") {
+    const { values } = parseArgs({ args: [sub ?? "", ...rest].filter(Boolean), options: { days: { type: "string" } } });
+    const removed = await gcClaudeSessions(db, { home: process.env.HANDOFF_HOME ?? "./.handoff", olderThanDays: Number(values.days ?? 7) });
+    out(`removed ${removed.length} Claude session folders`);
     return;
   }
 

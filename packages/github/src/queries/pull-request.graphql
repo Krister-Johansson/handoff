@@ -2,6 +2,12 @@ query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
       number
+      title
+      isDraft
+      additions
+      deletions
+      changedFiles
+      updatedAt
       url
       headRefOid
       headRefName
