@@ -1,0 +1,96 @@
+import { describe, expect, test } from "vitest";
+import linear from "../fixtures/linear.graph.json" with { type: "json" };
+import { compileGraph, type CompileResult } from "./compile.ts";
+
+type Doc = typeof linear;
+const clone = (): Doc => structuredClone(linear);
+const codes = (result: CompileResult) => (result.ok ? [] : result.errors.map((e) => e.code));
+
+describe("compileGraph", () => {
+  test("compileGraph accepts the linear fixture and exposes nodes in topological order", () => {
+    const result = compileGraph(linear);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.graph.startNode).toBe("planner");
+    expect(result.graph.order).toEqual(["planner", "coder", "pr", "merge"]);
+    expect(result.graph.node("coder").type).toBe("coder");
+    expect(result.graph.outEdges("coder").map((e) => e.target)).toEqual(["pr"]);
+  });
+
+  test("compileGraph fills catalog defaults for contract and executor kind", () => {
+    const result = compileGraph(linear);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.graph.node("coder").contract.output).toBe("coder_output");
+    expect(result.graph.executorKind("coder")).toBe("cli");
+    expect(result.graph.executorKind("pr")).toBe("github");
+  });
+
+  test("compileGraph rejects a document that is not a graph", () => {
+    const found = codes(compileGraph({ nodes: "nope" }));
+    expect(found.length).toBeGreaterThan(0);
+    expect(new Set(found)).toEqual(new Set(["invalid_document"]));
+  });
+
+  test("compileGraph rejects a node whose type is not in the catalog", () => {
+    const doc = clone();
+    doc.nodes[1]!.attributes.type = "wizard";
+    const result = compileGraph(doc);
+    expect(codes(result)).toContain("unknown_node_type");
+    expect(result.ok ? undefined : result.errors[0]?.nodeKey).toBe("coder");
+  });
+
+  test("compileGraph rejects an edge whose source or target does not exist", () => {
+    const doc = clone();
+    doc.edges[2]!.target = "ghost";
+    expect(codes(compileGraph(doc))).toContain("unknown_edge_endpoint");
+  });
+
+  test("compileGraph rejects a graph with no start node", () => {
+    const doc = clone();
+    doc.attributes.startNode = "ghost";
+    expect(codes(compileGraph(doc))).toContain("missing_start_node");
+  });
+
+  test("compileGraph rejects a node unreachable from the start node", () => {
+    const doc = clone();
+    doc.nodes.push({ key: "orphan", attributes: { type: "tester", label: "Orphan", x: 0, y: 200 } });
+    const result = compileGraph(doc);
+    expect(codes(result)).toContain("unreachable_node");
+    expect(result.ok ? undefined : result.errors.find((e) => e.code === "unreachable_node")?.nodeKey).toBe("orphan");
+  });
+
+  test("compileGraph rejects a cycle that contains a non-loop edge", () => {
+    const doc = clone();
+    doc.edges.push({ key: "pr->coder", source: "pr", target: "coder", attributes: { loop: false } });
+    expect(codes(compileGraph(doc))).toContain("non_loop_cycle");
+  });
+
+  test("compileGraph accepts a cycle through an edge flagged loop with maxAttempts", () => {
+    const doc = clone();
+    doc.edges.push({
+      key: "pr->coder",
+      source: "pr",
+      target: "coder",
+      attributes: { loop: true, maxAttempts: 3, condition: { eq: ["state.feedback.ci.status", "failure"] } } as never,
+    });
+    expect(compileGraph(doc).ok).toBe(true);
+  });
+
+  test("compileGraph rejects a loop edge without maxAttempts", () => {
+    const doc = clone();
+    doc.edges.push({ key: "pr->coder", source: "pr", target: "coder", attributes: { loop: true } as never });
+    expect(codes(compileGraph(doc))).toContain("loop_without_max_attempts");
+  });
+
+  test("compileGraph rejects an unknown contract name", () => {
+    const doc = clone();
+    (doc.nodes[1]!.attributes as Record<string, unknown>).contract = { output: "made_up", checks: [] };
+    expect(codes(compileGraph(doc))).toContain("unknown_contract");
+  });
+
+  test("compileGraph rejects a condition path outside state, node and edge", () => {
+    const doc = clone();
+    (doc.edges[0]!.attributes as Record<string, unknown>).condition = { eq: ["process.env.HOME", "x"] };
+    expect(codes(compileGraph(doc))).toEqual(["invalid_document"]);
+  });
+});

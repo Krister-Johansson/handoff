@@ -1,0 +1,66 @@
+import { z } from "zod";
+import { ConditionSchema } from "../conditions/schema.ts";
+import { ContextSelectorSchema, ContractSchema } from "./contracts.ts";
+
+export const NodeTypeSchema = z.enum(["planner", "coder", "reviewer", "tester", "pr", "merge", "human_gate", "function"]);
+export type NodeType = z.infer<typeof NodeTypeSchema>;
+
+export const ExecutorKindSchema = z.enum(["cli", "shell", "github", "human", "function"]);
+export type ExecutorKind = z.infer<typeof ExecutorKindSchema>;
+
+const LibrarySelectionSchema = z.object({
+  skills: z.array(z.string()).default([]),
+  mcp: z.array(z.string()).default([]),
+});
+
+/** As stored. `type` is a plain string so compileGraph can report unknown types by node. */
+export const NodeAttributesSchema = z.object({
+  type: z.string().min(1),
+  label: z.string().optional(),
+  config: z.record(z.string(), z.unknown()).default({}),
+  contract: ContractSchema.optional(),
+  contextSelector: ContextSelectorSchema.optional(),
+  library: LibrarySelectionSchema.optional(),
+  x: z.number().default(0),
+  y: z.number().default(0),
+});
+export type NodeAttributesInput = z.input<typeof NodeAttributesSchema>;
+
+export const EdgeAttributesSchema = z.object({
+  condition: ConditionSchema.optional(),
+  on: z.enum(["passed", "failed", "any"]).default("passed"),
+  loop: z.boolean().default(false),
+  maxAttempts: z.number().int().positive().optional(),
+  onExhausted: z.string().optional(),
+  priority: z.number().int().default(0),
+  overrides: LibrarySelectionSchema.partial().optional(),
+});
+export type EdgeAttributes = z.infer<typeof EdgeAttributesSchema>;
+
+export const GraphDocumentSchema = z.object({
+  attributes: z
+    .object({
+      name: z.string().optional(),
+      startNode: z.string().min(1),
+      exhaustedGate: z.string().optional(),
+    })
+    .loose(),
+  options: z
+    .object({
+      type: z.literal("directed").default("directed"),
+      multi: z.boolean().default(false),
+      allowSelfLoops: z.boolean().default(false),
+    })
+    .default({ type: "directed", multi: false, allowSelfLoops: false }),
+  nodes: z.array(z.object({ key: z.string().min(1), attributes: NodeAttributesSchema })),
+  edges: z.array(
+    z.object({
+      key: z.string().regex(/^[^.]+$/, "edge keys cannot contain dots"),
+      source: z.string(),
+      target: z.string(),
+      attributes: EdgeAttributesSchema.default({ on: "passed", loop: false, priority: 0 }),
+    }),
+  ),
+});
+export type GraphDocument = z.infer<typeof GraphDocumentSchema>;
+export type GraphDocumentInput = z.input<typeof GraphDocumentSchema>;
