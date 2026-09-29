@@ -193,6 +193,9 @@ importers:
       '@handoff/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@handoff/github':
+        specifier: workspace:*
+        version: link:../../packages/github
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -287,6 +290,12 @@ importers:
       '@handoff/engine':
         specifier: workspace:*
         version: link:../../packages/engine
+      '@handoff/github':
+        specifier: workspace:*
+        version: link:../../packages/github
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/cli-adapter:
     dependencies:
