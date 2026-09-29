@@ -1,4 +1,4 @@
-import type { CliSession } from "../types.ts";
+import type { AgentDefinition, CliSession } from "../types.ts";
 
 export type ClaudeArgvInput = {
   prompt: string;
@@ -10,6 +10,7 @@ export type ClaudeArgvInput = {
   addDirs: string[];
   session: CliSession;
   model?: string;
+  agents?: Record<string, AgentDefinition>;
 };
 
 /**
@@ -47,6 +48,7 @@ export function buildClaudeArgv(input: ClaudeArgvInput): string[] {
   if (input.mcpConfigPath) argv.push("--mcp-config", input.mcpConfigPath);
   for (const dir of input.addDirs) argv.push("--add-dir", dir);
   if (input.model) argv.push("--model", input.model);
+  if (input.agents && Object.keys(input.agents).length > 0) argv.push("--agents", JSON.stringify(input.agents));
   if (input.session.mode === "new") argv.push("--session-id", input.session.id, "--name", input.session.name);
   else argv.push("--resume", input.session.id);
   return argv;

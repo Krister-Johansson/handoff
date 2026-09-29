@@ -19,7 +19,11 @@ export type CliRunRequest = {
   /** Fails the run if no stdout line arrives for this long. */
   idleTimeoutMs?: number;
   model?: string;
+  /** Subagent definitions for --agents. */
+  agents?: Record<string, AgentDefinition>;
 };
+
+export type AgentDefinition = { description: string; prompt: string; tools?: string[]; model?: string };
 
 export type CliEvent = { type: string; payload: unknown };
 

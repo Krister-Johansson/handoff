@@ -12,3 +12,4 @@ export * from "./executors/github.ts";
 export * from "./operations.ts";
 export * from "./executors/human-gate.ts";
 export * from "./executors/tester.ts";
+export * from "./library/materialize.ts";

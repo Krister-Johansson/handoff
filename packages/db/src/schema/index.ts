@@ -9,3 +9,4 @@ export * from "./events.ts";
 export * from "./webhook-deliveries.ts";
 export * from "./workers.ts";
 export * from "./questions.ts";
+export * from "./library.ts";

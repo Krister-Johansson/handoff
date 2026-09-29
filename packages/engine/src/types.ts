@@ -1,5 +1,6 @@
 import type { CompiledGraph, CompiledNode, ContextPacket, NodeType, RunState } from "@handoff/core";
 import type { NodeExecutionRow, projects, runs } from "@handoff/db";
+import type { MaterializedLibrary } from "./library/materialize.ts";
 
 export type RunRow = typeof runs.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
@@ -23,6 +24,8 @@ export type ExecutorContext = {
   packet: ContextPacket;
   workdir?: Workdir;
   stagingDir: string;
+  /** Library entries staged for this execution (cli nodes). */
+  library?: MaterializedLibrary;
   signal: AbortSignal;
   emit(type: string, payload: unknown): void;
   setSessionId(id: string): Promise<void>;

@@ -26,6 +26,19 @@ function answerToResume(ctx: ExecutorContext): { sessionId: string; text: string
   return { sessionId: previous.sessionId, text: answer.option ? `${answer.option}: ${answer.answer}` : answer.answer };
 }
 
+/** Names of required MCP servers that the CLI reported as failed, missing or skipped at init. */
+function mcpInitProblems(payload: unknown, required: string[]): string[] {
+  const init = (payload ?? {}) as { mcp_servers?: { name: string; status: string }[]; mcp_server_errors?: { name: string; message?: string }[] };
+  const problems = (init.mcp_server_errors ?? []).map((e) => `${e.name} (${e.message ?? "invalid config"})`);
+  for (const name of required) {
+    const server = init.mcp_servers?.find((s) => s.name === name);
+    if (!server) {
+      if (!problems.some((p) => p.startsWith(name))) problems.push(`${name} (not loaded)`);
+    } else if (server.status === "failed" || server.status === "needs-auth") problems.push(`${name} (${server.status})`);
+  }
+  return problems;
+}
+
 const RESUME_PROMPT = "Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
 
 /** Planner, Coder and Reviewer: one Claude CLI turn per execution, validated against the node's contract. */
@@ -49,6 +62,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           ? `A person answered your question: "${answer.text}". Continue the task with that answer. When finished, return the structured output required by the output contract.`
           : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
 
+      let mcpProblems: string[] = [];
       const result = await options.cli.run(
         {
           prompt,
@@ -58,7 +72,9 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           allowedTools: ctx.packet.constraints.allowedTools,
           maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns,
           contract: contractRegistry[contractName],
-          addDirs: [],
+          addDirs: ctx.library?.addDirs ?? [],
+          ...(ctx.library?.mcpConfigPath ? { mcpConfigPath: ctx.library.mcpConfigPath } : {}),
+          ...(ctx.library?.agents ? { agents: ctx.library.agents } : {}),
           session,
           timeoutMs: options.timeoutMs,
           ...(options.idleTimeoutMs ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
@@ -66,12 +82,18 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         },
         {
           signal: ctx.signal,
-          onEvent: (event) => ctx.emit(event.type, event.payload),
+          onEvent: (event) => {
+            if (event.type === "cli.system.init") mcpProblems = mcpInitProblems(event.payload, ctx.library?.mcpServers ?? []);
+            ctx.emit(event.type, event.payload);
+          },
           onSessionId: (id) => ctx.setSessionId(id),
         },
       );
 
       const cost = { usd: result.costUsd, usage: result.usage };
+      if (mcpProblems.length && result.outcome !== "interrupted") {
+        return { kind: "failed", error: { code: "mcp_unavailable", message: `MCP servers did not start: ${mcpProblems.join(", ")}` } };
+      }
       switch (result.outcome) {
         case "success":
           return {

@@ -70,3 +70,10 @@ describe("buildClaudeArgv", () => {
     expect(buildClaudeArgv(base)).not.toContain("--no-session-persistence");
   });
 });
+
+test("buildClaudeArgv passes subagent definitions as --agents JSON only when given", () => {
+  expect(buildClaudeArgv(base)).not.toContain("--agents");
+  const agents = { explorer: { description: "Reads code", prompt: "Explore.", tools: ["Read"] } };
+  const argv = buildClaudeArgv({ ...base, agents });
+  expect(JSON.parse(argv[argv.indexOf("--agents") + 1]!)).toEqual(agents);
+});

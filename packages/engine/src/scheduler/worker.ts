@@ -17,6 +17,7 @@ import {
   type NodeExecutionRow,
 } from "@handoff/db";
 import { validateContract } from "../contract/validate.ts";
+import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary } from "../library/materialize.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
@@ -35,6 +36,8 @@ export type EngineDeps = {
   /** Resolves the git remote for a project; defaults to localClonePath or the GitHub https URL. */
   remoteUrl?: (project: typeof projects.$inferSelect) => string;
   log?: (message: string, detail?: unknown) => void;
+  /** Where ${secret:NAME} references in the library resolve from. Defaults to process.env. */
+  secrets?: Record<string, string | undefined>;
 };
 
 const EVENT_FLUSH_MS = 100;
@@ -195,7 +198,21 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         });
         if (run.worktreePath !== workdir.path) await db.update(runs).set({ worktreePath: workdir.path }).where(eq(runs.id, run.id));
       }
+      let library: MaterializedLibrary | undefined;
+      if (graph.executorKind(node.key) === "cli") {
+        const overrides = row.trigger?.kind === "edge" && row.trigger.edgeKey ? graph.graph.getEdgeAttributes(row.trigger.edgeKey).overrides : undefined;
+        const selection = {
+          skills: [...new Set([...node.library.skills, ...(overrides?.skills ?? [])])],
+          mcp: [...new Set([...node.library.mcp, ...(overrides?.mcp ?? [])])],
+          agents: [...new Set([...node.library.agents, ...(overrides?.agents ?? [])])],
+        };
+        if (selection.skills.length || selection.mcp.length || selection.agents.length) {
+          library = await materializeLibrary(db, selection, stagingDir, deps.secrets ?? process.env);
+          buffer.push({ type: "library.materialized", payload: library.used, nodeExecutionId: row.id });
+        }
+      }
       const packet = selectContext(node, state, row);
+      if (library?.allowedTools.length) packet.constraints.allowedTools = [...packet.constraints.allowedTools, ...library.allowedTools];
       await db.update(nodeExecutions).set({ contextPacket: packet }).where(eq(nodeExecutions.id, row.id));
       outcome = await executor.execute({
         run,
@@ -207,6 +224,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         packet,
         ...(workdir ? { workdir } : {}),
         stagingDir,
+        ...(library ? { library } : {}),
         signal: controller.signal,
         emit: (type, payload) => void buffer.push({ type, payload, nodeExecutionId: row.id }),
         setSessionId: async (id) => {
@@ -220,7 +238,10 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       });
     }
   } catch (error) {
-    outcome = { kind: "failed", error: { code: "executor_crashed", message: (error as Error).message } };
+    outcome =
+      error instanceof LibraryUnavailableError
+        ? { kind: "failed", error: { code: "library_unavailable", message: error.message } }
+        : { kind: "failed", error: { code: "executor_crashed", message: (error as Error).message } };
   } finally {
     clearInterval(beat);
     clearInterval(flusher);

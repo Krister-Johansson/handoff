@@ -21,7 +21,8 @@ export type CompileErrorCode =
   | "non_loop_cycle"
   | "loop_without_max_attempts"
   | "unknown_contract"
-  | "invalid_exhausted_gate";
+  | "invalid_exhausted_gate"
+  | "secret_in_graph";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -32,7 +33,7 @@ export type CompiledNode = {
   config: Record<string, unknown>;
   contract: Contract;
   contextSelector: ContextSelector;
-  library: { skills: string[]; mcp: string[] };
+  library: { skills: string[]; mcp: string[]; agents: string[] };
   x: number;
   y: number;
 };
@@ -53,7 +54,30 @@ export type CompiledGraph = {
 
 export type CompileResult = { ok: true; graph: CompiledGraph } | { ok: false; errors: CompileError[] };
 
+/** Token shapes that must never be stored in a graph: GitHub, Anthropic, Slack, AWS, OpenAI. */
+const SECRET_PATTERN = /\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{32,})\b/;
+
+function findSecret(value: unknown, path: string): string | undefined {
+  if (typeof value === "string") return SECRET_PATTERN.test(value) ? path : undefined;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const hit = findSecret(value[i], `${path}[${i}]`);
+      if (hit) return hit;
+    }
+  } else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      const hit = findSecret(v, path ? `${path}.${k}` : k);
+      if (hit) return hit;
+    }
+  }
+  return undefined;
+}
+
 export function compileGraph(input: unknown): CompileResult {
+  const secretAt = findSecret(input, "");
+  if (secretAt) {
+    return { ok: false, errors: [{ code: "secret_in_graph", message: `${secretAt} looks like a credential; reference secrets from the library as \${secret:NAME} instead` }] };
+  }
   const parsed = GraphDocumentSchema.safeParse(input);
   if (!parsed.success) {
     return {
@@ -90,7 +114,7 @@ export function compileGraph(input: unknown): CompileResult {
       config: attributes.config,
       contract,
       contextSelector: attributes.contextSelector ?? ContextSelectorSchema.parse({}),
-      library: { skills: attributes.library?.skills ?? [], mcp: attributes.library?.mcp ?? [] },
+      library: { skills: attributes.library?.skills ?? [], mcp: attributes.library?.mcp ?? [], agents: attributes.library?.agents ?? [] },
       x: attributes.x,
       y: attributes.y,
     });

@@ -115,3 +115,26 @@ describe("compileGraph with the loop fixture", () => {
     expect(codes(compileGraph(doc))).toContain("invalid_exhausted_gate");
   });
 });
+
+describe("library and secrets", () => {
+  test("a node can enable skills, MCP servers and agents from the library", () => {
+    const doc = clone();
+    (doc.nodes[1]!.attributes as Record<string, unknown>).library = { skills: ["tdd"], mcp: ["docs"], agents: ["explorer"] };
+    const result = compileGraph(doc);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.graph.node("coder").library).toEqual({ skills: ["tdd"], mcp: ["docs"], agents: ["explorer"] });
+  });
+
+  test("an edge can add library entries for the executions it creates", () => {
+    const doc = clone();
+    (doc.edges[1]!.attributes as Record<string, unknown>).overrides = { skills: ["ci-triage"] };
+    expect(compileGraph(doc).ok).toBe(true);
+  });
+
+  test("graph JSON containing a value that looks like a token is rejected", () => {
+    const doc = clone();
+    (doc.nodes[1]!.attributes as Record<string, unknown>).config = { note: "use ghp_abcdefghijklmnopqrstuvwxyz0123456789" };
+    const result = compileGraph(doc);
+    expect(codes(result)).toContain("secret_in_graph");
+  });
+});
