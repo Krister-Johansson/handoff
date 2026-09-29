@@ -2,7 +2,7 @@ import { z } from "zod";
 import { FeedbackSchema, HumanAnswerSchema } from "./outputs.ts";
 
 export const NodeResultSchema = z.object({
-  output: z.unknown(),
+  output: z.unknown().optional(),
   executionId: z.string(),
   attempt: z.number().int(),
   sessionId: z.string().optional(),

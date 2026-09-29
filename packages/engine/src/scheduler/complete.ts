@@ -1,6 +1,6 @@
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { matchingEdges, mergeState, RunStateSchema, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
-import { appendEvents, nodeExecutions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
+import { appendEvents, edgeTraversals, nodeExecutions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import type { ExecutionError } from "../types.ts";
 
 export class LeaseLostError extends Error {
@@ -30,9 +30,27 @@ async function othersActive(tx: DbTx, runId: string, excludeId: string): Promise
   return row?.n ?? 0;
 }
 
-type RouteResult = { events: NewEvent[]; created: number; exhausted: boolean; state: RunState };
+type RouteResult = { events: NewEvent[]; created: number; arrived: number; exhausted: boolean; state: RunState };
 
-/** Follows matching out-edges: applies loop guards and inserts the next node executions. */
+type Trigger = NonNullable<NodeExecutionRow["trigger"]>;
+
+async function createExecution(tx: DbTx, graph: CompiledGraph, runId: string, target: string, trigger: Trigger) {
+  const [{ attempt } = { attempt: 0 }] = await tx
+    .select({ attempt: sql<number>`coalesce(max(${nodeExecutions.attempt}), 0)::int` })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.nodeKey, target)));
+  const node = graph.node(target);
+  const [row] = await tx
+    .insert(nodeExecutions)
+    .values({ runId, nodeKey: target, nodeType: node.type, executorKind: graph.executorKind(target), attempt: attempt + 1, trigger })
+    .returning({ id: nodeExecutions.id, attempt: nodeExecutions.attempt });
+  return row!;
+}
+
+/**
+ * Follows matching out-edges: loop guards (exhaustion routes to the gate), fan-in joins recorded in
+ * edge_traversals, and a new node execution per edge taken.
+ */
 async function route(
   tx: DbTx,
   graph: CompiledGraph,
@@ -47,10 +65,12 @@ async function route(
   });
   const events: NewEvent[] = [];
   let created = 0;
+  let arrived = 0;
   let exhausted = false;
   let next = state;
   for (const edge of edges) {
     let target = edge.target;
+    let trigger: Trigger = { kind: "edge", edgeKey: edge.key, from: row.nodeKey, fromExecutionId: row.id };
     if (edge.loop) {
       const attempts = next.loops[edge.key]?.attempts ?? 0;
       if (attempts >= (edge.maxAttempts ?? 0)) {
@@ -61,24 +81,61 @@ async function route(
           continue;
         }
         target = gate;
+        trigger = { kind: "exhausted", edgeKey: edge.key, from: row.nodeKey, fromExecutionId: row.id };
       } else {
         next = { ...next, loops: { ...next.loops, [edge.key]: { attempts: attempts + 1 } } };
       }
     }
-    const [{ attempt } = { attempt: 0 }] = await tx
-      .select({ attempt: sql<number>`coalesce(max(${nodeExecutions.attempt}), 0)::int` })
-      .from(nodeExecutions)
-      .where(and(eq(nodeExecutions.runId, row.runId), eq(nodeExecutions.nodeKey, target)));
-    const node = graph.node(target);
-    const [created_] = await tx
-      .insert(nodeExecutions)
-      .values({ runId: row.runId, nodeKey: target, nodeType: node.type, executorKind: graph.executorKind(target), attempt: attempt + 1 })
-      .returning({ id: nodeExecutions.id });
+
+    const inbound = graph.inEdges(target).filter((e) => !e.loop);
+    if (!edge.loop && trigger.kind === "edge" && inbound.length > 1) {
+      arrived++;
+      await tx.insert(edgeTraversals).values({ runId: row.runId, edgeKey: edge.key, fromExecutionId: row.id, toNodeKey: target });
+      events.push({ type: "join.arrived", payload: { nodeKey: target, edgeKey: edge.key, from: row.nodeKey }, nodeExecutionId: row.id });
+      const pending = await tx
+        .select({ id: edgeTraversals.id, edgeKey: edgeTraversals.edgeKey })
+        .from(edgeTraversals)
+        .where(and(eq(edgeTraversals.runId, row.runId), eq(edgeTraversals.toNodeKey, target), isNull(edgeTraversals.consumedByExecutionId)));
+      const mode = graph.node(target).config.join === "any" ? "any" : "all";
+      let consumer: string | undefined;
+      if (mode === "any") {
+        const [existing] = await tx
+          .select({ id: nodeExecutions.id })
+          .from(nodeExecutions)
+          .where(and(eq(nodeExecutions.runId, row.runId), eq(nodeExecutions.nodeKey, target), ne(nodeExecutions.status, "failed")));
+        consumer = existing?.id;
+        if (!consumer) {
+          const exec = await createExecution(tx, graph, row.runId, target, trigger);
+          consumer = exec.id;
+          created++;
+          events.push({ type: "join.fired", payload: { nodeKey: target, mode }, nodeExecutionId: exec.id });
+          events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
+        }
+      } else {
+        const arrivedKeys = new Set(pending.map((p) => p.edgeKey));
+        if (inbound.every((e) => arrivedKeys.has(e.key))) {
+          const exec = await createExecution(tx, graph, row.runId, target, trigger);
+          consumer = exec.id;
+          created++;
+          events.push({ type: "join.fired", payload: { nodeKey: target, mode }, nodeExecutionId: exec.id });
+          events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
+        }
+      }
+      if (consumer) {
+        await tx
+          .update(edgeTraversals)
+          .set({ consumedByExecutionId: consumer })
+          .where(inArray(edgeTraversals.id, pending.map((p) => p.id)));
+      }
+      continue;
+    }
+
+    const exec = await createExecution(tx, graph, row.runId, target, trigger);
     created++;
     events.push({ type: "edge.taken", payload: { edgeKey: edge.key, from: row.nodeKey, to: target }, nodeExecutionId: row.id });
-    events.push({ type: "node.created", payload: { nodeKey: target, attempt: attempt + 1, via: edge.key }, nodeExecutionId: created_!.id });
+    events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
   }
-  return { events, created, exhausted, state: next };
+  return { events, created, arrived, exhausted, state: next };
 }
 
 async function finishRouting(
@@ -93,7 +150,7 @@ async function finishRouting(
   const active = await othersActive(tx, runId, row.id);
   const events = [...leadEvents, ...routed.events];
   let status: "running" | "succeeded" | "failed" = "running";
-  if (routed.created === 0 && active === 0) {
+  if (routed.created === 0 && routed.arrived === 0 && active === 0) {
     const deadEnd = graph.outEdges(row.nodeKey).length > 0;
     if (failure || routed.exhausted || deadEnd) {
       status = "failed";
@@ -133,7 +190,7 @@ export async function completePassed(
   },
 ) {
   const { row } = input;
-  const { state } = await lockRun(tx, row.runId);
+  const { run, state } = await lockRun(tx, row.runId);
   const [updated] = await tx
     .update(nodeExecutions)
     .set({
@@ -148,8 +205,11 @@ export async function completePassed(
     .where(owned(row, input.workerId))
     .returning();
   if (!updated) throw new LeaseLostError(row.id);
+  if (run.status === "cancelled") return;
+  const lead: NewEvent[] = [];
   if (row.repairedFromExecutionId) {
     await tx.update(nodeExecutions).set({ status: "repaired" }).where(eq(nodeExecutions.id, row.repairedFromExecutionId));
+    lead.push({ type: "node.repaired", payload: { nodeKey: row.nodeKey, repairedBy: row.id }, nodeExecutionId: row.repairedFromExecutionId });
   }
   const result: NodeResult = {
     output: input.output,
@@ -159,10 +219,10 @@ export async function completePassed(
   };
   const merged = mergeState(state, row.nodeKey, result, input.statePatch);
   const routed = await route(tx, input.graph, row, "passed", input.output, merged);
-  const lead: NewEvent[] = [
+  lead.push(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
     { type: "node.passed", payload: { nodeKey: row.nodeKey, attempt: row.attempt }, nodeExecutionId: row.id },
-  ];
+  );
   await finishRouting(tx, input.graph, row.runId, row, routed, lead);
 }
 
@@ -178,7 +238,7 @@ export async function completeFailed(
   },
 ) {
   const { row } = input;
-  const { state } = await lockRun(tx, row.runId);
+  const { run, state } = await lockRun(tx, row.runId);
   if (input.workerId) {
     const [updated] = await tx
       .update(nodeExecutions)
@@ -193,6 +253,10 @@ export async function completeFailed(
       .where(owned(row, input.workerId))
       .returning();
     if (!updated) throw new LeaseLostError(row.id);
+  }
+  if (run.status === "cancelled") {
+    await appendEvents(tx, row.runId, [{ type: "node.failed", payload: { nodeKey: row.nodeKey, attempt: row.attempt, error: input.error }, nodeExecutionId: row.id }]);
+    return;
   }
   const previous = state.nodes[row.nodeKey];
   const failed: NodeResult = {

@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { buildClaudeArgv, ClaudeCliExecutor } from "@handoff/cli-adapter";
 import { createDb } from "@handoff/db";
 import { runMigrations } from "@handoff/db/migrate";
-import { cliNodeExecutor, GitWorktreeProvider, mergeNodeExecutor, prNodeExecutor, startWorker, type EngineDeps } from "@handoff/engine";
+import { cliNodeExecutor, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
 import { OctokitGitHub, type GitHubPort } from "@handoff/github";
 import { checkClaudeVersion } from "./claude-version.ts";
 import type { WorkerEnv } from "./env.ts";
@@ -35,13 +35,22 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     idleTimeoutMs: 10 * 60_000,
     ...(env.HANDOFF_MODEL ? { model: env.HANDOFF_MODEL } : {}),
   });
+  const db = createDb(env.DATABASE_URL);
   return {
-    db: createDb(env.DATABASE_URL),
+    db,
     workerId: env.HANDOFF_WORKER_ID ?? `${hostname()}:${process.pid}`,
     caps: env.caps,
     leaseMs: 60_000,
     stagingRoot: join(home, "staging"),
-    executors: { planner: agent, coder: agent, reviewer: agent, pr: prNodeExecutor({ github, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }), merge: mergeNodeExecutor({ github }) },
+    executors: {
+      planner: agent,
+      coder: agent,
+      reviewer: agent,
+      tester: testerExecutor(),
+      human_gate: humanGateExecutor({ db }),
+      pr: prNodeExecutor({ github, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }),
+      merge: mergeNodeExecutor({ github }),
+    },
     workdirs: new GitWorktreeProvider({
       root: home,
       gitConfig: async (remote) => {

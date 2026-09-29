@@ -20,7 +20,8 @@ export type CompileErrorCode =
   | "unreachable_node"
   | "non_loop_cycle"
   | "loop_without_max_attempts"
-  | "unknown_contract";
+  | "unknown_contract"
+  | "invalid_exhausted_gate";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -126,6 +127,21 @@ export function compileGraph(input: unknown): CompileResult {
         errors.push({ code: "unreachable_node", message: `node ${node} is unreachable from ${startNode}`, nodeKey: node });
       }
     });
+  }
+
+  const gates = [
+    ...(document.attributes.exhaustedGate ? [{ key: document.attributes.exhaustedGate, edgeKey: undefined as string | undefined }] : []),
+    ...document.edges.filter((e) => e.attributes.onExhausted).map((e) => ({ key: e.attributes.onExhausted!, edgeKey: e.key as string | undefined })),
+  ];
+  for (const gate of gates) {
+    if (!graph.hasNode(gate.key) || graph.getNodeAttributes(gate.key).type !== "human_gate") {
+      errors.push({
+        code: "invalid_exhausted_gate",
+        message: `exhaustion target ${gate.key} must be an existing human_gate node`,
+        nodeKey: gate.key,
+        ...(gate.edgeKey ? { edgeKey: gate.edgeKey } : {}),
+      });
+    }
   }
 
   if (hasCycle(acyclic)) {

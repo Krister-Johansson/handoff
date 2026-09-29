@@ -1,0 +1,2469 @@
+{
+  "version": "8",
+  "dialect": "postgres",
+  "id": "c8968886-e5a1-4168-8764-4ddb1f761281",
+  "prevIds": [
+    "34b80c5b-510e-4185-9491-8518ede359a2"
+  ],
+  "ddl": [
+    {
+      "values": [
+        "cli",
+        "shell",
+        "github",
+        "human",
+        "function"
+      ],
+      "name": "executor_kind",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
+        "pending",
+        "running",
+        "waiting",
+        "passed",
+        "failed",
+        "repaired"
+      ],
+      "name": "node_execution_status",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
+        "queued",
+        "running",
+        "waiting",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "name": "run_status",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
+        "github_pr",
+        "human",
+        "timer"
+      ],
+      "name": "wait_kind",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "github_installations",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "projects",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "graph_versions",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "graphs",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "runs",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "node_executions",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "edge_traversals",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "events",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "webhook_deliveries",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "workers",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "questions",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_installations"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "installation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_installations"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "account_login",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_installations"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "account_type",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_installations"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "suspended_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_installations"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_installations"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "github_installations"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "github_installation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "repo_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "repo_owner",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "repo_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "default_branch",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "local_clone_path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "graph_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "version",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "document",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "created_by",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "latest_version",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "graph_version_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "run_status",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'queued'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "task",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "state",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "state_version",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "next_event_seq",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "base_branch",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "branch_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "worktree_path",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "pr_number",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "cancel_requested_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "finished_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "node_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "node_type",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "executor_kind",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "executor_kind",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "attempt",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "node_execution_status",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'pending'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "runnable_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "lease_owner",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "lease_expires_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "heartbeat_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "reclaim_count",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "0",
+      "generated": null,
+      "identity": null,
+      "name": "interrupt_count",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "wait_kind",
+      "typeSchema": "public",
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "wait_kind",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "wait_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "wait_token",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "wait_deadline_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "wake_requested_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "wake_reason",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "wake_payload",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "context_packet",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "output",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "checks",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "error",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "executor_session_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "numeric(12,6)",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "cost_usd",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "usage",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "repaired_from_execution_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "repair_note",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "trigger",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "claimed_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "finished_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "edge_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "from_execution_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "to_node_key",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "consumed_by_execution_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": {
+        "type": "always",
+        "name": "events_id_seq",
+        "increment": "1",
+        "startWith": "1",
+        "minValue": "1",
+        "maxValue": "9223372036854775807",
+        "cache": 1,
+        "cycle": false
+      },
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "seq",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "node_execution_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "type",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "payload",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "delivery_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "event_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "action",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "installation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "bigint",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "repo_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 1,
+      "default": "'{}'",
+      "generated": null,
+      "identity": null,
+      "name": "correlation_keys",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "payload",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "received_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "processed_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 1,
+      "default": "'{}'",
+      "generated": null,
+      "identity": null,
+      "name": "woke_execution_ids",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "workers"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "hostname",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "workers"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "caps",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "workers"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "workers"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "heartbeat_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "workers"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "stopped_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "workers"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "gen_random_uuid()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "node_execution_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "question",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'[]'",
+      "generated": null,
+      "identity": null,
+      "name": "options",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'{}'",
+      "generated": null,
+      "identity": null,
+      "name": "context",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "answer",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "option",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "answered_by",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "answered_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "graph_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "graph_versions_graph_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "project_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "created_at",
+          "isExpression": false,
+          "asc": false,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "runs_project_created_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "runs_status_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "executor_kind",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "runnable_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "created_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"status\" = 'pending'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "node_executions_claim_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "lease_expires_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"status\" = 'running'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "node_executions_lease_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "wait_deadline_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"status\" = 'waiting'",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "node_executions_wait_deadline_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "wait_key",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"status\" in ('running', 'waiting')",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "node_executions_wait_key_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "created_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "node_executions_run_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "to_node_key",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": "\"consumed_by_execution_id\" is null",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "edge_traversals_unconsumed_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "repo_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "received_at",
+          "isExpression": false,
+          "asc": false,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "webhook_deliveries_repo_received_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "webhook_deliveries"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "questions_run_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "github_installation_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "github_installations",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "projects_github_installation_id_github_installations_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "graph_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "graphs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "graph_versions_graph_id_graphs_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "project_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "projects",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "graphs_project_id_projects_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "project_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "projects",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "runs_project_id_projects_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "graph_version_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "graph_versions",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "runs_graph_version_id_graph_versions_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "run_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "node_executions_run_id_runs_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "repaired_from_execution_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "node_executions",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "node_executions_SXty6ZfBwrNc_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "run_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "edge_traversals_run_id_runs_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "from_execution_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "node_executions",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "edge_traversals_from_execution_id_node_executions_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "consumed_by_execution_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "node_executions",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "edge_traversals_iARfW5W1IRqm_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "edge_traversals"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "run_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "events_run_id_runs_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "node_execution_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "node_executions",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "events_node_execution_id_node_executions_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "run_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "runs",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "questions_run_id_runs_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "node_execution_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "node_executions",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "name": "questions_node_execution_id_node_executions_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "questions"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "github_installations_pkey",
+      "schema": "public",
+      "table": "github_installations",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "projects_pkey",
+      "schema": "public",
+      "table": "projects",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "graph_versions_pkey",
+      "schema": "public",
+      "table": "graph_versions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "graphs_pkey",
+      "schema": "public",
+      "table": "graphs",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "runs_pkey",
+      "schema": "public",
+      "table": "runs",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "node_executions_pkey",
+      "schema": "public",
+      "table": "node_executions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "edge_traversals_pkey",
+      "schema": "public",
+      "table": "edge_traversals",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "events_pkey",
+      "schema": "public",
+      "table": "events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "webhook_deliveries_pkey",
+      "schema": "public",
+      "table": "webhook_deliveries",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "workers_pkey",
+      "schema": "public",
+      "table": "workers",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "questions_pkey",
+      "schema": "public",
+      "table": "questions",
+      "entityType": "pks"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "graph_id",
+        "version"
+      ],
+      "nullsNotDistinct": false,
+      "name": "graph_versions_graph_version_unique",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "graph_versions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "project_id",
+        "name"
+      ],
+      "nullsNotDistinct": false,
+      "name": "graphs_project_name_unique",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "graphs"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "run_id",
+        "node_key",
+        "attempt"
+      ],
+      "nullsNotDistinct": false,
+      "name": "node_executions_run_node_attempt_unique",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        "run_id",
+        "seq"
+      ],
+      "nullsNotDistinct": false,
+      "name": "events_run_seq_unique",
+      "entityType": "uniques",
+      "schema": "public",
+      "table": "events"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "installation_id"
+      ],
+      "nullsNotDistinct": false,
+      "name": "github_installations_installation_id_key",
+      "schema": "public",
+      "table": "github_installations",
+      "entityType": "uniques"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "name"
+      ],
+      "nullsNotDistinct": false,
+      "name": "projects_name_key",
+      "schema": "public",
+      "table": "projects",
+      "entityType": "uniques"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "repo_id"
+      ],
+      "nullsNotDistinct": false,
+      "name": "projects_repo_id_key",
+      "schema": "public",
+      "table": "projects",
+      "entityType": "uniques"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "wait_token"
+      ],
+      "nullsNotDistinct": false,
+      "name": "node_executions_wait_token_key",
+      "schema": "public",
+      "table": "node_executions",
+      "entityType": "uniques"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "delivery_id"
+      ],
+      "nullsNotDistinct": false,
+      "name": "webhook_deliveries_delivery_id_key",
+      "schema": "public",
+      "table": "webhook_deliveries",
+      "entityType": "uniques"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "node_execution_id"
+      ],
+      "nullsNotDistinct": false,
+      "name": "questions_node_execution_id_key",
+      "schema": "public",
+      "table": "questions",
+      "entityType": "uniques"
+    }
+  ],
+  "renames": []
+}

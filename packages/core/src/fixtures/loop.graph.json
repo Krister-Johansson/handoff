@@ -1,0 +1,243 @@
+{
+  "attributes": {
+    "name": "loop",
+    "startNode": "planner",
+    "exhaustedGate": "gate"
+  },
+  "options": {
+    "type": "directed",
+    "multi": false,
+    "allowSelfLoops": false
+  },
+  "nodes": [
+    {
+      "key": "planner",
+      "attributes": {
+        "type": "planner",
+        "label": "Plan",
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "key": "coder",
+      "attributes": {
+        "type": "coder",
+        "label": "Code",
+        "x": 220,
+        "y": 0,
+        "contextSelector": {
+          "includeFeedback": true
+        }
+      }
+    },
+    {
+      "key": "tester",
+      "attributes": {
+        "type": "tester",
+        "label": "Test",
+        "x": 440,
+        "y": 0,
+        "config": {
+          "command": "npm test --if-present"
+        }
+      }
+    },
+    {
+      "key": "reviewer",
+      "attributes": {
+        "type": "reviewer",
+        "label": "Review",
+        "x": 660,
+        "y": 0
+      }
+    },
+    {
+      "key": "pr",
+      "attributes": {
+        "type": "pr",
+        "label": "Pull request",
+        "x": 880,
+        "y": 0
+      }
+    },
+    {
+      "key": "merge",
+      "attributes": {
+        "type": "merge",
+        "label": "Merge",
+        "x": 1100,
+        "y": 0
+      }
+    },
+    {
+      "key": "gate",
+      "attributes": {
+        "type": "human_gate",
+        "label": "Ask a person",
+        "x": 220,
+        "y": 200
+      }
+    }
+  ],
+  "edges": [
+    {
+      "key": "planner->coder",
+      "source": "planner",
+      "target": "coder",
+      "attributes": {
+        "loop": false
+      }
+    },
+    {
+      "key": "coder->tester",
+      "source": "coder",
+      "target": "tester",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "eq": [
+            "node.output.status",
+            "done"
+          ]
+        }
+      }
+    },
+    {
+      "key": "coder->gate",
+      "source": "coder",
+      "target": "gate",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "eq": [
+            "node.output.status",
+            "needs_input"
+          ]
+        }
+      }
+    },
+    {
+      "key": "gate->coder",
+      "source": "gate",
+      "target": "coder",
+      "attributes": {
+        "loop": true,
+        "maxAttempts": 5,
+        "condition": {
+          "neq": [
+            "node.output.option",
+            "abort"
+          ]
+        }
+      }
+    },
+    {
+      "key": "tester->reviewer",
+      "source": "tester",
+      "target": "reviewer",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "eq": [
+            "node.output.passed",
+            true
+          ]
+        }
+      }
+    },
+    {
+      "key": "tester->coder",
+      "source": "tester",
+      "target": "coder",
+      "attributes": {
+        "loop": true,
+        "maxAttempts": 3,
+        "condition": {
+          "eq": [
+            "node.output.passed",
+            false
+          ]
+        }
+      }
+    },
+    {
+      "key": "reviewer->pr",
+      "source": "reviewer",
+      "target": "pr",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "eq": [
+            "node.output.verdict",
+            "approve"
+          ]
+        }
+      }
+    },
+    {
+      "key": "reviewer->coder",
+      "source": "reviewer",
+      "target": "coder",
+      "attributes": {
+        "loop": true,
+        "maxAttempts": 3,
+        "condition": {
+          "eq": [
+            "node.output.verdict",
+            "request_changes"
+          ]
+        }
+      }
+    },
+    {
+      "key": "pr->merge",
+      "source": "pr",
+      "target": "merge",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "all": [
+            {
+              "eq": [
+                "node.output.feedback.ci.status",
+                "success"
+              ]
+            },
+            {
+              "neq": [
+                "node.output.feedback.review.decision",
+                "changes_requested"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "pr->coder",
+      "source": "pr",
+      "target": "coder",
+      "attributes": {
+        "loop": true,
+        "maxAttempts": 3,
+        "condition": {
+          "any": [
+            {
+              "eq": [
+                "node.output.feedback.ci.status",
+                "failure"
+              ]
+            },
+            {
+              "eq": [
+                "node.output.feedback.review.decision",
+                "changes_requested"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

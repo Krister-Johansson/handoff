@@ -14,7 +14,7 @@ const coderTools = [...readOnlyTools, "Edit", "Write", "Bash(git *)", "Bash(pnpm
 export const nodeCatalog: Record<NodeType, CatalogEntry> = {
   planner: { executorKind: "cli", contract: "planner_output", allowedTools: readOnlyTools },
   coder: { executorKind: "cli", contract: "coder_output", allowedTools: coderTools },
-  reviewer: { executorKind: "cli", contract: "reviewer_output", allowedTools: readOnlyTools },
+  reviewer: { executorKind: "cli", contract: "reviewer_output", allowedTools: [...readOnlyTools, "Bash(git diff *)", "Bash(git log *)", "Bash(git show *)"] },
   tester: { executorKind: "shell", contract: "tester_output", allowedTools: [] },
   pr: { executorKind: "github", contract: "pr_output", allowedTools: [] },
   merge: { executorKind: "github", contract: "merge_output", allowedTools: [] },

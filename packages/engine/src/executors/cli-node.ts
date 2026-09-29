@@ -11,6 +11,21 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
   reviewer: "Review the changes on this branch against the task and plan. Do not edit files. Return a verdict and line comments.",
 };
 
+/**
+ * When this execution follows a Human gate that answered this node's own needs_input question,
+ * resume that conversation instead of starting over. A resumed session keeps its first system
+ * prompt, so the answer travels in the prompt.
+ */
+function answerToResume(ctx: ExecutorContext): { sessionId: string; text: string } | undefined {
+  const trigger = ctx.execution.trigger;
+  if (trigger?.kind !== "edge" || !trigger.from) return undefined;
+  const answer = ctx.state.human[trigger.from];
+  const previous = ctx.state.nodes[ctx.node.key];
+  const asked = (previous?.output as { status?: string } | undefined)?.status === "needs_input";
+  if (!answer || !asked || !previous?.sessionId) return undefined;
+  return { sessionId: previous.sessionId, text: answer.option ? `${answer.option}: ${answer.answer}` : answer.answer };
+}
+
 const RESUME_PROMPT = "Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
 
 /** Planner, Coder and Reviewer: one Claude CLI turn per execution, validated against the node's contract. */
@@ -22,10 +37,17 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       const contractName = ctx.node.contract.output;
       if (!isContractName(contractName)) return { kind: "failed", error: { code: "unknown_contract", message: contractName } };
 
+      const answer = answerToResume(ctx);
       const session: CliSession = ctx.execution.executorSessionId
         ? { mode: "resume", id: ctx.execution.executorSessionId }
-        : { mode: "new", id: ctx.execution.id, name: `${ctx.run.id.slice(0, 8)}-${ctx.node.key}-${ctx.execution.attempt}` };
-      const prompt = session.mode === "resume" ? RESUME_PROMPT : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
+        : answer
+          ? { mode: "resume", id: answer.sessionId }
+          : { mode: "new", id: ctx.execution.id, name: `${ctx.run.id.slice(0, 8)}-${ctx.node.key}-${ctx.execution.attempt}` };
+      const prompt = ctx.execution.executorSessionId
+        ? RESUME_PROMPT
+        : answer
+          ? `A person answered your question: "${answer.text}". Continue the task with that answer. When finished, return the structured output required by the output contract.`
+          : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
 
       const result = await options.cli.run(
         {
