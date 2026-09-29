@@ -1,0 +1,76 @@
+export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string; durationMs?: number };
+
+export type ReviewComment = { author: string; path?: string; line?: number; body: string; resolved: boolean };
+
+export type ContextPacket = {
+  task: string;
+  nodeKey: string;
+  stateSlice: Record<string, unknown>;
+  repoPaths: string[];
+  constraints: { ownedPaths: string[]; allowedTools: string[]; maxTurns: number };
+  outputContract: string;
+  priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
+  humanAnswer?: string;
+  repairNote?: string;
+};
+
+const LOG_TAIL_LINES = 80;
+
+const tail = (text: string, n: number) => text.split("\n").slice(-n).join("\n");
+const list = (items: string[], empty: string) => (items.length ? items.map((i) => `- ${i}`).join("\n") : empty);
+
+/** The context packet as markdown, appended to the agent's system prompt. Never contains event history. */
+export function renderContextPacket(packet: ContextPacket): string {
+  const out: string[] = [];
+  out.push("# Task", "", packet.task, "");
+  out.push("# Run state", "", "```json", JSON.stringify(packet.stateSlice, null, 2), "```", "");
+  out.push(
+    "# Repository context",
+    "",
+    "The current working directory is a git worktree of the repository on this run's branch.",
+    "",
+    "Relevant paths:",
+    list(packet.repoPaths, "- (none specified)"),
+    "",
+  );
+  out.push(
+    "# Constraints",
+    "",
+    `- Only change files under: ${packet.constraints.ownedPaths.length ? packet.constraints.ownedPaths.join(", ") : "(no restriction)"}`,
+    `- Tools available: ${packet.constraints.allowedTools.join(", ") || "(none)"}`,
+    `- Turn budget: ${packet.constraints.maxTurns}`,
+    "- Commit your changes with git before finishing. Do not push.",
+    "",
+  );
+  out.push(
+    "# Output contract",
+    "",
+    `Finish by returning structured output that matches the \`${packet.outputContract}\` schema.`,
+    "If you cannot proceed without a decision from a person, return status `needs_input` with a question instead of guessing.",
+    "",
+  );
+  if (packet.priorAttempt || packet.humanAnswer || packet.repairNote) {
+    out.push("# Previous attempt", "");
+    if (packet.priorAttempt?.summary) out.push(packet.priorAttempt.summary, "");
+    const failed = packet.priorAttempt?.failedChecks.filter((c) => !c.passed) ?? [];
+    if (failed.length) {
+      out.push("## Failed checks", "");
+      for (const check of failed) {
+        out.push(`### ${check.kind}: ${check.detail}`, "");
+        if (check.logTail) out.push("```", tail(check.logTail, LOG_TAIL_LINES), "```", "");
+      }
+    }
+    const open = packet.priorAttempt?.reviewComments.filter((c) => !c.resolved) ?? [];
+    if (open.length) {
+      out.push("## Review comments", "");
+      for (const c of open) {
+        const where = c.path ? `${c.path}${c.line !== undefined ? `:${c.line}` : ""} - ` : "";
+        out.push(`- ${where}${c.author}: ${c.body}`);
+      }
+      out.push("");
+    }
+    if (packet.humanAnswer) out.push("## Human answer", "", packet.humanAnswer, "");
+    if (packet.repairNote) out.push("## Operator note", "", packet.repairNote, "");
+  }
+  return out.join("\n");
+}

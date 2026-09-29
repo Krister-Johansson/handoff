@@ -8,3 +8,7 @@ export function createDb(connectionString: string): Db {
   const pool = new pg.Pool({ connectionString });
   return drizzle({ client: pool });
 }
+
+export type DbTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+/** Either the pool-backed database or an open transaction. */
+export type DbExecutor = Db | DbTx;
