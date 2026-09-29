@@ -13,7 +13,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
   const { runId } = await params;
   const detail = await getRunDetail(getDb(), runId);
   if (!detail) notFound();
-  const { run, project, executions, events } = detail;
+  const { run, project, executions, events, graph } = detail;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div>
@@ -45,6 +45,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
         initialStatus={run.status}
         initialExecutions={executions.map((e) => ({ ...e, status: e.status }))}
         initialEvents={events}
+        graphDocument={graph?.document}
       />
     </main>
   );

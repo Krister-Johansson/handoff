@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
 const links = [
+  { href: "/projects", label: "Projects" },
   { href: "/runs", label: "Runs" },
   { href: "/library", label: "Library" },
 ];

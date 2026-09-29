@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { runStatusFromEvent, statusFromEvent } from "@/lib/status";
@@ -15,8 +16,10 @@ export function RunLive({
   initialStatus,
   initialExecutions,
   initialEvents,
+  graphDocument,
 }: {
   runId: string;
+  graphDocument?: unknown;
   initialStatus: string;
   initialExecutions: ExecutionView[];
   initialEvents: RunEvent[];
@@ -39,47 +42,56 @@ export function RunLive({
     });
   }, []);
 
+  const statuses = useMemo(() => {
+    const byNode: Record<string, NodeStatus> = {};
+    for (const e of executions) byNode[e.nodeKey] = { status: e.status, attempts: (byNode[e.nodeKey]?.attempts ?? 0) + 1 };
+    return byNode;
+  }, [executions]);
+
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between gap-2">
-            Nodes <StatusBadge status={status} />
-          </CardTitle>
-          <CardDescription>Executions in the order they were created.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Node</TableHead>
-                <TableHead>Attempt</TableHead>
-                <TableHead className="text-right">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {executions.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell className="font-medium">{e.nodeKey}</TableCell>
-                  <TableCell className="tabular-nums">{e.attempt}</TableCell>
-                  <TableCell className="text-right">
-                    <StatusBadge status={e.status} />
-                  </TableCell>
+    <div className="flex flex-col gap-6">
+      {graphDocument !== undefined && <RunGraph document={graphDocument} statuses={statuses} />}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between gap-2">
+              Nodes <StatusBadge status={status} />
+            </CardTitle>
+            <CardDescription>Executions in the order they were created.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Node</TableHead>
+                  <TableHead>Attempt</TableHead>
+                  <TableHead className="text-right">Status</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Events</CardTitle>
-          <CardDescription>Engine and Claude CLI events, live.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <EventStream runId={runId} initialEvents={initialEvents} onEvent={onEvent} />
-        </CardContent>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {executions.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="font-medium">{e.nodeKey}</TableCell>
+                    <TableCell className="tabular-nums">{e.attempt}</TableCell>
+                    <TableCell className="text-right">
+                      <StatusBadge status={e.status} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Events</CardTitle>
+            <CardDescription>Engine and Claude CLI events, live.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <EventStream runId={runId} initialEvents={initialEvents} onEvent={onEvent} />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
