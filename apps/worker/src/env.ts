@@ -18,6 +18,9 @@ const Schema = z.object({
   HANDOFF_MAX_TURNS: intFrom(60),
   HANDOFF_CLI_TIMEOUT_MS: intFrom(45 * 60_000),
   HANDOFF_MODEL: optional,
+  HANDOFF_PR_RECONCILE_MS: intFrom(10 * 60_000),
+  /** Comma-separated env var names passed through to the claude child (tests and sandbox runs only). */
+  HANDOFF_CLAUDE_PASSTHROUGH_ENV: optional,
   GITHUB_TOKEN: optional,
   GITHUB_APP_ID: optional,
   GITHUB_APP_PRIVATE_KEY_PATH: optional,

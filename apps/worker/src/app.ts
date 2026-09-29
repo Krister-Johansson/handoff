@@ -26,6 +26,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     command: { file: env.HANDOFF_CLAUDE_BIN, prefixArgs: [] },
     oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN,
     configDir,
+    ...(env.HANDOFF_CLAUDE_PASSTHROUGH_ENV ? { passthroughEnv: env.HANDOFF_CLAUDE_PASSTHROUGH_ENV.split(",").map((k) => k.trim()) } : {}),
   });
   const agent = cliNodeExecutor({
     cli,
@@ -40,7 +41,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     caps: env.caps,
     leaseMs: 60_000,
     stagingRoot: join(home, "staging"),
-    executors: { planner: agent, coder: agent, reviewer: agent, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) },
+    executors: { planner: agent, coder: agent, reviewer: agent, pr: prNodeExecutor({ github, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }), merge: mergeNodeExecutor({ github }) },
     workdirs: new GitWorktreeProvider({
       root: home,
       gitConfig: async (remote) => {

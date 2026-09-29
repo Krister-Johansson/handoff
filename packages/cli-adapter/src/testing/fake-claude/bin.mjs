@@ -6,8 +6,23 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path";
 import { execFileSync } from "node:child_process";
 
-const scenario = JSON.parse(readFileSync(process.env.FAKE_CLAUDE_SCENARIO, "utf8"));
 const argv = process.argv.slice(2);
+if (argv[0] === "--version") {
+  console.log(`${process.env.FAKE_CLAUDE_VERSION ?? "2.1.285"} (fake)`);
+  process.exit(0);
+}
+let scenario = JSON.parse(readFileSync(process.env.FAKE_CLAUDE_SCENARIO, "utf8"));
+// byName: pick the scenario whose key appears in the --name (or --resume) value, e.g. { planner: {...}, coder: {...} }.
+if (scenario.byName) {
+  const flagAt = Math.max(argv.indexOf("--name"), argv.indexOf("--resume"));
+  const label = flagAt >= 0 ? argv[flagAt + 1] ?? "" : "";
+  const key = Object.keys(scenario.byName).find((k) => label.includes(k));
+  scenario = key ? scenario.byName[key] : scenario.byName.default ?? {};
+}
+const sessionFromArgv = argv[argv.indexOf("--session-id") + 1];
+if (sessionFromArgv && Array.isArray(scenario.lines)) {
+  scenario.lines = scenario.lines.map((l) => (typeof l === "object" && l && "session_id" in l ? { ...l, session_id: sessionFromArgv } : l));
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 process.on("SIGINT", () => {
