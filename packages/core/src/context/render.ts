@@ -1,6 +1,6 @@
-export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string; durationMs?: number };
+export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined };
 
-export type ReviewComment = { author: string; path?: string; line?: number; body: string; resolved: boolean };
+export type ReviewComment = { author: string; path?: string | undefined; line?: number | undefined; body: string; resolved: boolean };
 
 export type ContextPacket = {
   task: string;

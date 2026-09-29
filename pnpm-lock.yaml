@@ -277,7 +277,23 @@ importers:
         specifier: 1.0.0-rc.4
         version: 1.0.0-rc.4
 
-  packages/engine: {}
+  packages/engine:
+    dependencies:
+      '@handoff/cli-adapter':
+        specifier: workspace:*
+        version: link:../cli-adapter
+      '@handoff/core':
+        specifier: workspace:*
+        version: link:../core
+      '@handoff/db':
+        specifier: workspace:*
+        version: link:../db
+      drizzle-orm:
+        specifier: 1.0.0-rc.4
+        version: 1.0.0-rc.4(@types/pg@8.23.1)(pg@8.23.0)(zod@4.6.5)
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/github: {}
 

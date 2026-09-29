@@ -1,0 +1,256 @@
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { matchingEdges, mergeState, RunStateSchema, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
+import { appendEvents, nodeExecutions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
+import type { ExecutionError } from "../types.ts";
+
+export class LeaseLostError extends Error {
+  constructor(executionId: string) {
+    super(`lease lost for execution ${executionId}`);
+  }
+}
+
+const RECONCILE_MS = 10 * 60_000;
+
+async function lockRun(tx: DbTx, runId: string) {
+  const [run] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
+  if (!run) throw new Error(`run ${runId} not found`);
+  return { run, state: RunStateSchema.parse(run.state) };
+}
+
+const owned = (row: NodeExecutionRow, workerId: string) =>
+  and(eq(nodeExecutions.id, row.id), eq(nodeExecutions.leaseOwner, workerId), eq(nodeExecutions.status, "running"));
+
+const releasedLease = { leaseOwner: null, leaseExpiresAt: null } as const;
+
+async function othersActive(tx: DbTx, runId: string, excludeId: string): Promise<number> {
+  const [row] = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, runId), ne(nodeExecutions.id, excludeId), inArray(nodeExecutions.status, ["pending", "running", "waiting"])));
+  return row?.n ?? 0;
+}
+
+type RouteResult = { events: NewEvent[]; created: number; exhausted: boolean; state: RunState };
+
+/** Follows matching out-edges: applies loop guards and inserts the next node executions. */
+async function route(
+  tx: DbTx,
+  graph: CompiledGraph,
+  row: NodeExecutionRow,
+  outcome: "passed" | "failed",
+  output: unknown,
+  state: RunState,
+): Promise<RouteResult> {
+  const edges = matchingEdges(graph, row.nodeKey, outcome, {
+    state,
+    node: { key: row.nodeKey, status: outcome, attempt: row.attempt, output },
+  });
+  const events: NewEvent[] = [];
+  let created = 0;
+  let exhausted = false;
+  let next = state;
+  for (const edge of edges) {
+    let target = edge.target;
+    if (edge.loop) {
+      const attempts = next.loops[edge.key]?.attempts ?? 0;
+      if (attempts >= (edge.maxAttempts ?? 0)) {
+        events.push({ type: "edge.exhausted", payload: { edgeKey: edge.key, attempts }, nodeExecutionId: row.id });
+        const gate = edge.onExhausted ?? graph.document.attributes.exhaustedGate;
+        if (!gate) {
+          exhausted = true;
+          continue;
+        }
+        target = gate;
+      } else {
+        next = { ...next, loops: { ...next.loops, [edge.key]: { attempts: attempts + 1 } } };
+      }
+    }
+    const [{ attempt } = { attempt: 0 }] = await tx
+      .select({ attempt: sql<number>`coalesce(max(${nodeExecutions.attempt}), 0)::int` })
+      .from(nodeExecutions)
+      .where(and(eq(nodeExecutions.runId, row.runId), eq(nodeExecutions.nodeKey, target)));
+    const node = graph.node(target);
+    const [created_] = await tx
+      .insert(nodeExecutions)
+      .values({ runId: row.runId, nodeKey: target, nodeType: node.type, executorKind: graph.executorKind(target), attempt: attempt + 1 })
+      .returning({ id: nodeExecutions.id });
+    created++;
+    events.push({ type: "edge.taken", payload: { edgeKey: edge.key, from: row.nodeKey, to: target }, nodeExecutionId: row.id });
+    events.push({ type: "node.created", payload: { nodeKey: target, attempt: attempt + 1, via: edge.key }, nodeExecutionId: created_!.id });
+  }
+  return { events, created, exhausted, state: next };
+}
+
+async function finishRouting(
+  tx: DbTx,
+  runId: string,
+  row: NodeExecutionRow,
+  routed: RouteResult,
+  leadEvents: NewEvent[],
+  failure?: ExecutionError,
+) {
+  const active = await othersActive(tx, runId, row.id);
+  const events = [...leadEvents, ...routed.events];
+  let status: "running" | "succeeded" | "failed" = "running";
+  if (routed.created === 0 && active === 0) {
+    if (failure || routed.exhausted) {
+      status = "failed";
+      events.push({
+        type: "run.failed",
+        payload: failure
+          ? { nodeKey: row.nodeKey, error: failure, awaiting: "repair" }
+          : { nodeKey: row.nodeKey, reason: "loop_exhausted", awaiting: "repair" },
+      });
+    } else {
+      status = "succeeded";
+      events.push({ type: "run.succeeded", payload: {} });
+    }
+  }
+  await tx
+    .update(runs)
+    .set({
+      state: routed.state,
+      stateVersion: sql`${runs.stateVersion} + 1`,
+      status,
+      ...(status !== "running" ? { finishedAt: sql`now()` } : {}),
+    })
+    .where(eq(runs.id, runId));
+  await appendEvents(tx, runId, events);
+}
+
+export async function completePassed(
+  tx: DbTx,
+  input: {
+    row: NodeExecutionRow;
+    workerId: string;
+    graph: CompiledGraph;
+    output: unknown;
+    statePatch?: Record<string, unknown> | undefined;
+    checks: CheckResult[];
+    cost?: { usd?: number | undefined; usage?: unknown } | undefined;
+  },
+) {
+  const { row } = input;
+  const { state } = await lockRun(tx, row.runId);
+  const [updated] = await tx
+    .update(nodeExecutions)
+    .set({
+      ...releasedLease,
+      status: "passed",
+      output: input.output,
+      checks: input.checks,
+      finishedAt: sql`now()`,
+      ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd.toFixed(6) } : {}),
+      ...(input.cost?.usage !== undefined ? { usage: input.cost.usage } : {}),
+    })
+    .where(owned(row, input.workerId))
+    .returning();
+  if (!updated) throw new LeaseLostError(row.id);
+  if (row.repairedFromExecutionId) {
+    await tx.update(nodeExecutions).set({ status: "repaired" }).where(eq(nodeExecutions.id, row.repairedFromExecutionId));
+  }
+  const result: NodeResult = {
+    output: input.output,
+    executionId: row.id,
+    attempt: row.attempt,
+    ...(updated.executorSessionId ? { sessionId: updated.executorSessionId } : {}),
+  };
+  const merged = mergeState(state, row.nodeKey, result, input.statePatch);
+  const routed = await route(tx, input.graph, row, "passed", input.output, merged);
+  const lead: NewEvent[] = [
+    ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
+    { type: "node.passed", payload: { nodeKey: row.nodeKey, attempt: row.attempt }, nodeExecutionId: row.id },
+  ];
+  await finishRouting(tx, row.runId, row, routed, lead);
+}
+
+export async function completeFailed(
+  tx: DbTx,
+  input: {
+    row: NodeExecutionRow;
+    workerId: string | null;
+    graph: CompiledGraph;
+    error: ExecutionError;
+    output?: unknown;
+    checks?: CheckResult[] | undefined;
+  },
+) {
+  const { row } = input;
+  const { state } = await lockRun(tx, row.runId);
+  if (input.workerId) {
+    const [updated] = await tx
+      .update(nodeExecutions)
+      .set({
+        ...releasedLease,
+        status: "failed",
+        error: input.error,
+        checks: input.checks ?? [],
+        ...(input.output !== undefined ? { output: input.output } : {}),
+        finishedAt: sql`now()`,
+      })
+      .where(owned(row, input.workerId))
+      .returning();
+    if (!updated) throw new LeaseLostError(row.id);
+  }
+  const previous = state.nodes[row.nodeKey];
+  const failed: NodeResult = {
+    output: input.output ?? previous?.output,
+    executionId: row.id,
+    attempt: row.attempt,
+    lastFailure: { checks: input.checks ?? [], error: input.error },
+  };
+  const merged = mergeState(state, row.nodeKey, failed);
+  const routed = await route(tx, input.graph, row, "failed", input.output, merged);
+  const lead: NewEvent[] = [
+    ...(input.checks ?? []).map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
+    { type: "node.failed", payload: { nodeKey: row.nodeKey, attempt: row.attempt, error: input.error }, nodeExecutionId: row.id },
+  ];
+  await finishRouting(tx, row.runId, row, routed, lead, input.error);
+}
+
+export async function yieldWaiting(
+  tx: DbTx,
+  input: { row: NodeExecutionRow; workerId: string; wait: { kind: "github_pr" | "human" | "timer"; key?: string | undefined; token?: string | undefined; deadlineAt?: Date | undefined } },
+) {
+  const { row, wait } = input;
+  await lockRun(tx, row.runId);
+  const deadline = wait.deadlineAt ?? (wait.kind === "github_pr" ? new Date(Date.now() + RECONCILE_MS) : null);
+  const [updated] = await tx
+    .update(nodeExecutions)
+    .set({
+      ...releasedLease,
+      status: sql`(case when ${nodeExecutions.wakeRequestedAt} > ${nodeExecutions.claimedAt} then 'pending' else 'waiting' end)::node_execution_status`,
+      runnableAt: sql`now()`,
+      waitKind: wait.kind,
+      waitKey: wait.key ?? row.waitKey,
+      waitToken: wait.token ?? null,
+      waitDeadlineAt: deadline,
+    })
+    .where(owned(row, input.workerId))
+    .returning();
+  if (!updated) throw new LeaseLostError(row.id);
+  const active = await tx
+    .select({ n: sql<number>`count(*)::int` })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, row.runId), inArray(nodeExecutions.status, ["pending", "running"])));
+  if ((active[0]?.n ?? 0) === 0) await tx.update(runs).set({ status: "waiting" }).where(eq(runs.id, row.runId));
+  await appendEvents(tx, row.runId, [
+    {
+      type: updated.status === "pending" ? "node.woken" : "node.waiting",
+      payload: { nodeKey: row.nodeKey, waitKind: wait.kind, waitKey: updated.waitKey, deadlineAt: deadline?.toISOString() ?? null },
+      nodeExecutionId: row.id,
+    },
+  ]);
+}
+
+export async function releaseForReclaim(tx: DbTx, input: { row: NodeExecutionRow; workerId: string }) {
+  const [updated] = await tx
+    .update(nodeExecutions)
+    .set({ ...releasedLease, status: "pending", runnableAt: sql`now()`, interruptCount: sql`${nodeExecutions.interruptCount} + 1` })
+    .where(owned(input.row, input.workerId))
+    .returning();
+  if (!updated) throw new LeaseLostError(input.row.id);
+  await appendEvents(tx, input.row.runId, [
+    { type: "node.interrupted", payload: { nodeKey: input.row.nodeKey }, nodeExecutionId: input.row.id },
+  ]);
+}

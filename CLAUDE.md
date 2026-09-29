@@ -14,7 +14,7 @@ Graph-engineering orchestrator for coding agents. A Next.js dashboard with a Rea
 
 ## Stack
 
-pnpm, TypeScript strict, Next.js App Router, Drizzle ORM on Postgres, graphology, @xyflow/react, Octokit, Zod, Vitest.
+pnpm, TypeScript strict, Next.js App Router, shadcn/ui on Tailwind CSS for all dashboard UI, Drizzle ORM on Postgres, graphology, @xyflow/react, Octokit, Zod, Vitest.
 
 ## Installed skills
 

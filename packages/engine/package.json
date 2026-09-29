@@ -3,5 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@handoff/core": "workspace:*",
+    "@handoff/db": "workspace:*",
+    "@handoff/cli-adapter": "workspace:*",
+    "drizzle-orm": "1.0.0-rc.4",
+    "zod": "4.6.5"
+  }
 }
