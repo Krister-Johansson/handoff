@@ -26,7 +26,22 @@ pnpm, TypeScript strict, Next.js App Router, Drizzle ORM on Postgres, graphology
 
 ## Commands
 
-Filled in once the project is scaffolded.
+```bash
+pnpm install
+pnpm db:up          # Postgres 17 on localhost:5433 with databases handoff and handoff_test
+pnpm test           # all Vitest projects: unit, integration (needs db:up), web
+pnpm test:unit
+pnpm test:int
+pnpm test:web
+pnpm typecheck
+pnpm lint
+pnpm doctor:react   # after any change under apps/web
+pnpm db:generate    # after a schema change; review the SQL, commit it. Never drizzle-kit push.
+pnpm db:migrate
+pnpm dev:web
+```
+
+Test files: `*.test.ts` unit, `*.integration.test.ts` real Postgres or subprocesses, `*.test.tsx` web components.
 
 ## Agent skills
 

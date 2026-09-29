@@ -1,0 +1,37 @@
+{
+  "name": "handoff",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @handoff/web dev",
+    "dev:worker": "pnpm --filter @handoff/worker dev",
+    "dev:tunnel": "ngrok http --url=$NGROK_URL 3000",
+    "handoff": "pnpm --filter @handoff/worker handoff",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d --wait",
+    "db:generate": "pnpm --filter @handoff/db db:generate",
+    "db:migrate": "pnpm --filter @handoff/db db:migrate",
+    "db:studio": "pnpm --filter @handoff/db db:studio",
+    "test": "vitest run",
+    "test:unit": "vitest run --project unit",
+    "test:int": "vitest run --project integration",
+    "test:web": "vitest run --project web",
+    "test:watch": "vitest",
+    "typecheck": "pnpm -r --parallel exec tsc --noEmit",
+    "lint": "eslint . && pnpm --filter @handoff/web lint",
+    "doctor:react": "npx react-doctor@latest apps/web"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "eslint": "9.39.5",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.2"
+  }
+}
