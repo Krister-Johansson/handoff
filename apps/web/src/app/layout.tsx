@@ -13,7 +13,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" className={cn("font-sans", geist.variable)}>
+    // Browser extensions (for example Scribe) add attributes to <html> before hydration.
+    <html lang="en" className={cn("font-sans", geist.variable)} suppressHydrationWarning>
       <body>{children}</body>
     </html>
   );
