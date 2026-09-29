@@ -67,12 +67,24 @@ describe("scheduler", () => {
     expect(types.at(-1)).toBe("run.succeeded");
   });
 
-  test("an edge whose condition does not hold is not taken and the run ends without it", async () => {
+  test("a node whose out-edges all fail their conditions fails the run with no_route", async () => {
     const { run } = await startRun(db, linear);
     await drain(engineDeps(db, registry({ coder: completes({ status: "needs_input", summary: "?", question: { text: "Which format?" } }) })));
-    const { run: row, executions } = await inspect(db, run.id);
-    expect(executions.map((e) => e.nodeKey)).toEqual(["planner", "coder"]);
-    expect(row.status).toBe("succeeded");
+    const { run: row, executions, events } = await inspect(db, run.id);
+    expect(executions.map((e) => [e.nodeKey, e.status])).toEqual([
+      ["planner", "passed"],
+      ["coder", "passed"],
+    ]);
+    expect(row.status).toBe("failed");
+    expect(events.at(-1)).toMatchObject({ type: "run.failed", payload: { nodeKey: "coder", reason: "no_route" } });
+  });
+
+  test("a finished run releases its worktree", async () => {
+    const { run } = await startRun(db, linear);
+    const released: string[] = [];
+    const workdirs = { acquire: async () => ({ path: "/tmp/x", baseSha: "0" }), release: async (spec: { runId: string }) => void released.push(spec.runId) };
+    await drain(engineDeps(db, registry(), { workdirs }));
+    expect(released).toEqual([run.id]);
   });
 
   test("a failed execution with no failed edge marks the run failed and creates no successor", async () => {

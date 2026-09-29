@@ -10,6 +10,7 @@
     "@handoff/cli-adapter": "workspace:*",
     "@handoff/core": "workspace:*",
     "@handoff/db": "workspace:*",
+    "@handoff/github": "workspace:*",
     "drizzle-orm": "1.0.0-rc.4",
     "zod": "4.6.5"
   }

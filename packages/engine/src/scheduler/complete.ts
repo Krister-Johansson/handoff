@@ -83,6 +83,7 @@ async function route(
 
 async function finishRouting(
   tx: DbTx,
+  graph: CompiledGraph,
   runId: string,
   row: NodeExecutionRow,
   routed: RouteResult,
@@ -93,13 +94,13 @@ async function finishRouting(
   const events = [...leadEvents, ...routed.events];
   let status: "running" | "succeeded" | "failed" = "running";
   if (routed.created === 0 && active === 0) {
-    if (failure || routed.exhausted) {
+    const deadEnd = graph.outEdges(row.nodeKey).length > 0;
+    if (failure || routed.exhausted || deadEnd) {
       status = "failed";
+      const reason = failure ? "node_failed" : routed.exhausted ? "loop_exhausted" : "no_route";
       events.push({
         type: "run.failed",
-        payload: failure
-          ? { nodeKey: row.nodeKey, error: failure, awaiting: "repair" }
-          : { nodeKey: row.nodeKey, reason: "loop_exhausted", awaiting: "repair" },
+        payload: { nodeKey: row.nodeKey, reason, ...(failure ? { error: failure } : {}), awaiting: "repair" },
       });
     } else {
       status = "succeeded";
@@ -111,6 +112,7 @@ async function finishRouting(
     .set({
       state: routed.state,
       stateVersion: sql`${runs.stateVersion} + 1`,
+      ...(routed.state.prNumber !== undefined ? { prNumber: routed.state.prNumber } : {}),
       status,
       ...(status !== "running" ? { finishedAt: sql`now()` } : {}),
     })
@@ -161,7 +163,7 @@ export async function completePassed(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
     { type: "node.passed", payload: { nodeKey: row.nodeKey, attempt: row.attempt }, nodeExecutionId: row.id },
   ];
-  await finishRouting(tx, row.runId, row, routed, lead);
+  await finishRouting(tx, input.graph, row.runId, row, routed, lead);
 }
 
 export async function completeFailed(
@@ -205,7 +207,7 @@ export async function completeFailed(
     ...(input.checks ?? []).map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
     { type: "node.failed", payload: { nodeKey: row.nodeKey, attempt: row.attempt, error: input.error }, nodeExecutionId: row.id },
   ];
-  await finishRouting(tx, row.runId, row, routed, lead, input.error);
+  await finishRouting(tx, input.graph, row.runId, row, routed, lead, input.error);
 }
 
 export async function yieldWaiting(

@@ -8,3 +8,4 @@ export * from "./scheduler/worker.ts";
 export * from "./scheduler/complete.ts";
 export * from "./workdir/git-worktree.ts";
 export * from "./executors/cli-node.ts";
+export * from "./executors/github.ts";

@@ -246,6 +246,25 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     if (error instanceof LeaseLostError) deps.log?.("lease lost at completion", { id: row.id });
     else throw error;
   }
+  await releaseIfFinished(deps, run.id, project);
+}
+
+const TERMINAL_RUN = new Set(["succeeded", "failed", "cancelled"]);
+
+/** A finished run gives its worktree back; the branch stays so a repair can re-create it. */
+async function releaseIfFinished(deps: EngineDeps, runId: string, project: typeof projects.$inferSelect) {
+  const [run] = await deps.db.select().from(runs).where(eq(runs.id, runId));
+  if (!run || !TERMINAL_RUN.has(run.status)) return;
+  try {
+    await deps.workdirs.release({
+      runId: run.id,
+      remoteUrl: (deps.remoteUrl ?? defaultRemote)(project),
+      baseBranch: run.baseBranch,
+      branchName: run.branchName,
+    });
+  } catch (error) {
+    deps.log?.("workdir release failed", { runId, error: String(error) });
+  }
 }
 
 async function applyOutcome(
