@@ -32,6 +32,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: GraphQL types are up to date
+        run: pnpm --filter @handoff/github codegen && git diff --exit-code packages/github/src/gql
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test

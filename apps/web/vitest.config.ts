@@ -10,7 +10,8 @@ export default defineConfig({
   test: {
     name: "web",
     environment: "jsdom",
-    include: ["src/**/*.test.tsx"],
+    include: ["src/**/*.test.{ts,tsx}"],
+    exclude: ["src/**/*.integration.test.ts", "**/node_modules/**"],
     setupFiles: ["./vitest.setup.ts"],
   },
 });

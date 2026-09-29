@@ -3,5 +3,23 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" }
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "dependencies": {
+    "@handoff/core": "workspace:*",
+    "octokit": "5.0.5",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@graphql-codegen/cli": "7.4.3",
+    "@graphql-codegen/client-preset": "6.2.0",
+    "@graphql-typed-document-node/core": "3.2.0",
+    "@octokit/graphql-schema": "15.26.1",
+    "graphql": "17.0.2"
+  },
+  "scripts": {
+    "codegen": "graphql-codegen --config codegen.ts"
+  }
 }

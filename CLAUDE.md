@@ -14,11 +14,11 @@ Graph-engineering orchestrator for coding agents. A Next.js dashboard with a Rea
 
 ## Stack
 
-pnpm, TypeScript strict, Next.js App Router, Drizzle ORM on Postgres, graphology, @xyflow/react, Octokit, Zod, Vitest.
+pnpm, TypeScript strict, Next.js App Router, shadcn/ui on Tailwind CSS for all dashboard UI, Drizzle ORM on Postgres, graphology, @xyflow/react, Octokit, Zod, Vitest.
 
 ## Installed skills
 
-`.claude/skills` holds tdd, vitest, react-flow, github-webhooks, drizzle-best-practices, frontend-design, webapp-testing, vercel-react-best-practices, vercel-composition-patterns, web-design-guidelines and setup-matt-pocock-skills, installed with `npx skills add` and pinned in `skills-lock.json`. Use the matching skill when working in that area.
+`.claude/skills` holds tdd, vitest, react-flow, github-webhooks, drizzle-best-practices, frontend-design, webapp-testing, vercel-react-best-practices, vercel-composition-patterns, web-design-guidelines, shadcn and setup-matt-pocock-skills, installed with `npx skills add` and pinned in `skills-lock.json`. Use the matching skill when working in that area.
 
 ## Implementation plan
 
@@ -39,6 +39,10 @@ pnpm doctor:react   # after any change under apps/web
 pnpm db:generate    # after a schema change; review the SQL, commit it. Never drizzle-kit push.
 pnpm db:migrate
 pnpm dev:web
+pnpm dev:worker     # needs CLAUDE_CODE_OAUTH_TOKEN and GITHUB_TOKEN (or a GitHub App) in .env
+pnpm demo           # seeds a demo run with simulated Claude events
+pnpm handoff <cmd>  # project add, graph import, run, runs
+pnpm --filter @handoff/github codegen   # after editing packages/github/src/queries/*.graphql
 ```
 
 Test files: `*.test.ts` unit, `*.integration.test.ts` real Postgres or subprocesses, `*.test.tsx` web components.

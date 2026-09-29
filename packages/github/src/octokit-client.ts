@@ -1,0 +1,137 @@
+import { App, Octokit } from "octokit";
+import { PullRequestSnapshotDocument, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
+import type { CheckContext, GitHubPort, PrInfo, PrSnapshot, RepoRef } from "./types.ts";
+
+type Fetch = typeof globalThis.fetch;
+
+type GqlPullRequest = NonNullable<NonNullable<PullRequestSnapshotQuery["repository"]>["pullRequest"]>;
+type GqlContext = NonNullable<
+  NonNullable<NonNullable<NonNullable<GqlPullRequest["commits"]["nodes"]>[number]>["commit"]["statusCheckRollup"]>["contexts"]["nodes"]
+>[number];
+
+/** GitHubPort over Octokit, authenticated as a GitHub App installation or with a personal token. */
+export class OctokitGitHub implements GitHubPort {
+  private constructor(
+    private readonly clientFor: (repo: RepoRef) => Promise<Octokit>,
+    private readonly tokenFor: (repo: RepoRef) => Promise<string>,
+  ) {}
+
+  static withToken(token: string, opts: { fetch?: Fetch } = {}): OctokitGitHub {
+    const octokit = new Octokit({ auth: token, ...(opts.fetch ? { request: { fetch: opts.fetch } } : {}) });
+    return new OctokitGitHub(async () => octokit, async () => token);
+  }
+
+  static withApp(input: { appId: number; privateKey: string; fetch?: Fetch }): OctokitGitHub {
+    const app = new App({
+      appId: input.appId,
+      privateKey: input.privateKey,
+      ...(input.fetch ? { Octokit: Octokit.defaults({ request: { fetch: input.fetch } }) } : {}),
+    });
+    const installation = async (repo: RepoRef) => {
+      if (repo.installationId) return repo.installationId;
+      const { data } = await app.octokit.rest.apps.getRepoInstallation({ owner: repo.owner, repo: repo.name });
+      return data.id;
+    };
+    return new OctokitGitHub(
+      async (repo) => app.getInstallationOctokit(await installation(repo)),
+      async (repo) => {
+        const octokit = await app.getInstallationOctokit(await installation(repo));
+        const auth = (await octokit.auth({ type: "installation" })) as { token: string };
+        return auth.token;
+      },
+    );
+  }
+
+  async getRepoId(repo: RepoRef): Promise<number> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.repos.get({ owner: repo.owner, repo: repo.name });
+    return data.id;
+  }
+
+  async findPrByHead(repo: RepoRef, branch: string): Promise<PrInfo | undefined> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.pulls.list({ owner: repo.owner, repo: repo.name, head: `${repo.owner}:${branch}`, state: "open" });
+    const pr = data[0];
+    return pr ? { number: pr.number, url: pr.html_url, headSha: pr.head.sha } : undefined;
+  }
+
+  async createPr(repo: RepoRef, input: { head: string; base: string; title: string; body: string }): Promise<PrInfo> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.pulls.create({ owner: repo.owner, repo: repo.name, ...input });
+    return { number: data.number, url: data.html_url, headSha: data.head.sha };
+  }
+
+  async getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot> {
+    const octokit = await this.clientFor(repo);
+    const { repository } = await octokit.graphql<PullRequestSnapshotQuery>(PullRequestSnapshotDocument.toString(), {
+      owner: repo.owner,
+      name: repo.name,
+      number,
+    });
+    const pr = repository?.pullRequest;
+    if (!pr) throw new Error(`pull request ${repo.owner}/${repo.name}#${number} not found`);
+    const rollup = pr.commits.nodes?.[0]?.commit.statusCheckRollup ?? null;
+    const present = <T>(items: readonly (T | null | undefined)[] | null | undefined): T[] => (items ?? []).filter((x): x is T => x != null);
+    return {
+      number: pr.number,
+      url: pr.url,
+      headSha: pr.headRefOid,
+      headRef: pr.headRefName,
+      state: pr.merged ? "merged" : pr.state === "OPEN" ? "open" : "closed",
+      merged: pr.merged,
+      mergeable: pr.mergeable,
+      reviewDecision: pr.reviewDecision ?? null,
+      checks: rollup
+        ? { state: rollup.state, contexts: present<NonNullable<GqlContext>>(rollup.contexts.nodes).flatMap((c) => toCheckContext(c)) }
+        : null,
+      reviewThreads: present(pr.reviewThreads.nodes).map((t) => ({
+        isResolved: t.isResolved,
+        comments: present(t.comments.nodes).map((c) => ({
+          author: c.author?.login ?? "ghost",
+          body: c.body,
+          ...(c.path ? { path: c.path } : {}),
+          ...(typeof c.line === "number" ? { line: c.line } : {}),
+          url: c.url,
+        })),
+      })),
+      comments: present(pr.comments.nodes).map((c) => ({ author: c.author?.login ?? "ghost", body: c.body, url: c.url })),
+    };
+  }
+
+  async getJobLogTail(repo: RepoRef, jobId: number, lines = 120): Promise<string | undefined> {
+    const octokit = await this.clientFor(repo);
+    try {
+      const response = await octokit.request("GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs", {
+        owner: repo.owner,
+        repo: repo.name,
+        job_id: jobId,
+      });
+      const text = typeof response.data === "string" ? response.data : String(response.data ?? "");
+      return text.replace(/\r/g, "").trimEnd().split("\n").slice(-lines).join("\n");
+    } catch {
+      return undefined;
+    }
+  }
+
+  async mergePr(repo: RepoRef, number: number, method: "squash" | "merge" | "rebase" = "squash") {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.pulls.merge({ owner: repo.owner, repo: repo.name, pull_number: number, merge_method: method });
+    return { merged: data.merged, ...(data.sha ? { sha: data.sha } : {}) };
+  }
+
+  async gitAuthConfig(repo: RepoRef): Promise<string[]> {
+    const token = await this.tokenFor(repo);
+    const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
+    return ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`];
+  }
+}
+
+function toCheckContext(c: NonNullable<GqlContext>): CheckContext[] {
+  if (c.__typename === "CheckRun") {
+    return [{ name: c.name, status: c.status, conclusion: c.conclusion ?? null, url: c.detailsUrl ?? "", ...(c.databaseId ? { checkRunId: c.databaseId } : {}) }];
+  }
+  if (c.__typename === "StatusContext") {
+    return [{ name: c.context, status: "COMPLETED", conclusion: c.state === "PENDING" || c.state === "EXPECTED" ? null : c.state, url: c.targetUrl ?? "" }];
+  }
+  return [];
+}

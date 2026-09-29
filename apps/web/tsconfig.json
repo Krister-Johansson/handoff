@@ -27,7 +27,8 @@
         "./src/*"
       ]
     },
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true
   },
   "include": [
     "next-env.d.ts",
@@ -35,7 +36,8 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts"
+    "**/*.mts",
+    "doctor.config.ts"
   ],
   "exclude": [
     "node_modules",

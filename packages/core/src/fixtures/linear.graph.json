@@ -1,0 +1,97 @@
+{
+  "attributes": {
+    "name": "linear",
+    "startNode": "planner"
+  },
+  "options": {
+    "type": "directed",
+    "multi": false,
+    "allowSelfLoops": false
+  },
+  "nodes": [
+    {
+      "key": "planner",
+      "attributes": {
+        "type": "planner",
+        "label": "Plan",
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "key": "coder",
+      "attributes": {
+        "type": "coder",
+        "label": "Code",
+        "x": 200,
+        "y": 0
+      }
+    },
+    {
+      "key": "pr",
+      "attributes": {
+        "type": "pr",
+        "label": "Pull request",
+        "x": 400,
+        "y": 0
+      }
+    },
+    {
+      "key": "merge",
+      "attributes": {
+        "type": "merge",
+        "label": "Merge",
+        "x": 600,
+        "y": 0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "key": "planner->coder",
+      "source": "planner",
+      "target": "coder",
+      "attributes": {
+        "loop": false
+      }
+    },
+    {
+      "key": "coder->pr",
+      "source": "coder",
+      "target": "pr",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "eq": [
+            "node.output.status",
+            "done"
+          ]
+        }
+      }
+    },
+    {
+      "key": "pr->merge",
+      "source": "pr",
+      "target": "merge",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "all": [
+            {
+              "eq": [
+                "node.output.feedback.ci.status",
+                "success"
+              ]
+            },
+            {
+              "neq": [
+                "node.output.feedback.review.decision",
+                "changes_requested"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
