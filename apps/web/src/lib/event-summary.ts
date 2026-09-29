@@ -1,0 +1,41 @@
+type EventLike = { type: string; payload: unknown };
+
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+
+function assistantSummary(payload: Record<string, unknown>): string {
+  const content = obj(payload.message).content;
+  if (!Array.isArray(content)) return "";
+  for (const block of content) {
+    const b = obj(block);
+    if (b.type === "text" && typeof b.text === "string") return b.text.trim().split("\n")[0] ?? "";
+    if (b.type === "tool_use" && typeof b.name === "string") {
+      const input = obj(b.input);
+      const target = input.file_path ?? input.path ?? input.command ?? input.pattern;
+      return typeof target === "string" ? `${b.name} ${target}` : b.name;
+    }
+  }
+  return "";
+}
+
+/** One line of human-readable detail per event type. */
+export function summarizeEvent(event: EventLike): string {
+  const p = obj(event.payload);
+  if (event.type.startsWith("node.")) {
+    const base = typeof p.nodeKey === "string" ? `${p.nodeKey}${typeof p.attempt === "number" ? `, attempt ${p.attempt}` : ""}` : "";
+    const error = obj(p.error).message;
+    return typeof error === "string" ? `${base}: ${error}` : base;
+  }
+  if (event.type === "edge.taken") return `${String(p.from)} to ${String(p.to)}`;
+  if (event.type === "edge.exhausted") return `${String(p.edgeKey)} after ${String(p.attempts)} attempts`;
+  if (event.type === "contract.checked") return `${String(p.kind)}: ${p.passed ? "passed" : "failed"}${p.detail ? `, ${String(p.detail)}` : ""}`;
+  if (event.type === "cli.assistant") return assistantSummary(p);
+  if (event.type === "cli.system.init") return typeof p.model === "string" ? `model ${p.model}` : "";
+  if (event.type.startsWith("cli.result")) {
+    const turns = typeof p.num_turns === "number" ? `${p.num_turns} turns` : "";
+    const cost = typeof p.total_cost_usd === "number" ? `$${p.total_cost_usd.toFixed(2)}` : "";
+    return [turns, cost].filter(Boolean).join(", ");
+  }
+  if (event.type === "run.failed") return typeof p.nodeKey === "string" ? `at ${p.nodeKey}` : "";
+  if (event.type === "run.created" && typeof p.branchName === "string") return p.branchName;
+  return "";
+}

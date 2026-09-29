@@ -3,5 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/main.ts",
+    "handoff": "tsx --env-file=../../.env src/cli.ts",
+    "demo": "tsx --env-file=../../.env src/demo.ts"
+  },
+  "dependencies": {
+    "@handoff/core": "workspace:*",
+    "@handoff/db": "workspace:*",
+    "@handoff/engine": "workspace:*",
+    "@handoff/cli-adapter": "workspace:*"
+  }
 }

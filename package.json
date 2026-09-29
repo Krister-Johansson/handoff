@@ -24,7 +24,8 @@
     "test:watch": "vitest",
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "lint": "eslint . && pnpm --filter @handoff/web lint",
-    "doctor:react": "npx react-doctor@latest apps/web"
+    "doctor:react": "cd apps/web && npx -y react-doctor@latest .",
+    "demo": "pnpm --filter @handoff/worker demo"
   },
   "devDependencies": {
     "@types/node": "24.19.0",
