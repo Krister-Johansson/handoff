@@ -24,7 +24,7 @@
       "attributes": {
         "type": "coder",
         "label": "Code",
-        "x": 220,
+        "x": 340,
         "y": 0,
         "contextSelector": {
           "includeFeedback": true
@@ -36,7 +36,7 @@
       "attributes": {
         "type": "tester",
         "label": "Test",
-        "x": 440,
+        "x": 680,
         "y": 0,
         "config": {
           "command": "npm test --if-present"
@@ -48,7 +48,7 @@
       "attributes": {
         "type": "reviewer",
         "label": "Review",
-        "x": 660,
+        "x": 1020,
         "y": 0
       }
     },
@@ -57,7 +57,7 @@
       "attributes": {
         "type": "pr",
         "label": "Pull request",
-        "x": 880,
+        "x": 1360,
         "y": 0
       }
     },
@@ -66,7 +66,7 @@
       "attributes": {
         "type": "merge",
         "label": "Merge",
-        "x": 1100,
+        "x": 1700,
         "y": 0
       }
     },
@@ -75,8 +75,8 @@
       "attributes": {
         "type": "human_gate",
         "label": "Ask a person",
-        "x": 220,
-        "y": 200
+        "x": 340,
+        "y": -130
       }
     }
   ],

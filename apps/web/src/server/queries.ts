@@ -1,4 +1,4 @@
-import { asc, desc, eq, listEventsAfter, nodeExecutions, projects, runs, type DbExecutor } from "@handoff/db";
+import { asc, desc, eq, graphVersions, listEventsAfter, nodeExecutions, projects, runs, type DbExecutor } from "@handoff/db";
 import type { StreamedEvent } from "./events-stream";
 
 export async function listRuns(db: DbExecutor, limit = 50) {
@@ -39,5 +39,6 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
     nodeExecutionId: e.nodeExecutionId,
     createdAt: e.createdAt.toISOString(),
   }));
-  return { ...run, executions, events };
+  const [version] = await db.select({ document: graphVersions.document, version: graphVersions.version }).from(graphVersions).where(eq(graphVersions.id, run.run.graphVersionId));
+  return { ...run, executions, events, graph: version };
 }

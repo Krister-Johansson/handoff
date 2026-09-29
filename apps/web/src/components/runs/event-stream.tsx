@@ -42,9 +42,13 @@ export function EventStream({
     return () => source.close();
   }, [runId]);
 
+  // Follow new events inside the list only, and only while the reader is already at the bottom.
   useEffect(() => {
-    bottom.current?.scrollIntoView?.({ block: "end" });
-  }, [events.length]);
+    const viewport = bottom.current?.closest<HTMLElement>("[data-slot=scroll-area-viewport]");
+    if (!viewport) return;
+    const nearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
+    if (nearBottom || events.length === initialEvents.length) viewport.scrollTop = viewport.scrollHeight;
+  }, [events.length, initialEvents.length]);
 
   return (
     <ScrollArea className="h-[32rem] rounded-md border">

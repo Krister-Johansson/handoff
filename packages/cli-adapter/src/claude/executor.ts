@@ -50,7 +50,7 @@ export class ClaudeCliExecutor implements CliExecutor {
         configDir: this.options.configDir,
         base: this.options.baseEnv ?? process.env,
         passthrough: this.options.passthroughEnv ?? [],
-      }),
+      }) as NodeJS.ProcessEnv,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });

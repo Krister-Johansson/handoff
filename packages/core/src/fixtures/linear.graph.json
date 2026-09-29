@@ -23,7 +23,7 @@
       "attributes": {
         "type": "coder",
         "label": "Code",
-        "x": 200,
+        "x": 340,
         "y": 0
       }
     },
@@ -32,7 +32,7 @@
       "attributes": {
         "type": "pr",
         "label": "Pull request",
-        "x": 400,
+        "x": 680,
         "y": 0
       }
     },
@@ -41,7 +41,7 @@
       "attributes": {
         "type": "merge",
         "label": "Merge",
-        "x": 600,
+        "x": 1020,
         "y": 0
       }
     }
