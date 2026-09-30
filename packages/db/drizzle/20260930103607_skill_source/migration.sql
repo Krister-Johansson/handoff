@@ -1,0 +1,1 @@
+ALTER TABLE "library_skills" ADD COLUMN "source" jsonb;

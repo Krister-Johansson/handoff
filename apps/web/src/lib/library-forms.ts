@@ -33,8 +33,12 @@ function pairs(value: string, separator: "=" | ":", errors: Record<string, strin
   return out;
 }
 
+/** Path segments the library's own pages use (/library/skills/new, /library/skills/browse). */
+const RESERVED = new Set(["new", "browse"]);
+
 function checkName(name: string, errors: Record<string, string>) {
   if (!NAME.test(name)) errors.name = "Use lowercase letters, digits and dashes, for example ci-triage.";
+  else if (RESERVED.has(name)) errors.name = `${name} is the name of a library page; choose another.`;
 }
 
 export function parseSkillForm(form: FormData): FormResult<SkillInput> {

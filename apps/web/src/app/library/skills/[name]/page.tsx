@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getLibraryByNames } from "@handoff/db";
 import { EntryPage } from "@/components/library/entry-page";
 import { SkillEditor } from "@/components/library/skill-editor";
+import { SkillSource } from "@/components/library/skill-source";
 import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,8 @@ export default async function SkillPage({ params }: { params: Promise<{ name: st
   if (!skill) notFound();
   return (
     <EntryPage tab="skills" kind="skill" title={skill.name} subtitle="Saving creates a new version. Runs already started keep the version they staged." name={skill.name} version={skill.version}>
-      <SkillEditor skill={{ name: skill.name, description: skill.description, body: skill.body, frontmatter: skill.frontmatter, files: skill.files }} />
+      {skill.source && <SkillSource id={skill.source.id} />}
+      <SkillEditor key={skill.version} skill={{ name: skill.name, description: skill.description, body: skill.body, frontmatter: skill.frontmatter, files: skill.files }} />
     </EntryPage>
   );
 }
