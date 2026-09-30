@@ -30,3 +30,13 @@ test("a tool still running has no result yet", () => {
   const { items } = toActivity([assistant(1, { type: "tool_use", id: "t1", name: "Bash", input: { command: "pnpm test" } })]);
   expect(items).toEqual([{ kind: "tool", key: "1:0", id: "t1", name: "Bash", target: "pnpm test" }]);
 });
+
+test("paths inside a run's worktree are shown relative to it", () => {
+  const wt = "/Users/k/Project/handoff/.handoff/worktrees/6fa020e8-5523-4d3a-9bd0-ee00b534c627";
+  const { items } = toActivity([
+    assistant(1, { type: "tool_use", id: "a", name: "Read", input: { file_path: `${wt}/docs/features.md` } }),
+    assistant(2, { type: "tool_use", id: "b", name: "Bash", input: { command: `cd ${wt} && pnpm test` } }),
+    assistant(3, { type: "tool_use", id: "c", name: "Glob", input: { pattern: "**/*", path: wt } }),
+  ]);
+  expect(items.map((i) => (i.kind === "tool" ? i.target : undefined))).toEqual(["docs/features.md", "cd . && pnpm test", "**/*"]);
+});

@@ -41,3 +41,14 @@ test("events that arrive while the node runs join the timeline", async () => {
   expect(screen.getByText("Now writing the scaffold.")).toBeInTheDocument();
   expect(screen.getAllByText("Reading the docs first.")).toHaveLength(1);
 });
+
+test("the activity sits in a scroll area that follows new activity to the bottom", async () => {
+  const { rerender, container } = render(<ExecutionActivity runId="r1" executionId="e1" live={[]} />);
+  await screen.findByText("Reading the docs first.");
+  const viewport = container.querySelector<HTMLElement>("[data-slot=scroll-area-viewport]")!;
+  expect(viewport).not.toBeNull();
+  Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 900 });
+  Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 300 });
+  rerender(<ExecutionActivity runId="r1" executionId="e1" live={[assistant(6, { type: "text", text: "Now writing the scaffold." })]} />);
+  expect(viewport.scrollTop).toBe(900);
+});
