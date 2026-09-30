@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
-import { compileGraph, suggestProjectName } from "@handoff/core";
+import { compileGraph, suggestProjectName, type LinkedIssue } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibrary, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, type GitHubPort } from "@handoff/github";
@@ -13,7 +13,7 @@ export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; gith
 const USAGE = `usage:
   handoff project add --repo <owner/name> [--name <name>] [--branch <default>] [--clone <path>]
   handoff graph import --project <name> --name <graph> <file.json>
-  handoff run --project <name> --graph <graph> --task "<task>" [--follow]
+  handoff run --project <name> --graph <graph> [--task "<task>"] [--issue <number> ...] [--follow]
   handoff runs
   handoff run cancel <runId>
   handoff run repair <runId> --node <key> [--note "<text>"]
@@ -140,7 +140,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
 
   if (command === "run" && (sub === undefined || sub.startsWith("--"))) {
     const args = sub ? [sub, ...rest] : rest;
-    const { values } = parseArgs({ args, options: { project: { type: "string" }, graph: { type: "string" }, task: { type: "string" }, follow: { type: "boolean" } } });
+    const { values } = parseArgs({
+      args,
+      options: { project: { type: "string" }, graph: { type: "string" }, task: { type: "string" }, issue: { type: "string", multiple: true }, follow: { type: "boolean" } },
+    });
     const project = await projectByName(db, need(values, "project"));
     const graphName = need(values, "graph");
     const [version] = await db
@@ -151,7 +154,22 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
       .orderBy(desc(graphVersions.version))
       .limit(1);
     if (!version) throw new Error(`no graph named ${graphName} for ${project.name}; import one with: handoff graph import`);
-    const run = await createRun(db, { projectId: project.id, graphVersionId: version.id, task: need(values, "task") });
+    const issueNumbers = (values.issue ?? []).map(Number);
+    if (issueNumbers.some((n) => !Number.isInteger(n) || n <= 0)) throw new Error("--issue takes an issue number, for example --issue 12");
+    let issues: LinkedIssue[] = [];
+    if (issueNumbers.length) {
+      const github = io.github === undefined ? gitHubFromEnv() : (io.github ?? undefined);
+      if (!github) throw new Error("--issue needs GitHub access (GITHUB_TOKEN or a GitHub App)");
+      issues = await Promise.all(issueNumbers.map((n) => github.getIssue({ owner: project.repoOwner, name: project.repoName }, n)));
+    }
+    const task = values.task?.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
+    if (!task) throw new Error("give --task, or link issues with --issue");
+    const run = await createRun(db, {
+      projectId: project.id,
+      graphVersionId: version.id,
+      task,
+      issues: issues.map(({ number, title, url, body }) => ({ number, title, url, body })),
+    });
     out(`run ${run.id} queued on branch ${run.branchName}`);
     out(`${io.webUrl ?? "http://localhost:3000"}/runs/${run.id}`);
     if (values.follow) await follow(db, run.id, out);

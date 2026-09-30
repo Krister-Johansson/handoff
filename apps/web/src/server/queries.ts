@@ -10,6 +10,7 @@ export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 5
     .select({
       id: runs.id,
       task: runs.task,
+      issues: runs.issues,
       status: runs.status,
       branchName: runs.branchName,
       prNumber: runs.prNumber,

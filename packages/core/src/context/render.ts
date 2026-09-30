@@ -9,12 +9,14 @@ export type ContextPacket = {
   repoPaths: string[];
   constraints: { ownedPaths: string[]; allowedTools: string[]; maxTurns: number };
   outputContract: string;
+  issues?: { number: number; title: string; url: string; body: string }[];
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
   repairNote?: string;
 };
 
 const LOG_TAIL_LINES = 80;
+const ISSUE_BODY_CHARS = 4000;
 
 const tail = (text: string, n: number) => text.split("\n").slice(-n).join("\n");
 const list = (items: string[], empty: string) => (items.length ? items.map((i) => `- ${i}`).join("\n") : empty);
@@ -23,6 +25,15 @@ const list = (items: string[], empty: string) => (items.length ? items.map((i) =
 export function renderContextPacket(packet: ContextPacket): string {
   const out: string[] = [];
   out.push("# Task", "", packet.task, "");
+  if (packet.issues?.length) {
+    out.push("# Linked issues", "", "The task works on these GitHub issues. The pull request closes them when it merges.", "");
+    for (const issue of packet.issues) {
+      const body = issue.body.trim();
+      const cut = body.length > ISSUE_BODY_CHARS;
+      out.push(`## #${issue.number} ${issue.title}`, "", issue.url, "");
+      if (body) out.push(cut ? `${body.slice(0, ISSUE_BODY_CHARS)}\n\n(issue body cut at ${ISSUE_BODY_CHARS} characters)` : body, "");
+    }
+  }
   out.push("# Run state", "", "```json", JSON.stringify(packet.stateSlice, null, 2), "```", "");
   out.push(
     "# Repository context",

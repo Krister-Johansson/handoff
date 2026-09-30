@@ -45,7 +45,15 @@ export type RepoSummary = {
   archived: boolean;
 };
 
+export type IssueSummary = { number: number; title: string; url: string; labels: string[]; author: string | null; updatedAt: string };
+export type IssueDetail = { number: number; title: string; url: string; body: string; state: "open" | "closed" };
+
 export interface GitHubPort {
+  /** Open issues of a repository (not pull requests), most recently updated first, up to 100. */
+  listIssues(repo: RepoRef): Promise<IssueSummary[]>;
+  getIssue(repo: RepoRef, number: number): Promise<IssueDetail>;
+  /** Comments on an issue, then closes it as completed. */
+  closeIssue(repo: RepoRef, number: number, comment: string): Promise<void>;
   /** Repositories this credential can reach, most recently pushed first. */
   listRepos(): Promise<RepoSummary[]>;
   getRepoId(repo: RepoRef): Promise<number>;

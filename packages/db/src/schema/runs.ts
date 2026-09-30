@@ -24,6 +24,8 @@ export const runs = pgTable(
     branchName: text("branch_name").notNull(),
     worktreePath: text("worktree_path"),
     prNumber: integer("pr_number"),
+    /** GitHub issues the run works on; the bodies live in run state for the agents. */
+    issues: jsonb("issues").$type<{ number: number; title: string; url: string }[]>().notNull().default([]),
     cancelRequestedAt: tstz("cancel_requested_at"),
     startedAt: tstz("started_at"),
     finishedAt: tstz("finished_at"),

@@ -1,0 +1,1 @@
+ALTER TABLE "runs" ADD COLUMN "issues" jsonb DEFAULT '[]' NOT NULL;

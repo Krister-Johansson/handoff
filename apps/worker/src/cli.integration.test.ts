@@ -5,6 +5,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { eq, graphVersions, nodeExecutions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { FakeGitHub } from "@handoff/github/testing";
 import { runCli } from "./cli.ts";
 
 const db = createTestDb();
@@ -54,6 +55,17 @@ test("graph import rejects a graph that does not compile and lists the errors", 
   await expect(runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(broken)], { db, out, github: null })).rejects.toThrow(
     /missing_start_node/,
   );
+});
+
+test("handoff run --issue links issues, and without --task uses their titles", async () => {
+  const { out } = capture();
+  const github = new FakeGitHub();
+  github.issues.set(12, { number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", body: "2nd", state: "open" });
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
+  await runCli(["run", "--project", "scratch", "--graph", "linear", "--issue", "12"], { db, out, github });
+  const [run] = await db.select().from(runs);
+  expect(run).toMatchObject({ task: "#12 Slugify drops digits", issues: [{ number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12" }] });
 });
 
 test("handoff run inserts a queued run and prints its id", async () => {

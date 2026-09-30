@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
-import { compileGraph, suggestProjectName, type CompileError } from "@handoff/core";
+import { compileGraph, RunStateSchema, suggestProjectName, type CompileError, type LinkedIssue } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
 import { createRun } from "@handoff/engine/runs";
 import type { GitHubPort } from "@handoff/github";
@@ -122,18 +122,42 @@ export async function createGraphFromTemplate(db: Db, projectId: string, name: s
   return { ok: true as const, version: 1 };
 }
 
-export async function startRunFromGraph(db: Db, input: { projectId: string; graphName: string; task: string }) {
-  const [project] = await db.select({ isDemo: projects.isDemo }).from(projects).where(eq(projects.id, input.projectId));
-  if (project?.isDemo) throw new Error("This is a demo project with simulated runs. Add a real repository to run a graph.");
+/**
+ * Starts a run of a graph's latest version. Issues are read from GitHub so the agents get their
+ * bodies; with issues and no task, the task is the issues' titles.
+ */
+export async function startRunFromGraph(
+  db: Db,
+  input: { projectId: string; graphName: string; task: string; issues?: number[] | LinkedIssue[] },
+  github?: GitHubPort,
+) {
+  const [project] = await db.select().from(projects).where(eq(projects.id, input.projectId));
+  if (!project) throw new Error("project not found");
+  if (project.isDemo) throw new Error("This is a demo project with simulated runs. Add a real repository to run a graph.");
   const latest = await getGraphForEdit(db, input.projectId, input.graphName);
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
-  return createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task: input.task });
+  const issues = await linkIssues(input.issues ?? [], { owner: project.repoOwner, name: project.repoName }, github);
+  const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
+  if (!task) throw new Error("Describe the task, or link at least one issue.");
+  return createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues });
+}
+
+async function linkIssues(issues: number[] | LinkedIssue[], repo: { owner: string; name: string }, github?: GitHubPort): Promise<LinkedIssue[]> {
+  if (issues.length === 0) return [];
+  if (typeof issues[0] !== "number") return issues as LinkedIssue[];
+  if (!github) throw new Error("Linking issues needs GitHub access (GITHUB_TOKEN or a GitHub App).");
+  return Promise.all(
+    (issues as number[]).map(async (number) => {
+      const issue = await github.getIssue(repo, number);
+      return { number: issue.number, title: issue.title, url: issue.url, body: issue.body };
+    }),
+  );
 }
 
 /** Starts the same task again on the latest version of the graph an earlier run used. */
 export async function runAgain(db: Db, runId: string) {
   const [earlier] = await db
-    .select({ projectId: runs.projectId, task: runs.task, status: runs.status, graphName: graphs.name })
+    .select({ projectId: runs.projectId, task: runs.task, status: runs.status, state: runs.state, graphName: graphs.name })
     .from(runs)
     .innerJoin(graphVersions, eq(graphVersions.id, runs.graphVersionId))
     .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
@@ -142,7 +166,8 @@ export async function runAgain(db: Db, runId: string) {
   if (earlier.status === "queued" || earlier.status === "running" || earlier.status === "waiting") {
     throw new Error(`The run is still ${earlier.status}.`);
   }
-  return startRunFromGraph(db, { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task });
+  const issues = RunStateSchema.shape.issues.parse(earlier.state.issues) ?? [];
+  return startRunFromGraph(db, { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues });
 }
 
 const GRAPH_NAME = /^[a-z0-9][a-z0-9-]*$/;

@@ -57,6 +57,22 @@ describe("PR node", () => {
     expect(events.map((e) => e.type)).toContain("github.pr");
   });
 
+  test("PR node says in the PR body which linked issues it closes", async () => {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+    const issues = [
+      { number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", body: "" },
+      { number: 14, title: "Document slugify", url: "https://github.com/octo/sample/issues/14", body: "" },
+    ];
+    await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Fix slugify", issues });
+    const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) };
+    await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+    const body = github.prs.get(1)!.body;
+    expect(body).toContain("Closes #12");
+    expect(body).toContain("Closes #14");
+  });
+
   test("PR node resumed with checks success passes and the linear run merges and finishes", async () => {
     const { github, run, deps } = await setup();
     await drain(deps);
@@ -73,6 +89,27 @@ describe("PR node", () => {
     expect(github.merged).toEqual([1]);
     expect(row).toMatchObject({ status: "succeeded", prNumber: 1 });
     expect(row.state).toMatchObject({ prNumber: 1, feedback: { ci: { status: "success" } } });
+  });
+
+  test("Merge closes the run's linked issues that are still open, pointing at the pull request", async () => {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    github.issues.set(12, { number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", body: "", state: "open" });
+    github.issues.set(14, { number: 14, title: "Already closed", url: "https://github.com/octo/sample/issues/14", body: "", state: "closed" });
+    const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+    const issues = [...github.issues.values()].map(({ number, title, url }) => ({ number, title, url, body: "" }));
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Fix slugify", issues });
+    const deps = engineDeps(db, { planner, coder, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) }, {
+      workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }),
+    });
+    await drain(deps);
+    github.setChecks(1, "SUCCESS");
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    expect(github.issues.get(12)!.state).toBe("closed");
+    expect(github.closedIssues).toEqual([{ number: 12, comment: expect.stringContaining("#1") }]);
+    const { events } = await inspect(db, run.id);
+    expect(events.find((e) => e.type === "github.issues_closed")?.payload).toEqual({ numbers: [12] });
   });
 
   test("PR node resumed with checks failure records failure feedback with job logs and the linear run stops", async () => {

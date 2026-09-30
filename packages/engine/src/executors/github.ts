@@ -17,6 +17,8 @@ function prBody(ctx: ExecutorContext): string {
   const lines = [`Task: ${ctx.state.task}`, ""];
   if (coder?.summary) lines.push("## Summary", "", coder.summary, "");
   if (plan) lines.push("## Plan", "", plan.plan, "", ...plan.steps.map((s) => `- ${s}`), "");
+  // GitHub closes these issues when the pull request merges into the default branch.
+  if (ctx.state.issues?.length) lines.push(...ctx.state.issues.map((i) => `Closes #${i.number}`), "");
   lines.push(`Opened by handoff run \`${ctx.run.id}\`.`);
   return lines.join("\n");
 }
@@ -111,6 +113,27 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
   };
 }
 
+/**
+ * Closes the run's linked issues that are still open once its pull request merged. The PR body's
+ * "Closes #N" is not always honoured by GitHub (a real run merged without closing its issue), so the
+ * engine closes them itself. A failure here is reported as an event and does not fail the merge.
+ */
+async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, prNumber: number) {
+  const issues = ctx.state.issues ?? [];
+  if (issues.length === 0) return;
+  const closed: number[] = [];
+  for (const issue of issues) {
+    try {
+      if ((await github.getIssue(repo, issue.number)).state !== "open") continue;
+      await github.closeIssue(repo, issue.number, `Fixed by #${prNumber}, merged by handoff run \`${ctx.run.id}\`.`);
+      closed.push(issue.number);
+    } catch (error) {
+      ctx.emit("github.issue_close_failed", { number: issue.number, message: (error as Error).message });
+    }
+  }
+  if (closed.length) ctx.emit("github.issues_closed", { numbers: closed });
+}
+
 /** Merges the run's pull request (squash by default). */
 export function mergeNodeExecutor(deps: { github: GitHubPort }): NodeExecutor {
   return {
@@ -126,6 +149,7 @@ export function mergeNodeExecutor(deps: { github: GitHubPort }): NodeExecutor {
         const result = await deps.github.mergePr(repo, number, method);
         if (!result.merged) return { kind: "failed", error: { code: "merge_failed", message: `GitHub did not merge PR #${number}` } };
         ctx.emit("github.merged", { number, sha: result.sha });
+        await closeLinkedIssues(deps.github, ctx, repo, number);
         return { kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } };
       } catch (error) {
         return { kind: "failed", error: { code: "merge_failed", message: (error as Error).message } };

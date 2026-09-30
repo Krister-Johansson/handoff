@@ -1,4 +1,4 @@
-import type { GitHubPort, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
+import type { GitHubPort, IssueDetail, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
 type FakePr = PrSnapshot & { base: string; body: string };
 
@@ -9,7 +9,28 @@ export class FakeGitHub implements GitHubPort {
   readonly merged: number[] = [];
   repoId = 42;
   repos: RepoSummary[] = [];
+  readonly closedIssues: { number: number; comment: string }[] = [];
+  readonly issues = new Map<number, IssueDetail & Partial<IssueSummary>>();
   private next = 1;
+
+  async listIssues(_repo: RepoRef): Promise<IssueSummary[]> {
+    return [...this.issues.values()]
+      .filter((i) => i.state === "open")
+      .map((i) => ({ number: i.number, title: i.title, url: i.url, labels: i.labels ?? [], author: i.author ?? null, updatedAt: i.updatedAt ?? "" }));
+  }
+
+  async getIssue(_repo: RepoRef, number: number): Promise<IssueDetail> {
+    const issue = this.issues.get(number);
+    if (!issue) throw new Error(`no issue ${number}`);
+    return { number: issue.number, title: issue.title, url: issue.url, body: issue.body, state: issue.state };
+  }
+
+  async closeIssue(_repo: RepoRef, number: number, comment: string) {
+    const issue = this.issues.get(number);
+    if (!issue) throw new Error(`no issue ${number}`);
+    issue.state = "closed";
+    this.closedIssues.push({ number, comment });
+  }
 
   async listRepos() {
     return structuredClone(this.repos);

@@ -5,6 +5,7 @@ import { GraphSettingsDialog, NewGraphDialog, StartRunDialog } from "@/component
 import { ProjectSettingsActions } from "@/components/projects/project-card";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 import { PullRequestList } from "@/components/pulls/pr-list";
+import { IssueLinks } from "@/components/runs/issue-links";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,10 +48,13 @@ function RunsTab({ project, runs }: Pick<Detail, "project" | "runs">) {
           <TableBody>
             {runs.map((run) => (
               <TableRow key={run.id}>
-                <TableCell className="w-full max-w-0 truncate">
-                  <Link href={`/runs/${run.id}`} className="hover:underline">
-                    {run.task}
-                  </Link>
+                <TableCell className="w-full max-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Link href={`/runs/${run.id}`} className="truncate hover:underline">
+                      {run.task}
+                    </Link>
+                    <IssueLinks issues={run.issues} className="shrink-0" />
+                  </div>
                 </TableCell>
                 <TableCell className="max-w-56 truncate font-mono text-xs">{run.branchName}</TableCell>
                 <TableCell>

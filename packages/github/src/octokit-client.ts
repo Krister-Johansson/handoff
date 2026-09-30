@@ -1,6 +1,6 @@
 import { App, Octokit } from "octokit";
 import { PullRequestSnapshotDocument, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
-import type { CheckContext, GitHubPort, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
+import type { CheckContext, GitHubPort, IssueDetail, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -78,6 +78,33 @@ export class OctokitGitHub implements GitHubPort {
 
   listRepos(): Promise<RepoSummary[]> {
     return this.reposFor();
+  }
+
+  async listIssues(repo: RepoRef): Promise<IssueSummary[]> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.issues.listForRepo({ owner: repo.owner, repo: repo.name, state: "open", sort: "updated", direction: "desc", per_page: 100 });
+    return data
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        url: issue.html_url,
+        labels: issue.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))).filter(Boolean),
+        author: issue.user?.login ?? null,
+        updatedAt: issue.updated_at,
+      }));
+  }
+
+  async getIssue(repo: RepoRef, number: number): Promise<IssueDetail> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.issues.get({ owner: repo.owner, repo: repo.name, issue_number: number });
+    return { number: data.number, title: data.title, url: data.html_url, body: data.body ?? "", state: data.state === "closed" ? "closed" : "open" };
+  }
+
+  async closeIssue(repo: RepoRef, number: number, comment: string): Promise<void> {
+    const octokit = await this.clientFor(repo);
+    await octokit.rest.issues.createComment({ owner: repo.owner, repo: repo.name, issue_number: number, body: comment });
+    await octokit.rest.issues.update({ owner: repo.owner, repo: repo.name, issue_number: number, state: "closed", state_reason: "completed" });
   }
 
   async getRepoId(repo: RepoRef): Promise<number> {

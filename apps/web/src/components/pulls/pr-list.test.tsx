@@ -23,3 +23,24 @@ test("an empty list says so", () => {
   render(<PullRequestList items={[]} />);
   expect(screen.getByText(/no pull requests/i)).toBeInTheDocument();
 });
+
+test("a PR row shows the task and the issues its run is linked to", () => {
+  render(
+    <PullRequestList
+      items={[
+        {
+          ...base,
+          number: 9,
+          title: "Fix slugify",
+          task: "Keep digits when slugifying",
+          issues: [{ number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12" }],
+          state: "open",
+          ci: "success",
+          review: "none",
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByText("Keep digits when slugifying")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "#12 Slugify drops digits" })).toHaveAttribute("href", "https://github.com/octo/sample/issues/12");
+});
