@@ -36,8 +36,9 @@ type Props = {
 type EventPayload = { nodeKey?: string; attempt?: number; costUsd?: number; durationMs?: number; summary?: string; error?: { code?: string; message?: string } };
 
 /** What the run is doing now, its steps, its graph and its events, kept in step with the event stream. */
-export function RunLive({ runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber, questions }: Props) {
+export function RunLive({ runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions }: Props) {
   const [status, setStatus] = useState(initialStatus);
+  const [prNumber, setPrNumber] = useState(initialPr);
   const [executions, setExecutions] = useState(initialExecutions);
   const [showCli, setShowCli] = useState(false);
   const [nodeFilter, setNodeFilter] = useState("");
@@ -51,6 +52,8 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
       if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
       if (event.type === "node.waiting") setStatus((s) => (s === "running" ? "waiting" : s));
       if (event.type === "node.claimed") setStatus("running");
+      const prFromEvent = (event.payload as { number?: unknown } | null)?.number;
+      if (event.type === "github.pr" && typeof prFromEvent === "number") setPrNumber(prFromEvent);
       const next = statusFromEvent(event.type);
       if (!next || !event.nodeExecutionId) return;
       const payload = (event.payload ?? {}) as EventPayload;

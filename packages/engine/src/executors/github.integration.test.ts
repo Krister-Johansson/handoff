@@ -54,6 +54,8 @@ describe("PR node", () => {
     const opened = github.prs.get(1)!;
     expect(opened).toMatchObject({ headRef: row.branchName, base: "main", title: "Add a CHANGELOG.md" });
     expect(opened.body).toContain("Added CHANGELOG.md");
+    // The run knows its PR while the PR node waits for CI, not only once it passes.
+    expect(row.prNumber).toBe(1);
     expect(events.map((e) => e.type)).toContain("github.pr");
   });
 

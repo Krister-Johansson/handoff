@@ -297,6 +297,9 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         recordRepoId: async (repoId) => {
           await db.update(projects).set({ repoId }).where(eq(projects.id, project.id));
         },
+        recordPrNumber: async (prNumber) => {
+          await db.update(runs).set({ prNumber }).where(eq(runs.id, run.id));
+        },
         setChildPid: async (pid) => {
           await db.update(nodeExecutions).set({ childPid: pid, childHost: hostname() }).where(eq(nodeExecutions.id, row.id));
         },

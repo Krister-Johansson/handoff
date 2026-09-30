@@ -32,6 +32,8 @@ export type ExecutorContext = {
   setSessionId(id: string): Promise<void>;
   /** Stores the GitHub repository id on the project so later lookups are free. */
   recordRepoId(repoId: number): Promise<void>;
+  /** Stores the run's pull request number as soon as the PR exists, before the PR node passes. */
+  recordPrNumber(prNumber: number): Promise<void>;
   /** Records the running child process so a restarted worker can stop it. */
   setChildPid(pid: number): Promise<void>;
   /** Records the correlation key while still running so a wake that arrives before the yield is kept. */

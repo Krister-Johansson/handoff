@@ -55,11 +55,21 @@ export async function createProject(db: Db, input: { name?: string; repo: string
 export async function getProjectDetail(db: Db, projectId: string) {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) return undefined;
-  const [graphRows, runRows] = await Promise.all([
+  const [graphRows, runRows, [lastUsed]] = await Promise.all([
     db.select().from(graphs).where(eq(graphs.projectId, projectId)).orderBy(graphs.name),
     db.select().from(runs).where(eq(runs.projectId, projectId)).orderBy(desc(runs.createdAt)).limit(50),
+    db
+      .select({ name: graphs.name })
+      .from(runs)
+      .innerJoin(graphVersions, eq(graphVersions.id, runs.graphVersionId))
+      .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+      .where(eq(runs.projectId, projectId))
+      .orderBy(desc(runs.createdAt))
+      .limit(1),
   ]);
-  return { project, graphs: graphRows, runs: runRows };
+  // New runs default to the graph the latest run used; without runs, to the graph changed last.
+  const lastChanged = [...graphRows].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+  return { project, graphs: graphRows, runs: runRows, defaultGraph: lastUsed?.name ?? lastChanged?.name };
 }
 
 export async function getGraphForEdit(db: Db, projectId: string, name: string) {

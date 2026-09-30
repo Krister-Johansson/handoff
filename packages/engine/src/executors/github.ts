@@ -73,6 +73,7 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
           (await deps.github.findPrByHead(repo, ctx.run.branchName)) ??
           (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, title: title(ctx.state.task), body: prBody(ctx) }));
         number = pr.number;
+        await ctx.recordPrNumber(number);
       }
       let repoId = ctx.project.repoId;
       if (repoId === null) {

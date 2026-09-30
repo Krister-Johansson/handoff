@@ -172,4 +172,13 @@ describe("renaming and deleting graphs", () => {
     await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
     await expect(startRunFromGraph(db, { projectId: project.id, graphName: "g", task: " " })).rejects.toThrow(/task/);
   });
+
+  test("the project's default graph is the one its latest run used, else the last one changed", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "used", document: linear });
+    expect((await getProjectDetail(db, project.id))!.defaultGraph).toBe("used");
+    await startRunFromGraph(db, { projectId: project.id, graphName: "used", task: "Add a CHANGELOG.md" });
+    await saveGraphVersion(db, { projectId: project.id, name: "newer", document: linear });
+    expect((await getProjectDetail(db, project.id))!.defaultGraph).toBe("used");
+  });
 });

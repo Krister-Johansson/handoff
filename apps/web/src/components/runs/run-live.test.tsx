@@ -102,3 +102,12 @@ test("a failed step shows its error", () => {
   render(<RunLive {...common} initialStatus="failed" initialExecutions={[{ ...executions[0]!, status: "failed", error: "cli_error: claude exited" }]} />);
   expect(screen.getAllByText(/cli_error: claude exited/).length).toBeGreaterThan(0);
 });
+
+test("the banner learns the PR number from the stream while the PR node waits", () => {
+  render(<RunLive {...common} labels={{ pr: "Pull request" }} initialStatus="running" initialExecutions={[{ id: "e3", nodeKey: "pr", attempt: 1, status: "running", costUsd: null, durationMs: null }]} />);
+  act(() => {
+    FakeEventSource.instances[0]!.emit({ seq: 1, type: "github.pr", payload: { number: 14, ci: "pending" }, nodeExecutionId: "e3", createdAt: "2026-09-30T10:00:00Z" });
+    FakeEventSource.instances[0]!.emit({ seq: 2, type: "node.waiting", payload: { nodeKey: "pr", attempt: 1 }, nodeExecutionId: "e3", createdAt: "2026-09-30T10:00:01Z" });
+  });
+  expect(screen.getByText("Waiting for CI and reviews on PR #14")).toBeInTheDocument();
+});
