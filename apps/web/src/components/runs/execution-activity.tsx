@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { BrainIcon, ChevronRightIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { BrainIcon, ChevronRightIcon, WrenchIcon } from "lucide-react";
 import { TerminalOutput } from "@/components/terminal-output";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
-import { toActivity, type ActivityItem, type ActivityStats } from "@/lib/activity";
+import { toActivity, toChat, type ActivityItem, type ActivityStats, type ChatEntry } from "@/lib/activity";
 import type { RunEvent } from "./event-stream";
 
 const RESULT_CHARS = 6_000;
@@ -25,12 +27,11 @@ function Stats({ stats }: { stats: ActivityStats }) {
 function Tool({ item }: { item: Extract<ActivityItem, { kind: "tool" }> }) {
   const result = item.result && item.result.length > RESULT_CHARS ? `${item.result.slice(0, RESULT_CHARS)}\n… (cut at ${RESULT_CHARS} characters)` : item.result;
   return (
-    <details className="group rounded-md border">
-      <summary className="flex cursor-pointer list-none items-center gap-2 px-2 py-1.5 text-sm [&::-webkit-details-marker]:hidden">
-        <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-        <WrenchIcon className="size-3.5 shrink-0 text-muted-foreground" />
+    <details className="group/tool">
+      <summary className="flex cursor-pointer list-none items-center gap-2 py-0.5 text-xs [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground transition-transform group-open/tool:rotate-90" />
         <span className="shrink-0 font-medium">{item.name}</span>
-        {item.target && <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{item.target}</span>}
+        {item.target && <span className="min-w-0 truncate font-mono text-muted-foreground">{item.target}</span>}
         {item.result === undefined && (
           <Badge variant="outline" className="ml-auto shrink-0">
             running
@@ -42,25 +43,54 @@ function Tool({ item }: { item: Extract<ActivityItem, { kind: "tool" }> }) {
           </Badge>
         )}
       </summary>
-      <div className="px-2 pb-2">{result ? <TerminalOutput text={result} label={`${item.name} result`} /> : <p className="text-xs text-muted-foreground">No output yet.</p>}</div>
+      <div className="mt-1 mb-2">{result ? <TerminalOutput text={result} label={`${item.name} result`} /> : <p className="text-xs text-muted-foreground">No output yet.</p>}</div>
     </details>
   );
 }
 
-function Item({ item }: { item: ActivityItem }) {
-  if (item.kind === "tool") return <Tool item={item} />;
-  if (item.kind === "thinking")
+/** A quiet line that opens to show more: a thought, or a step of tool calls. */
+function Fold({ icon, summary, badge, children }: { icon: ReactNode; summary: ReactNode; badge?: ReactNode; children: ReactNode }) {
+  return (
+    <details className="group/fold">
+      <summary className="flex cursor-pointer list-none items-center gap-2 py-0.5 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-open/fold:rotate-90" />
+        {icon}
+        <span className="min-w-0 flex-1">{summary}</span>
+        {badge}
+      </summary>
+      <div className="mt-1.5 ml-5 flex flex-col gap-1.5 border-l pl-3">{children}</div>
+    </details>
+  );
+}
+
+function Entry({ entry }: { entry: ChatEntry }) {
+  if (entry.kind === "message")
     return (
-      <div className="flex gap-2 text-sm text-muted-foreground italic">
-        <BrainIcon className="mt-0.5 size-3.5 shrink-0" />
-        <p className="whitespace-pre-wrap">{item.text}</p>
+      <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-pre:my-1 prose-code:before:content-none prose-code:after:content-none">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown>
       </div>
     );
+  if (entry.kind === "thinking")
+    return (
+      <Fold icon={<BrainIcon className="size-3.5 shrink-0" />} summary={<span className="italic">Thought</span>}>
+        <p className="text-sm whitespace-pre-wrap text-muted-foreground italic">{entry.text}</p>
+      </Fold>
+    );
+  const badge = entry.running ? (
+    <Badge variant="outline" className="shrink-0">
+      running
+    </Badge>
+  ) : entry.errors ? (
+    <Badge variant="destructive" className="shrink-0">
+      {entry.errors === 1 ? "1 error" : `${entry.errors} errors`}
+    </Badge>
+  ) : undefined;
   return (
-    <div className="flex gap-2 text-sm">
-      <MessageSquareIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-      <p className="whitespace-pre-wrap">{item.text}</p>
-    </div>
+    <Fold icon={<WrenchIcon className="size-3.5 shrink-0" />} summary={entry.summary} badge={badge}>
+      {entry.tools.map((tool) => (
+        <Tool key={tool.key} item={tool} />
+      ))}
+    </Fold>
   );
 }
 
@@ -79,10 +109,11 @@ export function ExecutionActivity({ runId, executionId, live }: { runId: string;
     return () => controller.abort();
   }, [runId, executionId]);
 
-  const { items, stats } = useMemo(() => {
+  const { items, stats, chat } = useMemo(() => {
     const base = stored ?? [];
     const last = base.at(-1)?.seq ?? 0;
-    return toActivity([...base, ...live.filter((e) => e.seq > last)]);
+    const activity = toActivity([...base, ...live.filter((e) => e.seq > last)]);
+    return { ...activity, chat: toChat(activity.items) };
   }, [stored, live]);
 
   const hasItems = items.length > 0;
@@ -113,11 +144,11 @@ export function ExecutionActivity({ runId, executionId, live }: { runId: string;
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">No activity yet.</p>
       ) : (
-        <ScrollArea className="h-[min(65svh,44rem)] rounded-md border">
+        <ScrollArea className="h-[min(65svh,44rem)] rounded-md border [&_[data-slot=scroll-area-viewport]>div]:!block">
           <ol ref={list} className="flex flex-col gap-2 p-2">
-            {items.map((item) => (
-              <li key={item.key}>
-                <Item item={item} />
+            {chat.map((entry) => (
+              <li key={entry.key}>
+                <Entry entry={entry} />
               </li>
             ))}
           </ol>

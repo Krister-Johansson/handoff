@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { toActivity } from "./activity";
+import { toActivity, toChat } from "./activity";
 
 const assistant = (seq: number, ...content: unknown[]) => ({ seq, type: "cli.assistant", payload: { type: "assistant", message: { content } } });
 const user = (seq: number, ...content: unknown[]) => ({ seq, type: "cli.user", payload: { type: "user", message: { content } } });
@@ -39,4 +39,35 @@ test("paths inside a run's worktree are shown relative to it", () => {
     assistant(3, { type: "tool_use", id: "c", name: "Glob", input: { pattern: "**/*", path: wt } }),
   ]);
   expect(items.map((i) => (i.kind === "tool" ? i.target : undefined))).toEqual(["docs/features.md", "cd . && pnpm test", "**/*"]);
+});
+
+test("consecutive tool calls form one step, summarised by what they did", () => {
+  const { items } = toActivity([
+    assistant(1, { type: "text", text: "Reading first." }),
+    assistant(2, { type: "tool_use", id: "a", name: "Read", input: { file_path: "a.md" } }),
+    assistant(3, { type: "tool_use", id: "b", name: "Read", input: { file_path: "b.md" } }),
+    assistant(4, { type: "tool_use", id: "c", name: "Bash", input: { command: "pnpm test" } }),
+    assistant(5, { type: "tool_use", id: "d", name: "mcp__context7__query-docs", input: { query: "x" } }),
+    assistant(6, { type: "tool_use", id: "e", name: "mcp__context7__query-docs", input: { query: "y" } }),
+    assistant(7, { type: "text", text: "Now the plan." }),
+    assistant(8, { type: "tool_use", id: "f", name: "Edit", input: { file_path: "c.ts" } }),
+  ]);
+  const chat = toChat(items);
+  expect(chat.map((e) => (e.kind === "tools" ? `tools: ${e.summary}` : `${e.kind}: ${e.text}`))).toEqual([
+    "message: Reading first.",
+    "tools: Read 2 files, ran a command, used context7 twice",
+    "message: Now the plan.",
+    "tools: Edited a file",
+  ]);
+});
+
+test("the CLI's own tools do not count as work in a step's summary", () => {
+  const { items } = toActivity([
+    assistant(1, { type: "tool_use", id: "a", name: "ToolSearch", input: { query: "select:x" } }),
+    assistant(2, { type: "tool_use", id: "b", name: "Read", input: { file_path: "a.md" } }),
+    assistant(3, { type: "tool_use", id: "c", name: "StructuredOutput", input: {} }),
+  ]);
+  expect(toChat(items).map((e) => (e.kind === "tools" ? e.summary : ""))).toEqual(["Read a file"]);
+  const { items: only } = toActivity([assistant(1, { type: "tool_use", id: "c", name: "StructuredOutput", input: {} })]);
+  expect(toChat(only).map((e) => (e.kind === "tools" ? e.summary : ""))).toEqual(["Prepared its answer"]);
 });
