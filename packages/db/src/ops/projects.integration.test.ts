@@ -5,7 +5,7 @@ import { events, nodeExecutions, projects, questions, runs } from "../schema/ind
 import { seedExecution, seedRun } from "../testing/fixtures.ts";
 import { truncateAll } from "../testing/reset.ts";
 import { createTestDb } from "../testing/test-db.ts";
-import { deleteProject } from "./projects.ts";
+import { deleteProject, setProjectLibrary } from "./projects.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -22,4 +22,11 @@ test("deleteProject removes the project with its graphs, runs, executions, quest
   expect(await db.select().from(runs).where(eq(runs.projectId, project.id))).toEqual([]);
   expect(await db.select().from(nodeExecutions)).toEqual([]);
   expect(await db.select().from(events)).toEqual([]);
+});
+
+test("a project's default library starts empty and keeps the names it is given", async () => {
+  const { project } = await seedRun(db);
+  expect(project.library).toEqual({ skills: [], mcp: [], agents: [], groups: [] });
+  const updated = await setProjectLibrary(db, project.id, { skills: ["tdd"], mcp: ["context7"], agents: [], groups: ["testing"] });
+  expect(updated?.library).toEqual({ skills: ["tdd"], mcp: ["context7"], agents: [], groups: ["testing"] });
 });

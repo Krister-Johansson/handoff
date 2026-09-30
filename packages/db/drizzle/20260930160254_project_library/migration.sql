@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "library" jsonb DEFAULT '{"skills":[],"mcp":[],"agents":[],"groups":[]}' NOT NULL;

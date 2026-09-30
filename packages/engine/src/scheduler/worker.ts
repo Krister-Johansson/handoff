@@ -271,12 +271,9 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       let library: MaterializedLibrary | undefined;
       if (graph.executorKind(node.key) === "cli") {
         const overrides = row.trigger?.kind === "edge" && row.trigger.edgeKey ? graph.graph.getEdgeAttributes(row.trigger.edgeKey).overrides : undefined;
-        const selection = {
-          skills: [...new Set([...node.library.skills, ...(overrides?.skills ?? [])])],
-          mcp: [...new Set([...node.library.mcp, ...(overrides?.mcp ?? [])])],
-          agents: [...new Set([...node.library.agents, ...(overrides?.agents ?? [])])],
-          groups: [...new Set([...node.library.groups, ...(overrides?.groups ?? [])])],
-        };
+        // The project's default library applies to every CLI node, next to the node's own and the edge's overrides.
+        const merge = (key: "skills" | "mcp" | "agents" | "groups") => [...new Set([...project.library[key], ...node.library[key], ...(overrides?.[key] ?? [])])];
+        const selection = { skills: merge("skills"), mcp: merge("mcp"), agents: merge("agents"), groups: merge("groups") };
         if (selection.skills.length || selection.mcp.length || selection.agents.length || selection.groups.length) {
           library = await materializeLibrary(db, selection, stagingDir, deps.secrets ?? process.env, deps.oauth);
           buffer.push({ type: "library.materialized", payload: library.used, nodeExecutionId: row.id });

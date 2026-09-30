@@ -1,6 +1,8 @@
-import { bigint, boolean, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, updatedAt } from "./columns.ts";
 import { githubInstallations } from "./github-installations.ts";
+
+export type ProjectLibrary = { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
 
 export const projects = pgTable("projects", {
   id: id(),
@@ -13,6 +15,8 @@ export const projects = pgTable("projects", {
   localClonePath: text("local_clone_path"),
   /** Seeded by pnpm demo; points at no real repository. */
   isDemo: boolean("is_demo").notNull().default(false),
+  /** Library entries by name that every CLI node of every run in this project gets. Names only, never secrets. */
+  library: jsonb("library").$type<ProjectLibrary>().notNull().default({ skills: [], mcp: [], agents: [], groups: [] }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

@@ -5,7 +5,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import type { CliRunRequest, CliRunResult } from "@handoff/cli-adapter";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
+import { setProjectLibrary, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
@@ -64,6 +64,19 @@ test("enabled skills are written as SKILL.md under the staging dir and passed wi
   expect(existsSync(seen[0]!.request.addDirs[0]!)).toBe(false);
   const coder = (await inspect(db, run.id)).events.find((e) => e.type === "library.materialized");
   expect(coder?.payload).toMatchObject({ skills: [{ name: "tdd", version: 1 }] });
+});
+
+test("a project's default library is added to every CLI node, next to what the node enables", async () => {
+  await upsertSkill(db, { name: "tdd", description: "Test first", body: "Write the failing test first." });
+  await upsertSkill(db, { name: "ci-triage", description: "Triage CI", body: "Read the logs." });
+  const seen: Seen[] = [];
+  const { project, run } = await startRun(db, graphWithLibrary({ skills: ["ci-triage"] }));
+  await setProjectLibrary(db, project.id, { skills: ["tdd"], mcp: [], agents: [], groups: [] });
+  await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)]))));
+  expect(Object.keys(seen[0]!.files).sort()).toEqual(["ci-triage", "tdd"]);
+  const materialized = (await inspect(db, run.id)).events.filter((e) => e.type === "library.materialized");
+  // The planner and the reviewer enable nothing themselves and still get the project's default.
+  expect(materialized.map((e) => (e.payload as { skills: { name: string }[] }).skills.map((s) => s.name).sort())).toEqual([["tdd"], ["ci-triage", "tdd"], ["tdd"]]);
 });
 
 test("a skill's frontmatter beyond name and description is written back to its SKILL.md", async () => {
