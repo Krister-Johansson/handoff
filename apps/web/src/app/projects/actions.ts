@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
+import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphVersion, renameGraph, runAgain, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
 export type ActionState = { ok?: boolean; error?: string; values?: Record<string, string> };
@@ -17,10 +18,21 @@ export async function createProjectAction(_: ActionState, form: FormData): Promi
     id = (await createProject(getDb(), values, getGitHub())).id;
   } catch (error) {
     const message = (error as Error).message;
-    return { ok: false, error: message.includes("duplicate") ? "A project with that name exists." : message, values };
+    const duplicate = message.includes("repo_id") ? "That repository already is a project." : "A project with that name exists.";
+    return { ok: false, error: message.includes("duplicate") ? duplicate : message, values };
   }
   revalidatePath("/projects");
   redirect(`/projects/${id}`);
+}
+
+export async function listReposAction(): Promise<{ repos: AvailableRepo[] } | { error: string }> {
+  const github = getGitHub();
+  if (!github) return { error: "GitHub is not configured (GITHUB_TOKEN or a GitHub App in .env), so type the repository instead." };
+  try {
+    return { repos: await listAvailableRepos(getDb(), github, { maxAgeMs: 60_000 }) };
+  } catch (error) {
+    return { error: `Could not list repositories from GitHub: ${(error as Error).message}` };
+  }
 }
 
 export async function createGraphAction(_: ActionState, form: FormData): Promise<ActionState> {

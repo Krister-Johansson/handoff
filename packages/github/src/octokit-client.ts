@@ -1,8 +1,34 @@
 import { App, Octokit } from "octokit";
 import { PullRequestSnapshotDocument, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
-import type { CheckContext, GitHubPort, PrInfo, PrSnapshot, RepoRef } from "./types.ts";
+import type { CheckContext, GitHubPort, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
+
+type RestRepo = {
+  id: number;
+  name: string;
+  full_name: string;
+  owner: { login: string };
+  default_branch?: string;
+  private: boolean;
+  description: string | null;
+  pushed_at?: string | null;
+  archived?: boolean;
+};
+
+const toSummary = (r: RestRepo): RepoSummary => ({
+  id: r.id,
+  owner: r.owner.login,
+  name: r.name,
+  fullName: r.full_name,
+  defaultBranch: r.default_branch ?? "main",
+  private: r.private,
+  description: r.description,
+  pushedAt: r.pushed_at ?? null,
+  archived: r.archived ?? false,
+});
+
+const byPushed = (a: RepoSummary, b: RepoSummary) => (b.pushedAt ?? "").localeCompare(a.pushedAt ?? "");
 
 type GqlPullRequest = NonNullable<NonNullable<PullRequestSnapshotQuery["repository"]>["pullRequest"]>;
 type GqlContext = NonNullable<
@@ -14,11 +40,14 @@ export class OctokitGitHub implements GitHubPort {
   private constructor(
     private readonly clientFor: (repo: RepoRef) => Promise<Octokit>,
     private readonly tokenFor: (repo: RepoRef) => Promise<string>,
+    private readonly reposFor: () => Promise<RepoSummary[]>,
   ) {}
 
   static withToken(token: string, opts: { fetch?: Fetch } = {}): OctokitGitHub {
     const octokit = new Octokit({ auth: token, ...(opts.fetch ? { request: { fetch: opts.fetch } } : {}) });
-    return new OctokitGitHub(async () => octokit, async () => token);
+    const repos = async () =>
+      (await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, { sort: "pushed", per_page: 100 })).map((r) => toSummary(r as RestRepo)).sort(byPushed);
+    return new OctokitGitHub(async () => octokit, async () => token, repos);
   }
 
   static withApp(input: { appId: number; privateKey: string; fetch?: Fetch }): OctokitGitHub {
@@ -39,7 +68,16 @@ export class OctokitGitHub implements GitHubPort {
         const auth = (await octokit.auth({ type: "installation" })) as { token: string };
         return auth.token;
       },
+      async () => {
+        const repos: RepoSummary[] = [];
+        for await (const { repository } of app.eachRepository.iterator()) repos.push(toSummary(repository as RestRepo));
+        return repos.sort(byPushed);
+      },
     );
+  }
+
+  listRepos(): Promise<RepoSummary[]> {
+    return this.reposFor();
   }
 
   async getRepoId(repo: RepoRef): Promise<number> {

@@ -154,3 +154,22 @@ test("upsertPrComment creates the comment when none carries the marker", async (
   expect(await gh.upsertPrComment(repo, 7, "<!-- handoff:x -->", "<!-- handoff:x -->\nnotes")).toEqual({ id: 9, created: true });
   expect(calls.at(-1)).toMatchObject({ method: "POST", body: { body: "<!-- handoff:x -->\nnotes" } });
 });
+
+test("listRepos with a token lists the user's repositories, most recently pushed first", async () => {
+  const { fetch, calls } = fakeFetch({
+    "GET /user/repos": () => ({
+      json: [
+        { id: 1, name: "sample", full_name: "octo/sample", owner: { login: "octo" }, default_branch: "main", private: true, description: "A sample", pushed_at: "2026-09-29T10:00:00Z", archived: false },
+        { id: 2, name: "old", full_name: "octo/old", owner: { login: "octo" }, default_branch: "master", private: false, description: null, pushed_at: "2026-01-01T10:00:00Z", archived: true },
+      ],
+    }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.listRepos()).toEqual([
+    { id: 1, owner: "octo", name: "sample", fullName: "octo/sample", defaultBranch: "main", private: true, description: "A sample", pushedAt: "2026-09-29T10:00:00Z", archived: false },
+    { id: 2, owner: "octo", name: "old", fullName: "octo/old", defaultBranch: "master", private: false, description: null, pushedAt: "2026-01-01T10:00:00Z", archived: true },
+  ]);
+  const url = new URL(calls[0]!.url);
+  expect(url.searchParams.get("sort")).toBe("pushed");
+  expect(url.searchParams.get("per_page")).toBe("100");
+});

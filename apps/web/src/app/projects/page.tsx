@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { NewProjectForm } from "@/components/projects/forms";
+import { AddProjectDialog } from "@/components/projects/add-project-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -11,11 +11,14 @@ export const dynamic = "force-dynamic";
 export default async function ProjectsPage() {
   const projects = await listProjects(getDb());
   return (
-    <main className="mx-auto grid w-full max-w-6xl gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-          <p className="text-muted-foreground">A project is a GitHub repository with its graphs and runs.</p>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
+            <p className="text-muted-foreground">A project is a GitHub repository with its graphs and runs.</p>
+          </div>
+          <AddProjectDialog />
         </div>
         {projects.length === 0 ? (
           <Empty>
@@ -25,7 +28,7 @@ export default async function ProjectsPage() {
             </EmptyHeader>
           </Empty>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((p) => (
               <Link key={p.id} href={`/projects/${p.id}`} className="rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
                 <Card className="h-full transition-colors hover:bg-muted/50">
@@ -46,15 +49,6 @@ export default async function ProjectsPage() {
           </div>
         )}
       </div>
-      <Card className="h-fit">
-        <CardHeader>
-          <CardTitle>Add a project</CardTitle>
-          <CardDescription>The worker clones it and opens pull requests there.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <NewProjectForm />
-        </CardContent>
-      </Card>
     </main>
   );
 }

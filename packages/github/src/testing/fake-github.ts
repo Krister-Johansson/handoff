@@ -1,4 +1,4 @@
-import type { GitHubPort, PrInfo, PrSnapshot, RepoRef } from "../types.ts";
+import type { GitHubPort, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
 type FakePr = PrSnapshot & { base: string; body: string };
 
@@ -8,7 +8,12 @@ export class FakeGitHub implements GitHubPort {
   readonly jobLogs = new Map<number, string>();
   readonly merged: number[] = [];
   repoId = 42;
+  repos: RepoSummary[] = [];
   private next = 1;
+
+  async listRepos() {
+    return structuredClone(this.repos);
+  }
 
   async getRepoId(_repo: RepoRef) {
     return this.repoId;

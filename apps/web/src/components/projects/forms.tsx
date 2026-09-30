@@ -2,39 +2,13 @@
 
 import { useActionState, type KeyboardEvent } from "react";
 import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
-import { createGraphAction, createProjectAction, deleteGraphAction, renameGraphAction, startRunAction, type ActionState } from "@/app/projects/actions";
+import { createGraphAction, deleteGraphAction, renameGraphAction, startRunAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
-
-export function NewProjectForm() {
-  const [state, action, pending] = useActionState(createProjectAction, {} as ActionState);
-  return (
-    <form action={action}>
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="project-name">Name</FieldLabel>
-          <Input id="project-name" name="name" placeholder="sandbox" defaultValue={state.values?.name} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="project-repo">GitHub repository</FieldLabel>
-          <Input id="project-repo" name="repo" placeholder="owner/name" defaultValue={state.values?.repo} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="project-branch">Default branch</FieldLabel>
-          <Input id="project-branch" name="defaultBranch" placeholder="main" defaultValue={state.values?.defaultBranch} />
-        </Field>
-        {state.error && <FieldError>{state.error}</FieldError>}
-        <Button type="submit" disabled={pending}>
-          Add project
-        </Button>
-      </FieldGroup>
-    </form>
-  );
-}
 
 export function NewGraphForm({ projectId, templates }: { projectId: string; templates: { value: string; label: string }[] }) {
   const [state, action, pending] = useActionState(createGraphAction, {} as ActionState);
