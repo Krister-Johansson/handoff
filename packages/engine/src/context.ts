@@ -10,6 +10,13 @@ function pick(state: RunState, keys: string[]): Record<string, unknown> {
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
 
+/** The file and lines a comment points at, when it has them. */
+const placeOf = (c: Record<string, unknown>) => ({
+  ...(typeof c.path === "string" ? { path: c.path } : {}),
+  ...(typeof c.line === "number" ? { line: c.line } : {}),
+  ...(typeof c.endLine === "number" ? { endLine: c.endLine } : {}),
+});
+
 /**
  * Feedback carried by the output of the node that sent this execution back: failing tests, review
  * comments, CI failures with log tails. Recognised by output shape, so custom nodes can reuse it.
@@ -32,10 +39,10 @@ export function feedbackFrom(output: unknown): { failedChecks: CheckResult[]; re
       });
     }
   }
-  // A person at a Human gate who asked for changes, commenting on quoted parts of what they reviewed.
+  // A person at a Human gate who asked for changes, commenting on quoted parts or lines of what they reviewed.
   if (typeof o.option === "string" && Array.isArray(o.comments)) {
     for (const c of o.comments.map(obj)) {
-      reviewComments.push({ author: "person", body: String(c.body ?? ""), ...(typeof c.quote === "string" ? { quote: c.quote } : {}), resolved: false });
+      reviewComments.push({ author: "person", body: String(c.body ?? ""), ...placeOf(c), ...(typeof c.quote === "string" ? { quote: c.quote } : {}), resolved: false });
     }
   }
   const feedback = obj(o.feedback);
@@ -68,7 +75,7 @@ function decisionsOf(state: RunState): NonNullable<ContextPacket["decisions"]> {
   return raw.map(obj).map((d) => ({
     gate: String(d.gate ?? ""),
     ...(typeof d.note === "string" ? { note: d.note } : {}),
-    comments: (Array.isArray(d.comments) ? d.comments.map(obj) : []).map((c) => ({ ...(typeof c.quote === "string" ? { quote: c.quote } : {}), body: String(c.body ?? "") })),
+    comments: (Array.isArray(d.comments) ? d.comments.map(obj) : []).map((c) => ({ ...placeOf(c), ...(typeof c.quote === "string" ? { quote: c.quote } : {}), body: String(c.body ?? "") })),
   }));
 }
 

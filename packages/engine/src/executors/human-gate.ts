@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { limitDiff, type DiffFile } from "@handoff/core";
 import { questions, type Db } from "@handoff/db";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
@@ -9,6 +10,16 @@ type Ask = { question: string; options: string[]; context: Record<string, unknow
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
 const strings = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+
+/** Terminal colour and cursor codes, which test runners print and a web page shows as noise. */
+const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
+export const stripAnsi = (text: string) => text.replace(ANSI, "");
+
+/** Nodes whose work is the branch itself, so a gate after them reviews the code. */
+const CODE_SENDERS = new Set(["coder", "tester", "code_review", "pr"]);
+
+/** Reads what the run's branch changed against its base, as the files a person reviews. */
+export type BranchDiff = (run: ExecutorContext["run"]) => Promise<DiffFile[] | undefined>;
 
 /** What reached the gate, as markdown a person can read and comment on, by the kind of node that sent it. */
 export function reviewOf(fromType: string | undefined, output: unknown): { kind: string; markdown: string } {
@@ -32,6 +43,13 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
       markdown: [`Verdict: **${o.verdict === "approve" ? "approve" : "request changes"}**`, "", ...comments.map((c) => `- ${c.path ? `\`${String(c.path)}${c.line ? `:${String(c.line)}` : ""}\` ` : ""}${String(c.body ?? "")}`)].join("\n"),
     };
   }
+  if (fromType === "tester" && typeof o.passed === "boolean") {
+    const tail = stripAnsi(String(o.tail ?? "")).trim();
+    return {
+      kind: "output",
+      markdown: [`Tests **${o.passed ? "passed" : "failed"}**: \`${String(o.command ?? "")}\` exited ${String(o.exitCode)}.`, ...(tail ? ["", "```text", tail, "```"] : [])].join("\n"),
+    };
+  }
   if (fromType === "coder" && typeof o.summary === "string") {
     const files = strings(o.filesChanged);
     return { kind: "change", markdown: [o.summary.trim(), ...(files.length ? ["", "## Files changed", "", ...files.map((f) => `- \`${f}\``)] : [])].join("\n") };
@@ -44,7 +62,9 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
  * the reviewer looked at (the node feeding it), with the reviewer's verdict and comments below, so
  * the person approves the plan itself rather than the reviewer's opinion of it.
  */
-function reviewFor(ctx: ExecutorContext, from: string): { from: string; kind: string; markdown: string } {
+type Review = { from: string; kind: string; markdown: string; files?: DiffFile[] };
+
+function reviewFor(ctx: ExecutorContext, from: string): Review {
   const sender = ctx.graph.node(from);
   const output = ctx.state.nodes[from]?.output;
   if (sender?.type === "reviewer") {
@@ -59,7 +79,14 @@ function reviewFor(ctx: ExecutorContext, from: string): { from: string; kind: st
   return { from, ...reviewOf(sender?.type, output) };
 }
 
-function compose(ctx: ExecutorContext): Ask {
+/** After a node that works on the branch, the review is the code: the sender's summary and the diff. */
+async function withCode(ctx: ExecutorContext, review: Review, branchDiff: BranchDiff | undefined): Promise<Review> {
+  if (!branchDiff || !CODE_SENDERS.has(ctx.graph.node(review.from)?.type ?? "")) return review;
+  const files = limitDiff((await branchDiff(ctx.run).catch(() => undefined)) ?? []);
+  return files.length ? { ...review, kind: "code", files } : review;
+}
+
+async function compose(ctx: ExecutorContext, branchDiff: BranchDiff | undefined): Promise<Ask> {
   const trigger = ctx.execution.trigger;
   if (trigger?.kind === "exhausted") {
     const attempts = ctx.state.loops[trigger.edgeKey ?? ""]?.attempts ?? 0;
@@ -74,7 +101,7 @@ function compose(ctx: ExecutorContext): Ask {
   if (asked?.text) return { question: asked.text, options: asked.options ?? [], context: { reason: "needs_input", from: trigger?.from } };
   const config = ctx.node.config;
   // Review mode: show what arrived, so the person can read it, comment and approve or ask for changes.
-  const review = trigger?.from ? reviewFor(ctx, trigger.from) : undefined;
+  const review = trigger?.from ? await withCode(ctx, reviewFor(ctx, trigger.from), branchDiff) : undefined;
   return {
     question: typeof config.question === "string" ? config.question : review ? `Review the ${review.kind} from ${review.from}` : "Approve continuing?",
     options: Array.isArray(config.options) ? config.options.map(String) : ["approve", "changes"],
@@ -86,13 +113,13 @@ function compose(ctx: ExecutorContext): Ask {
  * Asks a person. The first run stores a question and waits on its id; answering wakes the gate,
  * which records the answer in run state. Retrying an exhausted loop resets that loop's counter.
  */
-export function humanGateExecutor(deps: { db: Db }): NodeExecutor {
+export function humanGateExecutor(deps: { db: Db; branchDiff?: BranchDiff }): NodeExecutor {
   return {
     needsWorkdir: false,
     async execute(ctx): Promise<ExecutorOutcome> {
       let [question] = await deps.db.select().from(questions).where(eq(questions.nodeExecutionId, ctx.execution.id));
       if (!question) {
-        const ask = compose(ctx);
+        const ask = await compose(ctx, deps.branchDiff);
         [question] = await deps.db
           .insert(questions)
           .values({ runId: ctx.run.id, nodeExecutionId: ctx.execution.id, ...ask })

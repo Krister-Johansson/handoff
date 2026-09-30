@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { appendEvents, nodeExecutions, questions, runs, wakeByToken, type Db } from "@handoff/db";
+import { appendEvents, nodeExecutions, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
 
 /** Re-runs a failed node execution as a new attempt, keeping every upstream result in run state. */
 export async function repairNodeExecution(db: Db, executionId: string, opts: { note?: string }) {
@@ -56,9 +56,21 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string }
 export async function answerQuestion(
   db: Db,
   questionId: string,
-  input: { answer: string; option?: string; answeredBy: string; comments?: { quote?: string; body: string }[] },
+  input: { answer: string; option?: string; answeredBy: string; comments?: QuestionComment[] },
 ) {
-  const comments = (input.comments ?? []).map((c) => ({ ...(c.quote?.trim() ? { quote: c.quote.trim() } : {}), body: c.body.trim() })).filter((c) => c.body);
+  const comments = (input.comments ?? [])
+    .map(
+      (c): QuestionComment => ({
+        ...(c.path?.trim() ? { path: c.path.trim() } : {}),
+        ...(c.line !== undefined ? { line: c.line } : {}),
+        ...(c.endLine !== undefined && c.endLine !== c.line ? { endLine: c.endLine } : {}),
+        ...(c.side ? { side: c.side } : {}),
+        // Code keeps its indentation; a quote from prose is trimmed.
+        ...(c.quote?.trim() ? { quote: c.path ? c.quote : c.quote.trim() } : {}),
+        body: c.body.trim(),
+      }),
+    )
+    .filter((c) => c.body);
   return db.transaction(async (tx) => {
     const [question] = await tx
       .update(questions)

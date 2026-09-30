@@ -62,12 +62,26 @@ export const PrOutputSchema = z.object({
 
 export const MergeOutputSchema = z.object({ merged: z.boolean(), sha: z.string().optional() });
 
+/**
+ * A person's comment on what they reviewed: on a quoted part of a plan, or on lines of a file in a
+ * code review. `line` to `endLine` count in the new file, or the old one when `side` is "old".
+ */
+export const PersonCommentSchema = z.object({
+  quote: z.string().optional(),
+  body: z.string(),
+  path: z.string().optional(),
+  line: z.number().int().positive().optional(),
+  endLine: z.number().int().positive().optional(),
+  side: z.enum(["old", "new"]).optional(),
+});
+export type PersonComment = z.infer<typeof PersonCommentSchema>;
+
 export const HumanAnswerSchema = z.object({
   answer: z.string(),
   option: z.string().optional(),
   approved: z.boolean().optional(),
-  /** Comments on quoted parts of what the gate showed, when the person reviewed something. */
-  comments: z.array(z.object({ quote: z.string().optional(), body: z.string() })).optional(),
+  /** Comments on quoted parts or lines of what the gate showed, when the person reviewed something. */
+  comments: z.array(PersonCommentSchema).optional(),
   answeredBy: z.string(),
   answeredAt: z.string(),
 });

@@ -89,3 +89,14 @@ test("suggestions a reviewer left with an approval follow the person's decisions
   expect(md).toContain("- reviewer: Say in the PR that db:seed fails until F04.");
   expect(md).toMatch(/decisions from the person take precedence/i);
 });
+
+test("comments on lines of a file show the file and the line range", () => {
+  const md = renderContextPacket({
+    ...packet,
+    decisions: [{ gate: "gate", comments: [{ path: "src/a.ts", line: 3, endLine: 5, quote: "const a = 1;", body: "Keep it." }, { path: "src/b.ts", line: 7, body: "Fine." }] }],
+    priorAttempt: { failedChecks: [], reviewComments: [{ author: "person", path: "src/a.ts", line: 3, endLine: 5, quote: "const a =\n  1;", body: "Rename.", resolved: false }] },
+  });
+  expect(md).toContain('- src/a.ts:3-5 on "const a = 1;": Keep it.');
+  expect(md).toContain("- src/b.ts:7: Fine.");
+  expect(md).toContain('- src/a.ts:3-5 - person on "const a = 1;": Rename.');
+});

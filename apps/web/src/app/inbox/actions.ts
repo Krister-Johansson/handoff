@@ -55,10 +55,21 @@ const ReviewAnswerSchema = z.object({
   runId: z.string().uuid(),
   option: z.enum(["approve", "changes"]),
   note: z.string().max(10_000),
-  comments: z.array(z.object({ quote: z.string().max(2_000), body: z.string().min(1).max(10_000) })).max(200),
+  comments: z
+    .array(
+      z.object({
+        quote: z.string().max(20_000),
+        body: z.string().min(1).max(10_000),
+        path: z.string().max(1_000).optional(),
+        line: z.number().int().positive().optional(),
+        endLine: z.number().int().positive().optional(),
+        side: z.enum(["old", "new"]).optional(),
+      }),
+    )
+    .max(200),
 });
 
-/** Answers a human gate's review: approve, or changes with comments on quoted passages. Returns to the run. */
+/** Answers a human gate's review: approve, or changes with comments on quoted passages or lines of files. Returns to the run. */
 export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchema>): Promise<InboxActionState> {
   const parsed = ReviewAnswerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That review cannot be sent." };

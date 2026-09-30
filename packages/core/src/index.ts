@@ -16,3 +16,4 @@ export * from "./secrets/pass-env.ts";
 export * from "./project-name.ts";
 export * from "./summary/summarize.ts";
 export * from "./library/skill-markdown.ts";
+export * from "./review/diff.ts";

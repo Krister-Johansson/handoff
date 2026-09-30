@@ -16,3 +16,4 @@ export * from "./library/materialize.ts";
 export * from "./workdir/docker.ts";
 
 export * from "./executors/flow.ts";
+export * from "./review/branch-diff.ts";
