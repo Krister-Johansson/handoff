@@ -59,6 +59,12 @@ function TextField({
 export type McpServerValues = { name: string; transport: "stdio" | "http"; auth: "headers" | "oauth"; command: string | null; args: string[]; url: string | null; env: Record<string, string>; headers: Record<string, string>; tools: string[] };
 export type AgentValues = { name: string; description: string; prompt: string; tools: string[]; model: string | null };
 
+const splitList = (value: string) =>
+  value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
 const pairLines = (values: Record<string, string>, separator: string) =>
   Object.entries(values)
     .map(([k, v]) => `${k}${separator}${v}`)
@@ -163,11 +169,8 @@ export function McpServerForm({ initial, draft }: { initial?: McpServerValues; d
         <ConnectionFields state={state} initial={initial} draft={draft} />
         <AuthField auth={auth} onChange={setAuth} />
         <SecretFields state={state} initial={initial} />
-        <Field>
-          <FieldLabel htmlFor="field-tools">Allowed tools</FieldLabel>
-          <Input id="field-tools" name="tools" placeholder="search, fetch" value={tools} onChange={(e) => setTools(e.target.value)} />
-          <FieldDescription>Comma separated. Leave empty to allow every tool of this server. Test the server to pick from its tools.</FieldDescription>
-        </Field>
+        <input type="hidden" name="tools" value={tools} />
+        {tools && !tested.check && <FieldDescription>Runs may use only these tools: {tools}.</FieldDescription>}
         <Field orientation="horizontal">
           <Button type="submit" disabled={pending}>
             Save server
@@ -188,7 +191,15 @@ export function McpServerForm({ initial, draft }: { initial?: McpServerValues; d
           <Status state={state} />
         </Field>
         {tested.errors && <FieldError>{Object.values(tested.errors).join(" ")}</FieldError>}
-        {tested.check && <McpCheckResult key={tested.check.checkedAt} check={tested.check} onAllow={(names) => setTools(names.join(", "))} onUseOAuth={() => setAuth("oauth")} />}
+        {tested.check && (
+          <McpCheckResult
+            key={tested.check.checkedAt}
+            check={tested.check}
+            allowed={splitList(tools)}
+            onAllowedChange={(names) => setTools(names.join(", "))}
+            onUseOAuth={() => setAuth("oauth")}
+          />
+        )}
       </FieldGroup>
     </form>
   );

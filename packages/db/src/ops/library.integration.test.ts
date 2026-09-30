@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { truncateAll } from "../testing/reset.ts";
 import { createTestDb } from "../testing/test-db.ts";
-import { deleteLibraryEntry, getLibraryByNames, listLibrary, listLibraryIndex, recordMcpCheck, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "./library.ts";
+import { deleteLibraryEntry, getLibraryByNames, listLibrary, listLibraryIndex, recordMcpCheck, setMcpAllowedTools, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "./library.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -34,6 +34,14 @@ test("an http MCP server signs in with OAuth or sends headers, headers by defaul
   expect((await upsertMcpServer(db, { name: "plain", transport: "http", url: "https://example.com/mcp" })).auth).toBe("headers");
   const oauth = await upsertMcpServer(db, { name: "context7", transport: "http", url: "https://mcp.context7.com/mcp/oauth", auth: "oauth" });
   expect(oauth.auth).toBe("oauth");
+});
+
+test("choosing an MCP server's allowed tools makes a new version and keeps its last check", async () => {
+  await upsertMcpServer(db, { name: "context7", transport: "http", url: "https://mcp.context7.com/mcp/oauth" });
+  await recordMcpCheck(db, "context7", { status: "ok", tools: [{ name: "resolve-library-id" }, { name: "query-docs" }] });
+  const row = await setMcpAllowedTools(db, "context7", ["query-docs"]);
+  expect(row).toMatchObject({ version: 2, tools: ["query-docs"], lastCheck: { status: "ok" } });
+  expect(await setMcpAllowedTools(db, "ghost", [])).toBeUndefined();
 });
 
 test("deleting an entry removes it", async () => {

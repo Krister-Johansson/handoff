@@ -19,27 +19,26 @@ const ok = {
   prompts: 0,
 };
 
-test("a working server shows its name, version, tools and counts, and chosen tools can become the allowed tools", () => {
-  const onAllow = vi.fn();
-  render(<McpCheckResult check={ok} onAllow={onAllow} />);
+test("a working server shows its name, version, tools and counts, and its tools are ticked as allowed", () => {
+  const onAllowedChange = vi.fn();
+  render(<McpCheckResult check={ok} allowed={[]} onAllowedChange={onAllowedChange} />);
   expect(screen.getByText("Connected")).toBeInTheDocument();
   expect(screen.getByText(/docs 1\.2\.3/)).toBeInTheDocument();
   expect(screen.getByText(/2 tools, 1 resource, 0 prompts/)).toBeInTheDocument();
   expect(screen.getByText("Search the docs")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("checkbox", { name: "fetch" }));
-  fireEvent.click(screen.getByRole("button", { name: "Allow only the ticked tools" }));
-  expect(onAllow).toHaveBeenCalledWith(["search"]);
+  expect(onAllowedChange).toHaveBeenCalledWith(["search"]);
 });
 
 test("missing secrets and authentication say what to do", () => {
-  const { rerender } = render(<McpCheckResult check={{ ...ok, status: "missing_secrets", tools: [], missingSecrets: ["DOCS_TOKEN"], message: "Not set in this environment: DOCS_TOKEN" }} onAllow={() => {}} />);
+  const { rerender } = render(<McpCheckResult check={{ ...ok, status: "missing_secrets", tools: [], missingSecrets: ["DOCS_TOKEN"], message: "Not set in this environment: DOCS_TOKEN" }} allowed={[]} onAllowedChange={() => {}} />);
   expect(screen.getByText("Missing secrets")).toBeInTheDocument();
   expect(screen.getByText(/DOCS_TOKEN/)).toBeInTheDocument();
-  rerender(<McpCheckResult check={{ ...ok, status: "needs_auth", tools: [], message: "The server answered 401" }} onAllow={() => {}} />);
+  rerender(<McpCheckResult check={{ ...ok, status: "needs_auth", tools: [], message: "The server answered 401" }} allowed={[]} onAllowedChange={() => {}} />);
   expect(screen.getByText("Needs authentication")).toBeInTheDocument();
 });
 
-test("Test server checks the form's current values, and Allow fills the allowed tools", async () => {
+test("Test server checks the form's current values, and unticking a tool leaves it out of the allowed tools", async () => {
   actions.testMcpServerAction.mockResolvedValue({ check: ok });
   render(<McpServerForm />);
   fireEvent.change(screen.getByLabelText("Name"), { target: { value: "docs" } });
@@ -52,9 +51,10 @@ test("Test server checks the form's current values, and Allow fills the allowed 
   // Testing must not clear what was typed, so the server can be tested again or saved.
   expect(screen.getByLabelText("Name")).toHaveValue("docs");
   expect(screen.getByLabelText("Command")).toHaveValue("npx");
+  const allowed = () => (document.querySelector('input[name="tools"]') as HTMLInputElement).value;
+  expect(allowed()).toBe("");
   fireEvent.click(screen.getByRole("checkbox", { name: "search" }));
-  fireEvent.click(screen.getByRole("button", { name: "Allow only the ticked tools" }));
-  expect(screen.getByLabelText("Allowed tools")).toHaveValue("fetch");
+  expect(allowed()).toBe("fetch");
 });
 
 test("a server that offers OAuth can be switched to OAuth sign-in from the test result", async () => {
