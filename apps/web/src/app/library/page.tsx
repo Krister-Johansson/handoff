@@ -1,36 +1,25 @@
-import { TrashIcon } from "lucide-react";
+import Link from "next/link";
+import { PlusIcon } from "lucide-react";
 import { listLibrary } from "@handoff/db";
-import { AgentForm, McpServerForm, SkillForm } from "@/components/library/forms";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getDb } from "@/lib/db";
-import { deleteEntry } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-function DeleteButton({ kind, name }: { kind: "skill" | "mcp" | "agent"; name: string }) {
-  return (
-    <form action={deleteEntry}>
-      <input type="hidden" name="kind" value={kind} />
-      <input type="hidden" name="name" value={name} />
-      <Button type="submit" variant="ghost" size="icon-sm" aria-label={`Delete ${name}`}>
-        <TrashIcon />
-      </Button>
-    </form>
-  );
-}
+type Row = { name: string; detail: string; version: number; extra?: string | undefined };
 
-function EntryTable({ kind, rows }: { kind: "skill" | "mcp" | "agent"; rows: { name: string; detail: string; version: number }[] }) {
+function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; noun: string }) {
   if (rows.length === 0) {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>Nothing here yet</EmptyTitle>
-          <EmptyDescription>Add one with the form. Nodes enable entries by name in their library settings.</EmptyDescription>
+          <EmptyTitle>No {noun}s yet</EmptyTitle>
+          <EmptyDescription>Add one with New {noun}. Nodes enable library entries by name in their settings.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -41,20 +30,23 @@ function EntryTable({ kind, rows }: { kind: "skill" | "mcp" | "agent"; rows: { n
         <TableRow>
           <TableHead>Name</TableHead>
           <TableHead>Details</TableHead>
-          <TableHead>Version</TableHead>
-          <TableHead className="w-10" />
+          <TableHead className="text-right">Version</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
         {rows.map((row) => (
-          <TableRow key={row.name}>
-            <TableCell className="font-mono text-xs">{row.name}</TableCell>
-            <TableCell className="w-full max-w-0 truncate text-muted-foreground">{row.detail}</TableCell>
-            <TableCell>
-              <Badge variant="outline">v{row.version}</Badge>
+          <TableRow key={row.name} className="relative">
+            <TableCell className="font-mono text-xs">
+              <Link href={`/library/${segment}/${row.name}`} className="after:absolute after:inset-0 hover:underline">
+                {row.name}
+              </Link>
             </TableCell>
-            <TableCell>
-              <DeleteButton kind={kind} name={row.name} />
+            <TableCell className="w-full max-w-0 truncate text-muted-foreground">
+              {row.detail}
+              {row.extra && <span className="ml-2 text-xs">{row.extra}</span>}
+            </TableCell>
+            <TableCell className="text-right">
+              <Badge variant="outline">v{row.version}</Badge>
             </TableCell>
           </TableRow>
         ))}
@@ -63,35 +55,33 @@ function EntryTable({ kind, rows }: { kind: "skill" | "mcp" | "agent"; rows: { n
   );
 }
 
-export default async function LibraryPage() {
+const TABS = ["skills", "mcp", "agents"] as const;
+
+export default async function LibraryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const { tab } = await searchParams;
+  const active = TABS.find((t) => t === tab) ?? "skills";
   const { skills, mcp, agents } = await listLibrary(getDb());
   const sections = [
     {
       value: "skills",
       label: "Skills",
-      title: "Skills",
-      description: "SKILL.md instructions staged into a node's session with --add-dir.",
-      kind: "skill" as const,
-      rows: skills.map((s) => ({ name: s.name, detail: s.description, version: s.version })),
-      form: <SkillForm />,
+      noun: "skill",
+      description: "SKILL.md instructions, with their supporting files, staged into a node's session with --add-dir.",
+      rows: skills.map((s) => ({ name: s.name, detail: s.description, version: s.version, extra: s.files.length ? `${s.files.length + 1} files` : undefined })),
     },
     {
       value: "mcp",
       label: "MCP servers",
-      title: "MCP servers",
+      noun: "MCP server",
       description: "Written to a per-execution mcp.json and loaded with --strict-mcp-config.",
-      kind: "mcp" as const,
       rows: mcp.map((s) => ({ name: s.name, detail: s.transport === "stdio" ? `${s.command} ${s.args.join(" ")}` : (s.url ?? ""), version: s.version })),
-      form: <McpServerForm />,
     },
     {
       value: "agents",
       label: "Agents",
-      title: "Subagents",
-      description: "Definitions passed with --agents, so a node's Claude session can delegate.",
-      kind: "agent" as const,
+      noun: "agent",
+      description: "Subagent definitions passed with --agents, so a node's Claude session can delegate.",
       rows: agents.map((a) => ({ name: a.name, detail: a.description, version: a.version })),
-      form: <AgentForm />,
     },
   ];
   return (
@@ -100,7 +90,7 @@ export default async function LibraryPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
         <p className="text-muted-foreground">Skills, MCP servers and subagents that graph nodes enable by name.</p>
       </div>
-      <Tabs defaultValue="skills">
+      <Tabs defaultValue={active} className="gap-4">
         <TabsList>
           {sections.map((s) => (
             <TabsTrigger key={s.value} value={s.value}>
@@ -110,22 +100,23 @@ export default async function LibraryPage() {
           ))}
         </TabsList>
         {sections.map((s) => (
-          <TabsContent key={s.value} value={s.value} className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+          <TabsContent key={s.value} value={s.value}>
             <Card>
               <CardHeader>
-                <CardTitle>{s.title}</CardTitle>
+                <CardTitle>{s.label}</CardTitle>
                 <CardDescription>{s.description}</CardDescription>
+                <CardAction>
+                  <Button size="sm" asChild>
+                    <Link href={`/library/${s.value}/new`}>
+                      <PlusIcon data-icon="inline-start" />
+                      New {s.noun}
+                    </Link>
+                  </Button>
+                </CardAction>
               </CardHeader>
               <CardContent>
-                <EntryTable kind={s.kind} rows={s.rows} />
+                <EntryTable segment={s.value} rows={s.rows} noun={s.noun} />
               </CardContent>
-            </Card>
-            <Card>
-              <CardHeader>
-                <CardTitle>Add or update</CardTitle>
-                <CardDescription>Saving an existing name creates a new version.</CardDescription>
-              </CardHeader>
-              <CardContent>{s.form}</CardContent>
             </Card>
           </TabsContent>
         ))}

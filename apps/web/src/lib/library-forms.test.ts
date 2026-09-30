@@ -10,8 +10,46 @@ const form = (entries: Record<string, string>) => {
 test("parseSkillForm accepts a name, description and body", () => {
   expect(parseSkillForm(form({ name: "tdd", description: "Test first", body: "Write the test." }))).toEqual({
     ok: true,
-    data: { name: "tdd", description: "Test first", body: "Write the test." },
+    data: { name: "tdd", description: "Test first", body: "Write the test.", frontmatter: {}, files: [] },
   });
+});
+
+test("parseSkillForm reads the other frontmatter as YAML and the supporting files as JSON", () => {
+  const result = parseSkillForm(
+    form({
+      name: "tdd",
+      description: "Test first",
+      body: "b",
+      frontmatter: "license: MIT\nmetadata:\n  author: ann\n",
+      files: JSON.stringify([{ path: "mocking.md", content: "# Mocks" }, { path: "agents/openai.yaml", content: "x: 1" }]),
+    }),
+  );
+  expect(result).toEqual({
+    ok: true,
+    data: {
+      name: "tdd",
+      description: "Test first",
+      body: "b",
+      frontmatter: { license: "MIT", metadata: { author: "ann" } },
+      files: [
+        { path: "mocking.md", content: "# Mocks" },
+        { path: "agents/openai.yaml", content: "x: 1" },
+      ],
+    },
+  });
+});
+
+test("parseSkillForm refuses frontmatter that is not a YAML mapping, and unsafe or duplicate file paths", () => {
+  const errorsOf = (entries: Record<string, string>) => {
+    const r = parseSkillForm(form({ name: "tdd", description: "d", body: "b", ...entries }));
+    return r.ok ? {} : r.errors;
+  };
+  expect(errorsOf({ frontmatter: "- a\n- b" })).toHaveProperty("frontmatter");
+  expect(errorsOf({ frontmatter: "name: other" })).toHaveProperty("frontmatter");
+  expect(errorsOf({ files: JSON.stringify([{ path: "../escape.md", content: "" }]) })).toHaveProperty("files");
+  expect(errorsOf({ files: JSON.stringify([{ path: "/abs.md", content: "" }]) })).toHaveProperty("files");
+  expect(errorsOf({ files: JSON.stringify([{ path: "SKILL.md", content: "" }]) })).toHaveProperty("files");
+  expect(errorsOf({ files: JSON.stringify([{ path: "a.md", content: "" }, { path: "a.md", content: "" }]) })).toHaveProperty("files");
 });
 
 test("parseSkillForm rejects names that are not lowercase kebab case", () => {

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
-import { compileGraph, suggestProjectName, type LinkedIssue } from "@handoff/core";
+import { compileGraph, parseSkillMarkdown, suggestProjectName, type LinkedIssue } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibrary, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, type GitHubPort } from "@handoff/github";
@@ -23,15 +23,7 @@ const USAGE = `usage:
   handoff gc [--days 7]`;
 
 function readSkillDir(dir: string) {
-  const raw = readFileSync(join(dir, "SKILL.md"), "utf8");
-  const match = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(raw);
-  const meta = Object.fromEntries(
-    (match?.[1] ?? "")
-      .split("\n")
-      .map((line) => /^([a-zA-Z_-]+):\s*(.*)$/.exec(line))
-      .filter((m): m is RegExpExecArray => m !== null)
-      .map((m) => [m[1]!, m[2]!.replace(/^["']|["']$/g, "")]),
-  );
+  const skill = parseSkillMarkdown(readFileSync(join(dir, "SKILL.md"), "utf8"));
   const files: { path: string; content: string }[] = [];
   const walk = (current: string) => {
     for (const entry of readdirSync(current)) {
@@ -41,7 +33,7 @@ function readSkillDir(dir: string) {
     }
   };
   walk(dir);
-  return { name: meta.name ?? basename(dir), description: meta.description ?? "", body: (match?.[2] ?? raw).trim(), files };
+  return { name: skill.name ?? basename(dir), description: skill.description ?? "", body: skill.body, frontmatter: skill.frontmatter, files };
 }
 
 function need(values: Record<string, unknown>, key: string): string {
