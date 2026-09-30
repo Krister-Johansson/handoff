@@ -48,14 +48,7 @@ test("the bell lists what needs attention and the tab title shows how many", asy
   fireEvent.click(bell);
   expect(await screen.findByRole("link", { name: /gate asks a question/ })).toHaveAttribute("href", "/runs/r1");
   expect(screen.getByRole("link", { name: /run failed at coder/ })).toHaveAttribute("href", "/runs/r2");
+  expect(screen.getByRole("link", { name: "Notification settings" })).toHaveAttribute("href", "/settings#notifications");
+  expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 });
 
-test("turning desktop notifications on asks the browser first", async () => {
-  FakeNotification.permission = "default";
-  render(<AttentionNotifier load={async () => []} intervalMs={10_000} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Nothing needs your attention" }));
-  fireEvent.click(await screen.findByRole("switch", { name: "Desktop notifications" }));
-  await waitFor(() => expect(FakeNotification.requestPermission).toHaveBeenCalled());
-  await waitFor(() => expect(screen.getByRole("switch", { name: "Desktop notifications" })).toBeChecked());
-  expect(JSON.parse(localStorage.getItem("handoff.notify") ?? "{}")).toMatchObject({ desktop: true });
-});
