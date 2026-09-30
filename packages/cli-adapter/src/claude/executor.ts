@@ -6,7 +6,7 @@ import { z } from "zod";
 import { toCliEvent } from "../events.ts";
 import { parseStreamJson, type StreamJsonLine } from "../stream-json/parser.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult } from "../types.ts";
-import { buildClaudeArgv } from "./argv.ts";
+import { ancestorInstructionExcludes, buildClaudeArgv } from "./argv.ts";
 import { buildClaudeEnv } from "./env.ts";
 
 export type ClaudeCliExecutorOptions = {
@@ -39,6 +39,7 @@ export class ClaudeCliExecutor implements CliExecutor {
       systemPromptFile,
       addDirs: request.addDirs,
       session: request.session,
+      claudeMdExcludes: ancestorInstructionExcludes(request.cwd),
       ...(request.mcpConfigPath ? { mcpConfigPath: request.mcpConfigPath } : {}),
       ...(request.model ? { model: request.model } : {}),
       ...(request.agents ? { agents: request.agents } : {}),

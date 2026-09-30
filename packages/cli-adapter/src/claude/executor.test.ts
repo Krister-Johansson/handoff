@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { z } from "zod";
 import { fakeClaude, fakeClaudeBin, lines, SESSION_ID } from "../testing/fake-claude.ts";
@@ -123,6 +123,16 @@ describe("ClaudeCliExecutor", () => {
     expect(readFileSync(file, "utf8")).toBe("# Task\nWrite a file.");
     expect(argv.slice(0, 2)).toEqual(["-p", "Do the task."]);
     expect(JSON.parse(argv[argv.indexOf("--json-schema") + 1]!)).toMatchObject({ type: "object", required: ["status", "summary"] });
+  });
+
+  test("executor keeps instruction files from the working directory's ancestors out of the session", async () => {
+    const { executor, request, fake, onEvent } = setup({ lines: [lines.init(), lines.result({ structured_output: { status: "done", summary: "" } })] });
+    await executor.run(request, { signal: new AbortController().signal, onEvent });
+    const argv = fake.invocations()[0]!.argv;
+    const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!) as { claudeMdExcludes: string[] };
+    expect(settings.claudeMdExcludes).toContain(`${dirname(request.cwd)}/CLAUDE.md`);
+    expect(settings.claudeMdExcludes).toContain(`${dirname(request.cwd)}/.claude/rules/**`);
+    expect(settings.claudeMdExcludes.some((p) => p.startsWith(`${request.cwd}/`))).toBe(false);
   });
 
   test("executor passes a draft-07 JSON Schema, which the Claude CLI accepts", async () => {
