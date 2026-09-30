@@ -8,7 +8,7 @@ import { loops, edgeLabel, edgeStyle, loopPath, roundedPath, routeFor } from "./
 import { useEdgeInvalid } from "./edge-issues";
 import { useEdgeRoute } from "./elk-routes";
 
-export type HandoffEdge = Edge<EdgeAttributes & { taken?: boolean }, "handoff">;
+export type HandoffEdge = Edge<EdgeAttributes & { taken?: boolean; active?: boolean }, "handoff">;
 
 function HandoffEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd }: EdgeProps<HandoffEdge>) {
   const route = useEdgeRoute(id);
@@ -29,14 +29,14 @@ function HandoffEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePositio
   const text = edgeLabel(data);
   return (
     <>
-      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={edgeStyle(data, selected, invalid)} />
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={edgeStyle(data, selected, invalid, data?.active)} />
       {text && (
         <EdgeLabelRenderer>
           <div
             className={cn(
               "nodrag nopan pointer-events-auto absolute truncate rounded border bg-background px-1.5 py-0.5 text-center font-mono text-[10px] text-muted-foreground",
               label.width === undefined && "max-w-56",
-              selected && "border-primary text-foreground",
+              (selected || data?.active) && "border-primary text-foreground",
             )}
             style={{ transform: `translate(-50%, -50%) translate(${label.x}px, ${label.y}px)`, ...(label.width ? { width: label.width } : {}) }}
           >
