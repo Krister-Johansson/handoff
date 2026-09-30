@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, type Dispatch } from "react";
+import { TrashIcon } from "lucide-react";
+import { CONDITION_PRESETS } from "@/lib/condition-presets";
 import { ConditionSchema, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -99,7 +101,44 @@ function ContractChecks({ node, dispatch }: { node: FlowNode; dispatch: Dispatch
   );
 }
 
-function NodeInspector({ node, graph, library, dispatch }: { node: FlowNode; graph: FlowGraph; library: LibraryNames; dispatch: Dispatch<EditorAction> }) {
+function KeyField({ node, dispatch, onSelect }: { node: FlowNode; dispatch: Dispatch<EditorAction>; onSelect: (nodeId: string) => void }) {
+  const [key, setKey] = useState(node.id);
+  const valid = /^[A-Za-z0-9_-]+$/.test(key);
+  return (
+    <Field data-invalid={valid ? undefined : true}>
+      <FieldLabel htmlFor="node-key">Key</FieldLabel>
+      <div className="flex gap-2">
+        <Input id="node-key" className="font-mono text-xs" value={key} aria-invalid={valid ? undefined : true} onChange={(e) => setKey(e.target.value)} />
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={!valid || key === node.id}
+          onClick={() => {
+            dispatch({ type: "renameNode", id: node.id, to: key });
+            onSelect(key);
+          }}
+        >
+          Rename
+        </Button>
+      </div>
+      <FieldDescription>Used in edge keys, conditions and run state. Letters, digits, dashes and underscores.</FieldDescription>
+    </Field>
+  );
+}
+
+function NodeInspector({
+  node,
+  graph,
+  library,
+  dispatch,
+  onSelect,
+}: {
+  node: FlowNode;
+  graph: FlowGraph;
+  library: LibraryNames;
+  dispatch: Dispatch<EditorAction>;
+  onSelect: (nodeId: string) => void;
+}) {
   const type = node.data.nodeType as NodeType;
   const config = node.data.config;
   const setConfig = (patch: Record<string, unknown>) => dispatch({ type: "updateNode", id: node.id, patch: { config: patch } });
@@ -113,9 +152,10 @@ function NodeInspector({ node, graph, library, dispatch }: { node: FlowNode; gra
         <FieldLabel htmlFor="node-label">Label</FieldLabel>
         <Input id="node-label" value={node.data.label} onChange={(e) => dispatch({ type: "updateNode", id: node.id, patch: { label: e.target.value } })} />
         <FieldDescription className="font-mono text-xs">
-          {node.id} · {type} · runs on {nodeCatalog[type].executorKind}
+          {type} · runs on {nodeCatalog[type].executorKind}
         </FieldDescription>
       </Field>
+      <KeyField node={node} dispatch={dispatch} onSelect={onSelect} />
       {!node.data.isStart && (
         <Button variant="outline" size="sm" onClick={() => dispatch({ type: "setStart", id: node.id })}>
           Make this the start node
@@ -235,6 +275,10 @@ function NodeInspector({ node, graph, library, dispatch }: { node: FlowNode; gra
       {gates.length === 0 && CLI_TYPES.has(type) && (
         <FieldDescription>Tip: add a Human gate so a node can ask you questions with status needs_input.</FieldDescription>
       )}
+      <Button variant="destructive" size="sm" onClick={() => dispatch({ type: "remove", ids: [node.id] })}>
+        <TrashIcon data-icon="inline-start" />
+        Delete node
+      </Button>
     </FieldGroup>
   );
 }
@@ -291,7 +335,25 @@ function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowG
           <NativeSelectOption value="any">finished either way</NativeSelectOption>
         </NativeSelect>
       </Field>
-      <ConditionField key={edge.id} edge={edge} dispatch={dispatch} />
+      <Field>
+        <FieldLabel htmlFor="edge-preset">Preset</FieldLabel>
+        <NativeSelect
+          id="edge-preset"
+          value=""
+          onChange={(e) => {
+            const preset = CONDITION_PRESETS.find((p) => p.label === e.target.value);
+            if (preset) dispatch({ type: "updateEdge", id: edge.id, patch: { condition: preset.condition } });
+          }}
+        >
+          <NativeSelectOption value="">Pick a common condition</NativeSelectOption>
+          {CONDITION_PRESETS.map((p) => (
+            <NativeSelectOption key={p.label} value={p.label}>
+              {p.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Field>
+      <ConditionField key={`${edge.id}:${JSON.stringify(edge.data.condition ?? null)}`} edge={edge} dispatch={dispatch} />
       <Field orientation="horizontal">
         <Switch
           id="edge-loop"
@@ -334,6 +396,10 @@ function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowG
           </Field>
         </>
       )}
+      <Button variant="destructive" size="sm" onClick={() => dispatch({ type: "remove", ids: [edge.id] })}>
+        <TrashIcon data-icon="inline-start" />
+        Delete edge
+      </Button>
     </FieldGroup>
   );
 }
@@ -343,15 +409,17 @@ export function Inspector({
   selection,
   library,
   dispatch,
+  onSelect,
 }: {
   graph: FlowGraph;
   selection: { nodeId?: string; edgeId?: string };
   library: LibraryNames;
   dispatch: Dispatch<EditorAction>;
+  onSelect: (nodeId: string) => void;
 }) {
   const node = selection.nodeId ? graph.nodes.find((n) => n.id === selection.nodeId) : undefined;
   const edge = selection.edgeId ? graph.edges.find((e) => e.id === selection.edgeId) : undefined;
-  if (node) return <NodeInspector key={node.id} node={node} graph={graph} library={library} dispatch={dispatch} />;
+  if (node) return <NodeInspector key={node.id} node={node} graph={graph} library={library} dispatch={dispatch} onSelect={onSelect} />;
   if (edge) return <EdgeInspector key={edge.id} edge={edge} graph={graph} dispatch={dispatch} />;
   return <FieldDescription>Select a node or an edge to edit it. Drag from a node&apos;s right handle to another node to connect them. Press Backspace to delete the selection.</FieldDescription>;
 }

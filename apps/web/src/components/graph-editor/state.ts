@@ -22,6 +22,8 @@ export type EditorAction =
   | { type: "updateEdge"; id: string; patch: Partial<EdgeAttributes> }
   | { type: "setStart"; id: string }
   | { type: "setExhaustedGate"; id: string | undefined }
+  | { type: "remove"; ids: string[] }
+  | { type: "renameNode"; id: string; to: string }
   | { type: "layout" }
   | { type: "reset"; graph: FlowGraph };
 
@@ -96,6 +98,14 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
       else delete attributes.exhaustedGate;
       return { ...state, attributes };
     }
+    case "remove": {
+      const ids = new Set(action.ids);
+      const nodes = state.nodes.filter((n) => !ids.has(n.id));
+      const alive = new Set(nodes.map((n) => n.id));
+      return { ...state, nodes, edges: state.edges.filter((e) => !ids.has(e.id) && alive.has(e.source) && alive.has(e.target)) };
+    }
+    case "renameNode":
+      return renameNode(state, action.id, action.to);
     case "layout":
       return layoutFlow(state);
     case "reset":
@@ -115,4 +125,33 @@ export function issuesOf(state: FlowGraph): CompileError[] {
   }
   const result = compileGraph(doc);
   return result.ok ? [] : result.errors;
+}
+
+const KEY = /^[A-Za-z0-9_-]+$/;
+
+/** Renames a node key everywhere it is referenced: edges (and their derived keys), start node, gates. */
+function renameNode(state: FlowGraph, from: string, to: string): FlowGraph {
+  if (from === to || !KEY.test(to) || state.nodes.some((n) => n.id === to) || !state.nodes.some((n) => n.id === from)) return state;
+  const swap = (key: string) => (key === from ? to : key);
+  const edges = state.edges.map((e) => {
+    const source = swap(e.source);
+    const target = swap(e.target);
+    const derived = /^(.+)->(.+?)(-\d+)?$/.exec(e.id);
+    const id = derived && derived[1] === e.source && (derived[2] === e.target) ? `${source}->${target}${derived[3] ?? ""}` : e.id;
+    const data = e.data.onExhausted === from ? { ...e.data, onExhausted: to } : e.data;
+    return { ...e, id, source, target, data };
+  });
+  const attributes = {
+    ...state.attributes,
+    startNode: swap(state.attributes.startNode),
+    ...(state.attributes.exhaustedGate ? { exhaustedGate: swap(state.attributes.exhaustedGate) } : {}),
+  };
+  return { ...state, attributes, edges, nodes: state.nodes.map((n) => (n.id === from ? { ...n, id: to } : n)) };
+}
+
+/** Whether an action changes the stored document; React Flow's measure and select changes do not. */
+export function changesEdit(action: EditorAction): boolean {
+  if (action.type === "nodesChange") return action.changes.some((c) => c.type !== "dimensions" && c.type !== "select");
+  if (action.type === "edgesChange") return action.changes.some((c) => c.type !== "select");
+  return action.type !== "reset";
 }

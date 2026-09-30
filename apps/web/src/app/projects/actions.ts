@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
-import { createGraphFromTemplate, createProject, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
+import { createGraphFromTemplate, createProject, getGraphVersion, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
 export type ActionState = { ok?: boolean; error?: string; values?: Record<string, string> };
 
@@ -50,4 +50,8 @@ export async function startRunAction(_: ActionState, form: FormData): Promise<Ac
   if (task.length < 5) return { ok: false, error: "Describe the task in a sentence.", values: { task } };
   const run = await startRunFromGraph(getDb(), { projectId, graphName, task });
   redirect(`/runs/${run.id}`);
+}
+
+export async function loadGraphVersionAction(projectId: string, name: string, version: number): Promise<unknown> {
+  return (await getGraphVersion(getDb(), projectId, name, version))?.document ?? null;
 }

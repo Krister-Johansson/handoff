@@ -1,10 +1,10 @@
 "use client";
 
 import { Background, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes, type OnSelectionChangeParams } from "@xyflow/react";
-import { useCallback, useMemo, useReducer, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState, useTransition } from "react";
 import { AlertTriangleIcon, CheckIcon, LayoutGridIcon, SaveIcon } from "lucide-react";
 import { toReactFlow, type FlowEdge, type FlowNode, type NodeType } from "@handoff/core";
-import { saveGraphAction } from "@/app/projects/actions";
+import { loadGraphVersionAction, saveGraphAction } from "@/app/projects/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -13,21 +13,50 @@ import { HandoffEdgeComponent } from "./handoff-edge";
 import { HandoffNodeComponent } from "./handoff-node";
 import { Inspector, type LibraryNames } from "./inspector";
 import { NODE_ICONS } from "./node-icons";
-import { documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
+import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
 
 const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
 const edgeTypes: EdgeTypes = { handoff: HandoffEdgeComponent };
 const PALETTE = Object.keys(NODE_LABELS) as NodeType[];
 
-type Props = { projectId: string; graphName: string; version: number; document: unknown; library: LibraryNames; runSlot?: React.ReactNode };
+export type VersionItem = { version: number; createdAt: string; createdBy: string | null };
+type Props = {
+  projectId: string;
+  graphName: string;
+  version: number;
+  document: unknown;
+  library: LibraryNames;
+  versions: VersionItem[];
+  runSlot?: React.ReactNode;
+};
 
-function Editor({ projectId, graphName, version: initialVersion, document, library, runSlot }: Props) {
+function Editor({ projectId, graphName, version: initialVersion, document, library, versions: initialVersions, runSlot }: Props) {
   const [graph, dispatch] = useReducer(editorReducer, document, (doc) => toReactFlow(doc));
   const [selection, setSelection] = useState<{ nodeId?: string; edgeId?: string }>({});
   const [version, setVersion] = useState(initialVersion);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState<string | undefined>();
   const [pending, startTransition] = useTransition();
+  const [versions, setVersions] = useState(initialVersions);
+  const [restoring, setRestoring] = useState<number | undefined>();
+
+  // Warn before leaving with edits that are not saved as a version.
+  useEffect(() => {
+    if (saved) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [saved]);
+
+  const restore = (v: number) =>
+    startTransition(async () => {
+      const doc = await loadGraphVersionAction(projectId, graphName, v);
+      if (!doc) return;
+      dispatch({ type: "reset", graph: toReactFlow(doc) });
+      setSelection({});
+      setRestoring(v);
+      setSaved(false);
+    });
   const { screenToFlowPosition, fitView } = useReactFlow();
 
   const issues = useMemo(() => issuesOf(graph), [graph]);
@@ -36,7 +65,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
 
   const edit = useCallback((action: Parameters<typeof dispatch>[0]) => {
     dispatch(action);
-    setSaved(false);
+    if (changesEdit(action)) setSaved(false);
   }, []);
 
   const onSelectionChange = useCallback(({ nodes: n, edges: e }: OnSelectionChangeParams<FlowNode, FlowEdge>) => {
@@ -53,6 +82,8 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
       const result = await saveGraphAction(projectId, graphName, documentOf(graph));
       if (result.ok) {
         setVersion(result.version);
+        setVersions((current) => [{ version: result.version, createdAt: new Date().toISOString(), createdBy: "dashboard" }, ...current]);
+        setRestoring(undefined);
         setSaved(true);
         setSaveError(undefined);
       } else setSaveError(result.errors.map((e) => e.message).join("; "));
@@ -133,7 +164,25 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
       <aside className="flex min-h-0 flex-col border-l">
         <ScrollArea className="min-h-0 flex-1">
           <div className="flex flex-col gap-6 p-4">
-            <Inspector graph={graph} selection={selection} library={library} dispatch={edit} />
+            <Inspector graph={graph} selection={selection} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
+            {!selection.nodeId && !selection.edgeId && (
+              <div className="flex flex-col gap-2">
+                <h3 className="text-sm font-medium">History</h3>
+                {restoring !== undefined && <p className="text-xs text-muted-foreground">Showing v{restoring}. Save to make it the latest version.</p>}
+                <ul className="flex flex-col gap-1 text-sm">
+                  {versions.map((v) => (
+                    <li key={v.version} className="flex items-center justify-between gap-2">
+                      <span className="tabular-nums">
+                        v{v.version} <span className="text-xs text-muted-foreground">{v.createdAt.slice(0, 16).replace("T", " ")}</span>
+                      </span>
+                      <Button variant="ghost" size="sm" disabled={pending || v.version === version} onClick={() => restore(v.version)}>
+                        {v.version === version ? "current" : "Restore"}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {(issues.length > 0 || saveError) && (
               <div className="flex flex-col gap-2">
                 <h3 className="text-sm font-medium">Issues</h3>

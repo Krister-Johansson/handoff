@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json";
 import { toReactFlow } from "@handoff/core";
-import { documentOf, editorReducer, issuesOf } from "./state";
+import { changesEdit, documentOf, editorReducer, issuesOf } from "./state";
 
 const initial = () => toReactFlow(linear);
 
@@ -61,4 +61,46 @@ test("tidy layout changes positions only", () => {
   const after = editorReducer(before, { type: "layout" });
   expect(after.nodes.map((n) => n.data)).toEqual(before.nodes.map((n) => n.data));
   expect(after.edges).toEqual(before.edges);
+});
+
+describe("delete and rename", () => {
+  test("removing a selected edge deletes only that edge", () => {
+    const state = editorReducer(initial(), { type: "remove", ids: ["coder->pr"] });
+    expect(state.edges.map((e) => e.id)).toEqual(["planner->coder", "pr->merge"]);
+    expect(state.nodes).toHaveLength(4);
+  });
+
+  test("removing a node also removes its edges", () => {
+    const state = editorReducer(initial(), { type: "remove", ids: ["pr"] });
+    expect(state.nodes.map((n) => n.id)).toEqual(["planner", "coder", "merge"]);
+    expect(state.edges.map((e) => e.id)).toEqual(["planner->coder"]);
+  });
+
+  test("renaming a node key updates its edges, the start node and exhaustion targets", () => {
+    let state = editorReducer(initial(), { type: "addNode", nodeType: "human_gate", position: { x: 0, y: 0 } });
+    state = editorReducer(state, { type: "setExhaustedGate", id: "human_gate-1" });
+    state = editorReducer(state, { type: "connect", source: "pr", target: "coder" });
+    state = editorReducer(state, { type: "updateEdge", id: "pr->coder", patch: { loop: true, maxAttempts: 2, onExhausted: "human_gate-1" } });
+    state = editorReducer(state, { type: "renameNode", id: "human_gate-1", to: "ask" });
+    state = editorReducer(state, { type: "renameNode", id: "planner", to: "plan" });
+    const doc = documentOf(state);
+    expect(doc.attributes).toMatchObject({ startNode: "plan", exhaustedGate: "ask" });
+    expect(doc.edges.find((e) => e.key === "plan->coder")).toMatchObject({ source: "plan", target: "coder" });
+    expect(doc.edges.find((e) => e.key === "pr->coder")!.attributes.onExhausted).toBe("ask");
+  });
+
+  test("renaming to an existing or invalid key is ignored", () => {
+    const before = initial();
+    expect(editorReducer(before, { type: "renameNode", id: "coder", to: "pr" })).toBe(before);
+    expect(editorReducer(before, { type: "renameNode", id: "coder", to: "has space" })).toBe(before);
+  });
+});
+
+test("measuring and selecting do not count as edits; moving, adding and removing do", () => {
+  expect(changesEdit({ type: "nodesChange", changes: [{ type: "dimensions", id: "pr", dimensions: { width: 1, height: 1 } }] })).toBe(false);
+  expect(changesEdit({ type: "nodesChange", changes: [{ type: "select", id: "pr", selected: true }] })).toBe(false);
+  expect(changesEdit({ type: "edgesChange", changes: [{ type: "select", id: "coder->pr", selected: true }] })).toBe(false);
+  expect(changesEdit({ type: "nodesChange", changes: [{ type: "position", id: "pr", position: { x: 1, y: 1 } }] })).toBe(true);
+  expect(changesEdit({ type: "nodesChange", changes: [{ type: "remove", id: "pr" }] })).toBe(true);
+  expect(changesEdit({ type: "connect", source: "a", target: "b" })).toBe(true);
 });
