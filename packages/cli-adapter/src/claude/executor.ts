@@ -43,14 +43,18 @@ export class ClaudeCliExecutor implements CliExecutor {
       ...(request.agents ? { agents: request.agents } : {}),
     });
 
-    const child = spawn(this.options.command.file, [...this.options.command.prefixArgs, ...argv], {
+    const childEnv = buildClaudeEnv({
+      oauthToken: this.options.oauthToken,
+      configDir: this.options.configDir,
+      base: this.options.baseEnv ?? process.env,
+      passthrough: this.options.passthroughEnv ?? [],
+    });
+    const launch = request.container
+      ? dockerExec(request.container, request.cwd, childEnv, [this.options.command.file, ...this.options.command.prefixArgs, ...argv])
+      : { file: this.options.command.file, args: [...this.options.command.prefixArgs, ...argv], env: childEnv };
+    const child = spawn(launch.file, launch.args, {
       cwd: request.cwd,
-      env: buildClaudeEnv({
-        oauthToken: this.options.oauthToken,
-        configDir: this.options.configDir,
-        base: this.options.baseEnv ?? process.env,
-        passthrough: this.options.passthroughEnv ?? [],
-      }) as NodeJS.ProcessEnv,
+      env: launch.env as NodeJS.ProcessEnv,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });
@@ -68,6 +72,10 @@ export class ClaudeCliExecutor implements CliExecutor {
         if (child.pid) process.kill(-child.pid, sig);
       } catch {
         // already gone
+      }
+      // docker exec does not forward signals without a TTY; signal the process inside the container too.
+      if (request.container) {
+        spawn("docker", ["exec", request.container, "pkill", `-${sig.replace("SIG", "")}`, "-f", this.options.command.file], { stdio: "ignore" }).on("error", () => {});
       }
     };
     const stop = (reason: typeof stopReason) => {
@@ -153,4 +161,20 @@ function interpretResult(base: CliRunResult, line: StreamJsonLine, request: CliR
     return { ...result, outcome: "error_structured_output", structuredOutput: line.structured_output, validationIssues: parsed.error.issues };
   }
   return { ...result, outcome: "success", structuredOutput: line.structured_output, validated: parsed.data };
+}
+
+/** Host-specific variables that must not be forwarded into the container. */
+const HOST_ONLY = new Set(["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR"]);
+
+/**
+ * `docker exec` argv for running claude inside a run's container. Variables are forwarded by name
+ * (-e KEY) so their values never appear in the process list.
+ */
+export function dockerExec(container: string, cwd: string, childEnv: Record<string, string>, command: string[]) {
+  const forwarded = Object.keys(childEnv).filter((k) => !HOST_ONLY.has(k));
+  return {
+    file: "docker",
+    args: ["exec", "-i", "-w", cwd, ...forwarded.flatMap((k) => ["-e", k]), container, ...command],
+    env: { ...process.env, ...Object.fromEntries(forwarded.map((k) => [k, childEnv[k]!])) },
+  };
 }

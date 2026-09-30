@@ -6,11 +6,19 @@ import type { CheckResult, DeterministicCheck, RunState } from "@handoff/core";
 const execFileAsync = promisify(execFile);
 const TAIL_LINES = 200;
 
-export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined };
+export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined; container?: string | undefined };
 
-export async function shell(command: string, cwd: string, timeoutMs: number): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
+/** Runs a shell command in the worktree, or inside the run's container when one is given. */
+export async function shell(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  container?: string,
+): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
   return new Promise((resolve) => {
-    const child = spawn("sh", ["-c", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = container
+      ? spawn("docker", ["exec", "-w", cwd, container, "sh", "-c", command], { stdio: ["ignore", "pipe", "pipe"] })
+      : spawn("sh", ["-c", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
     const lines: string[] = [];
     const collect = (chunk: Buffer) => {
       lines.push(...chunk.toString("utf8").split("\n"));
@@ -64,7 +72,7 @@ export async function runCheck(check: DeterministicCheck, ctx: CheckContext): Pr
     case "command": {
       const expected = check.kind === "command" ? check.expectExitCode : 0;
       const timeout = check.kind === "tests_green" ? check.timeoutMs : 600_000;
-      const result = await shell(check.command, needWorkdir(check, ctx), timeout);
+      const result = await shell(check.command, needWorkdir(check, ctx), timeout, ctx.container);
       if (result.timedOut) return done(false, `\`${check.command}\` timed out after ${timeout} ms`, result.output);
       return done(result.exitCode === expected, `\`${check.command}\` exited ${result.exitCode}`, result.output);
     }
