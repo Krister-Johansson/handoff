@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { BrainIcon, ChevronRightIcon, WrenchIcon } from "lucide-react";
 import { TerminalOutput } from "@/components/terminal-output";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toActivity, toChat, type ActivityItem, type ActivityStats, type ChatEntry } from "@/lib/activity";
@@ -24,7 +25,35 @@ function Stats({ stats }: { stats: ActivityStats }) {
   return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
 }
 
-function Tool({ item }: { item: Extract<ActivityItem, { kind: "tool" }> }) {
+type Allow = (rule: string) => Promise<string>;
+
+/** Why the CLI refused a tool call, and a button per rule that would let the node use it from the next run on. */
+function Denied({ denial, allow }: { denial: NonNullable<Extract<ActivityItem, { kind: "tool" }>["denied"]>; allow: Allow }) {
+  const [saved, setSaved] = useState<string>();
+  return (
+    <div className="mb-2 flex flex-col gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+      <p>
+        <span className="font-medium">Needs approval, which a run cannot give: </span>
+        <span className="font-mono">{denial.reason}</span>
+      </p>
+      {saved ? (
+        <p className="text-muted-foreground">{saved}</p>
+      ) : denial.rules.length ? (
+        <div className="flex flex-wrap gap-1.5">
+          {denial.rules.map((rule) => (
+            <Button key={rule} type="button" size="xs" variant="outline" onClick={() => void allow(rule).then(setSaved, (e: Error) => setSaved(e.message))}>
+              {`Allow ${rule} for this node`}
+            </Button>
+          ))}
+        </div>
+      ) : (
+        <p className="text-muted-foreground">No tool rule allows this: Claude Code refuses the command&apos;s shape.</p>
+      )}
+    </div>
+  );
+}
+
+function Tool({ item, allow }: { item: Extract<ActivityItem, { kind: "tool" }>; allow: Allow }) {
   const result = item.result && item.result.length > RESULT_CHARS ? `${item.result.slice(0, RESULT_CHARS)}\n… (cut at ${RESULT_CHARS} characters)` : item.result;
   return (
     <details className="group/tool">
@@ -37,13 +66,20 @@ function Tool({ item }: { item: Extract<ActivityItem, { kind: "tool" }> }) {
             running
           </Badge>
         )}
-        {item.error && (
-          <Badge variant="destructive" className="ml-auto shrink-0">
-            error
+        {item.denied ? (
+          <Badge variant="outline" className="ml-auto shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-300">
+            denied
           </Badge>
+        ) : (
+          item.error && (
+            <Badge variant="destructive" className="ml-auto shrink-0">
+              error
+            </Badge>
+          )
         )}
       </summary>
-      <div className="mt-1 mb-2">{result ? <TerminalOutput text={result} label={`${item.name} result`} /> : <p className="text-xs text-muted-foreground">No output yet.</p>}</div>
+      {item.denied && <Denied denial={item.denied} allow={allow} />}
+      <div className="mt-1 mb-2">{item.denied ? null : result ? <TerminalOutput text={result} label={`${item.name} result`} /> : <p className="text-xs text-muted-foreground">No output yet.</p>}</div>
     </details>
   );
 }
@@ -63,7 +99,7 @@ function Fold({ icon, summary, badge, children }: { icon: ReactNode; summary: Re
   );
 }
 
-function Entry({ entry }: { entry: ChatEntry }) {
+function Entry({ entry, allow }: { entry: ChatEntry; allow: Allow }) {
   if (entry.kind === "message")
     return (
       <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-pre:my-1 prose-code:before:content-none prose-code:after:content-none">
@@ -76,7 +112,11 @@ function Entry({ entry }: { entry: ChatEntry }) {
         <p className="text-sm whitespace-pre-wrap text-muted-foreground italic">{entry.text}</p>
       </Fold>
     );
-  const badge = entry.running ? (
+  const badge = entry.denied ? (
+    <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-300">
+      {`${entry.denied} denied`}
+    </Badge>
+  ) : entry.running ? (
     <Badge variant="outline" className="shrink-0">
       running
     </Badge>
@@ -88,7 +128,7 @@ function Entry({ entry }: { entry: ChatEntry }) {
   return (
     <Fold icon={<WrenchIcon className="size-3.5 shrink-0" />} summary={entry.summary} badge={badge}>
       {entry.tools.map((tool) => (
-        <Tool key={tool.key} item={tool} />
+        <Tool key={tool.key} item={tool} allow={allow} />
       ))}
     </Fold>
   );
@@ -134,6 +174,17 @@ export function ExecutionActivity({ runId, executionId, live }: { runId: string;
     if (viewport && following.current) viewport.scrollTop = viewport.scrollHeight;
   }, [items.length]);
 
+  const allow: Allow = async (rule) => {
+    const response = await fetch(`/api/runs/${runId}/executions/${executionId}/allow-tool`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ rule }),
+    });
+    const body = (await response.json()) as { graph?: string; version?: number; error?: string };
+    if (!response.ok) throw new Error(body.error ?? "Could not allow it.");
+    return `Saved as ${body.graph} v${body.version}. Runs started from now on can use it.`;
+  };
+
   if (!stored) return <Skeleton className="h-24 w-full" />;
   return (
     <section aria-label="Activity" className="flex flex-col gap-2">
@@ -148,7 +199,7 @@ export function ExecutionActivity({ runId, executionId, live }: { runId: string;
           <ol ref={list} className="flex flex-col gap-2 p-2">
             {chat.map((entry) => (
               <li key={entry.key}>
-                <Entry entry={entry} />
+                <Entry entry={entry} allow={allow} />
               </li>
             ))}
           </ol>
