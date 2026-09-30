@@ -3,9 +3,13 @@ import { beforeEach, expect, test, vi } from "vitest";
 import type { DiffFile, DiffLine } from "@handoff/core";
 import { CodeReview } from "./code-review";
 
-const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn() }));
+const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn(), markViewedAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
-beforeEach(() => actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true }));
+beforeEach(() => {
+  actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true });
+  actions.markViewedAction.mockReset().mockResolvedValue({ ok: true });
+  window.localStorage.clear();
+});
 
 /** src/a.ts: twenty lines where line 10 was replaced. */
 function modified(): DiffFile {
@@ -35,6 +39,7 @@ const files: DiffFile[] = [
   modified(),
   {
     path: "src/b.ts",
+    blob: "b2",
     status: "added",
     additions: 2,
     deletions: 0,
@@ -66,6 +71,8 @@ const props = {
   from: "coder-1",
   markdown: "Added the scaffold.",
   files,
+  views: [],
+  earlier: [],
 };
 const fileA = () => screen.getByRole("region", { name: "src/a.ts" });
 
@@ -169,4 +176,69 @@ test("text typed in the comment box stays when the range is extended", () => {
   fireEvent.change(within(fileA()).getByLabelText("Comment on src/a.ts line 9"), { target: { value: "Half a thought" } });
   fireEvent.click(within(fileA()).getByRole("button", { name: "Select line 11" }), { shiftKey: true });
   expect(within(fileA()).getByLabelText("Comment on src/a.ts lines 9–11")).toHaveValue("Half a thought");
+});
+
+test("mark viewed saves the mark, collapses the file and counts down the files left", async () => {
+  render(<CodeReview {...props} />);
+  expect(screen.getByRole("button", { name: /File 1 of 3 · 3 left/ })).toBeInTheDocument();
+  fireEvent.click(within(fileA()).getByRole("button", { name: "Mark src/a.ts viewed" }));
+  expect(actions.markViewedAction).toHaveBeenCalledWith({ runId: "r1", path: "src/a.ts", blobSha: "b1", viewed: true });
+  expect(within(fileA()).queryByText("new 10")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /File 1 of 3 · 2 left/ })).toBeInTheDocument();
+});
+
+test("files keep their marks from earlier rounds unless they changed or were commented on", () => {
+  const views = [
+    { path: "src/a.ts", blobSha: "b1", viewedAt: new Date("2026-10-01T09:00:00Z") },
+    { path: "src/b.ts", blobSha: "old", viewedAt: new Date("2026-10-01T09:00:00Z") },
+    { path: "pnpm-lock.yaml", blobSha: "x", viewedAt: new Date("2026-10-01T09:00:00Z") },
+  ];
+  render(<CodeReview {...props} files={[...files.slice(0, 2), { ...files[2]!, blob: "x" }]} views={views} />);
+  expect(within(fileA()).getByRole("button", { name: "Mark src/a.ts not viewed" })).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByText("Changed since you viewed it")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /File 1 of 3 · 1 left/ })).toBeInTheDocument();
+});
+
+test("last round's comments show next to the code they were about, or as outdated when it is gone", () => {
+  const earlier = [
+    {
+      answer: "Round one.",
+      option: "changes",
+      answeredAt: new Date("2026-10-01T10:00:00Z"),
+      comments: [
+        { path: "src/a.ts", line: 11, quote: "line 11", body: "Is this needed?" },
+        { path: "src/a.ts", line: 10, quote: "gone 10", body: "This line was wrong." },
+      ],
+    },
+  ];
+  render(<CodeReview {...props} views={[{ path: "src/a.ts", blobSha: "b1", viewedAt: new Date("2026-10-01T09:00:00Z") }]} earlier={earlier} />);
+  // A file commented on last round is not viewed, even though it did not change.
+  expect(within(fileA()).getByText("You commented on it last round")).toBeInTheDocument();
+  expect(within(fileA()).getByText("Is this needed?")).toBeInTheDocument();
+  expect(within(fileA()).getByText("This line was wrong.").closest("[data-outdated]")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Last round (2)" }));
+  expect(screen.getByText("Round one.")).toBeInTheDocument();
+});
+
+test("draft comments and the overall comment survive leaving the page", () => {
+  const { unmount } = render(<CodeReview {...props} />);
+  fireEvent.click(within(fileA()).getByRole("button", { name: "Select line 9" }));
+  fireEvent.change(within(fileA()).getByLabelText("Comment on src/a.ts line 9"), { target: { value: "Keep me." } });
+  fireEvent.click(within(fileA()).getByRole("button", { name: "Add comment" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  fireEvent.change(screen.getByLabelText("Overall comment"), { target: { value: "Half done." } });
+  unmount();
+  render(<CodeReview {...props} />);
+  expect(within(fileA()).getByText("Keep me.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  expect(screen.getByLabelText("Overall comment")).toHaveValue("Half done.");
+});
+
+test("split view puts the old lines on the left and the new lines on the right", () => {
+  render(<CodeReview {...props} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Split" }));
+  const row = within(fileA()).getByText("old 10").closest("tr")!;
+  expect(within(row).getByText("new 10")).toBeInTheDocument();
+  expect(within(row).getByRole("button", { name: "Select old line 10" })).toBeInTheDocument();
+  expect(within(row).getByRole("button", { name: "Select line 10" })).toBeInTheDocument();
 });

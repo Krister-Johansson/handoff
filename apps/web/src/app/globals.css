@@ -132,3 +132,11 @@
 ::highlight(review-comment) {
   background-color: color-mix(in oklab, var(--color-amber-300) 55%, transparent);
 }
+
+/* Code review highlighting: Shiki gives each token its light and dark colour as variables. */
+.shiki-code span[style] {
+  color: var(--shiki-light);
+}
+.dark .shiki-code span[style] {
+  color: var(--shiki-dark);
+}

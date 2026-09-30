@@ -7,7 +7,9 @@ import { CodeReview } from "@/components/review/code-review";
 import { PlanReview } from "@/components/review/plan-review";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
+import type { LineTokens } from "@/lib/highlight-types";
 import type { LineComment } from "@/lib/line-comments";
+import { highlightFiles } from "@/server/highlight";
 import { getReview } from "@/server/review";
 
 export const dynamic = "force-dynamic";
@@ -40,13 +42,18 @@ const lineComments = (answered: Answered): LineComment[] =>
     c.path && c.line !== undefined ? [{ path: c.path, side: c.side ?? "new", line: c.line, ...(c.endLine !== undefined ? { endLine: c.endLine } : {}), quote: c.quote ?? "", body: c.body }] : [],
   );
 
-function ReviewBody({ review, runId }: { review: Review; runId: string }) {
+function ReviewBody({ review, runId, tokens }: { review: Review; runId: string; tokens: Record<string, LineTokens> | undefined }) {
   const { review: shown, answered } = review;
   if (shown.kind === "code" && shown.files) {
     return (
       <div className="flex flex-col gap-4">
         {answered && <Verdict answered={answered} />}
-        <CodeReview questionId={review.id} runId={runId} from={shown.backTo ?? shown.from} markdown={shown.markdown} files={shown.files} {...(answered ? { answered: lineComments(answered) } : {})} />
+        <CodeReview questionId={review.id} runId={runId} from={shown.backTo ?? shown.from} markdown={shown.markdown} files={shown.files}
+          views={review.views}
+          earlier={review.earlier}
+          tokens={tokens}
+          {...(answered ? { answered: lineComments(answered) } : {})}
+        />
       </div>
     );
   }
@@ -81,6 +88,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ runId: 
   const { runId, questionId } = await params;
   const review = await getReview(getDb(), runId, questionId);
   if (!review) notFound();
+  const tokens = review.review.kind === "code" && review.review.files ? await highlightFiles(review.review.files) : undefined;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div className="flex flex-col gap-1">
@@ -97,7 +105,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ runId: 
               : `Select text to comment on it. Submit your review to send your comments back to ${review.review.backTo ?? review.review.from} or let the run go on.`}
         </p>
       </div>
-      <ReviewBody review={review} runId={runId} />
+      <ReviewBody review={review} runId={runId} tokens={tokens} />
     </main>
   );
 }
