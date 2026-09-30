@@ -52,3 +52,16 @@ test("the bell lists what needs attention and the tab title shows how many", asy
   expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 });
 
+
+test("a finished run is notified and listed under Done, but does not count as needing attention", async () => {
+  localStorage.setItem("handoff.notify", JSON.stringify({ desktop: true, sound: true }));
+  const finished = { id: "finished:r3", kind: "finished" as const, title: "sandbox: run finished", body: "Add a truncate helper", href: "/runs/r3" };
+  const load = vi.fn().mockResolvedValueOnce([a]).mockResolvedValue([a, finished]);
+  render(<AttentionNotifier load={load} intervalMs={20} />);
+  await waitFor(() => expect(FakeNotification.shown).toEqual([{ title: finished.title, options: { body: finished.body, tag: finished.id } }]));
+  const bell = await screen.findByRole("button", { name: "1 thing needs your attention" });
+  expect(document.title).toBe("(1) handoff");
+  fireEvent.click(bell);
+  expect(await screen.findByText("Done")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /run finished/ })).toHaveAttribute("href", "/runs/r3");
+});

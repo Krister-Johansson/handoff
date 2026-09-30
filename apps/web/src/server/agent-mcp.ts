@@ -210,7 +210,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
 
   server.registerTool(
     "list_attention",
-    { description: "Everything waiting on a person: questions from Human gates, failed runs, pull requests waiting for review.", annotations: read },
+    { description: "Everything waiting on a person (questions from Human gates, failed runs, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).", annotations: read },
     () => tool(async () => (await listAttention(db)).map(({ href, ...item }) => ({ ...item, url: `${baseUrl}${href}` }))),
   );
 

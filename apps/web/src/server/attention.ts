@@ -1,4 +1,4 @@
-import { and, eq, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
+import { and, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
 import type { AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";
 
@@ -18,12 +18,24 @@ async function waitingReviews(db: Db) {
   return rows.filter((r) => r.pr && r.pr.ci !== "pending" && r.pr.number !== undefined);
 }
 
+/** Runs that reached a Finish node with notify on in the last day. */
+async function finishedRuns(db: Db) {
+  return db
+    .select({ runId: runs.id, task: runs.task, projectName: projects.name })
+    .from(events)
+    .innerJoin(runs, eq(runs.id, events.runId))
+    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .where(and(eq(events.type, "run.finish"), sql`(${events.payload}->>'notify')::boolean`, sql`${events.createdAt} > now() - interval '1 day'`))
+    .orderBy(desc(events.createdAt));
+}
+
 /**
  * Everything that needs a person right now, one item per thing with a stable id, so the dashboard
- * can notify once per new item: open questions, failed runs awaiting repair, PRs waiting for review.
+ * can notify once per new item: open questions, failed runs awaiting repair, PRs waiting for review,
+ * and runs that reached a Finish node with notify on, which need no action.
  */
 export async function listAttention(db: Db): Promise<AttentionItem[]> {
-  const [inbox, reviews] = await Promise.all([listInbox(db), waitingReviews(db)]);
+  const [inbox, reviews, finished] = await Promise.all([listInbox(db), waitingReviews(db), finishedRuns(db)]);
   return [
     ...inbox.questions.map((q): AttentionItem => {
       const review = (q.context as { review?: { from?: string; kind?: string } }).review;
@@ -39,5 +51,6 @@ export async function listAttention(db: Db): Promise<AttentionItem[]> {
       body: r.task,
       href: `/runs/${r.runId}`,
     })),
+    ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: f.task, href: `/runs/${f.runId}` })),
   ];
 }
