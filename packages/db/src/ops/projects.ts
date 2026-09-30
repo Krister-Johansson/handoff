@@ -1,6 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../client.ts";
-import { edgeTraversals, events, graphs, graphVersions, nodeExecutions, projects, questions, runs } from "../schema/index.ts";
+import { edgeTraversals, events, graphs, graphVersions, nodeExecutions, projects, questions, runs, type ProjectLibrary } from "../schema/index.ts";
 
 /** Deletes a project and everything that belongs to it. Used by pnpm demo --reset. */
 export async function deleteProject(db: Db, projectId: string) {
@@ -21,4 +21,10 @@ export async function deleteProject(db: Db, projectId: string) {
     }
     await tx.delete(projects).where(eq(projects.id, projectId));
   });
+}
+
+/** Sets the library entries every CLI node in the project's runs gets. */
+export async function setProjectLibrary(db: Db, projectId: string, library: ProjectLibrary) {
+  const [row] = await db.update(projects).set({ library }).where(eq(projects.id, projectId)).returning();
+  return row;
 }

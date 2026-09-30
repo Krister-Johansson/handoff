@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
-import { eq, projects } from "@handoff/db";
+import { LibrarySelectionSchema } from "@handoff/core";
+import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub } from "@/lib/github";
 import { deleteProject, updateProject } from "@/server/project-admin";
@@ -157,6 +158,17 @@ export async function deleteGraphAction(_: ActionState, form: FormData): Promise
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true };
+}
+
+/** Sets the library entries every CLI node in the project's runs gets. Every name must be in the library. */
+export async function saveProjectLibraryAction(projectId: string, selection: unknown): Promise<{ ok: true } | { error: string }> {
+  const parsed = LibrarySelectionSchema.safeParse(selection);
+  if (!parsed.success) return { error: "That is not a library selection." };
+  const { missing } = await getLibraryByNames(getDb(), parsed.data);
+  if (missing.length) return { error: `Not in the library: ${missing.join(", ")}` };
+  if (!(await setProjectLibrary(getDb(), projectId, parsed.data))) return { error: "The project no longer exists." };
   revalidatePath(`/projects/${projectId}`);
   return { ok: true };
 }
