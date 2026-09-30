@@ -10,3 +10,9 @@ export async function listExecutionCliEvents(db: Db, runId: string, executionId:
     .limit(limit);
   return rows.reverse().map((r) => ({ ...r, seq: Number(r.seq), createdAt: r.createdAt.toISOString() }));
 }
+
+/** The run's last event number, so a page that opens now follows the stream from there. */
+export async function latestSeq(db: Db, runId: string): Promise<number> {
+  const [row] = await db.select({ seq: sql<string | null>`max(${events.seq})` }).from(events).where(eq(events.runId, runId));
+  return Number(row?.seq ?? 0);
+}
