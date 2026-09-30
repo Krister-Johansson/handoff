@@ -294,6 +294,9 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         ...(library ? { library } : {}),
         signal: controller.signal,
         emit: (type, payload) => void buffer.push({ type, payload, nodeExecutionId: row.id }),
+        recordRepoId: async (repoId) => {
+          await db.update(projects).set({ repoId }).where(eq(projects.id, project.id));
+        },
         setChildPid: async (pid) => {
           await db.update(nodeExecutions).set({ childPid: pid, childHost: hostname() }).where(eq(nodeExecutions.id, row.id));
         },

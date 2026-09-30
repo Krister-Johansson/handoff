@@ -24,7 +24,7 @@ function graphFile(doc: unknown) {
 
 test("project add stores the repository", async () => {
   const { out, lines } = capture();
-  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample", "--branch", "trunk"], { db, out });
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample", "--branch", "trunk"], { db, out, github: null });
   const [project] = await db.select().from(projects);
   expect(project).toMatchObject({ name: "scratch", repoOwner: "octo", repoName: "sample", defaultBranch: "trunk" });
   expect(lines.join("\n")).toContain("scratch");
@@ -32,28 +32,28 @@ test("project add stores the repository", async () => {
 
 test("graph import stores a new version each time", async () => {
   const { out } = capture();
-  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out });
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
   const file = graphFile(linear);
-  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", file], { db, out });
-  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", file], { db, out });
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", file], { db, out, github: null });
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", file], { db, out, github: null });
   expect((await db.select().from(graphVersions)).map((v) => v.version).sort()).toEqual([1, 2]);
 });
 
 test("graph import rejects a graph that does not compile and lists the errors", async () => {
   const { out } = capture();
-  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out });
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
   const broken = structuredClone(linear);
   broken.attributes.startNode = "ghost";
-  await expect(runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(broken)], { db, out })).rejects.toThrow(
+  await expect(runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(broken)], { db, out, github: null })).rejects.toThrow(
     /missing_start_node/,
   );
 });
 
 test("handoff run inserts a queued run and prints its id", async () => {
   const { out, lines } = capture();
-  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out });
-  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out });
-  await runCli(["run", "--project", "scratch", "--graph", "linear", "--task", "Add a CHANGELOG.md"], { db, out });
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
+  await runCli(["run", "--project", "scratch", "--graph", "linear", "--task", "Add a CHANGELOG.md"], { db, out, github: null });
   const [run] = await db.select().from(runs);
   expect(run).toMatchObject({ status: "queued", task: "Add a CHANGELOG.md" });
   expect(lines.some((l) => l.includes(run!.id))).toBe(true);
@@ -62,13 +62,13 @@ test("handoff run inserts a queued run and prints its id", async () => {
 
 test("unknown commands print usage and fail", async () => {
   const { out } = capture();
-  await expect(runCli(["frobnicate"], { db, out })).rejects.toThrow(/usage/i);
+  await expect(runCli(["frobnicate"], { db, out, github: null })).rejects.toThrow(/usage/i);
 });
 
 async function queuedRun(out: (l: string) => void) {
-  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out });
-  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out });
-  await runCli(["run", "--project", "scratch", "--graph", "linear", "--task", "t"], { db, out });
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
+  await runCli(["run", "--project", "scratch", "--graph", "linear", "--task", "t"], { db, out, github: null });
   const [run] = await db.select().from(runs);
   return run!;
 }
@@ -76,7 +76,7 @@ async function queuedRun(out: (l: string) => void) {
 test("handoff run cancel marks the run cancelled", async () => {
   const { out, lines } = capture();
   const run = await queuedRun(out);
-  await runCli(["run", "cancel", run.id], { db, out });
+  await runCli(["run", "cancel", run.id], { db, out, github: null });
   const [row] = await db.select().from(runs).where(eq(runs.id, run.id));
   expect(row?.status).toBe("cancelled");
   expect(lines.at(-1)).toContain("cancelled");
@@ -85,7 +85,7 @@ test("handoff run cancel marks the run cancelled", async () => {
 test("handoff run repair requires a failed node", async () => {
   const { out } = capture();
   const run = await queuedRun(out);
-  await expect(runCli(["run", "repair", run.id, "--node", "planner"], { db, out })).rejects.toThrow(/no failed execution/);
+  await expect(runCli(["run", "repair", run.id, "--node", "planner"], { db, out, github: null })).rejects.toThrow(/no failed execution/);
 });
 
 test("handoff answer records the answer for an open question", async () => {
@@ -94,7 +94,7 @@ test("handoff answer records the answer for an open question", async () => {
   const [exec] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, run.id));
   const { questions } = await import("@handoff/db");
   const [q] = await db.insert(questions).values({ runId: run.id, nodeExecutionId: exec!.id, question: "ISO?", options: ["ISO", "US"] }).returning();
-  await runCli(["answer", q!.id, "Use ISO", "--option", "ISO"], { db, out });
+  await runCli(["answer", q!.id, "Use ISO", "--option", "ISO"], { db, out, github: null });
   const [after] = await db.select().from(questions).where(eq(questions.id, q!.id));
   expect(after).toMatchObject({ answer: "Use ISO", option: "ISO", answeredBy: "cli" });
   expect(lines.at(-1)).toContain("answered");
@@ -107,7 +107,7 @@ test("handoff library import-skill reads SKILL.md frontmatter and supporting fil
   writeFileSync(join(dir, "SKILL.md"), "---\nname: ci-triage\ndescription: Use when CI failed.\n---\n\n# CI triage\n\nStart from the failing test.\n");
   mkdirSync(join(dir, "refs"));
   writeFileSync(join(dir, "refs", "logs.md"), "How to read logs.");
-  await runCli(["library", "import-skill", dir], { db, out });
+  await runCli(["library", "import-skill", dir], { db, out, github: null });
   const { librarySkills } = await import("@handoff/db");
   const [skill] = await db.select().from(librarySkills);
   expect(skill).toMatchObject({ name: "ci-triage", description: "Use when CI failed.", files: [{ path: "refs/logs.md", content: "How to read logs." }] });

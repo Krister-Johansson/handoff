@@ -4,9 +4,11 @@ import { parseArgs } from "node:util";
 import { compileGraph } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibrary, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
+import { gitHubFromEnv, type GitHubPort } from "@handoff/github";
 import { gcClaudeSessions } from "./gc.ts";
 
-export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string };
+/** github: undefined reads credentials from the environment; null skips GitHub (tests). */
+export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; github?: GitHubPort | null };
 
 const USAGE = `usage:
   handoff project add --name <name> --repo <owner/name> [--branch <default>] [--clone <path>]
@@ -62,12 +64,16 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     const { values } = parseArgs({ args: rest, options: { name: { type: "string" }, repo: { type: "string" }, branch: { type: "string" }, clone: { type: "string" } } });
     const [owner, repoName] = need(values, "repo").split("/");
     if (!owner || !repoName) throw new Error("--repo must look like owner/name");
+    const github = io.github === undefined ? gitHubFromEnv() : io.github ?? undefined;
+    const repoId = github ? await github.getRepoId({ owner, name: repoName }).catch(() => {
+      throw new Error(`GitHub cannot find ${owner}/${repoName} with the configured credentials`);
+    }) : null;
     const [project] = await db
       .insert(projects)
-      .values({ name: need(values, "name"), repoOwner: owner, repoName, defaultBranch: values.branch ?? "main", localClonePath: values.clone ?? null })
+      .values({ name: need(values, "name"), repoOwner: owner, repoName, repoId, defaultBranch: values.branch ?? "main", localClonePath: values.clone ?? null })
       .onConflictDoUpdate({
         target: projects.name,
-        set: { repoOwner: owner, repoName, defaultBranch: values.branch ?? "main", localClonePath: values.clone ?? null },
+        set: { repoOwner: owner, repoName, repoId, defaultBranch: values.branch ?? "main", localClonePath: values.clone ?? null },
       })
       .returning();
     out(`project ${project!.name}: ${owner}/${repoName} (default branch ${project!.defaultBranch})`);

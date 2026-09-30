@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { eq, graphVersions, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { FakeGitHub } from "@handoff/github/testing";
 import { createGraphFromTemplate, createProject, getGraphForEdit, getProjectDetail, listProjects, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 
 const db = createTestDb();
@@ -14,6 +15,22 @@ describe("projects and graphs", () => {
     const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
     expect((await listProjects(db)).map((p) => p.name)).toEqual(["sandbox"]);
     expect(project).toMatchObject({ repoOwner: "octo", repoName: "sample" });
+  });
+
+  test("createProject stores the GitHub repository id when a GitHub client is available", async () => {
+    const github = new FakeGitHub();
+    github.repoId = 777;
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" }, github);
+    expect(project.repoId).toBe(777);
+  });
+
+  test("createProject refuses a repository GitHub cannot find", async () => {
+    const github = new FakeGitHub();
+    github.getRepoId = async () => {
+      throw new Error("Not Found");
+    };
+    await expect(createProject(db, { name: "sandbox", repo: "octo/missing", defaultBranch: "main" }, github)).rejects.toThrow(/octo\/missing/);
+    expect(await listProjects(db)).toEqual([]);
   });
 
   test("a template creates version 1 of a graph", async () => {

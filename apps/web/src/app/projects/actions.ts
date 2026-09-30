@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
+import { getGitHub } from "@/lib/github";
 import { createGraphFromTemplate, createProject, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
 export type ActionState = { ok?: boolean; error?: string; values?: Record<string, string> };
@@ -13,7 +14,7 @@ export async function createProjectAction(_: ActionState, form: FormData): Promi
   const values = { name: field(form, "name"), repo: field(form, "repo"), defaultBranch: field(form, "defaultBranch") || "main" };
   let id: string;
   try {
-    id = (await createProject(getDb(), values)).id;
+    id = (await createProject(getDb(), values, getGitHub())).id;
   } catch (error) {
     const message = (error as Error).message;
     return { ok: false, error: message.includes("duplicate") ? "A project with that name exists." : message, values };
