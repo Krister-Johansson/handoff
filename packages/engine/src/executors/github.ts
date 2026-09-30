@@ -97,7 +97,15 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
       const logs = await Promise.all(
         failedJobs.map(async (c) => ({ jobId: c.checkRunId!, log: (await deps.github.getJobLogTail(repo, c.checkRunId!)) ?? "" })),
       );
-      const feedback = toFeedback(snapshot, logs);
+      let feedback = toFeedback(snapshot, logs);
+      // A repository without CI never gets a check; after a while, stop waiting for one and treat CI as passed.
+      const sincePush = Date.now() - (ctx.execution.startedAt ?? new Date()).getTime();
+      const noChecksMs = (typeof ctx.node.config.noChecksAfterMinutes === "number" ? ctx.node.config.noChecksAfterMinutes : 10) * 60_000;
+      const noChecks = requireChecks && snapshot.checks === null && snapshot.state === "open";
+      if (noChecks && sincePush >= noChecksMs) {
+        ctx.emit("github.no_checks", { number, afterMinutes: noChecksMs / 60_000 });
+        feedback = { ...feedback, ci: { ...feedback.ci, status: "success" } };
+      }
       ctx.emit("github.pr", { number, url: snapshot.url, headSha: snapshot.headSha, ci: feedback.ci.status, review: feedback.review.decision });
 
       const checksPending = requireChecks && feedback.ci.status === "pending" && snapshot.state === "open";
@@ -107,14 +115,15 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
       // External reviewers (review bots such as CodeRabbit or Copilot, or people) on the head commit.
       const settings = reviewSettings(ctx.node.config);
       const handled = new Set(Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
-      const waitingForMs = Date.now() - (ctx.execution.startedAt ?? new Date()).getTime();
+      const waitingForMs = sincePush;
       const external = externalReview(snapshot, settings, handled, waitingForMs);
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
 
       if (checksPending || awaitingApproval || awaitingReviewers) {
-        const reconcile = Date.now() + (deps.reconcileMs ?? 10 * 60_000);
+        // Also wake when a PR without checks reaches its limit, so a repository without CI does not wait for the reconcile.
+        const reconcile = Math.min(Date.now() + (deps.reconcileMs ?? 10 * 60_000), noChecks ? Date.now() + Math.max(0, noChecksMs - sincePush) + 1_000 : Infinity);
         // Wake at the review time limit even without a webhook, so a reviewer who never comes cannot hold the run.
         const limit = awaitingReviewers ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
         return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit)) } };

@@ -122,3 +122,11 @@ test("a pull request node waits for review bots or people, and sends their comme
   fireEvent.change(screen.getByLabelText("Stop waiting after (minutes)"), { target: { value: "45" } });
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewTimeoutMinutes: 45 } } });
 });
+
+test("a pull request node says how long to wait for CI to start on a repository that may have none", () => {
+  const dispatch = vi.fn();
+  const pr: FlowGraph = { ...graph, nodes: [...graph.nodes, { id: "pr", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "pr", label: "Pull request", isStart: false, config: {} } }] };
+  render(<Inspector graph={pr} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Go on if no check starts within (minutes)"), { target: { value: "5" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { noChecksAfterMinutes: 5 } } });
+});
