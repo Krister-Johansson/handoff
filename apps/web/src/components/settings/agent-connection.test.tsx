@@ -29,7 +29,7 @@ test("turning them on shows the token and how to connect Claude Code", async () 
   expect(screen.getByText("/plugin marketplace add Krister-Johansson/handoff")).toBeInTheDocument();
   expect(screen.getByText("/plugin marketplace add /Users/me/handoff")).toBeInTheDocument();
   expect(screen.getByText("/plugin install handoff@handoff")).toBeInTheDocument();
-  expect(screen.getByText("claude --channels plugin:handoff@handoff")).toBeInTheDocument();
+  expect(screen.getByText("claude --dangerously-load-development-channels plugin:handoff@handoff")).toBeInTheDocument();
   expect(screen.getByText('claude mcp add --transport http handoff http://localhost:3000/api/mcp --header "Authorization: Bearer tok-1"')).toBeInTheDocument();
 });
 

@@ -40,8 +40,11 @@ function Instructions({ origin, checkout, token }: { origin: string; checkout: s
         <CopyLine label="marketplace command" text="/plugin marketplace add Krister-Johansson/handoff" />
         <CopyLine label="local marketplace command" text={`/plugin marketplace add ${checkout}`} />
         <CopyLine label="install command" text="/plugin install handoff@handoff" />
-        <p className="text-muted-foreground">To hear about questions, failed runs and reviews while you work, start Claude Code with channels:</p>
-        <CopyLine label="channels command" text="claude --channels plugin:handoff@handoff" />
+        <p className="text-muted-foreground">
+          To hear about questions, failed runs and reviews while you work, start Claude Code with handoff&apos;s channel. Channels are a research preview, and
+          plugins outside Anthropic&apos;s list load only with the development flag, which asks you to confirm when Claude Code starts:
+        </p>
+        <CopyLine label="channels command" text="claude --dangerously-load-development-channels plugin:handoff@handoff" />
       </section>
       <section className="flex flex-col gap-2">
         <h3 className="font-medium">Other ways to connect</h3>

@@ -1,0 +1,32 @@
+{
+  "name": "handoff",
+  "version": "0.1.0",
+  "description": "Drive handoff from Claude Code: see the backlog, start runs for issues, follow them and hear when a run needs you.",
+  "author": { "name": "Krister Johansson" },
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "handoff dashboard",
+      "description": "Where the handoff dashboard runs",
+      "default": "http://localhost:3000"
+    },
+    "token": {
+      "type": "string",
+      "title": "Connection token",
+      "description": "From handoff's Settings, Connect Claude Code",
+      "sensitive": true,
+      "required": true
+    }
+  },
+  "mcpServers": {
+    "handoff": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/handoff-mcp.mjs"],
+      "env": {
+        "HANDOFF_URL": "${user_config.url}",
+        "HANDOFF_TOKEN": "${user_config.token}"
+      }
+    }
+  },
+  "channels": [{ "server": "handoff" }]
+}
