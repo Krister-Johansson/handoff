@@ -100,3 +100,8 @@ test("comments on lines of a file show the file and the line range", () => {
   expect(md).toContain("- src/b.ts:7: Fine.");
   expect(md).toContain('- src/a.ts:3-5 - person on "const a = 1;": Rename.');
 });
+
+test("the constraints tell agents to stop what they start and to keep off the dashboard's port", () => {
+  const md = renderContextPacket(packet);
+  expect(md).toContain("- If you start a server or a watcher, stop it before you finish. Do not use port 3000: the handoff dashboard runs there.");
+});

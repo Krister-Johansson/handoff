@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
+import { trackDescendants } from "@handoff/cli-adapter";
 import { passEnvProblem, pickEnv, redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
 
 const execFileAsync = promisify(execFile);
@@ -23,13 +24,18 @@ export function commandEnv(base: Record<string, string | undefined> = process.en
   return env;
 }
 
-/** Runs a shell command in the worktree, or inside the run's container when one is given. */
+/**
+ * Runs a shell command in the worktree, or inside the run's container when one is given. The command
+ * gets its own process group, so a timeout or an abort stops everything it started, and whatever it
+ * left running in the background is stopped when it ends.
+ */
 export async function shell(
   command: string,
   cwd: string,
   timeoutMs: number,
   container?: string,
   passEnv: readonly string[] = [],
+  signal?: AbortSignal,
 ): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
   const problem = passEnvProblem(passEnv);
   if (problem) throw new Error(problem);
@@ -40,8 +46,17 @@ export async function shell(
       ? spawn("docker", ["exec", "-e", "CI=true", ...Object.keys(passed).flatMap((name) => ["-e", name]), "-w", cwd, container, "sh", "-c", command], {
           env: { ...process.env, ...passed },
           stdio: ["ignore", "pipe", "pipe"],
+          detached: true,
         })
-      : spawn("sh", ["-c", command], { cwd, env: { ...commandEnv(), ...passed }, stdio: ["ignore", "pipe", "pipe"] });
+      : spawn("sh", ["-c", command], { cwd, env: { ...commandEnv(), ...passed }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    const tracker = child.pid && !container ? trackDescendants(child.pid, 500) : undefined;
+    const killGroup = () => {
+      try {
+        if (child.pid) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+    };
     const lines: string[] = [];
     // One partial-line buffer per stream, so a chunk boundary never splits or blanks a line.
     const partial = { stdout: "", stderr: "" };
@@ -56,12 +71,24 @@ export async function shell(
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killGroup();
     }, timeoutMs);
-    child.on("close", (code) => {
+    const onAbort = () => killGroup();
+    if (signal?.aborted) onAbort();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    // "exit", not "close": a background process can hold the pipes open long after the shell is gone.
+    child.on("exit", (code) => {
       clearTimeout(timer);
-      for (const rest of [partial.stdout, partial.stderr]) if (rest) lines.push(rest);
-      resolve({ exitCode: code, output: redactSecrets(lines.slice(-TAIL_LINES).join("\n").trim()), timedOut });
+      signal?.removeEventListener("abort", onAbort);
+      const closed = new Promise((r) => child.once("close", r));
+      void (tracker?.stop(500) ?? Promise.resolve())
+        .then(() => killGroup())
+        // With nothing left holding them, the pipes close and the last output arrives.
+        .then(() => Promise.race([closed, new Promise((r) => setTimeout(r, 1_000))]))
+        .then(() => {
+          for (const rest of [partial.stdout, partial.stderr]) if (rest) lines.push(rest);
+          resolve({ exitCode: code, output: redactSecrets(lines.slice(-TAIL_LINES).join("\n").trim()), timedOut });
+        });
     });
   });
 }

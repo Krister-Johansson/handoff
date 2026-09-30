@@ -15,6 +15,8 @@ export type FakeScenario = {
   hangAfterLine?: number;
   ignoreSigint?: boolean;
   chunkSplit?: boolean;
+  /** Processes the fake starts and leaves running; `detached` puts one in its own session. */
+  background?: { pidFile: string; detached?: boolean }[];
 };
 
 export type FakeInvocation = { argv: string[]; cwd: string; env: Record<string, string> };

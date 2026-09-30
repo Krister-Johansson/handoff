@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { z } from "zod";
 import { toCliEvent } from "../events.ts";
+import { trackDescendants } from "../processes.ts";
 import { parseStreamJson, type StreamJsonLine } from "../stream-json/parser.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult } from "../types.ts";
 import { ancestorInstructionExcludes, buildClaudeArgv } from "./argv.ts";
@@ -18,6 +19,8 @@ export type ClaudeCliExecutorOptions = {
   passthroughEnv?: string[];
   /** Delay between SIGINT, SIGTERM and SIGKILL when stopping the child. */
   killGraceMs?: number;
+  /** How often to look for processes claude starts, which are stopped when it exits. */
+  trackIntervalMs?: number;
 };
 
 const STDERR_TAIL_LINES = 50;
@@ -63,6 +66,8 @@ export class ClaudeCliExecutor implements CliExecutor {
     });
 
     if (child.pid) await onSpawn?.(child.pid);
+    // In a container the processes live there; on the host, watch what claude starts so nothing outlives it.
+    const tracker = child.pid && !request.container ? trackDescendants(child.pid, this.options.trackIntervalMs) : undefined;
     const stderrTail: string[] = [];
     createInterface({ input: child.stderr }).on("line", (line) => {
       stderrTail.push(line);
@@ -128,6 +133,7 @@ export class ClaudeCliExecutor implements CliExecutor {
     signal.removeEventListener("abort", onAbort);
     for (const t of timers) clearTimeout(t);
     if (idleTimer) clearTimeout(idleTimer);
+    await tracker?.stop(this.options.killGraceMs);
 
     const base: CliRunResult = {
       outcome: "error",

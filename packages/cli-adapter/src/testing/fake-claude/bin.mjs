@@ -4,7 +4,7 @@
 // FAKE_CLAUDE_RECORD: path; one JSON line { argv, cwd, stdin, env } is appended per invocation.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 const argv = process.argv.slice(2);
 if (argv[0] === "--version") {
@@ -49,6 +49,13 @@ for (const edit of scenario.edits ?? []) {
 if (scenario.gitCommit) {
   execFileSync("git", ["add", "-A"], { stdio: "ignore" });
   execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@example.com", "commit", "-qm", scenario.gitCommit], { stdio: "ignore" });
+}
+
+// A server the agent started and left running, like `pnpm dev &`; its pid goes to a file for the test.
+for (const bg of scenario.background ?? []) {
+  const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "fake-dev-server"], { detached: bg.detached ?? false, stdio: "ignore" });
+  child.unref();
+  appendFileSync(bg.pidFile, `${child.pid}\n`);
 }
 
 for (const line of scenario.stderrLines ?? []) process.stderr.write(line + "\n");
