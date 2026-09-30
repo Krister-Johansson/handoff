@@ -17,6 +17,8 @@ export const projects = pgTable("projects", {
   isDemo: boolean("is_demo").notNull().default(false),
   /** Library entries by name that every CLI node of every run in this project gets. Names only, never secrets. */
   library: jsonb("library").$type<ProjectLibrary>().notNull().default({ skills: [], mcp: [], agents: [], groups: [] }),
+  /** A command run once in each run's worktree before its first step there, such as installing dependencies. */
+  setupCommand: text("setup_command"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

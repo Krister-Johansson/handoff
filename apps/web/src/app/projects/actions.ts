@@ -42,7 +42,7 @@ export async function listReposAction(): Promise<{ repos: AvailableRepo[] } | { 
 
 export async function updateProjectAction(_: ActionState, form: FormData): Promise<ActionState> {
   const projectId = field(form, "projectId");
-  const values = { name: field(form, "name"), defaultBranch: field(form, "defaultBranch") };
+  const values = { name: field(form, "name"), defaultBranch: field(form, "defaultBranch"), setupCommand: field(form, "setupCommand") };
   try {
     await updateProject(getDb(), projectId, values);
   } catch (error) {
