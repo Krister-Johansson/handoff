@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseOwnerPage, parseRepoPage } from "./skills-sh-pages";
+import { parseOwnerPage, parseRepoPage, parseSkillPage } from "./skills-sh-pages";
 
 // Shaped like skills.sh's server-rendered pages: navigation, then the listing as links and text.
 const nav = `<nav><a href="/">Skills</a><a href="/packs">Packs</a><a href="/audits">Audits</a></nav>`;
@@ -36,4 +36,37 @@ test("a repository page lists its skills with their installs", () => {
 test("a page without the expected listing is an error, not an empty list", () => {
   expect(() => parseRepoPage(`<html><body>${nav}<main>Not found</main></body></html>`, "a/b")).toThrow(/no skills/);
   expect(() => parseOwnerPage(`<html><body>${nav}</body></html>`, "nobody")).toThrow(/no repositories/);
+});
+
+const skillHtml = `<html><body>${nav}<main>
+<h1>tdd</h1><div>Installation</div><code>npx skills add https://github.com/mattpocock/skills --skill tdd</code>
+<h2>Summary</h2>
+<p>Test-driven development with vertical slices.</p>
+<ul><li>Tests verify behavior through public APIs</li><li>One test, one implementation, repeat</li></ul>
+<h2>SKILL.md</h2><article><h1>Test-Driven Development</h1><p>Body of the skill.</p></article>
+<aside><div>Installs</div><div>990.5K</div><div>Repository</div><div>mattpocock/skills</div><div>GitHub Stars</div><div>272.0K</div>
+<div>First Seen</div><div>Feb 10, 2026</div><div>Security Audits</div>
+<a href="/mattpocock/skills/tdd/security/agent-trust-hub"><span>Gen Agent Trust Hub</span><span>Pass</span></a>
+<a href="/mattpocock/skills/tdd/security/socket"><span>Socket</span><span>Pass</span></a>
+<a href="/mattpocock/skills/tdd/security/snyk"><span>Snyk</span><span>Warn</span></a></aside>
+<div>Browse</div><div>All skills</div></main></body></html>`;
+
+test("a skill page gives the summary, installs, repository, stars, first seen and security audits", () => {
+  expect(parseSkillPage(skillHtml)).toEqual({
+    summary: "Test-driven development with vertical slices.",
+    points: ["Tests verify behavior through public APIs", "One test, one implementation, repeat"],
+    installs: 990_500,
+    repository: "mattpocock/skills",
+    githubStars: 272_000,
+    firstSeen: "Feb 10, 2026",
+    audits: [
+      { name: "Gen Agent Trust Hub", result: "Pass" },
+      { name: "Socket", result: "Pass" },
+      { name: "Snyk", result: "Warn" },
+    ],
+  });
+});
+
+test("a skill page without those sections gives what it has", () => {
+  expect(parseSkillPage(`<html><body>${nav}<main><div>Installs</div><div>12</div></main></body></html>`)).toEqual({ installs: 12, points: [], audits: [] });
 });

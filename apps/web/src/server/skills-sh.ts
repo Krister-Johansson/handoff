@@ -1,4 +1,7 @@
-import { parseOwnerPage, parseRepoPage } from "./skills-sh-pages";
+import { parseOwnerPage, parseRepoPage, parseSkillPage, type SkillPageDetails } from "./skills-sh-pages";
+
+const DETAILS_TTL_MS = 30 * 60_000;
+const detailsCache = new Map<string, { at: number; details: SkillPageDetails }>();
 
 type Fetch = typeof globalThis.fetch;
 
@@ -47,6 +50,16 @@ export class SkillsShClient {
     const parts = repo.split("/");
     if (parts.length !== 2 || !parts.every((p) => NAME.test(p) && p !== "." && p !== "..")) throw new Error(`${repo} is not a skills.sh repository (owner/repo)`);
     return parseRepoPage(await this.page(`${this.base}/${repo}`), repo);
+  }
+
+  /** What skills.sh shows about a skill (summary, installs, stars, audits), cached for half an hour. */
+  async skillDetails(id: string): Promise<SkillPageDetails> {
+    if (!isSkillId(id)) throw new Error(`${id} is not a skills.sh id (owner/repo/skill)`);
+    const hit = detailsCache.get(id);
+    if (hit && Date.now() - hit.at < DETAILS_TTL_MS) return hit.details;
+    const details = parseSkillPage(await this.page(`${this.base}/${id}`));
+    detailsCache.set(id, { at: Date.now(), details });
+    return details;
   }
 
   private async page(url: string): Promise<string> {
