@@ -68,6 +68,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           prompt,
           systemPrompt: renderContextPacket(ctx.packet),
           cwd: ctx.workdir.path,
+          ...(ctx.workdir.container ? { container: ctx.workdir.container } : {}),
           stagingDir: ctx.stagingDir,
           allowedTools: ctx.packet.constraints.allowedTools,
           maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns,

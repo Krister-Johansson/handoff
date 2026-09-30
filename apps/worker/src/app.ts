@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { buildClaudeArgv, ClaudeCliExecutor } from "@handoff/cli-adapter";
 import { createDb } from "@handoff/db";
 import { runMigrations } from "@handoff/db/migrate";
-import { cliNodeExecutor, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
+import { cliNodeExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
 import { OctokitGitHub, type GitHubPort } from "@handoff/github";
 import { checkClaudeVersion } from "./claude-version.ts";
 import type { WorkerEnv } from "./env.ts";
@@ -23,7 +23,8 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
   mkdirSync(configDir, { recursive: true });
   const github = createGitHub(env);
   const cli = new ClaudeCliExecutor({
-    command: { file: env.HANDOFF_CLAUDE_BIN, prefixArgs: [] },
+    // Inside the runner image the CLI is on PATH as `claude`.
+    command: { file: env.HANDOFF_WORKSPACE === "docker" ? env.HANDOFF_CONTAINER_CLAUDE_BIN : env.HANDOFF_CLAUDE_BIN, prefixArgs: [] },
     oauthToken: env.CLAUDE_CODE_OAUTH_TOKEN,
     configDir,
     ...(env.HANDOFF_CLAUDE_PASSTHROUGH_ENV ? { passthroughEnv: env.HANDOFF_CLAUDE_PASSTHROUGH_ENV.split(",").map((k) => k.trim()) } : {}),
@@ -36,6 +37,13 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     ...(env.HANDOFF_MODEL ? { model: env.HANDOFF_MODEL } : {}),
   });
   const db = createDb(env.DATABASE_URL);
+  const git = new GitWorktreeProvider({
+    root: home,
+    gitConfig: async (remote) => {
+      const repo = parseGitHubRemote(remote);
+      return repo ? github.gitAuthConfig(repo) : [];
+    },
+  });
   return {
     db,
     workerId: env.HANDOFF_WORKER_ID ?? `${hostname()}:${process.pid}`,
@@ -51,20 +59,22 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       pr: prNodeExecutor({ github, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }),
       merge: mergeNodeExecutor({ github }),
     },
-    workdirs: new GitWorktreeProvider({
-      root: home,
-      gitConfig: async (remote) => {
-        const repo = parseGitHubRemote(remote);
-        return repo ? github.gitAuthConfig(repo) : [];
-      },
-    }),
+    workdirs: env.HANDOFF_WORKSPACE === "docker" ? new DockerWorkdirProvider({ git, image: env.HANDOFF_DOCKER_IMAGE, mounts: [home, ...(env.HANDOFF_DOCKER_MOUNTS?.split(",").map((m) => m.trim()).filter(Boolean) ?? [])], ...(env.HANDOFF_DOCKER_NETWORK ? { network: env.HANDOFF_DOCKER_NETWORK } : {}) }) : git,
     log,
   };
 }
 
 export async function runWorker(env: WorkerEnv) {
   const log = (message: string, detail?: unknown) => console.log(`[worker] ${message}`, detail ?? "");
-  const cli = await checkClaudeVersion(env.HANDOFF_CLAUDE_BIN, env.HANDOFF_CLAUDE_VERSION, env.allowCliDrift);
+  const docker = env.HANDOFF_WORKSPACE === "docker";
+  const mounts = env.HANDOFF_DOCKER_MOUNTS?.split(",").map((m) => m.trim()).filter(Boolean) ?? [];
+  const cli = await checkClaudeVersion(
+    docker ? env.HANDOFF_CONTAINER_CLAUDE_BIN : env.HANDOFF_CLAUDE_BIN,
+    env.HANDOFF_CLAUDE_VERSION,
+    env.allowCliDrift,
+    docker ? { image: env.HANDOFF_DOCKER_IMAGE, mounts } : undefined,
+  );
+  if (docker) log(`running nodes in containers from ${env.HANDOFF_DOCKER_IMAGE}`);
   if (cli.drift) log(`claude ${cli.version} differs from the pinned ${env.HANDOFF_CLAUDE_VERSION}; continuing because HANDOFF_ALLOW_CLI_DRIFT is set`);
   const deps = buildEngine(env, log);
   await runMigrations(deps.db);

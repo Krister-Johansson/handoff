@@ -28,3 +28,8 @@ test("parseEnv requires a GitHub token or a complete GitHub App configuration", 
 test("parseEnv reads cap overrides", () => {
   expect(parseEnv({ ...base, HANDOFF_CAP_CLI: "3" }).caps.cli).toBe(3);
 });
+
+test("parseEnv defaults to worktrees and reads the Docker settings", () => {
+  expect(parseEnv(base).HANDOFF_WORKSPACE).toBe("worktree");
+  expect(parseEnv({ ...base, HANDOFF_WORKSPACE: "docker", HANDOFF_DOCKER_IMAGE: "img:1" })).toMatchObject({ HANDOFF_WORKSPACE: "docker", HANDOFF_DOCKER_IMAGE: "img:1" });
+});

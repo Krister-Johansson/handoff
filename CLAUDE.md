@@ -41,9 +41,12 @@ pnpm db:migrate
 pnpm dev:web
 pnpm dev:worker     # needs CLAUDE_CODE_OAUTH_TOKEN and GITHUB_TOKEN (or a GitHub App) in .env
 pnpm demo           # seeds a demo run with simulated Claude events
-pnpm handoff <cmd>  # project add, graph import, run, runs
+pnpm handoff <cmd>  # project add, graph import, run, runs, answer, run repair|cancel, library, gc
+pnpm docker:runner  # builds the runner image for HANDOFF_WORKSPACE=docker
 pnpm --filter @handoff/github codegen   # after editing packages/github/src/queries/*.graphql
 ```
+
+Docker tests run with `HANDOFF_TEST_DOCKER=1` (CI sets it).
 
 Test files: `*.test.ts` unit, `*.integration.test.ts` real Postgres or subprocesses, `*.test.tsx` web components.
 

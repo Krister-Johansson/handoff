@@ -301,7 +301,7 @@ async function applyOutcome(
   const node = graph.node(row.nodeKey);
   switch (outcome.kind) {
     case "completed": {
-      const contract = await validateContract(node.contract, outcome.output, { state: { ...state, ...outcome.statePatch }, baseBranch, workdir: workdir?.path });
+      const contract = await validateContract(node.contract, outcome.output, { state: { ...state, ...outcome.statePatch }, baseBranch, workdir: workdir?.path, container: workdir?.container });
       if (contract.passed) {
         await db.transaction((tx) =>
           completePassed(tx, { row, workerId, graph, output: contract.output, statePatch: outcome.statePatch, checks: contract.checks, cost: outcome.cost }),

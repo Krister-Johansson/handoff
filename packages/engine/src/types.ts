@@ -6,7 +6,8 @@ export type RunRow = typeof runs.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 
 export type WorkdirSpec = { runId: string; remoteUrl: string; baseBranch: string; branchName: string };
-export type Workdir = { path: string; baseSha: string };
+/** Where a run's code lives. `container` is set when commands must run inside a Docker container. */
+export type Workdir = { path: string; baseSha: string; container?: string };
 
 /** Where a run's code lives. Git worktrees today; a Docker implementation later (M6). */
 export interface WorkdirProvider {

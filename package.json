@@ -25,7 +25,8 @@
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "lint": "eslint . && pnpm --filter @handoff/web lint",
     "doctor:react": "cd apps/web && npx -y react-doctor@latest .",
-    "demo": "pnpm --filter @handoff/worker demo"
+    "demo": "pnpm --filter @handoff/worker demo",
+    "docker:runner": "docker build -f docker/runner.Dockerfile -t handoff-runner:2.1.285 docker"
   },
   "devDependencies": {
     "@types/node": "24.19.0",

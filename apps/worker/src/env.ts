@@ -19,6 +19,13 @@ const Schema = z.object({
   HANDOFF_CLI_TIMEOUT_MS: intFrom(45 * 60_000),
   HANDOFF_MODEL: optional,
   HANDOFF_PR_RECONCILE_MS: intFrom(10 * 60_000),
+  HANDOFF_WORKSPACE: z.enum(["worktree", "docker"]).catch("worktree").default("worktree"),
+  HANDOFF_DOCKER_IMAGE: z.string().default("handoff-runner:2.1.285"),
+  HANDOFF_DOCKER_NETWORK: optional,
+  /** Extra host paths mounted into run containers, comma separated. */
+  HANDOFF_DOCKER_MOUNTS: optional,
+  /** CLI to run inside the container; the runner image has `claude` on PATH. */
+  HANDOFF_CONTAINER_CLAUDE_BIN: z.string().default("claude"),
   /** Comma-separated env var names passed through to the claude child (tests and sandbox runs only). */
   HANDOFF_CLAUDE_PASSTHROUGH_ENV: optional,
   GITHUB_TOKEN: optional,
