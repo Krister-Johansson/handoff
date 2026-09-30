@@ -36,6 +36,17 @@ test("a Coder shows its summary, changed files and commit", () => {
   expect(screen.getByText("6aca884")).toBeInTheDocument();
 });
 
+test("a Coder shows the files it changed outside the plan, with the reason", () => {
+  render(
+    <ExecutionDetails
+      detail={{ ...base, nodeType: "coder", output: { status: "done", summary: "Done.", extraPaths: [{ path: "pnpm-workspace.yaml", reason: "pnpm 12 reads build approvals only here" }] } }}
+    />,
+  );
+  expect(screen.getByText("Files outside the plan")).toBeInTheDocument();
+  expect(screen.getByText("pnpm-workspace.yaml")).toBeInTheDocument();
+  expect(screen.getByText("pnpm 12 reads build approvals only here")).toBeInTheDocument();
+});
+
 test("a Coder that needs input shows its question", () => {
   render(<ExecutionDetails detail={{ ...base, nodeType: "coder", output: { status: "needs_input", summary: "", question: { text: "Which license?" } } }} />);
   expect(screen.getByText("Which license?")).toBeInTheDocument();

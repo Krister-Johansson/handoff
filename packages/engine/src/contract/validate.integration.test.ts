@@ -72,6 +72,25 @@ test("diff_within_paths passes when every changed file is owned, including uncom
   expect(result.passed).toBe(true);
 });
 
+test("diff_within_paths accepts files the coder listed as extra paths with a reason, and no others", async () => {
+  const dir = await worktree();
+  writeFileSync(join(dir, "allowed.md"), "ok");
+  writeFileSync(join(dir, "pnpm-workspace.yaml"), "allowBuilds: {}");
+  writeFileSync(join(dir, "secret.env"), "no");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "change");
+  const state = { ...initialRunState("t"), plan: { plan: "p", steps: [], ownedPaths: ["allowed.md"] } };
+  const output = { ...coderDone, extraPaths: [{ path: "pnpm-workspace.yaml", reason: "pnpm 12 reads build approvals only from this file" }] };
+  const result = await validateContract({ output: "coder_output", checks: [{ kind: "diff_within_paths" }] }, output, { state, baseBranch: "main", workdir: dir });
+  expect(result.passed).toBe(false);
+  expect(result.checks[0]?.detail).toContain("secret.env");
+  expect(result.checks[0]?.detail).not.toContain("pnpm-workspace.yaml");
+  git(dir, "rm", "-q", "secret.env");
+  git(dir, "commit", "-qm", "drop");
+  const clean = await validateContract({ output: "coder_output", checks: [{ kind: "diff_within_paths" }] }, output, { state, baseBranch: "main", workdir: dir });
+  expect(clean.passed).toBe(true);
+});
+
 test("tests_green runs the command in the workdir and passes on exit 0", async () => {
   const dir = await worktree();
   const ok = await validateContract({ output: "coder_output", checks: [{ kind: "tests_green", command: "test -f README.md", timeoutMs: 5000 }] }, coderDone, {

@@ -7,7 +7,14 @@ import { passEnvProblem, pickEnv, redactSecrets, type CheckResult, type Determin
 const execFileAsync = promisify(execFile);
 const TAIL_LINES = 200;
 
-export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined; container?: string | undefined };
+/** What a check may look at; `output` is the node's own output being checked. */
+export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined; container?: string | undefined; output?: unknown };
+
+/** The files a coder declared it had to change outside the plan, with a reason for each. */
+const extraPathsOf = (output: unknown): string[] => {
+  const extra = (output as { extraPaths?: unknown } | undefined)?.extraPaths;
+  return Array.isArray(extra) ? extra.flatMap((e) => (e && typeof (e as { path?: unknown }).path === "string" ? [(e as { path: string }).path] : [])) : [];
+};
 
 const COMMAND_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TERM"];
 
@@ -135,7 +142,8 @@ export async function runCheck(check: DeterministicCheck, ctx: CheckContext): Pr
       const owned = check.paths ?? ctx.state.plan?.ownedPaths ?? [];
       const files = await changedFiles(needWorkdir(check, ctx), ctx.baseBranch);
       if (owned.length === 0) return done(true, `no owned paths declared; ${files.length} files changed`);
-      const outside = files.filter((f) => !isOwned(f, owned));
+      const allowed = [...owned, ...extraPathsOf(ctx.output)];
+      const outside = files.filter((f) => !isOwned(f, allowed));
       return outside.length === 0
         ? done(true, `${files.length} changed files within owned paths`)
         : done(false, `files outside owned paths: ${outside.join(", ")}`);

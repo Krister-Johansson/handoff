@@ -105,3 +105,8 @@ test("the constraints tell agents to stop what they start and to keep off the da
   const md = renderContextPacket(packet);
   expect(md).toContain("- If you start a server or a watcher, stop it before you finish. Do not use port 3000: the handoff dashboard runs there.");
 });
+
+test("the constraints say how to change a file outside the owned paths", () => {
+  const md = renderContextPacket(packet);
+  expect(md).toContain("If the change needs a file outside these, list it in extraPaths with the reason; any other file outside them fails the step.");
+});
