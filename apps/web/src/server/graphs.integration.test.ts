@@ -3,7 +3,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { eq, graphVersions, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
-import { createGraphFromTemplate, createProject, getGraphForEdit, getGraphVersion, listGraphVersions, getProjectDetail, listProjects, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
+import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjects, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -79,5 +79,37 @@ describe("graph versions", () => {
     expect(versions.map((v) => v.version)).toEqual([2, 1]);
     const v1 = await getGraphVersion(db, project.id, "g", 1);
     expect((v1?.document as typeof linear).nodes[1]!.attributes.label).toBe("Code");
+  });
+});
+
+describe("renaming and deleting graphs", () => {
+  test("renameGraph renames within the project and keeps its versions", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    await renameGraph(db, project.id, "g", "main-flow");
+    expect((await getGraphForEdit(db, project.id, "main-flow"))?.version).toBe(1);
+    expect(await getGraphForEdit(db, project.id, "g")).toBeUndefined();
+  });
+
+  test("renameGraph refuses an invalid or taken name", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "a", document: linear });
+    await saveGraphVersion(db, { projectId: project.id, name: "b", document: linear });
+    await expect(renameGraph(db, project.id, "a", "b")).rejects.toThrow(/already/);
+    await expect(renameGraph(db, project.id, "a", "Bad Name")).rejects.toThrow(/lowercase/);
+  });
+
+  test("deleteGraph removes a graph no run has used", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    await deleteGraph(db, project.id, "g");
+    expect(await getGraphForEdit(db, project.id, "g")).toBeUndefined();
+  });
+
+  test("deleteGraph refuses while runs use one of its versions", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "t" });
+    await expect(deleteGraph(db, project.id, "g")).rejects.toThrow(/1 run/);
   });
 });

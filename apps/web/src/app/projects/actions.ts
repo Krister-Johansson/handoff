@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
-import { createGraphFromTemplate, createProject, getGraphVersion, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
+import { createGraphFromTemplate, createProject, deleteGraph, getGraphVersion, renameGraph, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
 export type ActionState = { ok?: boolean; error?: string; values?: Record<string, string> };
 
@@ -54,4 +54,26 @@ export async function startRunAction(_: ActionState, form: FormData): Promise<Ac
 
 export async function loadGraphVersionAction(projectId: string, name: string, version: number): Promise<unknown> {
   return (await getGraphVersion(getDb(), projectId, name, version))?.document ?? null;
+}
+
+export async function renameGraphAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const projectId = field(form, "projectId");
+  try {
+    await renameGraph(getDb(), projectId, field(form, "from"), field(form, "to"));
+  } catch (error) {
+    return { ok: false, error: (error as Error).message, values: { to: field(form, "to") } };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true };
+}
+
+export async function deleteGraphAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const projectId = field(form, "projectId");
+  try {
+    await deleteGraph(getDb(), projectId, field(form, "name"));
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true };
 }

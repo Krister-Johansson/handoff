@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PencilIcon } from "lucide-react";
-import { NewGraphForm, StartRunDialog } from "@/components/projects/forms";
+import { GraphSettingsDialog, NewGraphForm, StartRunDialog } from "@/components/projects/forms";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +73,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
                           </Link>
                         </Button>
                         <StartRunDialog projectId={project.id} graphName={g.name} />
+                        <GraphSettingsDialog projectId={project.id} graphName={g.name} />
                       </TableCell>
                     </TableRow>
                   ))}
