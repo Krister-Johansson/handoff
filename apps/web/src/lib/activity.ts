@@ -3,7 +3,10 @@ type EventLike = { seq: number; type: string; payload: unknown };
 export type ActivityItem =
   | { kind: "message"; key: string; text: string }
   | { kind: "thinking"; key: string; text: string }
-  | { kind: "tool"; key: string; id: string; name: string; target?: string; result?: string; error?: boolean };
+  | { kind: "tool"; key: string; id: string; name: string; target?: string; result?: string; error?: boolean; denied?: Denial };
+
+/** A tool call the CLI refused because it needed an approval nobody can give in a run, and the rules that would allow it. */
+export type Denial = { reason: string; rules: string[] };
 
 export type ActivityStats = { model?: string; tools: number; thinkingTokens?: number; turns?: number; costUsd?: number };
 
@@ -31,6 +34,29 @@ const targetOf = (input: Record<string, unknown>) => {
   }
   return undefined;
 };
+
+const REQUIRED = /What required approval:\s*([\s\S]*)$/;
+const PARTS = /The following parts? requires? approval:\s*([\s\S]*)$/;
+
+/** `Bash(git log *)` for a command part: its first two words, or its one word. */
+const bashRule = (part: string) => {
+  const words = part.replace(/\s+\d?>&?\d?\S*/g, " ").trim().split(/\s+/).filter(Boolean);
+  return words.length ? `Bash(${words.slice(0, 2).join(" ")} *)` : undefined;
+};
+
+/** What the CLI refused and which permission rules would allow it; undefined for any other result. */
+function denialOf(toolName: string, text: string): Denial | undefined {
+  const required = REQUIRED.exec(text)?.[1]?.trim();
+  if (!required) return undefined;
+  const parts = PARTS.exec(required)?.[1];
+  if (toolName !== "Bash") return { reason: required, rules: [toolName.includes(" · ") ? `mcp__${toolName.replace(" · ", "__")}` : toolName] };
+  if (!parts) return { reason: required, rules: [] };
+  const rules = parts
+    .split(/\s*(?:&&|\|\||;|\||,\s)\s*/)
+    .map(bashRule)
+    .filter((r): r is string => r !== undefined);
+  return { reason: required, rules: [...new Set(rules)] };
+}
 
 const resultText = (c: unknown) =>
   typeof c === "string"
@@ -76,6 +102,8 @@ export function toActivity(events: EventLike[]): { items: ActivityItem[]; stats:
         if (block.type !== "tool_result" || !tool) continue;
         tool.result = resultText(block.content);
         tool.error = block.is_error === true;
+        const denied = tool.error ? denialOf(tool.name, tool.result) : undefined;
+        if (denied) tool.denied = denied;
       }
     }
   }
@@ -87,7 +115,7 @@ type ToolItem = Extract<ActivityItem, { kind: "tool" }>;
 export type ChatEntry =
   | { kind: "message"; key: string; text: string }
   | { kind: "thinking"; key: string; text: string }
-  | { kind: "tools"; key: string; summary: string; tools: ToolItem[]; running: boolean; errors: number };
+  | { kind: "tools"; key: string; summary: string; tools: ToolItem[]; running: boolean; errors: number; denied: number };
 
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 const count = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`);
@@ -140,7 +168,8 @@ export function toChat(items: ActivityItem[]): ChatEntry[] {
       summary: summarize(group),
       tools: group,
       running: group.some((t) => t.result === undefined),
-      errors: group.filter((t) => t.error).length,
+      errors: group.filter((t) => t.error && !t.denied).length,
+      denied: group.filter((t) => t.denied).length,
     });
     group = undefined;
   };
