@@ -35,7 +35,7 @@ export type CompiledNode = {
   config: Record<string, unknown>;
   contract: Contract;
   contextSelector: ContextSelector;
-  library: { skills: string[]; mcp: string[]; agents: string[] };
+  library: { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
   x: number;
   y: number;
 };
@@ -127,7 +127,12 @@ export function compileGraph(input: unknown): CompileResult {
       config: attributes.config,
       contract,
       contextSelector: attributes.contextSelector ?? ContextSelectorSchema.parse({}),
-      library: { skills: attributes.library?.skills ?? [], mcp: attributes.library?.mcp ?? [], agents: attributes.library?.agents ?? [] },
+      library: {
+        skills: attributes.library?.skills ?? [],
+        mcp: attributes.library?.mcp ?? [],
+        agents: attributes.library?.agents ?? [],
+        groups: attributes.library?.groups ?? [],
+      },
       x: attributes.x,
       y: attributes.y,
     });

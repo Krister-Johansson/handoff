@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeAll, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import { Backlog } from "./backlog";
 
 const actions = vi.hoisted(() => ({
@@ -11,14 +11,6 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
-beforeAll(() => {
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  Element.prototype.scrollIntoView ??= () => {};
-});
 
 const issue = (number: number, title: string, run: { id: string; status: string; prNumber: number | null } | null = null) => ({
   number,

@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { PassEnvField } from "./pass-env-field";
 import type { EditorAction } from "./state";
 
-export type LibraryNames = { skills: string[]; mcp: string[]; agents: string[] };
+export type LibraryNames = { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
 
 const CLI_TYPES = new Set<NodeType>(["planner", "coder", "reviewer"]);
 const str = (v: unknown) => (typeof v === "string" ? v : "");
@@ -26,8 +26,14 @@ const csv = (v: string) =>
     .filter(Boolean);
 
 function LibraryPicker({ node, library, dispatch }: { node: FlowNode; library: LibraryNames; dispatch: Dispatch<EditorAction> }) {
-  const selected = { skills: node.data.library?.skills ?? [], mcp: node.data.library?.mcp ?? [], agents: node.data.library?.agents ?? [] };
+  const selected = {
+    skills: node.data.library?.skills ?? [],
+    mcp: node.data.library?.mcp ?? [],
+    agents: node.data.library?.agents ?? [],
+    groups: node.data.library?.groups ?? [],
+  };
   const groups = [
+    { key: "groups" as const, legend: "Groups" },
     { key: "skills" as const, legend: "Skills" },
     { key: "mcp" as const, legend: "MCP servers" },
     { key: "agents" as const, legend: "Subagents" },

@@ -18,7 +18,12 @@ export default async function GraphEditorPage({ params }: { params: Promise<{ pr
       graphName={name}
       version={graph.version}
       document={graph.document}
-      library={{ skills: library.skills.map((s) => s.name), mcp: library.mcp.map((m) => m.name), agents: library.agents.map((a) => a.name) }}
+      library={{
+        skills: library.skills.map((s) => s.name),
+        mcp: library.mcp.map((m) => m.name),
+        agents: library.agents.map((a) => a.name),
+        groups: library.groups.map((g) => g.name),
+      }}
       versions={versions.map((v) => ({ version: v.version, createdAt: v.createdAt.toISOString(), createdBy: v.createdBy }))}
       runSlot={<StartRunDialog projectId={projectId} graphName={name} />}
     />

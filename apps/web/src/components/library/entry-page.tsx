@@ -15,8 +15,8 @@ export function EntryPage({
   version,
   children,
 }: {
-  tab: "skills" | "mcp" | "agents";
-  kind: "skill" | "mcp" | "agent";
+  tab: "skills" | "mcp" | "agents" | "groups";
+  kind: "skill" | "mcp" | "agent" | "group";
   title: string;
   subtitle: string;
   name?: string;

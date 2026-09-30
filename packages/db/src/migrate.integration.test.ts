@@ -32,6 +32,7 @@ describe("migrations", () => {
       "graph_versions",
       "graphs",
       "library_agents",
+      "library_groups",
       "library_mcp_servers",
       "library_skills",
       "node_executions",

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { AddProjectDialog } from "./add-project-dialog";
 
 const repo = (fullName: string, defaultBranch = "main", project: string | null = null) => {
@@ -13,15 +13,6 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
-beforeAll(() => {
-  // cmdk and Radix use these; jsdom has neither.
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  Element.prototype.scrollIntoView ??= () => {};
-});
 
 beforeEach(() => {
   actions.listReposAction.mockReset();

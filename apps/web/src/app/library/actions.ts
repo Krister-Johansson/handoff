@@ -2,15 +2,15 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { deleteLibraryEntry, upsertAgent, upsertMcpServer, upsertSkill } from "@handoff/db";
+import { deleteLibraryEntry, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
 import { getDb } from "@/lib/db";
-import { parseAgentForm, parseMcpForm, parseSkillForm, type FormResult } from "@/lib/library-forms";
+import { parseAgentForm, parseGroupForm, parseMcpForm, parseSkillForm, type FormResult } from "@/lib/library-forms";
 
 export type FormState = { ok?: boolean; message?: string; errors?: Record<string, string>; values?: Record<string, string> };
 
 const valuesOf = (form: FormData) => Object.fromEntries([...form.entries()].filter(([k]) => !k.startsWith("$")).map(([k, v]) => [k, String(v)]));
 
-const SEGMENT = { skill: "skills", mcp: "mcp", agent: "agents" } as const;
+const SEGMENT = { skill: "skills", mcp: "mcp", agent: "agents", group: "groups" } as const;
 type Kind = keyof typeof SEGMENT;
 
 /** Saves an entry; a new one then opens its own page, an existing one stays with a saved message. */
@@ -35,10 +35,14 @@ export async function saveAgent(_: FormState, form: FormData): Promise<FormState
   return save("agent", form, parseAgentForm(form), (data) => upsertAgent(getDb(), data));
 }
 
+export async function saveGroup(_: FormState, form: FormData): Promise<FormState> {
+  return save("group", form, parseGroupForm(form), (data) => upsertGroup(getDb(), data));
+}
+
 export async function deleteEntry(form: FormData): Promise<void> {
   const kind = String(form.get("kind"));
   const name = String(form.get("name"));
-  if (kind !== "skill" && kind !== "mcp" && kind !== "agent") return;
+  if (kind !== "skill" && kind !== "mcp" && kind !== "agent" && kind !== "group") return;
   await deleteLibraryEntry(getDb(), kind, name);
   revalidatePath("/library");
   redirect(`/library?tab=${SEGMENT[kind]}`);

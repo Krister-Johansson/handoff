@@ -53,3 +53,16 @@ export const libraryAgents = pgTable("library_agents", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/** A named set of library entries, like a skills repository or a plugin; a node enables it as one. */
+export const libraryGroups = pgTable("library_groups", {
+  id: id(),
+  name: text("name").notNull().unique(),
+  description: text("description").notNull().default(""),
+  skills: jsonb("skills").$type<string[]>().notNull().default([]),
+  mcp: jsonb("mcp").$type<string[]>().notNull().default([]),
+  agents: jsonb("agents").$type<string[]>().notNull().default([]),
+  version: integer("version").notNull().default(1),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});

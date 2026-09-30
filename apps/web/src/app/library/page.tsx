@@ -60,12 +60,12 @@ function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; nou
   );
 }
 
-const TABS = ["skills", "mcp", "agents"] as const;
+const TABS = ["skills", "mcp", "agents", "groups"] as const;
 
 export default async function LibraryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { tab } = await searchParams;
   const active = TABS.find((t) => t === tab) ?? "skills";
-  const { skills, mcp, agents } = await listLibrary(getDb());
+  const { skills, mcp, agents, groups } = await listLibrary(getDb());
   const sections = [
     {
       value: "skills",
@@ -88,12 +88,24 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       description: "Subagent definitions passed with --agents, so a node's Claude session can delegate.",
       rows: agents.map((a) => ({ name: a.name, detail: a.description, version: a.version })),
     },
+    {
+      value: "groups",
+      label: "Groups",
+      noun: "group",
+      description: "Named sets of skills, MCP servers and agents, like a skills repository or a plugin. A node that enables a group gets all of them.",
+      rows: groups.map((g) => ({
+        name: g.name,
+        detail: g.description || [...g.skills, ...g.mcp, ...g.agents].join(", "),
+        version: g.version,
+        extra: `${g.skills.length + g.mcp.length + g.agents.length} entries`,
+      })),
+    },
   ];
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-        <p className="text-muted-foreground">Skills, MCP servers and subagents that graph nodes enable by name.</p>
+        <p className="text-muted-foreground">Skills, MCP servers, subagents and groups of them that graph nodes enable by name.</p>
       </div>
       <Tabs defaultValue={active} className="gap-4">
         <TabsList>

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseAgentForm, parseMcpForm, parseSkillForm } from "./library-forms";
+import { parseAgentForm, parseGroupForm, parseMcpForm, parseSkillForm } from "./library-forms";
 
 const form = (entries: Record<string, string>) => {
   const data = new FormData();
@@ -95,4 +95,17 @@ test("names the library pages use for themselves are refused", () => {
     const result = parseSkillForm(form({ name, description: "d", body: "b" }));
     expect(result.ok ? {} : result.errors).toHaveProperty("name");
   }
+});
+
+test("parseGroupForm reads the chosen skills, MCP servers and agents", () => {
+  const data = form({ name: "frontend", description: "UI work" });
+  data.append("skills", "shadcn");
+  data.append("skills", "tdd");
+  data.append("agents", "explorer");
+  expect(parseGroupForm(data)).toEqual({ ok: true, data: { name: "frontend", description: "UI work", skills: ["shadcn", "tdd"], mcp: [], agents: ["explorer"] } });
+});
+
+test("parseGroupForm needs at least one entry", () => {
+  const result = parseGroupForm(form({ name: "empty", description: "" }));
+  expect(result.ok ? {} : result.errors).toHaveProperty("entries");
 });

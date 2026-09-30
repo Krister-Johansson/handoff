@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeAll, beforeEach, expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
 import { StartRunDialog } from "./forms";
 
 const actions = vi.hoisted(() => ({
@@ -11,14 +11,6 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
-beforeAll(() => {
-  globalThis.ResizeObserver ??= class {
-    observe() {}
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  Element.prototype.scrollIntoView ??= () => {};
-});
 beforeEach(() => {
   actions.startRunAction.mockClear();
   actions.listIssuesAction.mockReset();
