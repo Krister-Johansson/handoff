@@ -97,7 +97,27 @@ function suggestionsOf(state: RunState, self: string): NonNullable<ContextPacket
 }
 
 /** What the node is allowed to believe: a slice of run state, owned paths, and why it is running again. */
-export function selectContext(node: CompiledNode, state: RunState, execution: NodeExecutionRow): ContextPacket {
+const REVIEW_TYPES = new Set(["reviewer", "code_review"]);
+
+/**
+ * A reviewer's own last request for changes, when it runs again: its comments, what the step it sent
+ * the work back to said it changed, and the commit it reviewed, so it checks those instead of
+ * reviewing everything from scratch.
+ */
+function previousReviewOf(node: CompiledNode, state: RunState, sentBackTo: string[]): ContextPacket["previousReview"] {
+  if (!REVIEW_TYPES.has(node.type)) return undefined;
+  const last = obj(state.nodes[node.key]?.output);
+  if (last.verdict !== "request_changes" || !Array.isArray(last.comments) || last.comments.length === 0) return undefined;
+  const reply = sentBackTo.map((key) => obj(state.nodes[key]?.output).summary).find((s): s is string => typeof s === "string" && s.trim() !== "");
+  const reviewedAt = obj(state.reviewedAt)[node.key];
+  return {
+    comments: last.comments.map(obj).map((c) => ({ ...placeOf(c), body: String(c.body ?? "") })),
+    ...(reply ? { reply } : {}),
+    ...(typeof reviewedAt === "string" ? { reviewedAt } : {}),
+  };
+}
+
+export function selectContext(node: CompiledNode, state: RunState, execution: NodeExecutionRow, sentBackTo: string[] = []): ContextPacket {
   const selector = node.contextSelector;
   const defaultKeys = ["plan", "prNumber", ...(selector.includeFeedback ? ["feedback"] : [])];
   const stateSlice = pick(state, selector.stateKeys.length ? selector.stateKeys : defaultKeys);
@@ -119,6 +139,8 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     ...(suggestionsOf(state, node.key).length ? { suggestions: suggestionsOf(state, node.key) } : {}),
     ...(state.issues?.length ? { issues: state.issues } : {}),
   };
+  const previousReview = previousReviewOf(node, state, sentBackTo);
+  if (previousReview) packet.previousReview = previousReview;
 
   const trigger = execution.trigger;
   if (selector.includePriorAttempt && trigger?.kind === "edge" && trigger.from && trigger.from !== node.key) {

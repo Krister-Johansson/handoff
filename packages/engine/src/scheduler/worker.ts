@@ -279,7 +279,9 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
           buffer.push({ type: "library.materialized", payload: library.used, nodeExecutionId: row.id });
         }
       }
-      const packet = selectContext(node, state, row);
+      // Where this node sends work back, so a reviewer's next round can read what that step changed.
+      const sentBackTo = graph.outEdges(node.key).filter((e) => e.loop).map((e) => e.target);
+      const packet = selectContext(node, state, row, sentBackTo);
       if (library?.allowedTools.length) packet.constraints.allowedTools = [...new Set([...packet.constraints.allowedTools, ...library.allowedTools])];
       await db.update(nodeExecutions).set({ contextPacket: packet }).where(eq(nodeExecutions.id, row.id));
       outcome = await executor.execute({
