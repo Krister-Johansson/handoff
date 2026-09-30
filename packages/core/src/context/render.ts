@@ -1,6 +1,7 @@
 export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined };
 
-export type ReviewComment = { author: string; path?: string | undefined; line?: number | undefined; body: string; resolved: boolean };
+/** A comment on code (path and line) or on a quoted part of a text such as a plan. */
+export type ReviewComment = { author: string; path?: string | undefined; line?: number | undefined; quote?: string | undefined; body: string; resolved: boolean };
 
 export type ContextPacket = {
   task: string;
@@ -9,6 +10,8 @@ export type ContextPacket = {
   repoPaths: string[];
   constraints: { ownedPaths: string[]; allowedTools: string[]; maxTurns: number };
   outputContract: string;
+  /** The step's own instructions from the graph, on top of its built-in role. */
+  instructions?: string;
   issues?: { number: number; title: string; url: string; body: string }[];
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
@@ -25,6 +28,7 @@ const list = (items: string[], empty: string) => (items.length ? items.map((i) =
 export function renderContextPacket(packet: ContextPacket): string {
   const out: string[] = [];
   out.push("# Task", "", packet.task, "");
+  if (packet.instructions) out.push("# Instructions for this step", "", packet.instructions, "");
   if (packet.issues?.length) {
     out.push("# Linked issues", "", "The task works on these GitHub issues. The pull request closes them when it merges.", "");
     for (const issue of packet.issues) {
@@ -76,7 +80,8 @@ export function renderContextPacket(packet: ContextPacket): string {
       out.push("## Review comments", "");
       for (const c of open) {
         const where = c.path ? `${c.path}${c.line !== undefined ? `:${c.line}` : ""} - ` : "";
-        out.push(`- ${where}${c.author}: ${c.body}`);
+        const quote = c.quote ? ` on "${c.quote.replace(/\s+/g, " ").trim()}"` : "";
+        out.push(`- ${where}${c.author}${quote}: ${c.body}`);
       }
       out.push("");
     }

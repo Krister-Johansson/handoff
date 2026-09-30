@@ -53,11 +53,16 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string }
 }
 
 /** Records a person's answer and wakes the Human gate waiting on it. */
-export async function answerQuestion(db: Db, questionId: string, input: { answer: string; option?: string; answeredBy: string }) {
+export async function answerQuestion(
+  db: Db,
+  questionId: string,
+  input: { answer: string; option?: string; answeredBy: string; comments?: { quote?: string; body: string }[] },
+) {
+  const comments = (input.comments ?? []).map((c) => ({ ...(c.quote?.trim() ? { quote: c.quote.trim() } : {}), body: c.body.trim() })).filter((c) => c.body);
   return db.transaction(async (tx) => {
     const [question] = await tx
       .update(questions)
-      .set({ answer: input.answer, option: input.option ?? null, answeredBy: input.answeredBy, answeredAt: sql`now()` })
+      .set({ answer: input.answer, option: input.option ?? null, comments, answeredBy: input.answeredBy, answeredAt: sql`now()` })
       .where(and(eq(questions.id, questionId), sql`${questions.answer} is null`))
       .returning();
     if (!question) {
@@ -68,7 +73,7 @@ export async function answerQuestion(db: Db, questionId: string, input: { answer
     await appendEvents(tx, question.runId, [
       {
         type: "human.answered",
-        payload: { questionId: question.id, answer: input.answer, option: input.option ?? null, answeredBy: input.answeredBy },
+        payload: { questionId: question.id, answer: input.answer, option: input.option ?? null, comments: comments.length, answeredBy: input.answeredBy },
         nodeExecutionId: question.nodeExecutionId,
       },
     ]);

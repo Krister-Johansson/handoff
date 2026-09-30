@@ -8,8 +8,21 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
   planner:
     "Plan the task in the system prompt. Read the repository as needed but do not edit files. Return the plan, the ordered steps and the paths the change will own.",
   coder: "Implement the task in the system prompt in this repository, following the plan in the run state. Commit your work with git when done.",
-  reviewer: "Review the changes on this branch against the task and plan. Do not edit files. Return a verdict and line comments.",
+  reviewer:
+    "Review the work against the task: the changes on this branch, unless the step's instructions name something else, such as the plan. Do not edit files. Return a verdict and comments.",
 };
+
+/** The first prompt of a session: the role, plus pointers to the step's instructions and to what was sent back. */
+function firstPrompt(ctx: ExecutorContext): string {
+  const role = PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`;
+  return [
+    role,
+    ...(ctx.packet.instructions ? ["Follow the instructions for this step in the system prompt."] : []),
+    ...(ctx.packet.priorAttempt || ctx.packet.humanAnswer
+      ? ["An earlier attempt was sent back: address every point under Previous attempt in the system prompt, and keep what was not questioned."]
+      : []),
+  ].join(" ");
+}
 
 /**
  * When this execution follows a Human gate that answered this node's own needs_input question,
@@ -73,7 +86,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         ? RESUME_PROMPT
         : answer
           ? `A person answered your question: "${answer.text}". Continue the task with that answer. When finished, return the structured output required by the output contract.`
-          : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
+          : firstPrompt(ctx);
 
       let mcpProblems: string[] = [];
       let fatalRetryError: string | undefined;

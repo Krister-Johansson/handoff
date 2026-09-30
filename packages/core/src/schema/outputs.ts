@@ -66,6 +66,8 @@ export const HumanAnswerSchema = z.object({
   answer: z.string(),
   option: z.string().optional(),
   approved: z.boolean().optional(),
+  /** Comments on quoted parts of what the gate showed, when the person reviewed something. */
+  comments: z.array(z.object({ quote: z.string().optional(), body: z.string() })).optional(),
   answeredBy: z.string(),
   answeredAt: z.string(),
 });
