@@ -4,6 +4,7 @@ import { compileGraph, type CompileResult } from "./compile.ts";
 
 type Doc = typeof linear;
 const clone = (): Doc => structuredClone(linear);
+const attributesOf = (doc: Doc, key: string) => doc.nodes.find((n) => n.key === key)!.attributes as unknown as Record<string, unknown>;
 const codes = (result: CompileResult) => (result.ok ? [] : result.errors.map((e) => e.code));
 
 describe("compileGraph", () => {
@@ -23,6 +24,24 @@ describe("compileGraph", () => {
     expect(result.graph.node("coder").contract.output).toBe("coder_output");
     expect(result.graph.executorKind("coder")).toBe("cli");
     expect(result.graph.executorKind("pr")).toBe("github");
+  });
+
+  test("compileGraph rejects a node that passes a worker secret to its commands", () => {
+    const doc = clone();
+    attributesOf(doc, "coder").contract = {
+      output: "coder_output",
+      checks: [{ kind: "tests_green", command: "npm test", timeoutMs: 1000, passEnv: ["GITHUB_TOKEN"] }],
+    };
+    expect(codes(compileGraph(doc))).toContain("invalid_pass_env");
+    const tester = clone();
+    attributesOf(tester, "coder").config = { passEnv: ["DATABASE_URL"] };
+    expect(codes(compileGraph(tester))).toContain("invalid_pass_env");
+  });
+
+  test("compileGraph accepts ordinary passEnv names", () => {
+    const doc = clone();
+    attributesOf(doc, "coder").config = { passEnv: ["APP_TEST_DB"] };
+    expect(compileGraph(doc).ok).toBe(true);
   });
 
   test("compileGraph rejects a document that is not a graph", () => {

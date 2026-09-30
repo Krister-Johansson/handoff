@@ -1,3 +1,4 @@
+import { passEnvProblem } from "@handoff/core";
 import { shell } from "../contract/checks.ts";
 import type { ExecutorOutcome, NodeExecutor } from "../types.ts";
 
@@ -12,8 +13,11 @@ export function testerExecutor(): NodeExecutor {
       }
       if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "tester needs the run worktree" } };
       const timeoutMs = typeof ctx.node.config.timeoutMs === "number" ? ctx.node.config.timeoutMs : 10 * 60_000;
+      const passEnv = ctx.node.config.passEnv ?? [];
+      const problem = passEnvProblem(passEnv);
+      if (problem) return { kind: "failed", error: { code: "invalid_pass_env", message: problem } };
       ctx.emit("shell.started", { command });
-      const result = await shell(command, ctx.workdir.path, timeoutMs, ctx.workdir.container);
+      const result = await shell(command, ctx.workdir.path, timeoutMs, ctx.workdir.container, passEnv as string[]);
       const output = { passed: result.exitCode === 0 && !result.timedOut, command, exitCode: result.exitCode, tail: result.output };
       ctx.emit("shell.finished", { command, exitCode: result.exitCode, timedOut: result.timedOut });
       return { kind: "completed", output, statePatch: { testResults: output } };

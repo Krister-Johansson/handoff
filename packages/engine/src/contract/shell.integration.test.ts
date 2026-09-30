@@ -31,3 +31,14 @@ test("shell keeps output lines intact across chunk boundaries", async () => {
   const result = await shell("printf 'one\\n'; sleep 0.05; printf 'tw'; sleep 0.05; printf 'o\\nthree'", cwd(), 5_000);
   expect(result.output).toBe("one\ntwo\nthree");
 });
+
+test("shell passes the variables it is told to pass from the worker environment", async () => {
+  process.env.APP_TEST_DB = "postgres://localhost/app_test";
+  process.env.NOT_PASSED = "hidden";
+  const result = await shell('echo "[$APP_TEST_DB][$NOT_PASSED]"', cwd(), 5_000, undefined, ["APP_TEST_DB"]);
+  expect(result.output).toBe("[postgres://localhost/app_test][]");
+});
+
+test("shell refuses to pass the worker's own secrets", async () => {
+  await expect(shell("true", cwd(), 5_000, undefined, ["GITHUB_TOKEN"])).rejects.toThrow(/GITHUB_TOKEN/);
+});

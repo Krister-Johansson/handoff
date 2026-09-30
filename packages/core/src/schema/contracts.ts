@@ -29,11 +29,17 @@ export function isContractName(name: string): name is ContractName {
 }
 
 export const DeterministicCheckSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("tests_green"), command: z.string().min(1), timeoutMs: z.number().int().positive().default(600_000) }),
+  z.object({
+    kind: z.literal("tests_green"),
+    command: z.string().min(1),
+    timeoutMs: z.number().int().positive().default(600_000),
+    /** Names of worker environment variables the command gets; checked by compileGraph. */
+    passEnv: z.array(z.string()).optional(),
+  }),
   z.object({ kind: z.literal("diff_within_paths"), paths: z.array(z.string()).optional() }),
   z.object({ kind: z.literal("pr_exists") }),
   z.object({ kind: z.literal("no_uncommitted_changes") }),
-  z.object({ kind: z.literal("command"), command: z.string().min(1), expectExitCode: z.number().int().default(0) }),
+  z.object({ kind: z.literal("command"), command: z.string().min(1), expectExitCode: z.number().int().default(0), passEnv: z.array(z.string()).optional() }),
 ]);
 export type DeterministicCheck = z.infer<typeof DeterministicCheckSchema>;
 

@@ -38,6 +38,19 @@ describe.skipIf(!enabled)("DockerWorkdirProvider", () => {
     }
   });
 
+  test("DockerWorkdirProvider passes only the named variables into the container", async () => {
+    const { docker, spec } = provider();
+    const workdir = await docker.acquire(spec);
+    process.env.APP_TEST_DB = "postgres://db/app_test";
+    try {
+      const result = await shell('echo "[$APP_TEST_DB][$CI]"', workdir.path, 30_000, workdir.container, ["APP_TEST_DB"]);
+      expect(result.output).toBe("[postgres://db/app_test][true]");
+    } finally {
+      delete process.env.APP_TEST_DB;
+      await docker.release(spec);
+    }
+  });
+
   test("acquire reuses the running container for the same run", async () => {
     const { docker, spec } = provider();
     const first = await docker.acquire(spec);
