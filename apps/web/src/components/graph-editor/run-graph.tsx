@@ -3,6 +3,7 @@
 import { Background, Controls, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
 import { flowOf } from "@/lib/flow";
+import { useFlowColorMode } from "@/lib/use-flow-color-mode";
 import type { EdgeRoute, LayoutResult } from "@/lib/elk-layout";
 import { cn } from "@/lib/utils";
 import { EdgeRoutesContext, useElkLayout, useMeasuredSignature } from "./elk-routes";
@@ -29,6 +30,7 @@ type Props = {
  */
 function LaidOutRunGraph({ document, statuses, onNodeClick, className }: Props) {
   const flow = useMemo(() => flowOf(document), [document]);
+  const colorMode = useFlowColorMode();
   const [layout, setLayout] = useState<LayoutResult>();
   const signature = useMeasuredSignature();
   const runLayout = useElkLayout();
@@ -75,6 +77,7 @@ function LaidOutRunGraph({ document, statuses, onNodeClick, className }: Props) 
     <EdgeRoutesContext.Provider value={layout?.routes ?? NO_ROUTES}>
       <div className={cn("h-80 rounded-md border transition-opacity", layout ? "opacity-100" : "opacity-0", className)}>
         <ReactFlow
+          colorMode={colorMode}
           nodes={nodes}
           edges={flow.edges}
           nodeTypes={nodeTypes}

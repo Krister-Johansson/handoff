@@ -1,5 +1,6 @@
 "use client";
 
+import { useFlowColorMode } from "@/lib/use-flow-color-mode";
 import { canConnect } from "@/lib/connect-rules";
 import { flowOf } from "@/lib/flow";
 import { InvalidEdgesContext } from "./edge-issues";
@@ -38,6 +39,7 @@ type Props = {
 
 function Editor({ projectId, graphName, version: initialVersion, document, library, versions: initialVersions, runSlot }: Props) {
   const [graph, dispatch] = useReducer(editorReducer, document, flowOf);
+  const colorMode = useFlowColorMode();
   const [selection, setSelection] = useState<{ nodeId?: string; edgeId?: string }>({});
   const [version, setVersion] = useState(initialVersion);
   const [saved, setSaved] = useState(true);
@@ -143,6 +145,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
       <div className="grid h-[calc(100svh-3.5rem)] grid-cols-[minmax(0,1fr)_22rem]">
         <div className="relative min-w-0">
           <ReactFlow<FlowNode, FlowEdge>
+            colorMode={colorMode}
             nodes={nodes}
             edges={graph.edges}
             nodeTypes={nodeTypes}

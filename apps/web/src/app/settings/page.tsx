@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { headers } from "next/headers";
 import { AgentConnection } from "@/components/settings/agent-connection";
 import { NotificationSettingsLoader } from "@/components/settings/notification-settings-loader";
+import { ThemeSetting } from "@/components/settings/theme-setting";
 import { lastAgentConnection } from "@/server/agent-endpoint";
 import { AgentTokenStore, defaultAgentTokenFile } from "@/server/agent-token";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +34,15 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">Settings for this dashboard. Project settings are on each project&apos;s Settings tab.</p>
       </div>
+      <Card id="appearance" className="max-w-2xl scroll-mt-6">
+        <CardHeader>
+          <CardTitle>Appearance</CardTitle>
+          <CardDescription>Light, dark, or the same as your system. This browser keeps the choice.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ThemeSetting />
+        </CardContent>
+      </Card>
       <Card id="agents" className="max-w-2xl scroll-mt-6">
         <CardHeader>
           <CardTitle>Connect Claude Code</CardTitle>
