@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useActionState, useCallback, useEffect, useState } from "react";
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { deleteProjectAction, updateProjectAction, type ActionState } from "@/app/projects/actions";
 import { Badge } from "@/components/ui/badge";
@@ -75,9 +76,22 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
   );
 }
 
-export function DeleteProjectDialog({ project, open, onOpenChange }: { project: ProjectSummary; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function DeleteProjectDialog({
+  project,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  project: ProjectSummary;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDeleted?: () => void;
+}) {
   const [state, action, pending] = useActionState(deleteProjectAction, {} as ActionState);
   useCloseOnSuccess(state, onOpenChange);
+  useEffect(() => {
+    if (state.ok) onDeleted?.();
+  }, [state, onDeleted]);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -100,6 +114,28 @@ export function DeleteProjectDialog({ project, open, onOpenChange }: { project: 
         </form>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+/** Edit and Delete as buttons, for the project page's Settings tab; deleting leaves for the projects list. */
+export function ProjectSettingsActions({ project }: { project: ProjectSummary }) {
+  const [open, setOpen] = useState<"edit" | "delete">();
+  const router = useRouter();
+  const close = (next: boolean) => !next && setOpen(undefined);
+  const toProjects = useCallback(() => router.push("/projects"), [router]);
+  return (
+    <div className="flex gap-2">
+      <Button size="sm" variant="outline" onClick={() => setOpen("edit")}>
+        <PencilIcon data-icon="inline-start" />
+        Edit
+      </Button>
+      <Button size="sm" variant="outline" className="text-destructive" onClick={() => setOpen("delete")}>
+        <Trash2Icon data-icon="inline-start" />
+        Delete
+      </Button>
+      <EditProjectDialog project={project} open={open === "edit"} onOpenChange={close} />
+      <DeleteProjectDialog project={project} open={open === "delete"} onOpenChange={close} onDeleted={toProjects} />
+    </div>
   );
 }
 
@@ -164,7 +200,7 @@ export function ProjectCard({ project, attention }: { project: ProjectSummary; a
               </Link>
             )}
             {attention.reviews > 0 && (
-              <Link href={`/projects/${project.id}`} className={ATTENTION_LINK}>
+              <Link href={`/projects/${project.id}?tab=pulls`} className={ATTENTION_LINK}>
                 {plural(attention.reviews, "PR to review", "PRs to review")}
               </Link>
             )}
