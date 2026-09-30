@@ -9,6 +9,8 @@ export const librarySkills = pgTable("library_skills", {
   name: text("name").notNull().unique(),
   description: text("description").notNull(),
   body: text("body").notNull(),
+  /** SKILL.md frontmatter keys other than name and description (license, allowed-tools, metadata). */
+  frontmatter: jsonb("frontmatter").$type<Record<string, unknown>>().notNull().default({}),
   files: jsonb("files").$type<{ path: string; content: string }[]>().notNull().default([]),
   version: integer("version").notNull().default(1),
   createdAt: createdAt(),

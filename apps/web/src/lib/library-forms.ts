@@ -1,3 +1,4 @@
+import { parse as parseYaml } from "yaml";
 import { looksLikeSecret } from "@handoff/core";
 import type { AgentInput, McpServerInput, SkillInput } from "@handoff/db";
 
@@ -44,7 +45,50 @@ export function parseSkillForm(form: FormData): FormResult<SkillInput> {
   const body = text(form, "body");
   if (!description) errors.description = "Say when Claude should use this skill.";
   if (!body) errors.body = "The skill needs instructions.";
-  return Object.keys(errors).length ? { ok: false, errors } : { ok: true, data: { name, description, body } };
+  const frontmatter = skillFrontmatter(text(form, "frontmatter"), errors);
+  const files = skillFiles(text(form, "files"), errors);
+  return Object.keys(errors).length ? { ok: false, errors } : { ok: true, data: { name, description, body, frontmatter, files } };
+}
+
+/** SKILL.md frontmatter keys other than name and description, written as YAML. */
+function skillFrontmatter(value: string, errors: Record<string, string>): Record<string, unknown> {
+  if (!value) return {};
+  let data: unknown;
+  try {
+    data = parseYaml(value);
+  } catch (error) {
+    errors.frontmatter = `Not valid YAML: ${(error as Error).message.split("\n")[0]}`;
+    return {};
+  }
+  if (data === null || data === undefined) return {};
+  if (typeof data !== "object" || Array.isArray(data)) {
+    errors.frontmatter = "Write the frontmatter as key: value lines.";
+    return {};
+  }
+  if ("name" in data || "description" in data) errors.frontmatter = "Name and description have their own fields.";
+  return data as Record<string, unknown>;
+}
+
+/** Supporting files as JSON [{ path, content }], with relative paths inside the skill folder. */
+function skillFiles(value: string, errors: Record<string, string>): { path: string; content: string }[] {
+  if (!value) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(value);
+  } catch {
+    errors.files = "The supporting files could not be read.";
+    return [];
+  }
+  const files = Array.isArray(data) ? data.filter((f): f is { path: string; content: string } => typeof f?.path === "string" && typeof f?.content === "string") : [];
+  const seen = new Set<string>();
+  for (const { path } of files) {
+    const parts = path.split("/");
+    if (!path || path.startsWith("/") || parts.some((p) => p === ".." || p === "")) errors.files = `${path || "(empty)"} is not a path inside the skill folder.`;
+    else if (path === "SKILL.md") errors.files = "SKILL.md is the instructions; add other files next to it.";
+    else if (seen.has(path)) errors.files = `${path} appears twice.`;
+    seen.add(path);
+  }
+  return files.map(({ path, content }) => ({ path, content }));
 }
 
 export function parseMcpForm(form: FormData): FormResult<McpServerInput> {

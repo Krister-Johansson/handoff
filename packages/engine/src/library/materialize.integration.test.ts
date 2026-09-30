@@ -64,6 +64,14 @@ test("enabled skills are written as SKILL.md under the staging dir and passed wi
   expect(coder?.payload).toMatchObject({ skills: [{ name: "tdd", version: 1 }] });
 });
 
+test("a skill's frontmatter beyond name and description is written back to its SKILL.md", async () => {
+  await upsertSkill(db, { name: "tdd", description: "Test first", body: "Body.", frontmatter: { license: "MIT", "allowed-tools": "Read, Edit" } });
+  const seen: Seen[] = [];
+  await startRun(db, graphWithLibrary({ skills: ["tdd"] }));
+  await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)]))));
+  expect(seen[0]!.files.tdd).toBe("---\nname: tdd\ndescription: Test first\nlicense: MIT\nallowed-tools: Read, Edit\n---\n\nBody.\n");
+});
+
 test("mcp.json resolves secrets from the engine environment and never from the database", async () => {
   await upsertMcpServer(db, { name: "docs", transport: "stdio", command: "npx", args: ["docs-mcp"], env: { API_KEY: "${secret:DOCS_KEY}", MODE: "fast" } });
   await upsertMcpServer(db, { name: "search", transport: "http", url: "https://mcp.example.com", headers: { Authorization: "Bearer ${secret:SEARCH_TOKEN}" }, tools: ["query"] });

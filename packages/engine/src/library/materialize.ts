@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize } from "node:path";
 import type { AgentDefinition } from "@handoff/cli-adapter";
-import type { LibrarySelection } from "@handoff/core";
+import { renderSkillMarkdown, type LibrarySelection } from "@handoff/core";
 import { getLibraryByNames, type DbExecutor, type McpServerRow } from "@handoff/db";
 
 export class LibraryUnavailableError extends Error {}
@@ -39,8 +39,6 @@ function mcpEntry(server: McpServerRow, secrets: Record<string, string | undefin
   return { type: "http", url: server.url ?? "", ...(Object.keys(headers).length ? { headers } : {}) };
 }
 
-const skillMarkdown = (name: string, description: string, body: string) =>
-  `---\nname: ${name}\ndescription: ${description.replace(/\n/g, " ")}\n---\n\n${body.trimEnd()}\n`;
 
 /**
  * Writes the node's enabled library entries into its staging dir: skills under
@@ -72,7 +70,7 @@ export async function materializeLibrary(
     for (const skill of found.skills) {
       const dir = join(root, ".claude", "skills", skill.name);
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, "SKILL.md"), skillMarkdown(skill.name, skill.description, skill.body));
+      writeFileSync(join(dir, "SKILL.md"), renderSkillMarkdown(skill));
       for (const file of skill.files) {
         const target = normalize(join(dir, file.path));
         if (!target.startsWith(dir)) throw new LibraryUnavailableError(`skill ${skill.name} has a file outside its folder: ${file.path}`);
