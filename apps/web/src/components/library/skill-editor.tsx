@@ -11,7 +11,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { MarkdownEditor } from "./markdown-editor";
 
-export type SkillDraft = { name: string; description: string; body: string; frontmatter: Record<string, unknown>; files: { path: string; content: string }[] };
+export type SkillDraft = {
+  name: string;
+  description: string;
+  body: string;
+  frontmatter: Record<string, unknown>;
+  files: { path: string; content: string; encoding?: "base64" }[];
+};
 
 const SKILL_MD = "SKILL.md";
 const isMarkdown = (path: string) => /\.(md|mdx|markdown)$/i.test(path);
@@ -159,7 +165,11 @@ export function SkillEditor({ skill }: { skill?: SkillDraft }) {
         />
 
         <div className="flex min-w-0 flex-col gap-2">
-          {current ? (
+          {current?.encoding === "base64" ? (
+            <p className="rounded-md border px-4 py-6 text-sm text-muted-foreground">
+              <span className="font-mono">{current.path}</span> is a binary file ({Math.round((current.content.length * 3) / 4 / 1024)} KB). It is staged with the skill as it is.
+            </p>
+          ) : current ? (
             <MarkdownEditor
               key={current.path}
               label={current.path}

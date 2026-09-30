@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { listLibrary } from "@handoff/db";
+import { listLibraryIndex } from "@handoff/db";
 import { GraphEditor } from "@/components/graph-editor/graph-editor";
 import { StartRunDialog } from "@/components/projects/forms";
 import { getDb } from "@/lib/db";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function GraphEditorPage({ params }: { params: Promise<{ projectId: string; name: string }> }) {
   const { projectId, name } = await params;
   const db = getDb();
-  const [graph, library, versions] = await Promise.all([getGraphForEdit(db, projectId, name), listLibrary(db), listGraphVersions(db, projectId, name)]);
+  const [graph, library, versions] = await Promise.all([getGraphForEdit(db, projectId, name), listLibraryIndex(db), listGraphVersions(db, projectId, name)]);
   if (!graph) notFound();
   return (
     <GraphEditor

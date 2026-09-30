@@ -109,3 +109,9 @@ test("parseGroupForm needs at least one entry", () => {
   const result = parseGroupForm(form({ name: "empty", description: "" }));
   expect(result.ok ? {} : result.errors).toHaveProperty("entries");
 });
+
+test("parseSkillForm keeps binary files as base64", () => {
+  const files = [{ path: "fonts/a.ttf", content: "AAEA/w==", encoding: "base64" }];
+  const result = parseSkillForm(form({ name: "canvas", description: "d", body: "b", files: JSON.stringify(files) }));
+  expect(result.ok && result.data.files).toEqual(files);
+});

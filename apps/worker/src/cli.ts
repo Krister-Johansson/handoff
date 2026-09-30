@@ -2,7 +2,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { compileGraph, parseSkillMarkdown, suggestProjectName, type LinkedIssue } from "@handoff/core";
-import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibrary, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
+import { importSkillRepository } from "@handoff/engine/library-import";
+import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, type GitHubPort } from "@handoff/github";
 import { gcClaudeSessions } from "./gc.ts";
@@ -19,6 +20,7 @@ const USAGE = `usage:
   handoff run repair <runId> --node <key> [--note "<text>"]
   handoff answer <questionId> "<answer>" [--option <option>]
   handoff library import-skill <dir-with-SKILL.md>
+  handoff library import-repo <owner/name> [--group <name>]
   handoff library list
   handoff gc [--days 7]`;
 
@@ -176,8 +178,26 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     return;
   }
 
+  if (command === "library" && sub === "import-repo") {
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { group: { type: "string" }, url: { type: "string" } } });
+    const repo = positionals[0];
+    if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) throw new Error(`give the repository as owner/name\n${USAGE}`);
+    const [owner, name] = repo.split("/") as [string, string];
+    const github = io.github === undefined ? gitHubFromEnv() : (io.github ?? undefined);
+    const gitEnv = github && !values.url ? await github.gitAuthEnv({ owner, name }).catch(() => ({})) : {};
+    const report = await importSkillRepository(db, {
+      repo,
+      group: values.group ?? suggestProjectName(`${owner}-${name}`, []),
+      ...(values.url ? { url: values.url } : {}),
+      gitEnv,
+    });
+    for (const s of report.skills) out(`${s.status.padEnd(9)} ${s.name}${"reason" in s ? `: ${s.reason}` : ` v${s.version}`}`);
+    out(`group ${report.group}: ${report.skills.filter((s) => s.status !== "skipped").length} skills`);
+    return;
+  }
+
   if (command === "library" && sub === "list") {
-    const { skills, mcp, agents } = await listLibrary(db);
+    const { skills, mcp, agents } = await listLibraryIndex(db);
     for (const s of skills) out(`skill  ${s.name} v${s.version}  ${s.description}`);
     for (const m of mcp) out(`mcp    ${m.name} v${m.version}  ${m.transport}`);
     for (const a of agents) out(`agent  ${a.name} v${a.version}  ${a.description}`);

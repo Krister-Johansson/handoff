@@ -1,6 +1,6 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import type { DbExecutor } from "../client.ts";
-import { libraryAgents, libraryGroups, libraryMcpServers, librarySkills, type SkillSource } from "../schema/index.ts";
+import { libraryAgents, libraryGroups, libraryMcpServers, librarySkills, type SkillFile, type SkillSource } from "../schema/index.ts";
 
 export type SkillRow = typeof librarySkills.$inferSelect;
 export type McpServerRow = typeof libraryMcpServers.$inferSelect;
@@ -13,7 +13,7 @@ export type SkillInput = {
   description: string;
   body: string;
   frontmatter?: Record<string, unknown>;
-  files?: { path: string; content: string }[];
+  files?: SkillFile[];
   /** Set by an import; left out, an existing skill keeps its source. */
   source?: SkillSource;
 };
@@ -88,6 +88,29 @@ export async function upsertGroup(db: DbExecutor, input: GroupInput): Promise<Gr
 export async function listLibrary(db: DbExecutor) {
   const [skills, mcp, agents, groups] = await Promise.all([
     db.select().from(librarySkills).orderBy(asc(librarySkills.name)),
+    db.select().from(libraryMcpServers).orderBy(asc(libraryMcpServers.name)),
+    db.select().from(libraryAgents).orderBy(asc(libraryAgents.name)),
+    db.select().from(libraryGroups).orderBy(asc(libraryGroups.name)),
+  ]);
+  return { skills, mcp, agents, groups };
+}
+
+/**
+ * Every library entry for lists and pickers: skills without their body or file contents, which can
+ * run to megabytes for imported skills with fonts or schemas.
+ */
+export async function listLibraryIndex(db: DbExecutor) {
+  const [skills, mcp, agents, groups] = await Promise.all([
+    db
+      .select({
+        name: librarySkills.name,
+        description: librarySkills.description,
+        version: librarySkills.version,
+        fileCount: sql<number>`jsonb_array_length(${librarySkills.files})`.mapWith(Number),
+        source: librarySkills.source,
+      })
+      .from(librarySkills)
+      .orderBy(asc(librarySkills.name)),
     db.select().from(libraryMcpServers).orderBy(asc(libraryMcpServers.name)),
     db.select().from(libraryAgents).orderBy(asc(libraryAgents.name)),
     db.select().from(libraryGroups).orderBy(asc(libraryGroups.name)),

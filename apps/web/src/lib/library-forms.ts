@@ -1,6 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { looksLikeSecret } from "@handoff/core";
-import type { AgentInput, GroupInput, McpServerInput, SkillInput } from "@handoff/db";
+import type { AgentInput, GroupInput, McpServerInput, SkillFile, SkillInput } from "@handoff/db";
 
 export type FormResult<T> = { ok: true; data: T } | { ok: false; errors: Record<string, string> };
 
@@ -74,7 +74,7 @@ function skillFrontmatter(value: string, errors: Record<string, string>): Record
 }
 
 /** Supporting files as JSON [{ path, content }], with relative paths inside the skill folder. */
-function skillFiles(value: string, errors: Record<string, string>): { path: string; content: string }[] {
+function skillFiles(value: string, errors: Record<string, string>): SkillFile[] {
   if (!value) return [];
   let data: unknown;
   try {
@@ -83,7 +83,7 @@ function skillFiles(value: string, errors: Record<string, string>): { path: stri
     errors.files = "The supporting files could not be read.";
     return [];
   }
-  const files = Array.isArray(data) ? data.filter((f): f is { path: string; content: string } => typeof f?.path === "string" && typeof f?.content === "string") : [];
+  const files = Array.isArray(data) ? data.filter((f): f is SkillFile => typeof f?.path === "string" && typeof f?.content === "string") : [];
   const seen = new Set<string>();
   for (const { path } of files) {
     const parts = path.split("/");
@@ -92,7 +92,7 @@ function skillFiles(value: string, errors: Record<string, string>): { path: stri
     else if (seen.has(path)) errors.files = `${path} appears twice.`;
     seen.add(path);
   }
-  return files.map(({ path, content }) => ({ path, content }));
+  return files.map(({ path, content, encoding }) => (encoding === "base64" ? { path, content, encoding } : { path, content }));
 }
 
 export function parseMcpForm(form: FormData): FormResult<McpServerInput> {

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PlusIcon, SearchIcon } from "lucide-react";
-import { listLibrary } from "@handoff/db";
+import { listLibraryIndex } from "@handoff/db";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -65,14 +65,14 @@ const TABS = ["skills", "mcp", "agents", "groups"] as const;
 export default async function LibraryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { tab } = await searchParams;
   const active = TABS.find((t) => t === tab) ?? "skills";
-  const { skills, mcp, agents, groups } = await listLibrary(getDb());
+  const { skills, mcp, agents, groups } = await listLibraryIndex(getDb());
   const sections = [
     {
       value: "skills",
       label: "Skills",
       noun: "skill",
       description: "SKILL.md instructions, with their supporting files, staged into a node's session with --add-dir.",
-      rows: skills.map((s) => ({ name: s.name, detail: s.description, version: s.version, extra: s.files.length ? `${s.files.length + 1} files` : undefined, source: s.source?.id })),
+      rows: skills.map((s) => ({ name: s.name, detail: s.description, version: s.version, extra: s.fileCount ? `${s.fileCount + 1} files` : undefined, source: s.source?.id })),
     },
     {
       value: "mcp",
@@ -127,7 +127,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
                     <Button size="sm" variant="outline" asChild>
                       <Link href="/library/skills/browse">
                         <SearchIcon data-icon="inline-start" />
-                        Browse skills.sh
+                        Add skills
                       </Link>
                     </Button>
                   )}
