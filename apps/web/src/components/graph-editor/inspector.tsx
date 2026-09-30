@@ -230,23 +230,7 @@ function NodeInspector({
 
       {type === "tester" && <TesterSettings config={config} setConfig={setConfig} />}
 
-      {type === "pr" && (
-        <>
-          <Field orientation="horizontal">
-            <Switch id="pr-checks" checked={config.requireChecks !== false} onCheckedChange={(on) => setConfig({ requireChecks: on })} />
-            <FieldLabel htmlFor="pr-checks" className="font-normal">
-              Wait for CI checks
-            </FieldLabel>
-          </Field>
-          <Field orientation="horizontal">
-            <Switch id="pr-approval" checked={config.requireApproval === true} onCheckedChange={(on) => setConfig({ requireApproval: on })} />
-            <FieldLabel htmlFor="pr-approval" className="font-normal">
-              Wait for an approving review
-            </FieldLabel>
-          </Field>
-          <ReviewerFields config={config} setConfig={setConfig} clearConfig={clearConfig} />
-        </>
-      )}
+      {type === "pr" && <PrSettings config={config} setConfig={setConfig} clearConfig={clearConfig} />}
 
       {type === "merge" && (
         <Field>
@@ -345,6 +329,41 @@ function ToolsField({
         />
         <FieldDescription>{all ? `Every tool: ${ALL_TOOLS.join(", ")}.` : "Comma separated, in --allowedTools syntax. Empty uses the defaults shown."}</FieldDescription>
       </Field>
+    </>
+  );
+}
+
+/** The pull request node: what it waits for before it decides between ready and fix. */
+function PrSettings({ config, setConfig, clearConfig }: { config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void; clearConfig: (key: string) => void }) {
+  return (
+    <>
+          <Field orientation="horizontal">
+            <Switch id="pr-checks" checked={config.requireChecks !== false} onCheckedChange={(on) => setConfig({ requireChecks: on })} />
+            <FieldLabel htmlFor="pr-checks" className="font-normal">
+              Wait for CI checks
+            </FieldLabel>
+          </Field>
+          {config.requireChecks !== false && (
+            <Field>
+              <FieldLabel htmlFor="pr-no-checks">Go on if no check starts within (minutes)</FieldLabel>
+              <Input
+                id="pr-no-checks"
+                type="number"
+                min={0}
+                placeholder="10"
+                value={num(config.noChecksAfterMinutes)}
+                onChange={(e) => (e.target.value ? setConfig({ noChecksAfterMinutes: Number(e.target.value) }) : clearConfig("noChecksAfterMinutes"))}
+              />
+              <FieldDescription>For a repository without CI. Once a check starts, the PR waits for it to finish.</FieldDescription>
+            </Field>
+          )}
+          <Field orientation="horizontal">
+            <Switch id="pr-approval" checked={config.requireApproval === true} onCheckedChange={(on) => setConfig({ requireApproval: on })} />
+            <FieldLabel htmlFor="pr-approval" className="font-normal">
+              Wait for an approving review
+            </FieldLabel>
+          </Field>
+          <ReviewerFields config={config} setConfig={setConfig} clearConfig={clearConfig} />
     </>
   );
 }

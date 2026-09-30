@@ -298,3 +298,36 @@ describe("external reviewers", () => {
     expect((await inspect(db, run.id)).types).toContain("github.reviewers_timeout");
   });
 });
+
+describe("repositories without CI", () => {
+  async function run(prConfig: Record<string, unknown>) {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
+    doc.nodes.find((n) => n.key === "pr")!.attributes.config = prConfig;
+    const { project, graphVersion } = await seedGraph(db, doc, { localClonePath: origin });
+    const created = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const createPr = github.createPr.bind(github);
+    // A repository without workflows: the head commit never gets a check.
+    github.createPr = async (repo, input) => {
+      const pr = await createPr(repo, input);
+      github.prs.get(pr.number)!.checks = null;
+      return pr;
+    };
+    const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) };
+    await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+    return { github, run: created };
+  }
+
+  test("a PR goes on when no check has started on its commit within the limit", async () => {
+    const { github, run: created } = await run({ noChecksAfterMinutes: 0 });
+    expect(github.merged).toEqual([1]);
+    expect((await inspect(db, created.id)).types).toContain("github.no_checks");
+  });
+
+  test("before the limit a PR with no checks yet keeps waiting, since CI may still be starting", async () => {
+    const { github, run: created } = await run({});
+    expect(github.merged).toEqual([]);
+    expect((await inspect(db, created.id)).executions.find((e) => e.nodeKey === "pr")?.status).toBe("waiting");
+  });
+});
