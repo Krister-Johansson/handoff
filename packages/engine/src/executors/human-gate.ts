@@ -112,10 +112,10 @@ export function humanGateExecutor(deps: { db: Db }): NodeExecutor {
         answeredAt: (question.answeredAt ?? new Date()).toISOString(),
       };
       const statePatch: Record<string, unknown> = { human: { ...ctx.state.human, [ctx.node.key]: answer } };
-      // A review that asks for changes, or comments, is a decision every later step must keep to.
-      const decided = question.option === "changes" || question.option === "reject" || question.comments.length > 0;
+      // A review that asks for changes, comments, or has a note of its own is a decision every later step must keep to.
+      const note = DEFAULT_NOTES.has(question.answer.trim()) ? undefined : question.answer;
+      const decided = question.option === "changes" || question.option === "reject" || question.comments.length > 0 || note !== undefined;
       if ((question.context as { reason?: string }).reason === "approval" && decided) {
-        const note = DEFAULT_NOTES.has(question.answer) ? undefined : question.answer;
         const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
         statePatch.decisions = [...previous, { gate: ctx.node.key, ...(note ? { note } : {}), comments: question.comments }];
       }
