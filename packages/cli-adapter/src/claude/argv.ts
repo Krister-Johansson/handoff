@@ -1,3 +1,4 @@
+import { dirname, resolve } from "node:path";
 import type { AgentDefinition, CliSession } from "../types.ts";
 
 export type ClaudeArgvInput = {
@@ -11,7 +12,27 @@ export type ClaudeArgvInput = {
   session: CliSession;
   model?: string;
   agents?: Record<string, AgentDefinition>;
+  /** Absolute path globs for the CLI's claudeMdExcludes setting. */
+  claudeMdExcludes?: string[];
 };
+
+/**
+ * Claude loads CLAUDE.md, CLAUDE.local.md, .claude/CLAUDE.md and .claude/rules from every
+ * ancestor of its working directory. A worktree under handoff's own checkout or under the
+ * home directory would pick up handoff's CLAUDE.md or ~/.claude/rules. These globs exclude
+ * every strict ancestor, so only the target repository's own instructions load.
+ */
+export function ancestorInstructionExcludes(cwd: string): string[] {
+  const excludes: string[] = [];
+  let dir = dirname(resolve(cwd));
+  for (;;) {
+    const base = dir === "/" ? "" : dir;
+    excludes.push(`${base}/CLAUDE.md`, `${base}/CLAUDE.local.md`, `${base}/.claude/CLAUDE.md`, `${base}/.claude/rules/**`);
+    const parent = dirname(dir);
+    if (parent === dir) return excludes;
+    dir = parent;
+  }
+}
 
 /**
  * Builds argv for `claude -p`. Never emits --bare: bare mode ignores the subscription login
@@ -42,7 +63,7 @@ export function buildClaudeArgv(input: ClaudeArgvInput): string[] {
     "--append-system-prompt-file",
     input.systemPromptFile,
     "--settings",
-    JSON.stringify({ disableAllHooks: true }),
+    JSON.stringify({ disableAllHooks: true, ...(input.claudeMdExcludes ? { claudeMdExcludes: input.claudeMdExcludes } : {}) }),
     "--strict-mcp-config",
   ];
   if (input.mcpConfigPath) argv.push("--mcp-config", input.mcpConfigPath);

@@ -86,6 +86,7 @@ export async function runWorker(env: WorkerEnv) {
     systemPromptFile: "<context.md>",
     addDirs: [],
     session: { mode: "new", id: "<execution-id>", name: "<name>" },
+    claudeMdExcludes: ["<instruction files in the workdir's ancestors>"],
   });
   log(`claude ${cli.version}; argv template: claude ${template.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`);
   log(`worker ${deps.workerId} started; caps ${JSON.stringify(env.caps)}`);
