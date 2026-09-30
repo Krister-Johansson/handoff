@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeftIcon } from "lucide-react";
+import { ArrowLeftIcon, GitPullRequestIcon } from "lucide-react";
+import { GraphDocumentSchema, summarizeOutput } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
@@ -12,6 +13,13 @@ import { formatCost, formatDuration } from "@/lib/format";
 import { getRunDetail } from "@/server/queries";
 
 export const dynamic = "force-dynamic";
+
+/** Node labels by key from the run's pinned graph document. */
+function nodeLabels(document: unknown): Record<string, string> {
+  const parsed = GraphDocumentSchema.safeParse(document);
+  if (!parsed.success) return {};
+  return Object.fromEntries(parsed.data.nodes.map((n) => [n.key, n.attributes.label ?? n.key]));
+}
 
 export default async function RunPage({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
@@ -36,19 +44,35 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
           <CardTitle className="text-xl whitespace-pre-line">{run.task}</CardTitle>
           {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
           <IssueLinks issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
-          <CardDescription className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs">
-            <span>
-              {project.repoOwner}/{project.repoName}
-            </span>
-            <span>{run.branchName}</span>
-            {totalCost > 0 && <span title="Client-side estimate reported by the Claude CLI">{formatCost(totalCost)} est.</span>}
-            {run.startedAt && run.finishedAt && <span>{formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}</span>}
-            {run.prNumber !== null && (
-              <a className="hover:underline" href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
-                PR #{run.prNumber}
-              </a>
+          <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            <Link href={`/projects/${project.id}`} className="font-medium text-foreground hover:underline">
+              {project.name}
+            </Link>
+            {graph && (
+              <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="hover:underline">
+                <span className="font-mono">{graph.name}</span> v{graph.version}
+              </Link>
             )}
+            <span title={run.createdAt.toISOString()}>started {run.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC</span>
+            {run.startedAt && run.finishedAt && <span>took {formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}</span>}
+            {totalCost > 0 && <span title="Client-side estimate reported by the Claude CLI">{formatCost(totalCost)} est.</span>}
           </CardDescription>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            {run.prNumber !== null && (
+              <Button size="sm" variant="outline" asChild>
+                <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
+                  <GitPullRequestIcon data-icon="inline-start" />
+                  PR #{run.prNumber}
+                </a>
+              </Button>
+            )}
+            <a
+              className="truncate font-mono text-xs text-muted-foreground hover:underline"
+              href={`https://github.com/${project.repoOwner}/${project.repoName}/tree/${run.branchName}`}
+            >
+              {run.branchName}
+            </a>
+          </div>
         </CardHeader>
       </Card>
       {openQuestions.map((q) => (
@@ -74,7 +98,12 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
           status: e.status,
           costUsd: e.costUsd,
           durationMs: e.startedAt && e.finishedAt ? e.finishedAt.getTime() - e.startedAt.getTime() : null,
+          summary: summarizeOutput(e.output),
+          ...(e.status === "failed" && e.error ? { error: `${e.error.code}: ${e.error.message}` } : {}),
         }))}
+        labels={nodeLabels(graph?.document)}
+        prNumber={run.prNumber}
+        questions={openQuestions.length}
         initialEvents={events}
         graphDocument={graph?.document}
       />

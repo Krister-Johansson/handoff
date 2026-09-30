@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
+import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
 import type { RunFilter } from "../lib/run-filter.ts";
 import type { StreamedEvent } from "./events-stream";
 
@@ -35,12 +35,26 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
   if (!run) return undefined;
   const [executions, eventRows, [version], openQuestions, [failed]] = await Promise.all([
     db
-      .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey, attempt: nodeExecutions.attempt, status: nodeExecutions.status, costUsd: nodeExecutions.costUsd, startedAt: nodeExecutions.startedAt, finishedAt: nodeExecutions.finishedAt })
+      .select({
+        id: nodeExecutions.id,
+        nodeKey: nodeExecutions.nodeKey,
+        attempt: nodeExecutions.attempt,
+        status: nodeExecutions.status,
+        costUsd: nodeExecutions.costUsd,
+        startedAt: nodeExecutions.startedAt,
+        finishedAt: nodeExecutions.finishedAt,
+        output: nodeExecutions.output,
+        error: nodeExecutions.error,
+      })
       .from(nodeExecutions)
       .where(eq(nodeExecutions.runId, runId))
       .orderBy(asc(nodeExecutions.createdAt)),
     listEventsAfter(db, runId, 0, 1000),
-    db.select({ document: graphVersions.document, version: graphVersions.version }).from(graphVersions).where(eq(graphVersions.id, run.run.graphVersionId)),
+    db
+      .select({ document: graphVersions.document, version: graphVersions.version, name: graphs.name })
+      .from(graphVersions)
+      .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+      .where(eq(graphVersions.id, run.run.graphVersionId)),
     db
       .select({ id: questions.id, question: questions.question, options: questions.options, context: questions.context, nodeKey: nodeExecutions.nodeKey })
       .from(questions)

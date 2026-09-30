@@ -11,14 +11,25 @@ export type RunEvent = { seq: number; type: string; payload: unknown; nodeExecut
 const time = (iso: string) => iso.slice(11, 19);
 const family = (type: string) => type.split(".")[0] ?? type;
 
+/** Which events to show: Claude CLI events only on request, and optionally only some executions' events. */
+export type EventFilter = { showCli: boolean; executionIds?: Set<string> | undefined };
+
+const visible = (event: RunEvent, filter: EventFilter | undefined) => {
+  if (!filter) return true;
+  if (!filter.showCli && family(event.type) === "cli") return false;
+  return !filter.executionIds || (event.nodeExecutionId !== null && filter.executionIds.has(event.nodeExecutionId));
+};
+
 export function EventStream({
   runId,
   initialEvents,
   onEvent,
+  filter,
 }: {
   runId: string;
   initialEvents: RunEvent[];
   onEvent?: (event: RunEvent) => void;
+  filter?: EventFilter;
 }) {
   const [events, setEvents] = useState(initialEvents);
   const lastSeq = useRef(initialEvents.at(-1)?.seq ?? 0);
@@ -53,7 +64,9 @@ export function EventStream({
   return (
     <ScrollArea className="h-[32rem] rounded-md border">
       <ol className="flex flex-col font-mono text-xs">
-        {events.map((event) => (
+        {events
+          .filter((event) => visible(event, filter))
+          .map((event) => (
           <li key={event.seq} className="flex items-baseline gap-3 border-b px-3 py-1.5 last:border-b-0">
             <span className="w-8 shrink-0 text-right text-muted-foreground tabular-nums">{event.seq}</span>
             <span className="w-16 shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">{time(event.createdAt)}</span>
@@ -62,7 +75,7 @@ export function EventStream({
             </Badge>
             <span className="min-w-0 truncate">{summarizeEvent(event)}</span>
           </li>
-        ))}
+          ))}
         <div ref={bottom} />
       </ol>
     </ScrollArea>

@@ -20,13 +20,14 @@ type Props = {
   document: unknown;
   statuses: Record<string, NodeStatus>;
   onNodeClick?: (nodeKey: string) => void;
+  className?: string;
 };
 
 /**
  * The run's pinned graph, read-only, with each node coloured by its latest execution. Laid out
  * with ELK once the nodes are measured, and again when a node's size changes.
  */
-function LaidOutRunGraph({ document, statuses, onNodeClick }: Props) {
+function LaidOutRunGraph({ document, statuses, onNodeClick, className }: Props) {
   const flow = useMemo(() => toReactFlow(document), [document]);
   const [layout, setLayout] = useState<LayoutResult>();
   const signature = useMeasuredSignature();
@@ -72,7 +73,7 @@ function LaidOutRunGraph({ document, statuses, onNodeClick }: Props) {
   );
   return (
     <EdgeRoutesContext.Provider value={layout?.routes ?? NO_ROUTES}>
-      <div className={cn("h-80 rounded-md border transition-opacity", layout ? "opacity-100" : "opacity-0")}>
+      <div className={cn("h-80 rounded-md border transition-opacity", layout ? "opacity-100" : "opacity-0", className)}>
         <ReactFlow
           nodes={nodes}
           edges={flow.edges}
