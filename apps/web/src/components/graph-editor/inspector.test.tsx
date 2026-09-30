@@ -62,3 +62,25 @@ test("a node's library is shown as badges and chosen in a dialog", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Remove skill unslop" }));
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { library: { skills: [], mcp: [], agents: [], groups: [] } } });
 });
+
+test("a step can pick its model and effort, or keep the worker's defaults", () => {
+  const dispatch = vi.fn();
+  render(<Inspector graph={graph} selection={{ nodeId: "planner" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("Model")).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Model"), { target: { value: "opus" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { config: { model: "opus" } } });
+  fireEvent.change(screen.getByLabelText("Effort"), { target: { value: "xhigh" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { config: { effort: "xhigh" } } });
+});
+
+test("a full model id can be typed when no alias fits", () => {
+  const dispatch = vi.fn();
+  const custom: FlowGraph = { ...graph, nodes: graph.nodes.map((n) => (n.id === "planner" ? { ...n, data: { ...n.data, config: { model: "claude-opus-5-5" } } } : n)) };
+  render(<Inspector graph={custom} selection={{ nodeId: "planner" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("Model")).toHaveValue("custom");
+  const id = screen.getByLabelText("Model id");
+  expect(id).toHaveValue("claude-opus-5-5");
+  fireEvent.change(id, { target: { value: "claude-sonnet-5-5" } });
+  fireEvent.blur(id);
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { config: { model: "claude-sonnet-5-5" } } });
+});

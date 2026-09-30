@@ -42,6 +42,7 @@ export class ClaudeCliExecutor implements CliExecutor {
       claudeMdExcludes: ancestorInstructionExcludes(request.cwd),
       ...(request.mcpConfigPath ? { mcpConfigPath: request.mcpConfigPath } : {}),
       ...(request.model ? { model: request.model } : {}),
+      ...(request.effort ? { effort: request.effort } : {}),
       ...(request.agents ? { agents: request.agents } : {}),
     });
 

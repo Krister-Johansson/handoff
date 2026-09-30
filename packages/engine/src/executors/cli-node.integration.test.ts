@@ -112,3 +112,14 @@ test("running out of turns gets one resumed turn to finish and return the contra
   expect(cli.requests[1]!.session).toEqual({ mode: "resume", id: planner.id });
   expect(cli.requests[1]!.prompt).toMatch(/out of turns/i);
 });
+
+test("a node's model and effort override the worker's defaults, and nodes without them keep the defaults", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
+  const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
+  doc.nodes.find((n) => n.key === "coder")!.attributes.config = { model: "opus", effort: "xhigh" };
+  await startRun(db, doc);
+  const node = cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000, model: "sonnet", effort: "medium" });
+  await drain(engineDeps(db, { planner: node, coder: node, pr: stopAfterCoder } as unknown as ExecutorRegistry));
+  expect(cli.requests[0]).toMatchObject({ model: "sonnet", effort: "medium" });
+  expect(cli.requests[1]).toMatchObject({ model: "opus", effort: "xhigh" });
+});

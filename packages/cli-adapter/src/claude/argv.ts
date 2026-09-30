@@ -11,6 +11,8 @@ export type ClaudeArgvInput = {
   addDirs: string[];
   session: CliSession;
   model?: string;
+  /** Claude Code's --effort level. */
+  effort?: string;
   agents?: Record<string, AgentDefinition>;
   /** Absolute path globs for the CLI's claudeMdExcludes setting. */
   claudeMdExcludes?: string[];
@@ -69,6 +71,7 @@ export function buildClaudeArgv(input: ClaudeArgvInput): string[] {
   if (input.mcpConfigPath) argv.push("--mcp-config", input.mcpConfigPath);
   for (const dir of input.addDirs) argv.push("--add-dir", dir);
   if (input.model) argv.push("--model", input.model);
+  if (input.effort) argv.push("--effort", input.effort);
   if (input.agents && Object.keys(input.agents).length > 0) argv.push("--agents", JSON.stringify(input.agents));
   if (input.session.mode === "new") argv.push("--session-id", input.session.id, "--name", input.session.name);
   else argv.push("--resume", input.session.id);

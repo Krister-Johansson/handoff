@@ -2,7 +2,8 @@ import { contractRegistry, isContractName, renderContextPacket, type NodeType } 
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliSession } from "@handoff/cli-adapter";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
-export type CliNodeOptions = { cli: CliExecutor; maxTurns: number; timeoutMs: number; idleTimeoutMs?: number; model?: string };
+/** model and effort are the worker's defaults; a node's config.model and config.effort override them. */
+export type CliNodeOptions = { cli: CliExecutor; maxTurns: number; timeoutMs: number; idleTimeoutMs?: number; model?: string; effort?: string };
 
 const PROMPTS: Partial<Record<NodeType, string>> = {
   planner:
@@ -11,6 +12,9 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
   reviewer:
     "Review the work against the task: the changes on this branch, unless the step's instructions name something else, such as the plan. Do not edit files. Return a verdict and comments.",
 };
+
+const modelOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.node.config.model === "string" ? ctx.node.config.model : options.model);
+const effortOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.node.config.effort === "string" ? ctx.node.config.effort : options.effort);
 
 /** The first prompt of a session: the role, plus pointers to the step's instructions and to what was sent back. */
 function firstPrompt(ctx: ExecutorContext): string {
@@ -107,7 +111,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         ...(ctx.library?.agents ? { agents: ctx.library.agents } : {}),
         timeoutMs: options.timeoutMs,
         ...(options.idleTimeoutMs ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
-        ...(options.model ? { model: options.model } : {}),
+        ...(modelOf(ctx, options) ? { model: modelOf(ctx, options)! } : {}),
+        ...(effortOf(ctx, options) ? { effort: effortOf(ctx, options)! } : {}),
       };
       const runOptions: CliRunOptions = {
         signal: local.signal,

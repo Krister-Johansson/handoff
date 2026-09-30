@@ -19,6 +19,8 @@ export type CliRunRequest = {
   /** Fails the run if no stdout line arrives for this long. */
   idleTimeoutMs?: number;
   model?: string;
+  /** Claude Code's --effort level: low, medium, high, xhigh or max. */
+  effort?: string;
   /** Run claude inside this Docker container (docker exec) instead of on the host. Paths must be mounted identically. */
   container?: string;
   /** Subagent definitions for --agents. */

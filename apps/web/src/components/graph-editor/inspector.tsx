@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from "react";
 import { TrashIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
-import { ConditionSchema, gateMode, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { ConditionSchema, EFFORT_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
@@ -182,6 +182,7 @@ function NodeInspector({
 
       {CLI_TYPES.has(type) && (
         <>
+          <ModelFields config={config} setConfig={setConfig} clearConfig={clearConfig} />
           <Field>
             <FieldLabel htmlFor="node-turns">Max turns</FieldLabel>
             <Input
@@ -297,6 +298,63 @@ function NodeInspector({
         Delete node
       </Button>
     </FieldGroup>
+  );
+}
+
+const isAlias = (model: string) => MODEL_ALIASES.some((m) => m.alias === model);
+
+/** Which model and how much effort a CLI step runs with; empty keeps the worker's HANDOFF_MODEL and HANDOFF_EFFORT. */
+function ModelFields({ config, setConfig, clearConfig }: { config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void; clearConfig: (key: string) => void }) {
+  const model = str(config.model);
+  const [custom, setCustom] = useState(model !== "" && !isAlias(model));
+  const choice = custom ? "custom" : model;
+  return (
+    <>
+      <Field>
+        <FieldLabel htmlFor="node-model">Model</FieldLabel>
+        <NativeSelect
+          id="node-model"
+          value={choice}
+          onChange={(e) => {
+            const value = e.target.value;
+            setCustom(value === "custom");
+            if (value === "custom") return;
+            if (value) setConfig({ model: value });
+            else clearConfig("model");
+          }}
+        >
+          <NativeSelectOption value="">Worker default</NativeSelectOption>
+          {MODEL_ALIASES.map((m) => (
+            <NativeSelectOption key={m.alias} value={m.alias}>
+              {m.alias}: {m.label}
+            </NativeSelectOption>
+          ))}
+          <NativeSelectOption value="custom">A model id…</NativeSelectOption>
+        </NativeSelect>
+        {custom && (
+          <Input
+            aria-label="Model id"
+            className="font-mono text-xs"
+            placeholder="claude-opus-5-5"
+            defaultValue={isAlias(model) ? "" : model}
+            onBlur={(e) => (e.target.value.trim() ? setConfig({ model: e.target.value.trim() }) : clearConfig("model"))}
+          />
+        )}
+        <FieldDescription>Aliases follow the newest model of each family on your account.</FieldDescription>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="node-effort">Effort</FieldLabel>
+        <NativeSelect id="node-effort" value={str(config.effort)} onChange={(e) => (e.target.value ? setConfig({ effort: e.target.value }) : clearConfig("effort"))}>
+          <NativeSelectOption value="">Worker or model default</NativeSelectOption>
+          {EFFORT_LEVELS.map((level) => (
+            <NativeSelectOption key={level} value={level}>
+              {level}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+        <FieldDescription>How much the model thinks. A model without a level uses the highest one it has below it.</FieldDescription>
+      </Field>
+    </>
   );
 }
 
