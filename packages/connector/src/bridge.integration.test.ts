@@ -23,6 +23,12 @@ beforeEach(async () => {
     const server = new McpServer({ name: "handoff", version: "1.0.0" });
     server.registerTool("echo", { inputSchema: { text: z.string() } }, async ({ text }) => ({ content: [{ type: "text", text: `echo ${text}` }] }));
     server.registerTool("list_attention", {}, async () => ({ content: [{ type: "text", text: JSON.stringify(items) }] }));
+    server.registerTool("list_projects", {}, async () => ({ content: [{ type: "text", text: JSON.stringify([{ name: "sandbox", id: "p1", repo: "octo/sample" }]) }] }));
+    server.registerTool("get_project", { description: "A project.", inputSchema: { project: z.string().describe("Project name or id") } }, async ({ project }) => ({
+      content: [{ type: "text", text: JSON.stringify({ name: project }) }],
+    }));
+    server.registerTool("add_project", { inputSchema: { repo: z.string() } }, async ({ repo }) => ({ content: [{ type: "text", text: JSON.stringify({ repo }) }] }));
+    server.registerTool("list_runs", { inputSchema: { project: z.string().optional() } }, async ({ project }) => ({ content: [{ type: "text", text: JSON.stringify({ project: project ?? "all" }) }] }));
     // Stateless mode; the casts only bridge the SDK's optional-property types and exactOptionalPropertyTypes.
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true } as never);
     res.on("close", () => void transport.close());
@@ -41,8 +47,8 @@ afterEach(async () => {
 
 const ChannelSchema = z.object({ method: z.literal("notifications/claude/channel"), params: z.object({ content: z.string(), meta: z.record(z.string(), z.string()) }) });
 
-async function connect(token: string) {
-  bridge = createBridge({ url, token, pollMs: 25 });
+async function connect(token: string, session: { folder?: string; repo?: string } = {}) {
+  bridge = createBridge({ url, token, pollMs: 25, ...session });
   const client = new Client({ name: "claude-code", version: "test" });
   const pushed: z.infer<typeof ChannelSchema>["params"][] = [];
   client.setNotificationHandler(ChannelSchema, ({ params }) => void pushed.push(params));
@@ -56,7 +62,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 test("the dashboard's tools are passed through, and the bridge declares itself a channel", async () => {
   const { client } = await connect("tok");
   expect(client.getServerCapabilities()?.experimental).toEqual({ "claude/channel": {} });
-  expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["echo", "list_attention"]);
+  expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["add_project", "current_project", "echo", "get_project", "list_attention", "list_projects", "list_runs"]);
   expect(await client.callTool({ name: "echo", arguments: { text: "hi" } })).toMatchObject({ content: [{ type: "text", text: "echo hi" }] });
 });
 
@@ -101,4 +107,34 @@ test("the bundled plugin server runs on its own, the way the installed plugin st
   } finally {
     await client.close();
   }
+});
+
+const text = (result: unknown) => JSON.parse((result as { content: { text: string }[] }).content[0]!.text);
+
+test("in a folder of a known repository, tools default to its project and current_project names it", async () => {
+  const { client } = await connect("tok", { folder: "/work/sample", repo: "octo/sample" });
+  const getProject = (await client.listTools()).tools.find((t) => t.name === "get_project");
+  expect(getProject?.inputSchema.required ?? []).not.toContain("project");
+  expect(getProject?.description).toMatch(/this session's project/);
+  expect(text(await client.callTool({ name: "get_project", arguments: {} }))).toEqual({ name: "sandbox" });
+  expect(text(await client.callTool({ name: "get_project", arguments: { project: "other" } }))).toEqual({ name: "other" });
+  // An optional project is a filter: leaving it out still means every project.
+  expect(text(await client.callTool({ name: "list_runs", arguments: {} }))).toEqual({ project: "all" });
+  expect(text(await client.callTool({ name: "current_project", arguments: {} }))).toMatchObject({ folder: "/work/sample", repo: "octo/sample", project: { name: "sandbox", id: "p1" } });
+});
+
+test("in a folder of a repository handoff does not know, add_project adds that repository", async () => {
+  const { client } = await connect("tok", { folder: "/work/widgets", repo: "octo/widgets" });
+  expect(text(await client.callTool({ name: "current_project", arguments: {} }))).toMatchObject({ repo: "octo/widgets", project: null, next: expect.stringMatching(/add_project/) });
+  const missing = (await client.callTool({ name: "get_project", arguments: {} })) as { isError?: boolean; content: { text: string }[] };
+  expect(missing.isError).toBe(true);
+  expect(missing.content[0]?.text).toMatch(/octo\/widgets is not a handoff project yet/);
+  expect(text(await client.callTool({ name: "add_project", arguments: {} }))).toEqual({ repo: "octo/widgets" });
+});
+
+test("outside a GitHub repository the project has to be named", async () => {
+  const { client } = await connect("tok", { folder: "/tmp/scratch" });
+  const result = (await client.callTool({ name: "get_project", arguments: {} })) as { isError?: boolean; content: { text: string }[] };
+  expect(result.isError).toBe(true);
+  expect(result.content[0]?.text).toMatch(/name the project/i);
 });
