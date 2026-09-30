@@ -2,6 +2,9 @@ import { and, eq } from "drizzle-orm";
 import { questions, type Db } from "@handoff/db";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
+/** Answers the review page fills in when the person wrote no note; not decisions in themselves. */
+const DEFAULT_NOTES = new Set(["Approved.", "Changes requested.", "approve", "changes"]);
+
 type Ask = { question: string; options: string[]; context: Record<string, unknown> };
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
@@ -109,6 +112,13 @@ export function humanGateExecutor(deps: { db: Db }): NodeExecutor {
         answeredAt: (question.answeredAt ?? new Date()).toISOString(),
       };
       const statePatch: Record<string, unknown> = { human: { ...ctx.state.human, [ctx.node.key]: answer } };
+      // A review that asks for changes, or comments, is a decision every later step must keep to.
+      const decided = question.option === "changes" || question.option === "reject" || question.comments.length > 0;
+      if ((question.context as { reason?: string }).reason === "approval" && decided) {
+        const note = DEFAULT_NOTES.has(question.answer) ? undefined : question.answer;
+        const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
+        statePatch.decisions = [...previous, { gate: ctx.node.key, ...(note ? { note } : {}), comments: question.comments }];
+      }
       const edgeKey = (question.context as { reason?: string; edgeKey?: string }).edgeKey;
       if ((question.context as { reason?: string }).reason === "loop_exhausted" && edgeKey && question.option !== "abort") {
         statePatch.loops = { ...ctx.state.loops, [edgeKey]: { attempts: 0 } };
