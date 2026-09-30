@@ -1,24 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import Link from "next/link";
+import { ExternalLinkIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { describeNow } from "@/lib/run-now";
 import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { EventStream, type RunEvent } from "./event-stream";
-import { ExecutionActivity } from "./execution-activity";
-import { ExecutionDetails, type ExecutionDetail } from "./execution-details";
-
-/** Node types that run a Claude Code agent, whose activity the drawer shows. */
-const AGENT_TYPES = new Set(["planner", "coder", "reviewer", "code_review"]);
+import { ExecutionPanel } from "./execution-panel";
 import { StatusBadge } from "./status-badge";
 import { Steps, type StepView } from "./steps";
 
@@ -80,6 +78,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [wide, setWide] = useState(false);
   const selected = executions.find((e) => e.id === selectedId);
   const selectLatest = useCallback(
     (nodeKey: string) => {
@@ -150,42 +149,30 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
         </TabsContent>
       </Tabs>
       <Sheet open={selected !== undefined} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+        <SheetContent data-wide={wide} className={cn("w-full overflow-y-auto", wide ? "sm:max-w-[min(96vw,90rem)]" : "sm:max-w-xl")}>
           {selected && (
             <>
               <SheetHeader>
-                <SheetTitle>{labels[selected.nodeKey] ?? selected.nodeKey}</SheetTitle>
+                <div className="flex items-center gap-1 pr-8">
+                  <SheetTitle className="mr-auto">{labels[selected.nodeKey] ?? selected.nodeKey}</SheetTitle>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label={wide ? "Narrow" : "Widen"} aria-pressed={wide} onClick={() => setWide((w) => !w)}>
+                    {wide ? <Minimize2Icon /> : <Maximize2Icon />}
+                  </Button>
+                  <Button variant="ghost" size="icon-sm" asChild>
+                    <Link href={`/runs/${runId}/executions/${selected.id}`} target="_blank" aria-label="Open on its own page">
+                      <ExternalLinkIcon />
+                    </Link>
+                  </Button>
+                </div>
                 <SheetDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</SheetDescription>
               </SheetHeader>
               <div className="px-4 pb-6">
-                <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} />
+                <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} wide={wide} />
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
-    </div>
-  );
-}
-
-/** Loads one execution's details, and again whenever its status changes. */
-function ExecutionPanel({ runId, executionId, status, liveCli }: { runId: string; executionId: string; status: string; liveCli: RunEvent[] }) {
-  const [loaded, setLoaded] = useState<{ key: string; detail: ExecutionDetail | null }>();
-  const key = `${executionId}:${status}`;
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/runs/${runId}/executions/${executionId}`, { signal: controller.signal })
-      .then((r) => (r.ok ? (r.json() as Promise<ExecutionDetail>) : null))
-      .then((detail) => setLoaded({ key, detail }))
-      .catch(() => {});
-    return () => controller.abort();
-  }, [runId, executionId, key]);
-  if (!loaded) return <Skeleton className="h-40 w-full" />;
-  if (!loaded.detail) return <p className="text-sm text-muted-foreground">This execution could not be loaded.</p>;
-  return (
-    <div className="flex flex-col gap-6">
-      <ExecutionDetails detail={loaded.detail} />
-      {AGENT_TYPES.has(loaded.detail.nodeType) && <ExecutionActivity runId={runId} executionId={executionId} live={liveCli.filter((e) => e.nodeExecutionId === executionId)} />}
     </div>
   );
 }

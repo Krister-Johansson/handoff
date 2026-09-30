@@ -53,6 +53,17 @@ test("selecting a step opens what it produced", async () => {
   expect(await screen.findByText("Add a module.")).toBeInTheDocument();
 });
 
+test("the drawer widens to show details and activity side by side, and opens on its own page", async () => {
+  render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
+  fireEvent.click(screen.getByRole("button", { name: /Plan/ }));
+  await screen.findByText("Add a module.");
+  const widen = screen.getByRole("button", { name: "Widen" });
+  fireEvent.click(widen);
+  expect(screen.getByRole("button", { name: "Narrow" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("dialog")).toHaveAttribute("data-wide", "true");
+  expect(screen.getByRole("link", { name: "Open on its own page" })).toHaveAttribute("href", "/runs/r1/executions/e1");
+});
+
 test("an open execution reloads when its status changes", async () => {
   fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(detail("running", ""))));
   render(<RunLive {...common} initialStatus="running" initialExecutions={[{ ...executions[0]!, status: "running" }]} />);
