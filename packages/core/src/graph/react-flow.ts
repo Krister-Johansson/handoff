@@ -9,14 +9,30 @@ export type FlowNodeData = {
   contract?: NodeAttributesInput["contract"];
   contextSelector?: NodeAttributesInput["contextSelector"];
   library?: NodeAttributesInput["library"];
+  /** An outgoing edge has no port (a custom condition), so the node shows a handle for it. */
+  customOut?: boolean;
 };
 export type FlowNode = { id: string; type: "handoff"; position: { x: number; y: number }; data: FlowNodeData };
-export type FlowEdge = { id: string; source: string; target: string; type: "handoff"; data: EdgeAttributes };
+export type FlowEdge = {
+  id: string;
+  source: string;
+  target: string;
+  /** The source's output port, or CUSTOM_HANDLE for an edge with a custom condition. */
+  sourceHandle?: string | null;
+  /** The target's input: in or feedback. */
+  targetHandle?: string | null;
+  type: "handoff";
+  data: EdgeAttributes;
+};
+
+/** The handle of an edge that has no port: its route comes from a custom condition. */
+export const CUSTOM_HANDLE = "custom";
 export type FlowGraph = { nodes: FlowNode[]; edges: FlowEdge[]; attributes: GraphDocument["attributes"] };
 
 /** graphology export JSON to React Flow nodes and edges. graphology stays the stored model. */
 export function toReactFlow(input: unknown): FlowGraph {
   const doc = GraphDocumentSchema.parse(input);
+  const customOut = new Set(doc.edges.filter((e) => e.attributes.port === undefined).map((e) => e.source));
   return {
     attributes: doc.attributes,
     nodes: doc.nodes.map(({ key, attributes }) => ({
@@ -31,9 +47,18 @@ export function toReactFlow(input: unknown): FlowGraph {
         ...(attributes.contract ? { contract: attributes.contract } : {}),
         ...(attributes.contextSelector ? { contextSelector: attributes.contextSelector } : {}),
         ...(attributes.library ? { library: attributes.library } : {}),
+        ...(customOut.has(key) ? { customOut: true } : {}),
       },
     })),
-    edges: doc.edges.map(({ key, source, target, attributes }) => ({ id: key, source, target, type: "handoff", data: attributes })),
+    edges: doc.edges.map(({ key, source, target, attributes }) => ({
+      id: key,
+      source,
+      target,
+      sourceHandle: attributes.port ?? CUSTOM_HANDLE,
+      targetHandle: attributes.input ?? "in",
+      type: "handoff",
+      data: attributes,
+    })),
   };
 }
 
@@ -56,6 +81,12 @@ export function fromReactFlow(flow: FlowGraph): GraphDocument {
         y: Math.round(n.position.y),
       },
     })),
-    edges: flow.edges.map((e) => ({ key: e.id, source: e.source, target: e.target, attributes: e.data })),
+    edges: flow.edges.map((e) => {
+      const { port: _port, input: _input, ...rest } = e.data;
+      const port = e.sourceHandle && e.sourceHandle !== CUSTOM_HANDLE ? e.sourceHandle : undefined;
+      // in is the default: it is only written when the edge had an input already.
+      const input = e.targetHandle === "feedback" ? "feedback" : e.data.input !== undefined ? "in" : undefined;
+      return { key: e.id, source: e.source, target: e.target, attributes: { ...rest, ...(port ? { port } : {}), ...(input ? { input } : {}) } };
+    }),
   });
 }

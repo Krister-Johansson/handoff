@@ -31,6 +31,10 @@ export const NodeAttributesSchema = z.object({
 export type NodeAttributesInput = z.input<typeof NodeAttributesSchema>;
 
 export const EdgeAttributesSchema = z.object({
+  /** The source's output port (see portsOf). It sets on and condition unless condition is given. */
+  port: z.string().optional(),
+  /** The target's input: in, or feedback, which loops back and carries what the source sent. */
+  input: z.enum(["in", "feedback"]).optional(),
   condition: ConditionSchema.optional(),
   on: z.enum(["passed", "failed", "any"]).default("passed"),
   loop: z.boolean().default(false),
