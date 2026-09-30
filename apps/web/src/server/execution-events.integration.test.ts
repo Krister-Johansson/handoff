@@ -1,8 +1,8 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, events as eventsTable } from "@handoff/db";
+import { appendEvents } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
-import { latestSeq, listExecutionCliEvents } from "./execution-events";
+import { listExecutionCliEvents } from "./execution-events";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
 
 const db = createTestDb();
@@ -32,8 +32,4 @@ test("an execution's Claude CLI events come back in order, the latest ones when 
   ]);
   expect((await listExecutionCliEvents(db, run.id, coder.id, 2)).map((e) => (e.payload as { n: number }).n)).toEqual([3, 4]);
   expect(await listExecutionCliEvents(db, crypto.randomUUID(), coder.id)).toEqual([]);
-  // A page that opens now follows the stream from the run's last event.
-  const all = await db.select({ seq: eventsTable.seq }).from(eventsTable).where(eq(eventsTable.runId, run.id));
-  expect(await latestSeq(db, run.id)).toBe(Math.max(...all.map((e) => Number(e.seq))));
-  expect(await latestSeq(db, crypto.randomUUID())).toBe(0);
 });

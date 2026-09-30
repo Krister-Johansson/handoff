@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BrainIcon, ChevronRightIcon, MessageSquareIcon, WrenchIcon } from "lucide-react";
 import { TerminalOutput } from "@/components/terminal-output";
 import { Badge } from "@/components/ui/badge";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toActivity, type ActivityItem, type ActivityStats } from "@/lib/activity";
 import type { RunEvent } from "./event-stream";
@@ -84,6 +85,24 @@ export function ExecutionActivity({ runId, executionId, live }: { runId: string;
     return toActivity([...base, ...live.filter((e) => e.seq > last)]);
   }, [stored, live]);
 
+  const hasItems = items.length > 0;
+  // Follow new activity to the bottom, unless the reader scrolled up to read; scrolling back down follows again.
+  const list = useRef<HTMLOListElement>(null);
+  const following = useRef(true);
+  useEffect(() => {
+    const viewport = list.current?.closest<HTMLElement>("[data-slot=scroll-area-viewport]");
+    if (!viewport) return;
+    const onScroll = () => {
+      following.current = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+    };
+    viewport.addEventListener("scroll", onScroll);
+    return () => viewport.removeEventListener("scroll", onScroll);
+  }, [stored, hasItems]);
+  useEffect(() => {
+    const viewport = list.current?.closest<HTMLElement>("[data-slot=scroll-area-viewport]");
+    if (viewport && following.current) viewport.scrollTop = viewport.scrollHeight;
+  }, [items.length]);
+
   if (!stored) return <Skeleton className="h-24 w-full" />;
   return (
     <section aria-label="Activity" className="flex flex-col gap-2">
@@ -94,13 +113,15 @@ export function ExecutionActivity({ runId, executionId, live }: { runId: string;
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">No activity yet.</p>
       ) : (
-        <ol className="flex flex-col gap-2">
-          {items.map((item) => (
-            <li key={item.key}>
-              <Item item={item} />
-            </li>
-          ))}
-        </ol>
+        <ScrollArea className="h-[min(65svh,44rem)] rounded-md border">
+          <ol ref={list} className="flex flex-col gap-2 p-2">
+            {items.map((item) => (
+              <li key={item.key}>
+                <Item item={item} />
+              </li>
+            ))}
+          </ol>
+        </ScrollArea>
       )}
     </section>
   );

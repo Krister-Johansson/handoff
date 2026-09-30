@@ -6,9 +6,9 @@ import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import Link from "next/link";
-import { ExternalLinkIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
+import { Maximize2Icon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -78,7 +78,8 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [wide, setWide] = useState(false);
+  // A popped-out node shows in a large modal instead of the drawer; closing it goes back to the drawer.
+  const [poppedOut, setPoppedOut] = useState(false);
   const selected = executions.find((e) => e.id === selectedId);
   const selectLatest = useCallback(
     (nodeKey: string) => {
@@ -148,31 +149,39 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
           </Card>
         </TabsContent>
       </Tabs>
-      <Sheet open={selected !== undefined} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <SheetContent data-wide={wide} className={cn("w-full overflow-y-auto", wide ? "sm:max-w-[min(96vw,90rem)]" : "sm:max-w-xl")}>
+      <Sheet open={selected !== undefined && !poppedOut} onOpenChange={(open) => !open && setSelectedId(null)}>
+        <SheetContent className="w-full overflow-y-auto data-[side=right]:sm:max-w-xl">
           {selected && (
             <>
               <SheetHeader>
                 <div className="flex items-center gap-1 pr-8">
                   <SheetTitle className="mr-auto">{labels[selected.nodeKey] ?? selected.nodeKey}</SheetTitle>
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label={wide ? "Narrow" : "Widen"} aria-pressed={wide} onClick={() => setWide((w) => !w)}>
-                    {wide ? <Minimize2Icon /> : <Maximize2Icon />}
-                  </Button>
-                  <Button variant="ghost" size="icon-sm" asChild>
-                    <Link href={`/runs/${runId}/executions/${selected.id}`} target="_blank" aria-label="Open on its own page">
-                      <ExternalLinkIcon />
-                    </Link>
+                  <Button type="button" variant="ghost" size="icon-sm" aria-label="Pop out" onClick={() => setPoppedOut(true)}>
+                    <Maximize2Icon />
                   </Button>
                 </div>
                 <SheetDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</SheetDescription>
               </SheetHeader>
               <div className="px-4 pb-6">
-                <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} wide={wide} />
+                <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} />
               </div>
             </>
           )}
         </SheetContent>
       </Sheet>
+      <Dialog open={selected !== undefined && poppedOut} onOpenChange={(open) => !open && setPoppedOut(false)}>
+        <DialogContent className="h-[90dvh] content-start sm:max-w-[min(96vw,90rem)]">
+          {selected && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{labels[selected.nodeKey] ?? selected.nodeKey}</DialogTitle>
+                <DialogDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</DialogDescription>
+              </DialogHeader>
+              <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} wide />
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
