@@ -88,3 +88,31 @@ test("approving the plan moves on to the coder", async () => {
   expect(executions.find((e) => e.nodeKey === "coder")?.status).toBe("passed");
   expect(row.status).toBe("succeeded");
 });
+
+test("a gate after a plan reviewer shows the plan it reviewed, with the reviewer's verdict under it", async () => {
+  const graph = {
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "plan-review", attributes: { type: "reviewer", x: 300, y: 0 } },
+      { key: "gate", attributes: { type: "human_gate", x: 600, y: 0 } },
+    ],
+    edges: [
+      { key: "planner->plan-review", source: "planner", target: "plan-review", attributes: { port: "done" } },
+      { key: "plan-review->planner", source: "plan-review", target: "planner", attributes: { port: "changes", input: "feedback" } },
+      { key: "plan-review->gate", source: "plan-review", target: "gate", attributes: { port: "approve" } },
+      { key: "gate->planner", source: "gate", target: "planner", attributes: { port: "changes", input: "feedback" } },
+    ],
+  };
+  const cli = new FakeCliExecutor([{ output: plan }]);
+  const reviewed = { verdict: "approve", comments: [{ path: "plan", body: "Covers the issue." }] };
+  const { run } = await startRun(db, graph, "Build a todo app");
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 }), reviewer: scripted(done(reviewed)), human_gate: humanGateExecutor({ db }) }));
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  expect(question?.question).toBe("Review the plan from planner");
+  const review = (question?.context as { review: { from: string; kind: string; markdown: string } }).review;
+  expect(review).toMatchObject({ from: "planner", kind: "plan" });
+  expect(review.markdown).toContain("Store todos in a JSON file and add a CLI.");
+  expect(review.markdown).toContain("## Review by plan-review");
+  expect(review.markdown).toContain("Covers the issue.");
+});
