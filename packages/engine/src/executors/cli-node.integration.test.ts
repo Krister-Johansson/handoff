@@ -123,3 +123,15 @@ test("a node's model and effort override the worker's defaults, and nodes withou
   expect(cli.requests[0]).toMatchObject({ model: "sonnet", effort: "medium" });
   expect(cli.requests[1]).toMatchObject({ model: "opus", effort: "xhigh" });
 });
+
+test("a node that allows every tool gets Claude Code's full list, still named one by one", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
+  const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
+  doc.nodes.find((n) => n.key === "coder")!.attributes.config = { allTools: true, allowedTools: ["Read"] };
+  await startRun(db, doc);
+  await drain(engineDeps(db, registry(cli)));
+  const tools = cli.requests[1]!.allowedTools;
+  expect(tools).toEqual(expect.arrayContaining(["Read", "Edit", "Write", "Bash", "WebFetch", "WebSearch", "Agent", "Skill"]));
+  expect(tools).not.toContain("Artifact");
+  expect(cli.requests[0]!.allowedTools).not.toContain("Bash");
+});
