@@ -52,7 +52,11 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
           (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, title: title(ctx.state.task), body: prBody(ctx) }));
         number = pr.number;
       }
-      const repoId = ctx.project.repoId ?? (await deps.github.getRepoId(repo));
+      let repoId = ctx.project.repoId;
+      if (repoId === null) {
+        repoId = await deps.github.getRepoId(repo);
+        await ctx.recordRepoId(repoId);
+      }
       const key = prKey(repoId, number);
       await ctx.registerWait(key);
 

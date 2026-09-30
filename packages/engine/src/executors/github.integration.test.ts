@@ -130,3 +130,13 @@ describe("Merge node", () => {
     expect(merge).toMatchObject({ status: "failed", error: { code: "merge_failed" } });
   });
 });
+
+describe("repository id", () => {
+  test("the PR node stores the repository id on the project the first time it looks it up", async () => {
+    const { deps } = await setup();
+    await drain(deps);
+    const { projects } = await import("@handoff/db");
+    const [project] = await db.select().from(projects);
+    expect(project?.repoId).toBe(42);
+  });
+});

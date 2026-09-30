@@ -3,6 +3,7 @@ import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { compileGraph, type CompileError } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, projects, runs, sql, type Db } from "@handoff/db";
 import { createRun } from "@handoff/engine/runs";
+import type { GitHubPort } from "@handoff/github";
 
 export const TEMPLATES = {
   linear: { label: "Plan, code, PR, merge", document: linear },
@@ -26,13 +27,22 @@ export async function listProjects(db: Db) {
     .orderBy(projects.name);
 }
 
-export async function createProject(db: Db, input: { name: string; repo: string; defaultBranch: string }) {
+/** Adds a project; with a GitHub client it also checks the repository exists and stores its id. */
+export async function createProject(db: Db, input: { name: string; repo: string; defaultBranch: string }, github?: GitHubPort) {
   const [owner, name, extra] = input.repo.trim().split("/");
   if (!owner || !name || extra !== undefined) throw new Error("Repository must look like owner/name.");
   if (!/^[a-z0-9][a-z0-9-]*$/.test(input.name)) throw new Error("Project name: lowercase letters, digits and dashes.");
+  let repoId: number | null = null;
+  if (github) {
+    try {
+      repoId = await github.getRepoId({ owner, name });
+    } catch {
+      throw new Error(`GitHub cannot find ${owner}/${name} with the configured credentials.`);
+    }
+  }
   const [project] = await db
     .insert(projects)
-    .values({ name: input.name, repoOwner: owner, repoName: name, defaultBranch: input.defaultBranch || "main" })
+    .values({ name: input.name, repoOwner: owner, repoName: name, defaultBranch: input.defaultBranch || "main", repoId })
     .returning();
   return project!;
 }
