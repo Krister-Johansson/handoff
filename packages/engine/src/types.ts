@@ -30,6 +30,8 @@ export type ExecutorContext = {
   signal: AbortSignal;
   emit(type: string, payload: unknown): void;
   setSessionId(id: string): Promise<void>;
+  /** Records the running child process so a restarted worker can stop it. */
+  setChildPid(pid: number): Promise<void>;
   /** Records the correlation key while still running so a wake that arrives before the yield is kept. */
   registerWait(key: string): Promise<void>;
 };

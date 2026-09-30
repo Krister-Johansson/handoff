@@ -25,7 +25,7 @@ const STDERR_TAIL_LINES = 50;
 export class ClaudeCliExecutor implements CliExecutor {
   constructor(private readonly options: ClaudeCliExecutorOptions) {}
 
-  async run(request: CliRunRequest, { signal, onEvent, onSessionId }: CliRunOptions): Promise<CliRunResult> {
+  async run(request: CliRunRequest, { signal, onEvent, onSessionId, onSpawn }: CliRunOptions): Promise<CliRunResult> {
     mkdirSync(request.stagingDir, { recursive: true });
     const systemPromptFile = join(request.stagingDir, "context.md");
     writeFileSync(systemPromptFile, request.systemPrompt);
@@ -60,6 +60,7 @@ export class ClaudeCliExecutor implements CliExecutor {
       detached: true,
     });
 
+    if (child.pid) await onSpawn?.(child.pid);
     const stderrTail: string[] = [];
     createInterface({ input: child.stderr }).on("line", (line) => {
       stderrTail.push(line);

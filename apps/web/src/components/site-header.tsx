@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { InboxLink } from "@/components/inbox-link";
+import { WorkerStatus } from "@/components/worker-status";
 
 const links = [
   { href: "/projects", label: "Projects" },
@@ -23,6 +24,9 @@ export function SiteHeader() {
           ))}
           <InboxLink />
         </nav>
+        <div className="ml-auto">
+          <WorkerStatus />
+        </div>
       </div>
     </header>
   );

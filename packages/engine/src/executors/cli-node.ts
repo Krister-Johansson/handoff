@@ -111,6 +111,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           ctx.emit(event.type, event.payload);
         },
         onSessionId: (id) => ctx.setSessionId(id),
+        onSpawn: (pid) => ctx.setChildPid(pid),
       };
       let result = await options.cli.run({ ...base, prompt, session, maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns }, runOptions);
       if (result.outcome === "error_max_turns" && !local.signal.aborted) {

@@ -36,6 +36,9 @@ export const nodeExecutions = pgTable(
     checks: jsonb("checks").$type<unknown[]>(),
     error: jsonb("error").$type<{ code: string; message: string; detail?: unknown }>(),
     executorSessionId: text("executor_session_id"),
+    /** Process group of the running claude child, so a restarted worker can kill it. */
+    childPid: integer("child_pid"),
+    childHost: text("child_host"),
     costUsd: numeric("cost_usd", { precision: 12, scale: 6 }),
     usage: jsonb("usage").$type<unknown>(),
     repairedFromExecutionId: uuid("repaired_from_execution_id").references((): AnyPgColumn => nodeExecutions.id),
