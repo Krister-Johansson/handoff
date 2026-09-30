@@ -33,7 +33,7 @@ test("signing in to a saved OAuth server sends the browser to its authorization 
   const callback = await approve(started.redirect);
   expect(`${callback.origin}${callback.pathname}`).toBe(`${ORIGIN}/api/mcp-oauth/callback`);
 
-  expect(await completeSignIn(store, callback.searchParams)).toEqual({ redirect: "/library/mcp/docs?signed_in=1" });
+  expect(await completeSignIn(db, store, callback.searchParams)).toEqual({ redirect: "/library/mcp/docs?signed_in=1" });
   expect(mcpSignInStatus(store, "docs", server.url)).toMatchObject({ connected: true });
 });
 
@@ -48,7 +48,7 @@ test("a denied sign-in returns to the server's page with the reason", async () =
   const started = await startSignIn(db, store, "docs", ORIGIN);
   if (!("redirect" in started)) throw new Error(started.error);
   const state = new URL(started.redirect).searchParams.get("state") ?? "";
-  const result = await completeSignIn(store, new URLSearchParams({ state, error: "access_denied", error_description: "The user said no" }));
+  const result = await completeSignIn(db, store, new URLSearchParams({ state, error: "access_denied", error_description: "The user said no" }));
   expect(result).toEqual({ redirect: `/library/mcp/docs?oauth_error=${encodeURIComponent("The user said no")}` });
-  expect(await completeSignIn(store, new URLSearchParams({ state: "forged", code: "x" }))).toEqual({ error: expect.stringMatching(/unknown or has expired/) });
+  expect(await completeSignIn(db, store, new URLSearchParams({ state: "forged", code: "x" }))).toEqual({ error: expect.stringMatching(/unknown or has expired/) });
 });

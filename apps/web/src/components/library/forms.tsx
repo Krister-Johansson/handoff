@@ -65,65 +65,104 @@ const pairLines = (values: Record<string, string>, separator: string) =>
     .join("\n");
 
 /** The name field for a new entry, or the fixed name of an existing one. */
-function NameField({ state, name, placeholder, description }: { state: FormState; name?: string | undefined; placeholder: string; description?: string }) {
+function NameField({
+  state,
+  name,
+  placeholder,
+  description,
+  defaultValue,
+}: {
+  state: FormState;
+  name?: string | undefined;
+  placeholder: string;
+  description?: string;
+  defaultValue?: string | undefined;
+}) {
   if (name) return <input type="hidden" name="name" value={name} />;
   return (
     <>
       <input type="hidden" name="$new" value="1" />
-      <TextField name="name" label="Name" state={state} placeholder={placeholder} {...(description ? { description } : {})} />
+      <TextField name="name" label="Name" state={state} placeholder={placeholder} {...(description ? { description } : {})} {...(defaultValue ? { defaultValue } : {})} />
     </>
   );
 }
 
-export function McpServerForm({ initial }: { initial?: McpServerValues }) {
+type Draft = { name: string; url: string };
+
+/** Where the server runs: a local command or a remote URL. */
+function ConnectionFields({ state, initial, draft }: { state: FormState; initial: McpServerValues | undefined; draft: Draft | undefined }) {
+  const transport = state.values?.transport ?? initial?.transport ?? (draft ? "http" : "stdio");
+  return (
+    <>
+      <Field>
+        <FieldLabel htmlFor="field-transport">Transport</FieldLabel>
+        <NativeSelect key={transport} id="field-transport" name="transport" defaultValue={transport}>
+          <NativeSelectOption value="stdio">stdio (local command)</NativeSelectOption>
+          <NativeSelectOption value="http">http (remote URL)</NativeSelectOption>
+        </NativeSelect>
+      </Field>
+      <TextField name="command" label="Command" state={state} placeholder="npx" description="For stdio servers." defaultValue={initial?.command ?? ""} />
+      <TextField name="args" label="Arguments" state={state} multiline rows={3} placeholder={"-y\n@example/docs-mcp"} description="One per line." defaultValue={initial?.args.join("\n")} />
+      <TextField name="url" label="URL" state={state} placeholder="https://mcp.example.com" description="For http servers." defaultValue={initial?.url ?? draft?.url ?? ""} />
+    </>
+  );
+}
+
+function AuthField({ auth, onChange }: { auth: string; onChange: (auth: string) => void }) {
+  return (
+    <Field>
+      <FieldLabel htmlFor="field-auth">Authentication</FieldLabel>
+      <NativeSelect id="field-auth" name="auth" value={auth} onChange={(e) => onChange(e.target.value)}>
+        <NativeSelectOption value="headers">Headers (API key or token)</NativeSelectOption>
+        <NativeSelectOption value="oauth">OAuth sign-in</NativeSelectOption>
+      </NativeSelect>
+      <FieldDescription>For http servers. With OAuth sign-in, save the server, then sign in on its page; runs send the token as an Authorization header.</FieldDescription>
+    </Field>
+  );
+}
+
+/** Environment variables and headers, with secrets as references the worker resolves. */
+function SecretFields({ state, initial }: { state: FormState; initial: McpServerValues | undefined }) {
+  return (
+    <>
+      <TextField
+        name="env"
+        label="Environment"
+        state={state}
+        multiline
+        rows={3}
+        placeholder={"API_KEY=${secret:DOCS_API_KEY}"}
+        description="KEY=value per line. Secrets stay in the worker environment; reference them as ${secret:NAME}."
+        defaultValue={initial ? pairLines(initial.env, "=") : undefined}
+      />
+      <TextField
+        name="headers"
+        label="Headers"
+        state={state}
+        multiline
+        rows={2}
+        placeholder={"Authorization: Bearer ${secret:DOCS_TOKEN}"}
+        description="Name: value per line."
+        defaultValue={initial ? pairLines(initial.headers, ": ") : undefined}
+      />
+    </>
+  );
+}
+
+/** `initial` edits a saved server; `draft` starts a new one with a name and URL filled in. */
+export function McpServerForm({ initial, draft }: { initial?: McpServerValues; draft?: Draft }) {
   const [state, action, pending] = useForm(saveMcpServer);
   const [tested, test, testing] = useActionState(testMcpServerAction, {} as McpTestState);
   const [, startTest] = useTransition();
   const [tools, setTools] = useState(state.values?.tools ?? initial?.tools.join(", ") ?? "");
-  const transport = state.values?.transport ?? initial?.transport ?? "stdio";
   const [auth, setAuth] = useState(state.values?.auth ?? initial?.auth ?? "headers");
   return (
     <form action={action}>
       <FieldGroup>
-        <NameField state={state} name={initial?.name} placeholder="docs" description="Tools appear to Claude as mcp__name__tool." />
-        <Field>
-          <FieldLabel htmlFor="field-transport">Transport</FieldLabel>
-          <NativeSelect key={transport} id="field-transport" name="transport" defaultValue={transport}>
-            <NativeSelectOption value="stdio">stdio (local command)</NativeSelectOption>
-            <NativeSelectOption value="http">http (remote URL)</NativeSelectOption>
-          </NativeSelect>
-        </Field>
-        <TextField name="command" label="Command" state={state} placeholder="npx" description="For stdio servers." defaultValue={initial?.command ?? ""} />
-        <TextField name="args" label="Arguments" state={state} multiline rows={3} placeholder={"-y\n@example/docs-mcp"} description="One per line." defaultValue={initial?.args.join("\n")} />
-        <TextField name="url" label="URL" state={state} placeholder="https://mcp.example.com" description="For http servers." defaultValue={initial?.url ?? ""} />
-        <Field>
-          <FieldLabel htmlFor="field-auth">Authentication</FieldLabel>
-          <NativeSelect id="field-auth" name="auth" value={auth} onChange={(e) => setAuth(e.target.value)}>
-            <NativeSelectOption value="headers">Headers (API key or token)</NativeSelectOption>
-            <NativeSelectOption value="oauth">OAuth sign-in</NativeSelectOption>
-          </NativeSelect>
-          <FieldDescription>For http servers. With OAuth sign-in, save the server, then sign in on its page; runs send the token as an Authorization header.</FieldDescription>
-        </Field>
-        <TextField
-          name="env"
-          label="Environment"
-          state={state}
-          multiline
-          rows={3}
-          placeholder={"API_KEY=${secret:DOCS_API_KEY}"}
-          description="KEY=value per line. Secrets stay in the worker environment; reference them as ${secret:NAME}."
-          defaultValue={initial ? pairLines(initial.env, "=") : undefined}
-        />
-        <TextField
-          name="headers"
-          label="Headers"
-          state={state}
-          multiline
-          rows={2}
-          placeholder={"Authorization: Bearer ${secret:DOCS_TOKEN}"}
-          description="Name: value per line."
-          defaultValue={initial ? pairLines(initial.headers, ": ") : undefined}
-        />
+        <NameField state={state} name={initial?.name} defaultValue={draft?.name} placeholder="docs" description="Tools appear to Claude as mcp__name__tool." />
+        <ConnectionFields state={state} initial={initial} draft={draft} />
+        <AuthField auth={auth} onChange={setAuth} />
+        <SecretFields state={state} initial={initial} />
         <Field>
           <FieldLabel htmlFor="field-tools">Allowed tools</FieldLabel>
           <Input id="field-tools" name="tools" placeholder="search, fetch" value={tools} onChange={(e) => setTools(e.target.value)} />
