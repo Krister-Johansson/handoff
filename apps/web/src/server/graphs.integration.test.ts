@@ -3,7 +3,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { eq, graphVersions, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
-import { createGraphFromTemplate, createProject, getGraphForEdit, getProjectDetail, listProjects, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
+import { createGraphFromTemplate, createProject, getGraphForEdit, getGraphVersion, listGraphVersions, getProjectDetail, listProjects, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -65,5 +65,19 @@ describe("projects and graphs", () => {
     const detail = await getProjectDetail(db, project.id);
     expect(detail?.graphs).toEqual([expect.objectContaining({ name: "g", latestVersion: 2 })]);
     expect(detail?.runs.map((r) => r.id)).toEqual([run.id]);
+  });
+});
+
+describe("graph versions", () => {
+  test("listGraphVersions returns versions newest first and getGraphVersion loads one", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const edited = structuredClone(linear);
+    edited.nodes[1]!.attributes.label = "Implement";
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: edited });
+    const versions = await listGraphVersions(db, project.id, "g");
+    expect(versions.map((v) => v.version)).toEqual([2, 1]);
+    const v1 = await getGraphVersion(db, project.id, "g", 1);
+    expect((v1?.document as typeof linear).nodes[1]!.attributes.label).toBe("Code");
   });
 });

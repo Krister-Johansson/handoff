@@ -69,6 +69,24 @@ export async function getGraphForEdit(db: Db, projectId: string, name: string) {
   return row;
 }
 
+export async function listGraphVersions(db: Db, projectId: string, name: string) {
+  return db
+    .select({ version: graphVersions.version, createdAt: graphVersions.createdAt, createdBy: graphVersions.createdBy })
+    .from(graphVersions)
+    .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+    .where(and(eq(graphs.projectId, projectId), eq(graphs.name, name)))
+    .orderBy(desc(graphVersions.version));
+}
+
+export async function getGraphVersion(db: Db, projectId: string, name: string, version: number) {
+  const [row] = await db
+    .select({ version: graphVersions.version, document: graphVersions.document })
+    .from(graphVersions)
+    .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+    .where(and(eq(graphs.projectId, projectId), eq(graphs.name, name), eq(graphVersions.version, version)));
+  return row;
+}
+
 export type SaveResult = { ok: true; version: number } | { ok: false; errors: CompileError[] };
 
 /** Validates with compileGraph and stores a new immutable version; runs stay pinned to theirs. */
