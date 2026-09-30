@@ -9,6 +9,8 @@ export type CatalogEntry = {
 };
 
 const readOnlyTools = ["Read", "Glob", "Grep"];
+/** Git commands that only read: enough to see the history and state of the branch. */
+const readGitTools = ["Bash(git log *)", "Bash(git show *)", "Bash(git diff *)", "Bash(git status *)", "Bash(git ls-files *)"];
 
 /**
  * Every Claude Code tool a headless step can use, for a node that allows every tool: still passed
@@ -22,9 +24,9 @@ const coderTools = [...readOnlyTools, "Edit", "Write", "Bash(git *)", "Bash(pnpm
 export const nodeCatalog: Record<NodeType, CatalogEntry> = {
   start: { executorKind: "function", contract: "start_output", allowedTools: [] },
   finish: { executorKind: "function", contract: "finish_output", allowedTools: [] },
-  planner: { executorKind: "cli", contract: "planner_output", allowedTools: readOnlyTools },
+  planner: { executorKind: "cli", contract: "planner_output", allowedTools: [...readOnlyTools, ...readGitTools] },
   coder: { executorKind: "cli", contract: "coder_output", allowedTools: coderTools },
-  reviewer: { executorKind: "cli", contract: "reviewer_output", allowedTools: [...readOnlyTools, "Bash(git diff *)", "Bash(git log *)", "Bash(git show *)"] },
+  reviewer: { executorKind: "cli", contract: "reviewer_output", allowedTools: [...readOnlyTools, ...readGitTools] },
   // Claude Code's code-review skill, run through the Skill tool, reading the branch's diff with git.
   code_review: {
     executorKind: "cli",
