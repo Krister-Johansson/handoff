@@ -104,3 +104,21 @@ test("a code review node picks how thorough the review is", () => {
   fireEvent.change(screen.getByLabelText("Review level"), { target: { value: "max" } });
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "review", patch: { config: { level: "max" } } });
 });
+
+test("a pull request node waits for review bots or people, and sends their comments back", () => {
+  const dispatch = vi.fn();
+  const pr = (config: Record<string, unknown>): FlowGraph => ({ ...graph, nodes: [...graph.nodes, { id: "pr", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "pr", label: "Pull request", isStart: false, config } }] });
+  const { rerender } = render(<Inspector graph={pr({})} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add CodeRabbit" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { waitForReviewers: ["coderabbitai[bot]"] } } });
+
+  rerender(<Inspector graph={pr({ waitForReviewers: ["coderabbitai[bot]"] })} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByRole("list", { name: "Reviewers to wait for" })).toHaveTextContent("coderabbitai[bot]");
+  expect(screen.getByRole("switch", { name: "Send review comments back to the coder" })).toBeChecked();
+  const login = screen.getByLabelText("Reviewer login");
+  fireEvent.change(login, { target: { value: "octocat" } });
+  fireEvent.keyDown(login, { key: "Enter" });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { waitForReviewers: ["coderabbitai[bot]", "octocat"] } } });
+  fireEvent.change(screen.getByLabelText("Stop waiting after (minutes)"), { target: { value: "45" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewTimeoutMinutes: 45 } } });
+});

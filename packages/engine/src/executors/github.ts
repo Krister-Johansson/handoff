@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { ReviewerOutputSchema, type CoderOutput, type PlannerOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
+import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -102,14 +103,30 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
       const checksPending = requireChecks && feedback.ci.status === "pending" && snapshot.state === "open";
       const awaitingApproval =
         requireApproval && feedback.review.decision === "none" && feedback.ci.status !== "failure" && snapshot.state === "open";
-      if (checksPending || awaitingApproval) {
-        return {
-          kind: "waiting",
-          wait: { kind: "github_pr", key, deadlineAt: new Date(Date.now() + (deps.reconcileMs ?? 10 * 60_000)) },
-        };
+
+      // External reviewers (review bots such as CodeRabbit or Copilot, or people) on the head commit.
+      const settings = reviewSettings(ctx.node.config);
+      const handled = new Set(Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
+      const waitingForMs = Date.now() - (ctx.execution.startedAt ?? new Date()).getTime();
+      const external = externalReview(snapshot, settings, handled, waitingForMs);
+      const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
+      if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
+      if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
+
+      if (checksPending || awaitingApproval || awaitingReviewers) {
+        const reconcile = Date.now() + (deps.reconcileMs ?? 10 * 60_000);
+        // Wake at the review time limit even without a webhook, so a reviewer who never comes cannot hold the run.
+        const limit = awaitingReviewers ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
+        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit)) } };
       }
-      const output = { prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha, feedback };
-      return { kind: "completed", output, statePatch: { prNumber: number, feedback } };
+
+      const sendBack = settings.sendBack && external.findings.length > 0;
+      const routed = sendBack ? withFindings(feedback, external.findings) : feedback;
+      if (sendBack) ctx.emit("github.review_findings", { number, findings: external.findings.length });
+      const output = { prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha, feedback: routed };
+      const statePatch: Record<string, unknown> = { prNumber: number, feedback: routed };
+      if (sendBack) statePatch.prHandledReviews = [...handled, ...external.findings.map((f) => f.id)];
+      return { kind: "completed", output, statePatch };
     },
   };
 }

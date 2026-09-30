@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, type Dispatch } from "react";
-import { TrashIcon } from "lucide-react";
+import { PlusIcon, TrashIcon, XIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
 import { ALL_TOOLS, ConditionSchema, DEFAULT_REVIEW_LEVEL, EFFORT_LEVELS, REVIEW_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
@@ -243,6 +244,7 @@ function NodeInspector({
               Wait for an approving review
             </FieldLabel>
           </Field>
+          <ReviewerFields config={config} setConfig={setConfig} clearConfig={clearConfig} />
         </>
       )}
 
@@ -344,6 +346,88 @@ function ToolsField({
         <FieldDescription>{all ? `Every tool: ${ALL_TOOLS.join(", ")}.` : "Comma separated, in --allowedTools syntax. Empty uses the defaults shown."}</FieldDescription>
       </Field>
     </>
+  );
+}
+
+/** Review bots with a known GitHub login. Their app has to be installed on the repository and set to review. */
+const REVIEW_BOTS = [
+  { name: "CodeRabbit", login: "coderabbitai[bot]" },
+  { name: "Copilot", login: "copilot-pull-request-reviewer[bot]" },
+];
+
+/** Reviewers the PR node waits for on each new commit, how long, and whether what they say goes back to the coder. */
+function ReviewerFields({ config, setConfig, clearConfig }: { config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void; clearConfig: (key: string) => void }) {
+  const reviewers = Array.isArray(config.waitForReviewers) ? config.waitForReviewers.map(String) : [];
+  const waiting = new Set(reviewers);
+  const [login, setLogin] = useState("");
+  const write = (next: string[]) => (next.length ? setConfig({ waitForReviewers: next }) : clearConfig("waitForReviewers"));
+  const add = (name: string) => {
+    const trimmed = name.trim();
+    if (trimmed && !waiting.has(trimmed)) write([...reviewers, trimmed]);
+  };
+  const sendBack = typeof config.sendReviewComments === "boolean" ? config.sendReviewComments : reviewers.length > 0;
+  return (
+    <FieldSet>
+      <FieldLegend variant="label">Reviewers to wait for</FieldLegend>
+      <FieldDescription>The PR waits until each has reviewed its newest commit. A review bot must be installed on the repository and set to review pull requests.</FieldDescription>
+      {reviewers.length > 0 && (
+        <ul aria-label="Reviewers to wait for" className="flex flex-wrap gap-1.5">
+          {reviewers.map((name) => (
+            <li key={name}>
+              <Badge variant="secondary" className="gap-1 pr-0.5 font-mono">
+                {name}
+                <Button type="button" size="icon-xs" variant="ghost" aria-label={`Stop waiting for ${name}`} onClick={() => write(reviewers.filter((r) => r !== name))}>
+                  <XIcon />
+                </Button>
+              </Badge>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        {REVIEW_BOTS.filter((bot) => !waiting.has(bot.login)).map((bot) => (
+          <Button key={bot.login} type="button" size="sm" variant="outline" aria-label={`Add ${bot.name}`} onClick={() => add(bot.login)}>
+            <PlusIcon data-icon="inline-start" />
+            {bot.name}
+          </Button>
+        ))}
+      </div>
+      <Input
+        aria-label="Reviewer login"
+        placeholder="A GitHub login, then Enter"
+        className="font-mono text-xs"
+        value={login}
+        onChange={(e) => setLogin(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          add(login);
+          setLogin("");
+        }}
+      />
+      {reviewers.length > 0 && (
+        <Field>
+          <FieldLabel htmlFor="pr-review-timeout">Stop waiting after (minutes)</FieldLabel>
+          <Input
+            id="pr-review-timeout"
+            type="number"
+            min={0}
+            placeholder="30"
+            value={num(config.reviewTimeoutMinutes)}
+            onChange={(e) => (e.target.value ? setConfig({ reviewTimeoutMinutes: Number(e.target.value) }) : clearConfig("reviewTimeoutMinutes"))}
+          />
+        </Field>
+      )}
+      <Field orientation="horizontal">
+        <Switch id="pr-send-back" checked={sendBack} onCheckedChange={(on) => setConfig({ sendReviewComments: on })} />
+        <FieldContent>
+          <FieldLabel htmlFor="pr-send-back" className="font-normal">
+            Send review comments back to the coder
+          </FieldLabel>
+          <FieldDescription>New unresolved threads and review summaries from anyone leave through fix, once each.</FieldDescription>
+        </FieldContent>
+      </Field>
+    </FieldSet>
   );
 }
 

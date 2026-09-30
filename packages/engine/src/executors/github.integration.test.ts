@@ -226,3 +226,75 @@ describe("Reviewer notes on the pull request", () => {
     expect(github.prs.get(1)!.comments).toEqual([]);
   });
 });
+
+describe("external reviewers", () => {
+  const graph = (prConfig: Record<string, unknown>) => ({
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "pr", attributes: { type: "pr", config: prConfig, x: 0, y: 0 } },
+      { key: "merge", attributes: { type: "merge", x: 0, y: 0 } },
+    ],
+    edges: [
+      { key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done" } },
+      { key: "coder->pr", source: "coder", target: "pr", attributes: { port: "done" } },
+      { key: "pr->merge", source: "pr", target: "merge", attributes: { port: "ready" } },
+      { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix", input: "feedback" } },
+    ],
+  });
+  async function reviewed(prConfig: Record<string, unknown>) {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    github.origin = origin;
+    const { project, graphVersion } = await seedGraph(db, graph(prConfig), { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) };
+    const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+    await drain(deps);
+    github.setChecks(1, "SUCCESS");
+    const wake = async () => {
+      await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+      await drain(deps);
+    };
+    await wake();
+    return { github, run, wake };
+  }
+
+  test("the PR node waits for each listed reviewer to review the head commit, then goes on", async () => {
+    const { github, run, wake } = await reviewed({ waitForReviewers: ["coderabbitai[bot]"] });
+    expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "pr")?.status).toBe("waiting");
+    github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+    await wake();
+    expect(github.merged).toEqual([1]);
+  });
+
+  test("a reviewer's unresolved comments go back to the coder once, and a clean review of the fix lets it merge", async () => {
+    const { github, run, wake } = await reviewed({ waitForReviewers: ["coderabbitai"] });
+    github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", body: "Actionable comments posted: 1", threads: [{ path: "CHANGELOG.md", line: 1, body: "Say what changed, not just the attempt." }] });
+    await wake();
+
+    const { executions } = await inspect(db, run.id);
+    const retry = executions.find((e) => e.nodeKey === "coder" && e.attempt === 2)!;
+    const comments = (retry.contextPacket as { priorAttempt?: { reviewComments: { author: string; body: string; path?: string }[] } }).priorAttempt?.reviewComments;
+    expect(comments).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ author: "coderabbitai", path: "CHANGELOG.md", body: "Say what changed, not just the attempt." }),
+        expect.objectContaining({ author: "coderabbitai", body: "Actionable comments posted: 1" }),
+      ]),
+    );
+    // The fix is pushed and waits for coderabbitai again, on the new head commit.
+    expect(executions.filter((e) => e.nodeKey === "pr").at(-1)?.status).toBe("waiting");
+    github.setChecks(1, "SUCCESS");
+    github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+    await wake();
+    // The first thread is still unresolved on GitHub, but it was already sent back.
+    expect(github.merged).toEqual([1]);
+  });
+
+  test("a reviewer who never shows up does not hold the run past the time limit", async () => {
+    const { github, run } = await reviewed({ waitForReviewers: ["copilot-pull-request-reviewer[bot]"], reviewTimeoutMinutes: 0 });
+    expect(github.merged).toEqual([1]);
+    expect((await inspect(db, run.id)).types).toContain("github.reviewers_timeout");
+  });
+});
