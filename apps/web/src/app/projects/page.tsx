@@ -1,15 +1,17 @@
-import Link from "next/link";
 import { AddProjectDialog } from "@/components/projects/add-project-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ProjectCard } from "@/components/projects/project-card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { getDb } from "@/lib/db";
 import { listProjects } from "@/server/graphs";
+import { projectAttention } from "@/server/project-admin";
 
 export const dynamic = "force-dynamic";
 
+const CALM = { questions: 0, failed: 0, reviews: 0, waitingOnCi: 0, running: 0 };
+
 export default async function ProjectsPage() {
-  const projects = await listProjects(getDb());
+  const db = getDb();
+  const [projects, attention] = await Promise.all([listProjects(db), projectAttention(db)]);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div className="flex flex-col gap-4">
@@ -30,21 +32,7 @@ export default async function ProjectsPage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {projects.map((p) => (
-              <Link key={p.id} href={`/projects/${p.id}`} className="rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
-                <Card className="h-full transition-colors hover:bg-muted/50">
-                  <CardHeader>
-                    <CardTitle>{p.name}</CardTitle>
-                    <CardDescription className="font-mono text-xs">
-                      {p.repoOwner}/{p.repoName} · {p.defaultBranch}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex gap-2">
-                    <Badge variant="outline">{p.runCount} runs</Badge>
-                    {p.isDemo && <Badge variant="secondary">demo</Badge>}
-                    {p.activeRuns > 0 && <Badge variant="secondary">{p.activeRuns} active</Badge>}
-                  </CardContent>
-                </Card>
-              </Link>
+              <ProjectCard key={p.id} project={p} attention={attention[p.id] ?? CALM} />
             ))}
           </div>
         )}
