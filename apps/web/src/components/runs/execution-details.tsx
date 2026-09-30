@@ -18,6 +18,7 @@ import {
   type TesterOutput,
 } from "@handoff/core";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { TerminalOutput } from "@/components/terminal-output";
 import { Badge } from "@/components/ui/badge";
 import { formatCost, formatDuration } from "@/lib/format";
 import { StatusBadge } from "./status-badge";
@@ -50,7 +51,7 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function Log({ children }: { children: string }) {
-  return <pre className="max-h-72 overflow-auto rounded-md border bg-muted/40 p-2 font-mono text-xs whitespace-pre-wrap">{children}</pre>;
+  return <TerminalOutput text={children} />;
 }
 
 function PathList({ paths }: { paths: string[] }) {

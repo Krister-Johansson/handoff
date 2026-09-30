@@ -14,7 +14,11 @@ import { describeNow } from "@/lib/run-now";
 import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { EventStream, type RunEvent } from "./event-stream";
+import { ExecutionActivity } from "./execution-activity";
 import { ExecutionDetails, type ExecutionDetail } from "./execution-details";
+
+/** Node types that run a Claude Code agent, whose activity the drawer shows. */
+const AGENT_TYPES = new Set(["planner", "coder", "reviewer", "code_review"]);
 import { StatusBadge } from "./status-badge";
 import { Steps, type StepView } from "./steps";
 
@@ -42,10 +46,13 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
   const [executions, setExecutions] = useState(initialExecutions);
   const [showCli, setShowCli] = useState(false);
   const [nodeFilter, setNodeFilter] = useState("");
+  // Claude CLI events from the live stream, for the drawer's activity of a node that is still running.
+  const [liveCli, setLiveCli] = useState<RunEvent[]>([]);
   const router = useRouter();
 
   const onEvent = useCallback(
     (event: RunEvent) => {
+      if (event.type.startsWith("cli.") && event.nodeExecutionId) setLiveCli((list) => [...list.slice(-3_000), event]);
       const runStatus = runStatusFromEvent(event.type);
       if (runStatus) setStatus(runStatus);
       // The server-rendered header (cost, duration, PR, Cancel or Run again) only changes when the run ends.
@@ -148,10 +155,10 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
             <>
               <SheetHeader>
                 <SheetTitle>{labels[selected.nodeKey] ?? selected.nodeKey}</SheetTitle>
-                <SheetDescription>What this execution produced, and the checks the engine ran on it.</SheetDescription>
+                <SheetDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</SheetDescription>
               </SheetHeader>
               <div className="px-4 pb-6">
-                <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} />
+                <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} />
               </div>
             </>
           )}
@@ -162,7 +169,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
 }
 
 /** Loads one execution's details, and again whenever its status changes. */
-function ExecutionPanel({ runId, executionId, status }: { runId: string; executionId: string; status: string }) {
+function ExecutionPanel({ runId, executionId, status, liveCli }: { runId: string; executionId: string; status: string; liveCli: RunEvent[] }) {
   const [loaded, setLoaded] = useState<{ key: string; detail: ExecutionDetail | null }>();
   const key = `${executionId}:${status}`;
   useEffect(() => {
@@ -175,5 +182,10 @@ function ExecutionPanel({ runId, executionId, status }: { runId: string; executi
   }, [runId, executionId, key]);
   if (!loaded) return <Skeleton className="h-40 w-full" />;
   if (!loaded.detail) return <p className="text-sm text-muted-foreground">This execution could not be loaded.</p>;
-  return <ExecutionDetails detail={loaded.detail} />;
+  return (
+    <div className="flex flex-col gap-6">
+      <ExecutionDetails detail={loaded.detail} />
+      {AGENT_TYPES.has(loaded.detail.nodeType) && <ExecutionActivity runId={runId} executionId={executionId} live={liveCli.filter((e) => e.nodeExecutionId === executionId)} />}
+    </div>
+  );
 }

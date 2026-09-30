@@ -38,7 +38,7 @@ describe("buildClaudeArgv", () => {
     expect(flagValue(argv, "--permission-mode")).toBe("acceptEdits");
     expect(flagValue(argv, "--permission-prompts")).toBe("none");
     expect(argv).toContain("--strict-mcp-config");
-    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true });
+    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true, showThinkingSummaries: true });
     expect(flagValue(argv, "--allowedTools")).toBe("Read,Edit,Bash(git *)");
     expect(flagValue(argv, "--max-turns")).toBe("40");
     expect(flagValue(argv, "--append-system-prompt-file")).toBe("/tmp/stage/context.md");
@@ -73,7 +73,7 @@ describe("buildClaudeArgv", () => {
 
   test("buildClaudeArgv passes claudeMdExcludes in --settings only when given", () => {
     const argv = buildClaudeArgv({ ...base, claudeMdExcludes: ["/a/CLAUDE.md"] });
-    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true, claudeMdExcludes: ["/a/CLAUDE.md"] });
+    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true, showThinkingSummaries: true, claudeMdExcludes: ["/a/CLAUDE.md"] });
   });
 
   test("buildClaudeArgv never disables session persistence", () => {
@@ -104,4 +104,10 @@ describe("ancestorInstructionExcludes", () => {
     expect(excludes.some((p) => p.startsWith("/home/me/work/"))).toBe(false);
     expect(excludes).toContain("/home/me/CLAUDE.md");
   });
+});
+
+test("claude returns thinking summaries, so the dashboard can show what an agent thought", () => {
+  const argv = buildClaudeArgv(base);
+  const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!) as Record<string, unknown>;
+  expect(settings.showThinkingSummaries).toBe(true);
 });
