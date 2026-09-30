@@ -89,3 +89,10 @@ test("parseAgentForm reads tools as a comma list and an optional model", () => {
     data: { name: "explorer", description: "Finds code", prompt: "Search.", tools: ["Read", "Grep"], model: null },
   });
 });
+
+test("names the library pages use for themselves are refused", () => {
+  for (const name of ["new", "browse"]) {
+    const result = parseSkillForm(form({ name, description: "d", body: "b" }));
+    expect(result.ok ? {} : result.errors).toHaveProperty("name");
+  }
+});

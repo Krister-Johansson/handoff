@@ -12,10 +12,14 @@ export const librarySkills = pgTable("library_skills", {
   /** SKILL.md frontmatter keys other than name and description (license, allowed-tools, metadata). */
   frontmatter: jsonb("frontmatter").$type<Record<string, unknown>>().notNull().default({}),
   files: jsonb("files").$type<{ path: string; content: string }[]>().notNull().default([]),
+  /** Where an imported skill came from, with the content hash it was imported at; null for skills written here. */
+  source: jsonb("source").$type<SkillSource>(),
   version: integer("version").notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+export type SkillSource = { registry: "skills.sh"; id: string; hash: string };
 
 /**
  * An MCP server nodes can enable by name. env and headers values may contain ${secret:NAME}; those

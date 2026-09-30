@@ -1,12 +1,20 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import type { DbExecutor } from "../client.ts";
-import { libraryAgents, libraryMcpServers, librarySkills } from "../schema/index.ts";
+import { libraryAgents, libraryMcpServers, librarySkills, type SkillSource } from "../schema/index.ts";
 
 export type SkillRow = typeof librarySkills.$inferSelect;
 export type McpServerRow = typeof libraryMcpServers.$inferSelect;
 export type AgentRow = typeof libraryAgents.$inferSelect;
 
-export type SkillInput = { name: string; description: string; body: string; frontmatter?: Record<string, unknown>; files?: { path: string; content: string }[] };
+export type SkillInput = {
+  name: string;
+  description: string;
+  body: string;
+  frontmatter?: Record<string, unknown>;
+  files?: { path: string; content: string }[];
+  /** Set by an import; left out, an existing skill keeps its source. */
+  source?: SkillSource;
+};
 export type McpServerInput = {
   name: string;
   transport: "stdio" | "http";
@@ -20,7 +28,14 @@ export type McpServerInput = {
 export type AgentInput = { name: string; description: string; prompt: string; tools?: string[]; model?: string | null };
 
 export async function upsertSkill(db: DbExecutor, input: SkillInput): Promise<SkillRow> {
-  const values = { name: input.name, description: input.description, body: input.body, frontmatter: input.frontmatter ?? {}, files: input.files ?? [] };
+  const values = {
+    name: input.name,
+    description: input.description,
+    body: input.body,
+    frontmatter: input.frontmatter ?? {},
+    files: input.files ?? [],
+    ...(input.source ? { source: input.source } : {}),
+  };
   const [row] = await db
     .insert(librarySkills)
     .values(values)

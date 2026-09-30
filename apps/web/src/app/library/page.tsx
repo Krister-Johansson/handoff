@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, SearchIcon } from "lucide-react";
 import { listLibrary } from "@handoff/db";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-type Row = { name: string; detail: string; version: number; extra?: string | undefined };
+type Row = { name: string; detail: string; version: number; extra?: string | undefined; source?: string | undefined };
 
 function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; noun: string }) {
   if (rows.length === 0) {
@@ -44,6 +44,11 @@ function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; nou
             <TableCell className="w-full max-w-0 truncate text-muted-foreground">
               {row.detail}
               {row.extra && <span className="ml-2 text-xs">{row.extra}</span>}
+              {row.source && (
+                <Badge variant="outline" className="ml-2" title={`Imported from skills.sh/${row.source}`}>
+                  skills.sh
+                </Badge>
+              )}
             </TableCell>
             <TableCell className="text-right">
               <Badge variant="outline">v{row.version}</Badge>
@@ -67,7 +72,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       label: "Skills",
       noun: "skill",
       description: "SKILL.md instructions, with their supporting files, staged into a node's session with --add-dir.",
-      rows: skills.map((s) => ({ name: s.name, detail: s.description, version: s.version, extra: s.files.length ? `${s.files.length + 1} files` : undefined })),
+      rows: skills.map((s) => ({ name: s.name, detail: s.description, version: s.version, extra: s.files.length ? `${s.files.length + 1} files` : undefined, source: s.source?.id })),
     },
     {
       value: "mcp",
@@ -105,7 +110,15 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
               <CardHeader>
                 <CardTitle>{s.label}</CardTitle>
                 <CardDescription>{s.description}</CardDescription>
-                <CardAction>
+                <CardAction className="flex gap-2">
+                  {s.value === "skills" && (
+                    <Button size="sm" variant="outline" asChild>
+                      <Link href="/library/skills/browse">
+                        <SearchIcon data-icon="inline-start" />
+                        Browse skills.sh
+                      </Link>
+                    </Button>
+                  )}
                   <Button size="sm" asChild>
                     <Link href={`/library/${s.value}/new`}>
                       <PlusIcon data-icon="inline-start" />
