@@ -46,6 +46,7 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
         finishedAt: nodeExecutions.finishedAt,
         output: nodeExecutions.output,
         error: nodeExecutions.error,
+        trigger: nodeExecutions.trigger,
       })
       .from(nodeExecutions)
       .where(eq(nodeExecutions.runId, runId))

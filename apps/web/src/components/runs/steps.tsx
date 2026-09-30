@@ -14,6 +14,8 @@ export type StepView = {
   durationMs: number | null;
   summary?: string | undefined;
   error?: string | undefined;
+  /** The edge that started this execution, when an edge did. */
+  via?: string | null | undefined;
 };
 
 const DOT: Record<string, string> = {
