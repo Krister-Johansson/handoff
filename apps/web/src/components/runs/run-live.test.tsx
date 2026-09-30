@@ -44,18 +44,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const executions = [{ id: "e1", nodeKey: "planner", attempt: 1, status: "passed", costUsd: null, durationMs: null }];
+const common = { runId: "r1", initialEvents: [], labels: { planner: "Plan", coder: "Code" }, prNumber: null, questions: 0 };
 
-test("selecting an execution in the Nodes table opens what it produced", async () => {
-  render(<RunLive runId="r1" initialStatus="running" initialExecutions={executions} initialEvents={[]} />);
-  fireEvent.click(screen.getByRole("button", { name: /planner/ }));
+test("selecting a step opens what it produced", async () => {
+  render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
+  fireEvent.click(screen.getByRole("button", { name: /Plan/ }));
   expect(fetchMock).toHaveBeenCalledWith("/api/runs/r1/executions/e1", expect.anything());
   expect(await screen.findByText("Add a module.")).toBeInTheDocument();
 });
 
 test("an open execution reloads when its status changes", async () => {
   fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(detail("running", ""))));
-  render(<RunLive runId="r1" initialStatus="running" initialExecutions={[{ ...executions[0]!, status: "running" }]} initialEvents={[]} />);
-  fireEvent.click(screen.getByRole("button", { name: /planner/ }));
+  render(<RunLive {...common} initialStatus="running" initialExecutions={[{ ...executions[0]!, status: "running" }]} />);
+  fireEvent.click(screen.getByRole("button", { name: /Plan/ }));
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
   act(() =>
     FakeEventSource.instances[0]!.emit({ seq: 1, type: "node.passed", payload: { nodeKey: "planner", attempt: 1 }, nodeExecutionId: "e1", createdAt: "2026-09-30T10:00:00Z" }),
@@ -65,8 +66,39 @@ test("an open execution reloads when its status changes", async () => {
 });
 
 test("the page refreshes once when the run finishes, so the header shows the final state", () => {
-  render(<RunLive runId="r1" initialStatus="running" initialExecutions={executions} initialEvents={[]} />);
+  render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
   expect(refresh).not.toHaveBeenCalled();
   act(() => FakeEventSource.instances[0]!.emit({ seq: 1, type: "run.succeeded", payload: {}, nodeExecutionId: null, createdAt: "2026-09-30T10:00:00Z" }));
   expect(refresh).toHaveBeenCalledTimes(1);
+});
+
+test("steps show their outcome, and a passed event brings the next step's summary live", () => {
+  render(
+    <RunLive
+      {...common}
+      initialStatus="running"
+      initialExecutions={[
+        { ...executions[0]!, summary: "Strip apostrophes. 2 steps" },
+        { id: "e2", nodeKey: "coder", attempt: 1, status: "running", costUsd: null, durationMs: null },
+      ]}
+    />,
+  );
+  expect(screen.getByText("Strip apostrophes. 2 steps")).toBeInTheDocument();
+  expect(screen.getByText("Code is working")).toBeInTheDocument();
+  act(() =>
+    FakeEventSource.instances[0]!.emit({
+      seq: 1,
+      type: "node.passed",
+      payload: { nodeKey: "coder", attempt: 1, summary: "Removed apostrophes. 2 files changed", durationMs: 19_000 },
+      nodeExecutionId: "e2",
+      createdAt: "2026-09-30T10:00:00Z",
+    }),
+  );
+  expect(screen.getByText("Removed apostrophes. 2 files changed")).toBeInTheDocument();
+  expect(screen.getByText("19s")).toBeInTheDocument();
+});
+
+test("a failed step shows its error", () => {
+  render(<RunLive {...common} initialStatus="failed" initialExecutions={[{ ...executions[0]!, status: "failed", error: "cli_error: claude exited" }]} />);
+  expect(screen.getAllByText(/cli_error: claude exited/).length).toBeGreaterThan(0);
 });

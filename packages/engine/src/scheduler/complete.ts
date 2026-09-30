@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { matchingEdges, mergeState, RunStateSchema, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
+import { matchingEdges, mergeState, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import type { ExecutionError } from "../types.ts";
 
@@ -226,6 +226,7 @@ export async function completePassed(
       payload: {
         nodeKey: row.nodeKey,
         attempt: row.attempt,
+        ...summaryOf(input.output),
         ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd } : {}),
         ...(row.startedAt ? { durationMs: Date.now() - row.startedAt.getTime() } : {}),
       },
@@ -281,6 +282,11 @@ export async function completeFailed(
     { type: "node.failed", payload: { nodeKey: row.nodeKey, attempt: row.attempt, error: input.error }, nodeExecutionId: row.id },
   ];
   await finishRouting(tx, input.graph, row.runId, row, routed, lead, input.error);
+}
+
+function summaryOf(output: unknown): { summary?: string } {
+  const summary = summarizeOutput(output);
+  return summary ? { summary } : {};
 }
 
 export async function yieldWaiting(

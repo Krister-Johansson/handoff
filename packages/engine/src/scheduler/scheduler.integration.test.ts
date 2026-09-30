@@ -103,6 +103,14 @@ describe("scheduler", () => {
     expect(JSON.stringify(executions)).not.toContain("c2VjcmV0");
   });
 
+  test("node.passed carries a one-line summary of what the node produced", async () => {
+    const { run } = await startRun(db, linear);
+    await drain(engineDeps(db, registry()));
+    const { events } = await inspect(db, run.id);
+    const planner = events.find((e) => e.type === "node.passed" && (e.payload as { nodeKey: string }).nodeKey === "planner");
+    expect(planner?.payload).toMatchObject({ summary: "write it 1 step" });
+  });
+
   test("a failed execution with no failed edge marks the run failed and creates no successor", async () => {
     const { run } = await startRun(db, linear);
     const failing: NodeExecutor = { needsWorkdir: false, execute: async () => ({ kind: "failed", error: { code: "boom", message: "it broke" } }) };

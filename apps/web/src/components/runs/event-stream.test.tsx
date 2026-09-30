@@ -50,3 +50,15 @@ test("event stream reports each new event to the parent", () => {
   act(() => FakeEventSource.instances[0]!.emit(event(1, "run.started")));
   expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "run.started" }));
 });
+
+test("the engine view hides Claude CLI events, and a node filter keeps that node's events", () => {
+  const ev = (seq: number, type: string, nodeExecutionId: string | null) => ({ ...event(seq, type), nodeExecutionId });
+  const initial = [ev(1, "run.created", null), ev(2, "node.claimed", "e1"), ev(3, "cli.assistant", "e1"), ev(4, "node.passed", "e1"), ev(5, "node.claimed", "e2")];
+  const { rerender } = render(<EventStream runId="r1" initialEvents={initial} filter={{ showCli: false }} />);
+  expect(screen.queryByText("cli.assistant")).not.toBeInTheDocument();
+  expect(screen.getAllByText("node.claimed")).toHaveLength(2);
+  rerender(<EventStream runId="r1" initialEvents={initial} filter={{ showCli: true, executionIds: new Set(["e1"]) }} />);
+  expect(screen.getByText("cli.assistant")).toBeInTheDocument();
+  expect(screen.getAllByText("node.claimed")).toHaveLength(1);
+  expect(screen.queryByText("run.created")).not.toBeInTheDocument();
+});

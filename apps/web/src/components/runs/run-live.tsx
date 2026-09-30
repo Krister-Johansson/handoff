@@ -3,60 +3,71 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatCost, formatDuration } from "@/lib/format";
-import { runStatusFromEvent, statusFromEvent } from "@/lib/status";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { describeNow } from "@/lib/run-now";
+import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
+import { cn } from "@/lib/utils";
 import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionDetails, type ExecutionDetail } from "./execution-details";
 import { StatusBadge } from "./status-badge";
+import { Steps, type StepView } from "./steps";
 
-export type ExecutionView = { id: string; nodeKey: string; attempt: number; status: string; costUsd: string | null; durationMs: number | null };
+export type ExecutionView = StepView;
 
-/** Keeps the node table and run status in step with the event stream. */
-export function RunLive({
-  runId,
-  initialStatus,
-  initialExecutions,
-  initialEvents,
-  graphDocument,
-}: {
+type Props = {
   runId: string;
   graphDocument?: unknown;
   initialStatus: string;
   initialExecutions: ExecutionView[];
   initialEvents: RunEvent[];
-}) {
+  /** Node labels from the pinned graph, by node key. */
+  labels: Record<string, string>;
+  prNumber: number | null;
+  /** Open questions waiting for a person. */
+  questions: number;
+};
+
+type EventPayload = { nodeKey?: string; attempt?: number; costUsd?: number; durationMs?: number; summary?: string; error?: { code?: string; message?: string } };
+
+/** What the run is doing now, its steps, its graph and its events, kept in step with the event stream. */
+export function RunLive({ runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber, questions }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [executions, setExecutions] = useState(initialExecutions);
-
+  const [showCli, setShowCli] = useState(false);
+  const [nodeFilter, setNodeFilter] = useState("");
   const router = useRouter();
 
-  const onEvent = useCallback((event: RunEvent) => {
-    const runStatus = runStatusFromEvent(event.type);
-    if (runStatus) setStatus(runStatus);
-    // The server-rendered header (cost, duration, PR, Cancel or Run again) only changes when the run ends.
-    if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
-    if (event.type === "node.waiting") setStatus((s) => (s === "running" ? "waiting" : s));
-    if (event.type === "node.claimed") setStatus("running");
-    const next = statusFromEvent(event.type);
-    if (!next || !event.nodeExecutionId) return;
-    const payload = (event.payload ?? {}) as { nodeKey?: string; attempt?: number; costUsd?: number; durationMs?: number };
-    const measured = {
-      ...(payload.costUsd !== undefined ? { costUsd: String(payload.costUsd) } : {}),
-      ...(payload.durationMs !== undefined ? { durationMs: payload.durationMs } : {}),
-    };
-    setExecutions((current) => {
-      const exists = current.some((e) => e.id === event.nodeExecutionId);
-      if (exists) return current.map((e) => (e.id === event.nodeExecutionId ? { ...e, status: next, ...measured } : e));
-      return [
-        ...current,
-        { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, status: next, costUsd: null, durationMs: null, ...measured },
-      ];
-    });
-  }, [router]);
+  const onEvent = useCallback(
+    (event: RunEvent) => {
+      const runStatus = runStatusFromEvent(event.type);
+      if (runStatus) setStatus(runStatus);
+      // The server-rendered header (cost, duration, PR, Cancel or Run again) only changes when the run ends.
+      if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
+      if (event.type === "node.waiting") setStatus((s) => (s === "running" ? "waiting" : s));
+      if (event.type === "node.claimed") setStatus("running");
+      const next = statusFromEvent(event.type);
+      if (!next || !event.nodeExecutionId) return;
+      const payload = (event.payload ?? {}) as EventPayload;
+      const update = {
+        status: next,
+        ...(payload.costUsd !== undefined ? { costUsd: String(payload.costUsd) } : {}),
+        ...(payload.durationMs !== undefined ? { durationMs: payload.durationMs } : {}),
+        ...(payload.summary !== undefined ? { summary: payload.summary } : {}),
+        ...(event.type === "node.failed" && payload.error ? { error: [payload.error.code, payload.error.message].filter(Boolean).join(": ") } : {}),
+      };
+      setExecutions((current) => {
+        if (current.some((e) => e.id === event.nodeExecutionId)) return current.map((e) => (e.id === event.nodeExecutionId ? { ...e, ...update } : e));
+        return [...current, { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, ...update }];
+      });
+    },
+    [router],
+  );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = executions.find((e) => e.id === selectedId);
@@ -74,65 +85,66 @@ export function RunLive({
     return byNode;
   }, [executions]);
 
+  const now = describeNow({ status, executions, labels, prNumber, questions });
+  const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
+  const filter = useMemo(
+    () => ({ showCli, executionIds: nodeFilter ? new Set(executions.filter((e) => e.nodeKey === nodeFilter).map((e) => e.id)) : undefined }),
+    [showCli, nodeFilter, executions],
+  );
+
   return (
-    <div className="flex flex-col gap-6">
-      {graphDocument !== undefined && <RunGraph document={graphDocument} statuses={statuses} onNodeClick={selectLatest} />}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-2">
-              Nodes <StatusBadge status={status} />
-            </CardTitle>
-            <CardDescription>Executions in the order they were created.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Node</TableHead>
-                  <TableHead>Attempt</TableHead>
-                  <TableHead>Time</TableHead>
-                  <TableHead title="Client-side estimate reported by the Claude CLI">Cost</TableHead>
-                  <TableHead className="text-right">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {executions.map((e) => (
-                  <TableRow key={e.id}>
-                    <TableCell className="font-medium">
-                      <button type="button" className="text-left hover:underline" onClick={() => setSelectedId(e.id)}>
-                        {e.nodeKey}
-                        <span className="sr-only">, attempt {e.attempt}: show details</span>
-                      </button>
-                    </TableCell>
-                    <TableCell className="tabular-nums">{e.attempt}</TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground tabular-nums">{formatDuration(e.durationMs)}</TableCell>
-                    <TableCell className="text-muted-foreground tabular-nums">{formatCost(e.costUsd)}</TableCell>
-                    <TableCell className="text-right">
-                      <StatusBadge status={e.status} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Events</CardTitle>
-            <CardDescription>Engine and Claude CLI events, live.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <EventStream runId={runId} initialEvents={initialEvents} onEvent={onEvent} />
-          </CardContent>
-        </Card>
+    <div className="flex flex-col gap-4">
+      <div role="status" className={cn("flex items-center gap-3 rounded-lg border px-4 py-3", TONE_CLASS[now.tone])}>
+        <StatusBadge status={status} />
+        <span className="min-w-0 truncate text-sm font-medium">{now.text}</span>
       </div>
+      <Tabs defaultValue="steps" className="gap-4">
+        <TabsList>
+          <TabsTrigger value="steps">Steps</TabsTrigger>
+          <TabsTrigger value="graph">Graph</TabsTrigger>
+          <TabsTrigger value="events">Events</TabsTrigger>
+        </TabsList>
+        <TabsContent value="steps">
+          <Card>
+            <CardContent>
+              <Steps steps={executions} labels={labels} onSelect={setSelectedId} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+        <TabsContent value="graph">
+          {graphDocument !== undefined && <RunGraph document={graphDocument} statuses={statuses} onNodeClick={selectLatest} className="h-[28rem]" />}
+        </TabsContent>
+        {/* Always mounted: the stream also drives the steps and the banner. */}
+        <TabsContent value="events" forceMount className="data-[state=inactive]:hidden">
+          <Card>
+            <CardContent className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-4">
+                <Field orientation="horizontal" className="w-auto">
+                  <Switch id="events-cli" checked={showCli} onCheckedChange={setShowCli} />
+                  <FieldLabel htmlFor="events-cli" className="font-normal">
+                    Claude CLI events
+                  </FieldLabel>
+                </Field>
+                <NativeSelect size="sm" aria-label="Node" value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)}>
+                  <NativeSelectOption value="">All nodes</NativeSelectOption>
+                  {nodeKeys.map((key) => (
+                    <NativeSelectOption key={key} value={key}>
+                      {labels[key] ?? key}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </div>
+              <EventStream runId={runId} initialEvents={initialEvents} onEvent={onEvent} filter={filter} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
       <Sheet open={selected !== undefined} onOpenChange={(open) => !open && setSelectedId(null)}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
           {selected && (
             <>
               <SheetHeader>
-                <SheetTitle>{selected.nodeKey}</SheetTitle>
+                <SheetTitle>{labels[selected.nodeKey] ?? selected.nodeKey}</SheetTitle>
                 <SheetDescription>What this execution produced, and the checks the engine ran on it.</SheetDescription>
               </SheetHeader>
               <div className="px-4 pb-6">
