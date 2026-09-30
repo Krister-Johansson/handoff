@@ -3,10 +3,10 @@ import { z } from "zod";
 import { and, desc, eq, listLibraryIndex, nodeExecutions, projects, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, repairNodeExecution } from "@handoff/engine/operations";
 import type { GitHubPort } from "@handoff/github";
-import { listAttention } from "./attention";
+import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
-import { getRunDetail, listRuns } from "./queries";
+import { currentSteps, getRunDetail, listRuns } from "./queries";
 
 export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; baseUrl: string };
 
@@ -57,7 +57,15 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     branch: run.branchName,
     pr: run.prNumber ? { number: run.prNumber, url: `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` } : null,
     issues: run.issues.map((i) => ({ number: i.number, title: i.title, url: i.url })),
-    steps: executions.map((e) => ({ node: e.nodeKey, attempt: e.attempt, status: e.status })),
+    steps: executions.map((e) => ({
+      node: e.nodeKey,
+      attempt: e.attempt,
+      status: e.status,
+      started_at: e.startedAt?.toISOString() ?? null,
+      finished_at: e.finishedAt?.toISOString() ?? null,
+      // A step still running counts up to now, which is what decides between waiting and repairing.
+      duration_seconds: e.startedAt ? Math.round(((e.finishedAt ?? new Date()).getTime() - e.startedAt.getTime()) / 1000) : null,
+    })),
     questions: openQuestions.map((q) => {
       const review = (q.context as { review?: { markdown?: string } }).review;
       return {
@@ -183,28 +191,46 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
   server.registerTool(
     "list_runs",
     {
-      description: "Runs, newest first. status active means queued, running or waiting.",
+      description: "Runs, newest first, each with the step it is on and for how long. status active means queued, running or waiting.",
       inputSchema: { project: z.string().optional().describe("Project name"), status: z.enum(["active", "succeeded", "failed", "cancelled"]).optional() },
       annotations: read,
     },
     ({ project, status }) =>
-      tool(async () =>
-        (await listRuns(db, { ...(project ? { project } : {}), ...(status ? { status } : {}) }, 30)).map((r) => ({
-          id: r.id,
-          project: r.project,
-          task: r.task,
-          status: r.status,
-          pr: r.prNumber,
-          issues: r.issues.map((i) => i.number),
-          created_at: r.createdAt,
-          url: `${baseUrl}/runs/${r.id}`,
-        })),
-      ),
+      tool(async () => {
+        const listed = await listRuns(db, { ...(project ? { project } : {}), ...(status ? { status } : {}) }, 30);
+        const steps = await currentSteps(db, listed.map((r) => r.id));
+        return listed.map((r) => {
+          const step = steps.get(r.id);
+          return {
+            id: r.id,
+            project: r.project,
+            task: r.task,
+            status: r.status,
+            current_step: step
+              ? {
+                  node: step.nodeKey,
+                  attempt: step.attempt,
+                  status: step.status,
+                  since: step.since?.toISOString() ?? null,
+                  for_seconds: step.since ? Math.round((Date.now() - step.since.getTime()) / 1000) : null,
+                }
+              : null,
+            pr: r.prNumber,
+            issues: r.issues.map((i) => i.number),
+            created_at: r.createdAt,
+            url: `${baseUrl}/runs/${r.id}`,
+          };
+        });
+      }),
   );
 
   server.registerTool(
     "get_run",
-    { description: "Where a run stands: status, steps, PR, linked issues, open questions and the failed step.", inputSchema: { run_id: z.string() }, annotations: read },
+    {
+      description: "Where a run stands: status, steps with their start, end and duration, PR, linked issues, open questions and the failed step.",
+      inputSchema: { run_id: z.string() },
+      annotations: read,
+    },
     ({ run_id }) => tool(() => runSummary(deps, run_id)),
   );
 
@@ -212,6 +238,20 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     "list_attention",
     { description: "Everything waiting on a person (questions from Human gates, failed runs, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).", annotations: read },
     () => tool(async () => (await listAttention(db)).map(({ href, ...item }) => ({ ...item, url: `${baseUrl}${href}` }))),
+  );
+
+  server.registerTool(
+    "dismiss_attention",
+    {
+      description: "Takes a finished run (an item of kind finished from list_attention) off the list once the user has seen it. Other items leave the list when someone acts on them.",
+      inputSchema: { item_id: z.string().describe("The item's id from list_attention, finished:<run id>") },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    ({ item_id }) =>
+      tool(async () => {
+        await dismissAttention(db, item_id);
+        return { dismissed: true };
+      }),
   );
 
   server.registerTool(

@@ -14,6 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { describeNow } from "@/lib/run-now";
 import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
+import { loopEdgeKeys } from "@/lib/sent-back";
+import { triggeringEdges } from "@/lib/triggering-edges";
 import { cn } from "@/lib/utils";
 import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
@@ -35,7 +37,15 @@ type Props = {
   questions: number;
 };
 
-type EventPayload = { nodeKey?: string; attempt?: number; costUsd?: number; durationMs?: number; summary?: string; error?: { code?: string; message?: string } };
+type EventPayload = {
+  nodeKey?: string;
+  attempt?: number;
+  via?: string;
+  costUsd?: number;
+  durationMs?: number;
+  summary?: string;
+  error?: { code?: string; message?: string };
+};
 
 /** What the run is doing now, its steps, its graph and its events, kept in step with the event stream. */
 export function RunLive({ runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions }: Props) {
@@ -47,6 +57,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
   // Claude CLI events from the live stream, for the drawer's activity of a node that is still running.
   const [liveCli, setLiveCli] = useState<RunEvent[]>([]);
   const router = useRouter();
+  const loopEdges = useMemo(() => loopEdgeKeys(graphDocument), [graphDocument]);
 
   const onEvent = useCallback(
     (event: RunEvent) => {
@@ -57,6 +68,11 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
       if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
       if (event.type === "node.waiting") setStatus((s) => (s === "running" ? "waiting" : s));
       if (event.type === "node.claimed") setStatus("running");
+      // A node that passed and then took a loop edge sent its work back.
+      const edgeKey = (event.payload as { edgeKey?: unknown } | null)?.edgeKey;
+      if (event.type === "edge.taken" && typeof edgeKey === "string" && loopEdges.has(edgeKey) && event.nodeExecutionId) {
+        setExecutions((current) => current.map((e) => (e.id === event.nodeExecutionId ? { ...e, status: "sent_back" } : e)));
+      }
       const prFromEvent = (event.payload as { number?: unknown } | null)?.number;
       if (event.type === "github.pr" && typeof prFromEvent === "number") setPrNumber(prFromEvent);
       const next = statusFromEvent(event.type);
@@ -71,10 +87,13 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
       };
       setExecutions((current) => {
         if (current.some((e) => e.id === event.nodeExecutionId)) return current.map((e) => (e.id === event.nodeExecutionId ? { ...e, ...update } : e));
-        return [...current, { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, ...update }];
+        return [
+          ...current,
+          { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, via: payload.via ?? null, ...update },
+        ];
       });
     },
-    [router],
+    [router, loopEdges],
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -89,6 +108,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
     [executions],
   );
 
+  const activeEdges = useMemo(() => triggeringEdges(executions), [executions]);
   const statuses = useMemo(() => {
     const byNode: Record<string, NodeStatus> = {};
     for (const e of executions) byNode[e.nodeKey] = { status: e.status, attempts: (byNode[e.nodeKey]?.attempts ?? 0) + 1 };
@@ -122,7 +142,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
           </Card>
         </TabsContent>
         <TabsContent value="graph">
-          {graphDocument !== undefined && <RunGraph document={graphDocument} statuses={statuses} onNodeClick={selectLatest} className="h-[28rem]" />}
+          {graphDocument !== undefined && <RunGraph document={graphDocument} statuses={statuses} activeEdges={activeEdges} onNodeClick={selectLatest} className="h-[28rem]" />}
         </TabsContent>
         {/* Always mounted: the stream also drives the steps and the banner. */}
         <TabsContent value="events" forceMount className="data-[state=inactive]:hidden">

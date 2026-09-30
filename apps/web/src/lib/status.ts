@@ -10,6 +10,7 @@ const tones: Record<string, StatusTone> = {
   failed: "danger",
   cancelled: "muted",
   repaired: "repaired",
+  sent_back: "attention",
 };
 
 export const statusTone = (status: string): StatusTone => tones[status] ?? "neutral";

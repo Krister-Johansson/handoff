@@ -8,7 +8,7 @@ export function StatusBadge({ status, label }: { status: string; label?: string 
   return (
     <Badge variant="outline" data-tone={tone} className={cn("gap-1.5", TONE_CLASS[tone])}>
       {tone === "active" && <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-current" />}
-      {label ?? status}
+      {label ?? status.replaceAll("_", " ")}
     </Badge>
   );
 }

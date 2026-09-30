@@ -65,3 +65,13 @@ test("a finished run is notified and listed under Done, but does not count as ne
   expect(await screen.findByText("Done")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /run finished/ })).toHaveAttribute("href", "/runs/r3");
 });
+
+test("a finished run can be dismissed from the bell", async () => {
+  const finished = { id: "finished:r3", kind: "finished" as const, title: "sandbox: run finished", body: "Add a truncate helper", href: "/runs/r3" };
+  const dismiss = vi.fn().mockResolvedValue({ ok: true });
+  render(<AttentionNotifier load={async () => [finished]} dismiss={dismiss} intervalMs={10_000} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Nothing needs your attention" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Dismiss sandbox: run finished" }));
+  expect(dismiss).toHaveBeenCalledWith("finished:r3");
+  await waitFor(() => expect(screen.queryByText("Done")).not.toBeInTheDocument());
+});

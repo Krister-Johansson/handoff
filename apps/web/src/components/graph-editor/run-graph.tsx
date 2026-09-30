@@ -21,6 +21,8 @@ type Props = {
   document: unknown;
   statuses: Record<string, NodeStatus>;
   onNodeClick?: (nodeKey: string) => void;
+  /** Edges that started a node still at work, drawn highlighted and animated. */
+  activeEdges?: ReadonlySet<string>;
   className?: string;
 };
 
@@ -28,7 +30,7 @@ type Props = {
  * The run's pinned graph, read-only, with each node coloured by its latest execution. Laid out
  * with ELK once the nodes are measured, and again when a node's size changes.
  */
-function LaidOutRunGraph({ document, statuses, onNodeClick, className }: Props) {
+function LaidOutRunGraph({ document, statuses, onNodeClick, activeEdges, className }: Props) {
   const flow = useMemo(() => flowOf(document), [document]);
   const colorMode = useFlowColorMode();
   const [layout, setLayout] = useState<LayoutResult>();
@@ -73,13 +75,17 @@ function LaidOutRunGraph({ document, statuses, onNodeClick, className }: Props) 
       })),
     [flow.nodes, statuses, layout],
   );
+  const edges = useMemo(
+    () => flow.edges.map((e) => (activeEdges?.has(e.id) ? { ...e, animated: true, zIndex: 1, data: { ...e.data!, active: true } } : e)),
+    [flow.edges, activeEdges],
+  );
   return (
     <EdgeRoutesContext.Provider value={layout?.routes ?? NO_ROUTES}>
       <div className={cn("h-80 rounded-md border transition-opacity", layout ? "opacity-100" : "opacity-0", className)}>
         <ReactFlow
           colorMode={colorMode}
           nodes={nodes}
-          edges={flow.edges}
+          edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
