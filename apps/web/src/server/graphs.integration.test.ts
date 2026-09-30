@@ -47,6 +47,14 @@ describe("projects and graphs", () => {
     expect((graph?.document as { nodes: unknown[] }).nodes).toHaveLength(7);
   });
 
+  test("the plan, review, approve, build template is saved as a graph that compiles", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    const saved = await createGraphFromTemplate(db, project.id, "plan-first", "plan");
+    expect(saved).toMatchObject({ ok: true });
+    const graph = await getGraphForEdit(db, project.id, "plan-first");
+    expect((graph?.document as { nodes: { key: string }[] }).nodes.map((n) => n.key)).toEqual(["planner", "plan-review", "approval", "coder", "tester", "ask", "pr", "merge"]);
+  });
+
   test("save rejects a graph that does not compile with the compile errors", async () => {
     const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
     const broken = structuredClone(linear);

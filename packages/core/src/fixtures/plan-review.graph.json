@@ -1,0 +1,39 @@
+{
+  "attributes": { "startNode": "planner" },
+  "options": { "type": "directed", "multi": false, "allowSelfLoops": false },
+  "nodes": [
+    { "key": "planner", "attributes": { "type": "planner", "label": "Plan", "config": {}, "x": 0, "y": 0 } },
+    {
+      "key": "plan-review",
+      "attributes": {
+        "type": "reviewer",
+        "label": "Review the plan",
+        "config": {
+          "instructions": "Review the plan in the run state, not code: nothing has been written yet. Check that it covers the task and every linked issue, that the steps are in a workable order and small enough to test, and that it names the files it will change. Request changes with a comment per problem, using path \"plan\"; approve when a coder could follow it without guessing."
+        },
+        "x": 300,
+        "y": 0
+      }
+    },
+    { "key": "approval", "attributes": { "type": "human_gate", "label": "Approve the plan", "config": {}, "x": 600, "y": 0 } },
+    { "key": "coder", "attributes": { "type": "coder", "label": "Code", "config": {}, "x": 900, "y": 0 } },
+    { "key": "tester", "attributes": { "type": "tester", "label": "Test", "config": { "command": "npm test --if-present" }, "x": 1200, "y": 0 } },
+    { "key": "ask", "attributes": { "type": "human_gate", "label": "Answer the coder", "config": { "mode": "question" }, "x": 1200, "y": 200 } },
+    { "key": "pr", "attributes": { "type": "pr", "label": "Pull request", "config": {}, "x": 1500, "y": 0 } },
+    { "key": "merge", "attributes": { "type": "merge", "label": "Merge", "config": {}, "x": 1800, "y": 0 } }
+  ],
+  "edges": [
+    { "key": "planner->plan-review", "source": "planner", "target": "plan-review", "attributes": { "port": "done" } },
+    { "key": "plan-review->planner", "source": "plan-review", "target": "planner", "attributes": { "port": "changes", "input": "feedback" } },
+    { "key": "plan-review->approval", "source": "plan-review", "target": "approval", "attributes": { "port": "approve" } },
+    { "key": "approval->planner", "source": "approval", "target": "planner", "attributes": { "port": "changes", "input": "feedback" } },
+    { "key": "approval->coder", "source": "approval", "target": "coder", "attributes": { "port": "approve" } },
+    { "key": "coder->tester", "source": "coder", "target": "tester", "attributes": { "port": "done" } },
+    { "key": "coder->ask", "source": "coder", "target": "ask", "attributes": { "port": "needs_input" } },
+    { "key": "ask->coder", "source": "ask", "target": "coder", "attributes": { "port": "answered", "input": "feedback" } },
+    { "key": "tester->coder", "source": "tester", "target": "coder", "attributes": { "port": "fail", "input": "feedback" } },
+    { "key": "tester->pr", "source": "tester", "target": "pr", "attributes": { "port": "pass" } },
+    { "key": "pr->coder", "source": "pr", "target": "coder", "attributes": { "port": "fix", "input": "feedback" } },
+    { "key": "pr->merge", "source": "pr", "target": "merge", "attributes": { "port": "ready" } }
+  ]
+}
