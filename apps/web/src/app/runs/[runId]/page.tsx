@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
+import { RunAgainButton } from "@/components/runs/run-again-button";
 import { RunLive } from "@/components/runs/run-live";
 import { getDb } from "@/lib/db";
 import { formatCost, formatDuration } from "@/lib/format";
@@ -27,7 +28,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
             Runs
           </Link>
         </Button>
-        {active && <CancelRunButton runId={run.id} />}
+        {active ? <CancelRunButton runId={run.id} /> : <RunAgainButton runId={run.id} />}
       </div>
       <Card>
         <CardHeader>

@@ -2,6 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RunLive } from "./run-live";
 
+const refresh = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   onmessage: ((e: MessageEvent) => void) | null = null;
@@ -59,4 +62,11 @@ test("an open execution reloads when its status changes", async () => {
   );
   expect(await screen.findByText("Add a module.")).toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+test("the page refreshes once when the run finishes, so the header shows the final state", () => {
+  render(<RunLive runId="r1" initialStatus="running" initialExecutions={executions} initialEvents={[]} />);
+  expect(refresh).not.toHaveBeenCalled();
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 1, type: "run.succeeded", payload: {}, nodeExecutionId: null, createdAt: "2026-09-30T10:00:00Z" }));
+  expect(refresh).toHaveBeenCalledTimes(1);
 });

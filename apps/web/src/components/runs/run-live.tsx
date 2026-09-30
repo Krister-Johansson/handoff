@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -31,9 +32,13 @@ export function RunLive({
   const [status, setStatus] = useState(initialStatus);
   const [executions, setExecutions] = useState(initialExecutions);
 
+  const router = useRouter();
+
   const onEvent = useCallback((event: RunEvent) => {
     const runStatus = runStatusFromEvent(event.type);
     if (runStatus) setStatus(runStatus);
+    // The server-rendered header (cost, duration, PR, Cancel or Run again) only changes when the run ends.
+    if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
     if (event.type === "node.waiting") setStatus((s) => (s === "running" ? "waiting" : s));
     if (event.type === "node.claimed") setStatus("running");
     const next = statusFromEvent(event.type);
@@ -51,7 +56,7 @@ export function RunLive({
         { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, status: next, costUsd: null, durationMs: null, ...measured },
       ];
     });
-  }, []);
+  }, [router]);
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const selected = executions.find((e) => e.id === selectedId);

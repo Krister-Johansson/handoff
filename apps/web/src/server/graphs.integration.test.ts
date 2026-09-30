@@ -3,7 +3,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { eq, graphVersions, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
-import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjects, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
+import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjects, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -111,5 +111,29 @@ describe("renaming and deleting graphs", () => {
     await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
     await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "t" });
     await expect(deleteGraph(db, project.id, "g")).rejects.toThrow(/1 run/);
+  });
+
+  test("runAgain starts a new run with the same project and task on the graph's latest version", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const first = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a slugify helper" });
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.id));
+    const edited = structuredClone(linear);
+    edited.nodes[1]!.attributes.label = "Implement";
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: edited });
+
+    const again = await runAgain(db, first.id);
+    expect(again.id).not.toBe(first.id);
+    const [row] = await db.select().from(runs).where(eq(runs.id, again.id));
+    expect(row).toMatchObject({ projectId: project.id, task: "Add a slugify helper", status: "queued" });
+    const [version] = await db.select().from(graphVersions).where(eq(graphVersions.id, row!.graphVersionId));
+    expect(version?.version).toBe(2);
+  });
+
+  test("runAgain refuses a run that is still active", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "t" });
+    await expect(runAgain(db, run.id)).rejects.toThrow(/still queued/);
   });
 });
