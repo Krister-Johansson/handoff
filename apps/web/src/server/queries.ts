@@ -29,7 +29,7 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
   if (!run) return undefined;
   const [executions, eventRows, [version], openQuestions, [failed]] = await Promise.all([
     db
-      .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey, attempt: nodeExecutions.attempt, status: nodeExecutions.status, costUsd: nodeExecutions.costUsd })
+      .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey, attempt: nodeExecutions.attempt, status: nodeExecutions.status, costUsd: nodeExecutions.costUsd, startedAt: nodeExecutions.startedAt, finishedAt: nodeExecutions.finishedAt })
       .from(nodeExecutions)
       .where(eq(nodeExecutions.runId, runId))
       .orderBy(asc(nodeExecutions.createdAt)),

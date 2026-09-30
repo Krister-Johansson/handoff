@@ -1,4 +1,4 @@
-import { bigint, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, updatedAt } from "./columns.ts";
 import { githubInstallations } from "./github-installations.ts";
 
@@ -11,6 +11,8 @@ export const projects = pgTable("projects", {
   repoName: text("repo_name").notNull(),
   defaultBranch: text("default_branch").notNull(),
   localClonePath: text("local_clone_path"),
+  /** Seeded by pnpm demo; points at no real repository. */
+  isDemo: boolean("is_demo").notNull().default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

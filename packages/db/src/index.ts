@@ -6,3 +6,4 @@ export * from "./ops/events.ts";
 export { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
 export * from "./ops/library.ts";
 export * from "./ops/workers.ts";
+export * from "./ops/projects.ts";
