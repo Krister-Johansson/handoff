@@ -26,3 +26,12 @@ test("the tabs show counts, mark the current one and keep the choice in the URL"
   fireEvent.mouseDown(pulls, { button: 0 });
   expect(push).toHaveBeenCalledWith("?tab=pulls", { scroll: false });
 });
+
+test("the Issues tab shows how many issues are open once the count arrives", () => {
+  render(
+    <ProjectTabs active="runs" counts={{ runs: 1, pulls: 1 }} issueCount={<span>48</span>}>
+      <p>runs content</p>
+    </ProjectTabs>,
+  );
+  expect(screen.getByRole("tab", { name: /Issues 48/ })).toBeInTheDocument();
+});
