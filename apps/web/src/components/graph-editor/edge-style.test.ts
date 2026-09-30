@@ -19,3 +19,7 @@ test("an edge shows its port, and an edge into feedback is a dashed loop of thre
   expect(edgeLabel({ on: "passed", loop: false, priority: 0, port: "done", condition: { eq: ["state.plan.steps", 0] } })).toMatch(/^done \(custom\)/);
   expect(edgeStyle({ on: "passed", loop: false, priority: 0, port: "changes", input: "feedback" }, false).strokeDasharray).toBe("6 4");
 });
+
+test("an edge with an issue draws red", () => {
+  expect(edgeStyle({ on: "passed", loop: false, priority: 0, port: "done" }, false, true).stroke).toBe("var(--destructive)");
+});
