@@ -39,6 +39,8 @@ export interface GitHubPort {
   getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot>;
   getJobLogTail(repo: RepoRef, jobId: number, lines?: number): Promise<string | undefined>;
   mergePr(repo: RepoRef, number: number, method?: "squash" | "merge" | "rebase"): Promise<{ merged: boolean; sha?: string }>;
+  /** Updates the PR comment whose body contains `marker`, or creates it. */
+  upsertPrComment(repo: RepoRef, number: number, marker: string, body: string): Promise<{ id: number; created: boolean }>;
   /**
    * Environment variables (GIT_CONFIG_COUNT, GIT_CONFIG_KEY_n, GIT_CONFIG_VALUE_n) that authenticate git
    * over https for this repository. Environment, not `-c` argv, so the token never appears in git's

@@ -125,6 +125,18 @@ export class OctokitGitHub implements GitHubPort {
     return { merged: data.merged, ...(data.sha ? { sha: data.sha } : {}) };
   }
 
+  async upsertPrComment(repo: RepoRef, number: number, marker: string, body: string) {
+    const octokit = await this.clientFor(repo);
+    const comments = await octokit.paginate(octokit.rest.issues.listComments, { owner: repo.owner, repo: repo.name, issue_number: number, per_page: 100 });
+    const existing = comments.find((c) => c.body?.includes(marker));
+    if (existing) {
+      await octokit.rest.issues.updateComment({ owner: repo.owner, repo: repo.name, comment_id: existing.id, body });
+      return { id: existing.id, created: false };
+    }
+    const { data } = await octokit.rest.issues.createComment({ owner: repo.owner, repo: repo.name, issue_number: number, body });
+    return { id: data.id, created: true };
+  }
+
   async gitAuthEnv(repo: RepoRef): Promise<Record<string, string>> {
     const token = await this.tokenFor(repo);
     const basic = Buffer.from(`x-access-token:${token}`).toString("base64");

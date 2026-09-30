@@ -65,6 +65,18 @@ export class FakeGitHub implements GitHubPort {
     return { merged: true, sha: `merge-${number}` };
   }
 
+  async upsertPrComment(_repo: RepoRef, number: number, marker: string, body: string) {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    const index = pr.comments.findIndex((c) => c.body.includes(marker));
+    if (index >= 0) {
+      pr.comments[index] = { ...pr.comments[index]!, body };
+      return { id: index + 1, created: false };
+    }
+    pr.comments.push({ author: "handoff", body, url: `${pr.url}#issuecomment-${pr.comments.length + 1}` });
+    return { id: pr.comments.length, created: true };
+  }
+
   async gitAuthEnv(): Promise<Record<string, string>> {
     return {};
   }

@@ -81,3 +81,17 @@ test("toFeedback maps a changes-requested review to feedback with unresolved thr
 test("toFeedback maps an approval", () => {
   expect(toFeedback({ ...base, reviewDecision: "APPROVED" }, []).review.decision).toBe("approved");
 });
+
+test("toFeedback leaves out handoff's own PR comments, so the Coder is not fed its Reviewer's notes twice", () => {
+  const f = toFeedback(
+    {
+      ...base,
+      comments: [
+        { author: "octocat", body: "Please add a test.", url: "u1" },
+        { author: "handoff", body: "<!-- handoff:reviewer-notes -->\nNit.", url: "u2" },
+      ],
+    },
+    [],
+  );
+  expect(f.review.comments.map((c) => c.body)).toEqual(["Please add a test."]);
+});

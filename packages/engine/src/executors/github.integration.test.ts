@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
+import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
@@ -138,5 +139,51 @@ describe("repository id", () => {
     const { projects } = await import("@handoff/db");
     const [project] = await db.select().from(projects);
     expect(project?.repoId).toBe(42);
+  });
+});
+
+describe("Reviewer notes on the pull request", () => {
+  const reviewerSaying = (...rounds: { path: string; line?: number; body: string }[][]): NodeExecutor => {
+    let call = 0;
+    return { needsWorkdir: false, execute: async () => ({ kind: "completed", output: { verdict: "approve", comments: rounds[Math.min(call++, rounds.length - 1)] } }) };
+  };
+  const tester: NodeExecutor = { needsWorkdir: false, execute: async () => ({ kind: "completed", output: { passed: true, command: "true", exitCode: 0, tail: "" } }) };
+
+  async function setupLoop(reviewer: NodeExecutor) {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    const { project, graphVersion } = await seedGraph(db, loop, { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const executors: ExecutorRegistry = { planner, coder, tester, reviewer, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) };
+    const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+    return { github, run, deps };
+  }
+
+  test("PR node posts the Reviewer's comments on the pull request and updates that comment on the next attempt", async () => {
+    const { github, run, deps } = await setupLoop(
+      reviewerSaying([{ path: "src/slugify.js", line: 4, body: "Nit: name the regex." }], [{ path: "README.md", body: "Nit: typo in Usage." }]),
+    );
+    await drain(deps);
+    let comments = github.prs.get(1)!.comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.body).toContain("`src/slugify.js:4`");
+    expect(comments[0]!.body).toContain("Nit: name the regex.");
+
+    github.setChecks(1, "FAILURE", [{ name: "test", jobId: 9, log: "boom" }]);
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    comments = github.prs.get(1)!.comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.body).toContain("Nit: typo in Usage.");
+    expect(comments[0]!.body).not.toContain("name the regex");
+
+    const { run: row } = await inspect(db, run.id);
+    expect(JSON.stringify(row.state.feedback)).not.toContain("typo in Usage");
+  });
+
+  test("PR node posts nothing when the Reviewer left no comments", async () => {
+    const { github, deps } = await setupLoop(reviewerSaying([]));
+    await drain(deps);
+    expect(github.prs.get(1)!.comments).toEqual([]);
   });
 });
