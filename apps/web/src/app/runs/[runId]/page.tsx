@@ -99,6 +99,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
           costUsd: e.costUsd,
           durationMs: e.startedAt && e.finishedAt ? e.finishedAt.getTime() - e.startedAt.getTime() : null,
           summary: summarizeOutput(e.output),
+          via: e.trigger?.kind === "edge" ? (e.trigger.edgeKey ?? null) : null,
           ...(e.status === "failed" && e.error ? { error: `${e.error.code}: ${e.error.message}` } : {}),
         }))}
         labels={nodeLabels(graph?.document)}

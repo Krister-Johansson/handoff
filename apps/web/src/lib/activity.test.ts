@@ -71,3 +71,25 @@ test("the CLI's own tools do not count as work in a step's summary", () => {
   const { items: only } = toActivity([assistant(1, { type: "tool_use", id: "c", name: "StructuredOutput", input: {} })]);
   expect(toChat(only).map((e) => (e.kind === "tools" ? e.summary : ""))).toEqual(["Prepared its answer"]);
 });
+
+const denial = (what: string) =>
+  `Permission for this tool use was denied. It requires approval, and this session has no approval surface. What required approval: ${what}`;
+
+test("a denied tool call says what was denied and which rules would allow it", () => {
+  const { items } = toActivity([
+    assistant(1, { type: "tool_use", id: "a", name: "Bash", input: { command: "git log -5 && gh issue view 1" } }),
+    user(2, { type: "tool_result", tool_use_id: "a", is_error: true, content: denial("This Bash command contains multiple operations. The following part requires approval: git log --format='%h' -5 && gh issue view 1 --json state 2>&1") }),
+    assistant(3, { type: "tool_use", id: "b", name: "Bash", input: { command: "xxd f | head; node --test" } }),
+    user(4, { type: "tool_result", tool_use_id: "b", is_error: true, content: denial("This Bash command contains multiple operations. The following parts require approval: xxd, head; node --test 2>&1") }),
+    assistant(5, { type: "tool_use", id: "c", name: "Bash", input: { command: "echo {a,b}" } }),
+    user(6, { type: "tool_result", tool_use_id: "c", is_error: true, content: denial("Brace expansion (unquoted `{` in concatenation with `,`/`..`)") }),
+    assistant(7, { type: "tool_use", id: "d", name: "WebFetch", input: { url: "https://example.com" } }),
+    user(8, { type: "tool_result", tool_use_id: "d", is_error: true, content: denial("WebFetch(https://example.com)") }),
+  ]);
+  const denied = items.map((i) => (i.kind === "tool" ? i.denied : undefined));
+  expect(denied[0]).toEqual({ reason: expect.stringContaining("git log"), rules: ["Bash(git log *)", "Bash(gh issue *)"] });
+  expect(denied[1]!.rules).toEqual(["Bash(xxd *)", "Bash(head *)", "Bash(node --test *)"]);
+  expect(denied[2]).toEqual({ reason: "Brace expansion (unquoted `{` in concatenation with `,`/`..`)", rules: [] });
+  expect(denied[3]!.rules).toEqual(["WebFetch"]);
+  expect(toChat(items).find((e) => e.kind === "tools")).toMatchObject({ denied: 4 });
+});
