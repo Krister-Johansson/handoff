@@ -4,7 +4,7 @@ import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import type { FlowNodeData, NodeType } from "@handoff/core";
 import { Badge } from "@/components/ui/badge";
-import { statusTone } from "@/lib/status";
+import { StatusBadge } from "@/components/runs/status-badge";
 import { cn } from "@/lib/utils";
 import { NODE_ICONS } from "./node-icons";
 
@@ -12,9 +12,10 @@ export type HandoffNodeData = FlowNodeData & { status?: string; attempts?: numbe
 export type HandoffNode = Node<HandoffNodeData, "handoff">;
 
 const statusRing: Record<string, string> = {
-  running: "ring-2 ring-primary/60",
+  running: "ring-2 ring-sky-500/60",
   waiting: "ring-2 ring-amber-500/60",
   failed: "ring-2 ring-destructive/70",
+  passed: "border-emerald-500/50",
 };
 
 function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
@@ -38,7 +39,7 @@ function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
         <span className="truncate font-mono text-[10px] text-muted-foreground">{id}</span>
         {data.isStart && <Badge variant="secondary">start</Badge>}
         {library > 0 && <Badge variant="outline">{library} library</Badge>}
-        {data.status && <Badge variant={statusTone(data.status)}>{data.attempts && data.attempts > 1 ? `${data.status} ×${data.attempts}` : data.status}</Badge>}
+        {data.status && <StatusBadge status={data.status} label={data.attempts && data.attempts > 1 ? `${data.status} ×${data.attempts}` : data.status} />}
       </div>
       <Handle type="source" position={Position.Right} />
     </div>
