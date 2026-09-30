@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ConditionSchema } from "../conditions/schema.ts";
 import { ContextSelectorSchema, ContractSchema } from "./contracts.ts";
 
-export const NodeTypeSchema = z.enum(["planner", "coder", "reviewer", "code_review", "tester", "pr", "merge", "human_gate", "function"]);
+export const NodeTypeSchema = z.enum(["start", "planner", "coder", "reviewer", "code_review", "tester", "pr", "merge", "human_gate", "finish", "function"]);
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
 export const ExecutorKindSchema = z.enum(["cli", "shell", "github", "human", "function"]);

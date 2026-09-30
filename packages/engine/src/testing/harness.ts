@@ -58,9 +58,9 @@ export async function drain(deps: EngineDeps, maxSteps = 50) {
   throw new Error("drain did not settle");
 }
 
-export async function startRun(db: Db, document: unknown, task = "Add a CHANGELOG.md") {
+export async function startRun(db: Db, document: unknown, task = "Add a CHANGELOG.md", issues?: { number: number; title: string; url: string; body: string }[]) {
   const { project, graphVersion } = await seedGraph(db, document);
-  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task, ...(issues ? { issues } : {}) });
   return { project, graphVersion, run };
 }
 

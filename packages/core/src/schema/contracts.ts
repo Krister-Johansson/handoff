@@ -1,12 +1,14 @@
 import { z } from "zod";
 import {
   CoderOutputSchema,
+  FinishOutputSchema,
   FunctionOutputSchema,
   HumanAnswerSchema,
   MergeOutputSchema,
   PlannerOutputSchema,
   PrOutputSchema,
   ReviewerOutputSchema,
+  StartOutputSchema,
   TesterOutputSchema,
 } from "./outputs.ts";
 
@@ -20,6 +22,8 @@ export const contractRegistry = {
   merge_output: MergeOutputSchema,
   human_answer: HumanAnswerSchema,
   function_output: FunctionOutputSchema,
+  start_output: StartOutputSchema,
+  finish_output: FinishOutputSchema,
 } as const satisfies Record<string, z.ZodType>;
 
 export type ContractName = keyof typeof contractRegistry;

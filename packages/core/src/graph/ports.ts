@@ -24,7 +24,7 @@ const out = (id: string, label: string, condition?: Condition, kind: OutputPort[
 /** The node types that run an agent, so they can use what a feedback edge brings. */
 export const FEEDBACK_TARGETS = new Set(["planner", "coder", "reviewer", "code_review"]);
 
-const OUTPUTS: Record<Exclude<NodeType, "human_gate">, OutputPort[]> = {
+const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, OutputPort[]> = {
   planner: [out("done", "done")],
   coder: [out("done", "done", { eq: ["node.output.status", "done"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
   reviewer: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "feedback")],
@@ -54,6 +54,9 @@ export function portKind(type: string, config: Record<string, unknown>, port: st
 /** The fixed inputs and outputs of a node type. Edges connect an output to an input. */
 export function portsOf(type: string, config: Record<string, unknown>): NodePorts {
   if (type === "human_gate") return { inputs: [IN], outputs: gateMode(config) === "question" ? GATE_QUESTION : GATE_APPROVAL };
+  // Start begins the graph with the run's task and issues; Finish ends it.
+  if (type === "start") return { inputs: [], outputs: [out("run", "run")] };
+  if (type === "finish") return { inputs: [IN], outputs: [] };
   const outputs = OUTPUTS[type as keyof typeof OUTPUTS] ?? [];
   return { inputs: [IN], outputs };
 }

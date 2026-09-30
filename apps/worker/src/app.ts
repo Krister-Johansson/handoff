@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { buildClaudeArgv, ClaudeCliExecutor } from "@handoff/cli-adapter";
 import { createDb } from "@handoff/db";
 import { runMigrations } from "@handoff/db/migrate";
-import { cliNodeExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
+import { cliNodeExecutor, finishExecutor, startExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
 import { OctokitGitHub, type GitHubPort } from "@handoff/github";
 import { checkClaudeVersion } from "./claude-version.ts";
 import type { WorkerEnv } from "./env.ts";
@@ -56,6 +56,8 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       coder: agent,
       reviewer: agent,
       code_review: agent,
+      start: startExecutor(),
+      finish: finishExecutor(),
       tester: testerExecutor(),
       human_gate: humanGateExecutor({ db }),
       pr: prNodeExecutor({ github, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }),
