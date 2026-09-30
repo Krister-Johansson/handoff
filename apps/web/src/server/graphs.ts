@@ -1,11 +1,13 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
+import planReview from "@handoff/core/fixtures/plan-review.graph.json" with { type: "json" };
 import { compileGraph, RunStateSchema, suggestProjectName, type CompileError, type LinkedIssue } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
 import { createRun } from "@handoff/engine/runs";
 import type { GitHubPort } from "@handoff/github";
 
 export const TEMPLATES = {
+  plan: { label: "Plan, review, approve, build: a reviewer and you approve the plan before any code", document: planReview },
   linear: { label: "Plan, code, PR, merge", document: linear },
   loop: { label: "Plan, code, test, review, PR, merge with retry loops", document: loop },
   empty: { label: "Empty", document: { attributes: { startNode: "" }, nodes: [], edges: [] } },

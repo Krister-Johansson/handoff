@@ -2,6 +2,9 @@ import { and, eq } from "drizzle-orm";
 import { questions, type Db } from "@handoff/db";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
+/** Answers the review page fills in when the person wrote no note; not decisions in themselves. */
+const DEFAULT_NOTES = new Set(["Approved.", "Changes requested.", "approve", "changes"]);
+
 type Ask = { question: string; options: string[]; context: Record<string, unknown> };
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
@@ -36,6 +39,26 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
   return { kind: "output", markdown: ["```json", JSON.stringify(output ?? null, null, 2), "```"].join("\n") };
 }
 
+/**
+ * What the person reviews when a node's output reaches the gate. After a reviewer, that is the work
+ * the reviewer looked at (the node feeding it), with the reviewer's verdict and comments below, so
+ * the person approves the plan itself rather than the reviewer's opinion of it.
+ */
+function reviewFor(ctx: ExecutorContext, from: string): { from: string; kind: string; markdown: string } {
+  const sender = ctx.graph.node(from);
+  const output = ctx.state.nodes[from]?.output;
+  if (sender?.type === "reviewer") {
+    const reviewed = ctx.graph.inEdges(from).find((e) => !e.loop)?.source;
+    const work = reviewed ? ctx.state.nodes[reviewed]?.output : undefined;
+    if (reviewed && work !== undefined) {
+      const main = reviewOf(ctx.graph.node(reviewed)?.type, work);
+      const verdict = reviewOf("reviewer", output);
+      return { from: reviewed, kind: main.kind, markdown: `${main.markdown}\n\n## Review by ${from}\n\n${verdict.markdown}` };
+    }
+  }
+  return { from, ...reviewOf(sender?.type, output) };
+}
+
 function compose(ctx: ExecutorContext): Ask {
   const trigger = ctx.execution.trigger;
   if (trigger?.kind === "exhausted") {
@@ -51,7 +74,7 @@ function compose(ctx: ExecutorContext): Ask {
   if (asked?.text) return { question: asked.text, options: asked.options ?? [], context: { reason: "needs_input", from: trigger?.from } };
   const config = ctx.node.config;
   // Review mode: show what arrived, so the person can read it, comment and approve or ask for changes.
-  const review = trigger?.from ? { from: trigger.from, ...reviewOf(ctx.graph.node(trigger.from)?.type, from) } : undefined;
+  const review = trigger?.from ? reviewFor(ctx, trigger.from) : undefined;
   return {
     question: typeof config.question === "string" ? config.question : review ? `Review the ${review.kind} from ${review.from}` : "Approve continuing?",
     options: Array.isArray(config.options) ? config.options.map(String) : ["approve", "changes"],
@@ -89,6 +112,13 @@ export function humanGateExecutor(deps: { db: Db }): NodeExecutor {
         answeredAt: (question.answeredAt ?? new Date()).toISOString(),
       };
       const statePatch: Record<string, unknown> = { human: { ...ctx.state.human, [ctx.node.key]: answer } };
+      // A review that asks for changes, or comments, is a decision every later step must keep to.
+      const decided = question.option === "changes" || question.option === "reject" || question.comments.length > 0;
+      if ((question.context as { reason?: string }).reason === "approval" && decided) {
+        const note = DEFAULT_NOTES.has(question.answer) ? undefined : question.answer;
+        const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
+        statePatch.decisions = [...previous, { gate: ctx.node.key, ...(note ? { note } : {}), comments: question.comments }];
+      }
       const edgeKey = (question.context as { reason?: string; edgeKey?: string }).edgeKey;
       if ((question.context as { reason?: string }).reason === "loop_exhausted" && edgeKey && question.option !== "abort") {
         statePatch.loops = { ...ctx.state.loops, [edgeKey]: { attempts: 0 } };

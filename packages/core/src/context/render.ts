@@ -12,6 +12,8 @@ export type ContextPacket = {
   outputContract: string;
   /** The step's own instructions from the graph, on top of its built-in role. */
   instructions?: string;
+  /** What people decided at review gates earlier in the run: binding for every later step. */
+  decisions?: { gate: string; note?: string | undefined; comments: { quote?: string | undefined; body: string }[] }[];
   issues?: { number: number; title: string; url: string; body: string }[];
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
@@ -29,6 +31,19 @@ export function renderContextPacket(packet: ContextPacket): string {
   const out: string[] = [];
   out.push("# Task", "", packet.task, "");
   if (packet.instructions) out.push("# Instructions for this step", "", packet.instructions, "");
+  if (packet.decisions?.length) {
+    out.push(
+      "# Decisions from the person reviewing this run",
+      "",
+      "A person made these decisions at a review earlier in this run. Follow them. They take precedence over comments from reviewers and over conventions you find in the repository.",
+      "",
+    );
+    for (const decision of packet.decisions) {
+      if (decision.note) out.push(`- ${decision.note}`);
+      for (const c of decision.comments) out.push(c.quote ? `- On "${c.quote.replace(/\s+/g, " ").trim()}": ${c.body}` : `- ${c.body}`);
+    }
+    out.push("");
+  }
   if (packet.issues?.length) {
     out.push("# Linked issues", "", "The task works on these GitHub issues. The pull request closes them when it merges.", "");
     for (const issue of packet.issues) {

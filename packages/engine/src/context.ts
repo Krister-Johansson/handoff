@@ -61,6 +61,17 @@ export function feedbackFrom(output: unknown): { failedChecks: CheckResult[]; re
   return { failedChecks, reviewComments };
 }
 
+/** Decisions people made at review gates, which the gate appends to run state. */
+function decisionsOf(state: RunState): NonNullable<ContextPacket["decisions"]> {
+  const raw = (state as { decisions?: unknown }).decisions;
+  if (!Array.isArray(raw)) return [];
+  return raw.map(obj).map((d) => ({
+    gate: String(d.gate ?? ""),
+    ...(typeof d.note === "string" ? { note: d.note } : {}),
+    comments: (Array.isArray(d.comments) ? d.comments.map(obj) : []).map((c) => ({ ...(typeof c.quote === "string" ? { quote: c.quote } : {}), body: String(c.body ?? "") })),
+  }));
+}
+
 /** What the node is allowed to believe: a slice of run state, owned paths, and why it is running again. */
 export function selectContext(node: CompiledNode, state: RunState, execution: NodeExecutionRow): ContextPacket {
   const selector = node.contextSelector;
@@ -79,6 +90,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     constraints: { ownedPaths, allowedTools, maxTurns },
     outputContract: node.contract.output,
     ...(typeof node.config.instructions === "string" && node.config.instructions.trim() ? { instructions: node.config.instructions.trim() } : {}),
+    ...(decisionsOf(state).length ? { decisions: decisionsOf(state) } : {}),
     ...(state.issues?.length ? { issues: state.issues } : {}),
   };
 

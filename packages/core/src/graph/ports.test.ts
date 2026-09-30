@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import linear from "../fixtures/linear.graph.json" with { type: "json" };
 import loop from "../fixtures/loop.graph.json" with { type: "json" };
+import planReview from "../fixtures/plan-review.graph.json" with { type: "json" };
 import { GraphDocumentSchema } from "../schema/graph.ts";
 import { compileGraph } from "./compile.ts";
 import { portsOf, withPorts } from "./ports.ts";
@@ -93,4 +94,13 @@ describe("withPorts", () => {
       }
     }
   });
+});
+
+test("the plan, review, approve, build graph compiles, and every way back is a feedback loop", () => {
+  const result = compileGraph(planReview);
+  if (!result.ok) throw new Error(JSON.stringify(result.errors));
+  const back = result.graph.graph.edges().map((e) => result.graph.graph.getEdgeAttributes(e)).filter((e) => e.loop);
+  expect(back.map((e) => e.key).sort()).toEqual(["approval->planner", "ask->coder", "plan-review->planner", "pr->coder", "tester->coder"]);
+  expect(back.every((e) => e.input === "feedback" && e.maxAttempts === 3)).toBe(true);
+  expect(result.graph.order.slice(0, 4)).toEqual(["planner", "plan-review", "approval", "coder"]);
 });
