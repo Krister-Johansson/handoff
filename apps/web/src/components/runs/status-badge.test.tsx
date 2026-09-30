@@ -21,3 +21,8 @@ test("an unknown status is neutral", () => {
   render(<StatusBadge status="mystery" />);
   expect(screen.getByText("mystery")).toHaveAttribute("data-tone", "neutral");
 });
+
+test("a node that sent work back reads as sent back, in the attention tone", () => {
+  render(<StatusBadge status="sent_back" />);
+  expect(screen.getByText("sent back")).toHaveAttribute("data-tone", "attention");
+});

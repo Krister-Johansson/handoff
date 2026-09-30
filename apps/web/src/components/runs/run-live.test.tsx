@@ -123,3 +123,31 @@ test("the banner learns the PR number from the stream while the PR node waits", 
   });
   expect(screen.getByText("Waiting for CI and reviews on PR #14")).toBeInTheDocument();
 });
+
+test("a node whose result sent work back shows sent back instead of passed", () => {
+  const graphDocument = {
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "reviewer", attributes: { type: "reviewer", x: 300, y: 0 } },
+    ],
+    edges: [
+      { key: "planner->reviewer", source: "planner", target: "reviewer", attributes: { port: "done" } },
+      { key: "reviewer->planner", source: "reviewer", target: "planner", attributes: { port: "changes" } },
+    ],
+  };
+  render(
+    <RunLive
+      {...common}
+      graphDocument={graphDocument}
+      labels={{ planner: "Plan", reviewer: "Review" }}
+      initialStatus="running"
+      initialExecutions={[{ id: "e2", nodeKey: "reviewer", attempt: 1, status: "running", costUsd: null, durationMs: null }]}
+    />,
+  );
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 1, type: "node.passed", payload: { nodeKey: "reviewer", attempt: 1 }, nodeExecutionId: "e2", createdAt: "2026-10-01T10:00:00Z" }));
+  act(() =>
+    FakeEventSource.instances[0]!.emit({ seq: 2, type: "edge.taken", payload: { edgeKey: "reviewer->planner", from: "reviewer", to: "planner" }, nodeExecutionId: "e2", createdAt: "2026-10-01T10:00:00Z" }),
+  );
+  expect(screen.getAllByText("sent back").length).toBeGreaterThan(0);
+});

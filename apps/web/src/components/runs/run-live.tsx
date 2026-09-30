@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { describeNow } from "@/lib/run-now";
 import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
+import { loopEdgeKeys } from "@/lib/sent-back";
 import { cn } from "@/lib/utils";
 import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
@@ -47,6 +48,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
   // Claude CLI events from the live stream, for the drawer's activity of a node that is still running.
   const [liveCli, setLiveCli] = useState<RunEvent[]>([]);
   const router = useRouter();
+  const loopEdges = useMemo(() => loopEdgeKeys(graphDocument), [graphDocument]);
 
   const onEvent = useCallback(
     (event: RunEvent) => {
@@ -57,6 +59,11 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
       if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
       if (event.type === "node.waiting") setStatus((s) => (s === "running" ? "waiting" : s));
       if (event.type === "node.claimed") setStatus("running");
+      // A node that passed and then took a loop edge sent its work back.
+      const edgeKey = (event.payload as { edgeKey?: unknown } | null)?.edgeKey;
+      if (event.type === "edge.taken" && typeof edgeKey === "string" && loopEdges.has(edgeKey) && event.nodeExecutionId) {
+        setExecutions((current) => current.map((e) => (e.id === event.nodeExecutionId ? { ...e, status: "sent_back" } : e)));
+      }
       const prFromEvent = (event.payload as { number?: unknown } | null)?.number;
       if (event.type === "github.pr" && typeof prFromEvent === "number") setPrNumber(prFromEvent);
       const next = statusFromEvent(event.type);
@@ -74,7 +81,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
         return [...current, { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, ...update }];
       });
     },
-    [router],
+    [router, loopEdges],
   );
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
