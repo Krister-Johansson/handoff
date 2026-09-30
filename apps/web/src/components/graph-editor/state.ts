@@ -102,20 +102,28 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
       return { ...state, edges: [...state.edges, edge] };
     }
     case "addNode": {
+      // A graph has at most one Start.
+      if (action.nodeType === "start" && state.nodes.some((n) => n.data.nodeType === "start")) return state;
       const taken = new Set(state.nodes.map((n) => n.id));
       const count = state.nodes.filter((n) => n.data.nodeType === action.nodeType).length;
       const id = uniqueId(taken, action.nodeType, count + 1);
+      const isStart = state.nodes.length === 0 || action.nodeType === "start";
+      const config = action.nodeType === "start" ? { trigger: "run" } : action.nodeType === "finish" ? { notify: true } : {};
       const node: FlowNode = {
         id,
         type: "handoff",
         position: action.position,
-        data: { nodeType: action.nodeType, label: NODE_LABELS[action.nodeType], isStart: state.nodes.length === 0, config: {} },
+        data: { nodeType: action.nodeType, label: NODE_LABELS[action.nodeType], isStart, config },
       };
-      return {
-        ...state,
-        attributes: state.nodes.length === 0 ? { ...state.attributes, startNode: id } : state.attributes,
-        nodes: [...state.nodes, node],
-      };
+      if (!isStart) return { ...state, nodes: [...state.nodes, node] };
+      // A new Start takes over from the step the run started at, and leads into it.
+      const previous = state.nodes.find((n) => n.id === state.attributes.startNode);
+      const nodes = [...state.nodes.map((n) => (n.data.isStart ? { ...n, data: { ...n.data, isStart: false } } : n)), node];
+      const lead: FlowEdge[] =
+        action.nodeType === "start" && previous
+          ? [{ id: `${id}->${previous.id}`, source: id, target: previous.id, sourceHandle: "run", targetHandle: "in", type: "handoff", data: { on: "passed", loop: false, priority: 0, port: "run", input: "in" } }]
+          : [];
+      return { ...state, attributes: { ...state.attributes, startNode: id }, nodes, edges: [...state.edges, ...lead] };
     }
     case "updateNode": {
       const nodes = state.nodes.map((n) =>

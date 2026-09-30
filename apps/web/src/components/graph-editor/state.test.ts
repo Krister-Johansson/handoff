@@ -27,6 +27,21 @@ describe("graph editor state", () => {
     expect(documentOf(state).edges.find((e) => e.key === "reviewer-1->planner")!.attributes).toMatchObject({ port: "changes", input: "feedback" });
   });
 
+  test("adding a Start to a graph makes it where the run starts and connects it to the old first step; a second Start is not added", () => {
+    const state = editorReducer(initial(), { type: "addNode", nodeType: "start", position: { x: 0, y: 0 } });
+    expect(state.attributes.startNode).toBe("start-1");
+    expect(state.nodes.find((n) => n.id === "planner")?.data.isStart).toBe(false);
+    expect(state.edges.find((e) => e.source === "start-1")).toMatchObject({ target: "planner", sourceHandle: "run", data: { port: "run", input: "in" } });
+    expect(issuesOf(state)).toEqual([]);
+    const again = editorReducer(state, { type: "addNode", nodeType: "start", position: { x: 0, y: 0 } });
+    expect(again.nodes.filter((n) => n.data.nodeType === "start")).toHaveLength(1);
+  });
+
+  test("a Finish node notifies by default", () => {
+    const state = editorReducer(initial(), { type: "addNode", nodeType: "finish", position: { x: 0, y: 0 } });
+    expect(state.nodes.find((n) => n.id === "finish-1")?.data.config).toEqual({ notify: true });
+  });
+
   test("connecting two nodes that already have an edge re-wires that edge to the new ports, keeping its settings", () => {
     let state = editorReducer(initial(), { type: "addNode", nodeType: "human_gate", position: { x: 0, y: 0 } });
     state = editorReducer(state, { type: "connect", source: "human_gate-1", target: "coder", sourceHandle: "approve", targetHandle: "in" });

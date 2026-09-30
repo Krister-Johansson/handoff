@@ -1,8 +1,35 @@
 {
-  "attributes": { "startNode": "planner" },
-  "options": { "type": "directed", "multi": false, "allowSelfLoops": false },
+  "attributes": {
+    "startNode": "start"
+  },
+  "options": {
+    "type": "directed",
+    "multi": false,
+    "allowSelfLoops": false
+  },
   "nodes": [
-    { "key": "planner", "attributes": { "type": "planner", "label": "Plan", "config": {}, "x": 0, "y": 0 } },
+    {
+      "key": "start",
+      "attributes": {
+        "type": "start",
+        "label": "Start",
+        "config": {
+          "trigger": "run"
+        },
+        "x": -300,
+        "y": 0
+      }
+    },
+    {
+      "key": "planner",
+      "attributes": {
+        "type": "planner",
+        "label": "Plan",
+        "config": {},
+        "x": 0,
+        "y": 0
+      }
+    },
     {
       "key": "plan-review",
       "attributes": {
@@ -15,25 +42,195 @@
         "y": 0
       }
     },
-    { "key": "approval", "attributes": { "type": "human_gate", "label": "Approve the plan", "config": {}, "x": 600, "y": 0 } },
-    { "key": "coder", "attributes": { "type": "coder", "label": "Code", "config": {}, "x": 900, "y": 0 } },
-    { "key": "tester", "attributes": { "type": "tester", "label": "Test", "config": { "command": "npm test --if-present" }, "x": 1200, "y": 0 } },
-    { "key": "ask", "attributes": { "type": "human_gate", "label": "Answer the coder", "config": { "mode": "question" }, "x": 1200, "y": 200 } },
-    { "key": "pr", "attributes": { "type": "pr", "label": "Pull request", "config": {}, "x": 1500, "y": 0 } },
-    { "key": "merge", "attributes": { "type": "merge", "label": "Merge", "config": {}, "x": 1800, "y": 0 } }
+    {
+      "key": "approval",
+      "attributes": {
+        "type": "human_gate",
+        "label": "Approve the plan",
+        "config": {},
+        "x": 600,
+        "y": 0
+      }
+    },
+    {
+      "key": "coder",
+      "attributes": {
+        "type": "coder",
+        "label": "Code",
+        "config": {},
+        "x": 900,
+        "y": 0
+      }
+    },
+    {
+      "key": "tester",
+      "attributes": {
+        "type": "tester",
+        "label": "Test",
+        "config": {
+          "command": "npm test --if-present"
+        },
+        "x": 1200,
+        "y": 0
+      }
+    },
+    {
+      "key": "ask",
+      "attributes": {
+        "type": "human_gate",
+        "label": "Answer the coder",
+        "config": {
+          "mode": "question"
+        },
+        "x": 1200,
+        "y": 200
+      }
+    },
+    {
+      "key": "pr",
+      "attributes": {
+        "type": "pr",
+        "label": "Pull request",
+        "config": {},
+        "x": 1500,
+        "y": 0
+      }
+    },
+    {
+      "key": "merge",
+      "attributes": {
+        "type": "merge",
+        "label": "Merge",
+        "config": {},
+        "x": 1800,
+        "y": 0
+      }
+    },
+    {
+      "key": "finish",
+      "attributes": {
+        "type": "finish",
+        "label": "Finish",
+        "config": {
+          "notify": true
+        },
+        "x": 2100,
+        "y": 0
+      }
+    }
   ],
   "edges": [
-    { "key": "planner->plan-review", "source": "planner", "target": "plan-review", "attributes": { "port": "done" } },
-    { "key": "plan-review->planner", "source": "plan-review", "target": "planner", "attributes": { "port": "changes", "input": "feedback" } },
-    { "key": "plan-review->approval", "source": "plan-review", "target": "approval", "attributes": { "port": "approve" } },
-    { "key": "approval->planner", "source": "approval", "target": "planner", "attributes": { "port": "changes", "input": "feedback" } },
-    { "key": "approval->coder", "source": "approval", "target": "coder", "attributes": { "port": "approve" } },
-    { "key": "coder->tester", "source": "coder", "target": "tester", "attributes": { "port": "done" } },
-    { "key": "coder->ask", "source": "coder", "target": "ask", "attributes": { "port": "needs_input" } },
-    { "key": "ask->coder", "source": "ask", "target": "coder", "attributes": { "port": "answered", "input": "feedback" } },
-    { "key": "tester->coder", "source": "tester", "target": "coder", "attributes": { "port": "fail", "input": "feedback" } },
-    { "key": "tester->pr", "source": "tester", "target": "pr", "attributes": { "port": "pass" } },
-    { "key": "pr->coder", "source": "pr", "target": "coder", "attributes": { "port": "fix", "input": "feedback" } },
-    { "key": "pr->merge", "source": "pr", "target": "merge", "attributes": { "port": "ready" } }
+    {
+      "key": "start->planner",
+      "source": "start",
+      "target": "planner",
+      "attributes": {
+        "port": "run"
+      }
+    },
+    {
+      "key": "planner->plan-review",
+      "source": "planner",
+      "target": "plan-review",
+      "attributes": {
+        "port": "done"
+      }
+    },
+    {
+      "key": "plan-review->planner",
+      "source": "plan-review",
+      "target": "planner",
+      "attributes": {
+        "port": "changes"
+      }
+    },
+    {
+      "key": "plan-review->approval",
+      "source": "plan-review",
+      "target": "approval",
+      "attributes": {
+        "port": "approve"
+      }
+    },
+    {
+      "key": "approval->planner",
+      "source": "approval",
+      "target": "planner",
+      "attributes": {
+        "port": "changes"
+      }
+    },
+    {
+      "key": "approval->coder",
+      "source": "approval",
+      "target": "coder",
+      "attributes": {
+        "port": "approve"
+      }
+    },
+    {
+      "key": "coder->tester",
+      "source": "coder",
+      "target": "tester",
+      "attributes": {
+        "port": "done"
+      }
+    },
+    {
+      "key": "coder->ask",
+      "source": "coder",
+      "target": "ask",
+      "attributes": {
+        "port": "needs_input"
+      }
+    },
+    {
+      "key": "ask->coder",
+      "source": "ask",
+      "target": "coder",
+      "attributes": {
+        "port": "answered"
+      }
+    },
+    {
+      "key": "tester->coder",
+      "source": "tester",
+      "target": "coder",
+      "attributes": {
+        "port": "fail"
+      }
+    },
+    {
+      "key": "tester->pr",
+      "source": "tester",
+      "target": "pr",
+      "attributes": {
+        "port": "pass"
+      }
+    },
+    {
+      "key": "pr->coder",
+      "source": "pr",
+      "target": "coder",
+      "attributes": {
+        "port": "fix"
+      }
+    },
+    {
+      "key": "pr->merge",
+      "source": "pr",
+      "target": "merge",
+      "attributes": {
+        "port": "ready"
+      }
+    },
+    {
+      "key": "merge->finish",
+      "source": "merge",
+      "target": "finish",
+      "attributes": {
+        "port": "merged"
+      }
+    }
   ]
 }

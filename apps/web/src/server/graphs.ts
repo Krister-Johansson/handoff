@@ -10,7 +10,10 @@ export const TEMPLATES = {
   plan: { label: "Plan, review, approve, build: a reviewer and you approve the plan before any code", document: planReview },
   linear: { label: "Plan, code, PR, merge", document: linear },
   loop: { label: "Plan, code, test, review, PR, merge with retry loops", document: loop },
-  empty: { label: "Empty", document: { attributes: { startNode: "" }, nodes: [], edges: [] } },
+  empty: {
+    label: "Empty: a Start node to build from",
+    document: { attributes: { startNode: "start" }, nodes: [{ key: "start", attributes: { type: "start", label: "Start", config: { trigger: "run" }, x: 0, y: 0 } }], edges: [] },
+  },
 } as const;
 export type TemplateName = keyof typeof TEMPLATES;
 
