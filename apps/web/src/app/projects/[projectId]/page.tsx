@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PencilIcon } from "lucide-react";
 import { GraphSettingsDialog, NewGraphDialog, StartRunDialog } from "@/components/projects/forms";
+import { Backlog } from "@/components/projects/backlog";
 import { ProjectSettingsActions } from "@/components/projects/project-card";
 import { ProjectTabs } from "@/components/projects/project-tabs";
 import { PullRequestList, type PullItem } from "@/components/pulls/pr-list";
@@ -15,9 +16,10 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
-import { parseProjectTab } from "@/lib/project-tab";
+import { parseBacklogFilter, parseProjectTab } from "@/lib/project-tab";
 import { parsePullFilter } from "@/lib/pull-filter";
 import { getProjectDetail, TEMPLATES } from "@/server/graphs";
+import { isTodo, listBacklog, type BacklogFilter } from "@/server/backlog";
 import { listProjectPulls, type PullFilter } from "@/server/pulls";
 
 export const dynamic = "force-dynamic";
@@ -97,6 +99,45 @@ async function PullsTab({ projectId, filter }: { projectId: string; filter: Pull
           emptyText={filter === "archived" ? "Nothing archived." : filter === "all" ? "No pull requests from handoff runs yet." : `No ${filter} pull requests.`}
           actions={(pr) => (finished(pr) ? <ArchivePullButton runId={pr.runId} number={pr.number} archived={pr.archived ?? false} /> : null)}
         />
+      </CardContent>
+    </Card>
+  );
+}
+
+async function IssuesTab({ project, graphs, graphName, filter }: { project: Detail["project"]; graphs: string[]; graphName: string | undefined; filter: BacklogFilter }) {
+  const backlog = await listBacklog(getDb(), getGitHub(), project.id);
+  if ("error" in backlog) {
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>No issues to show</EmptyTitle>
+          <EmptyDescription>{backlog.error}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  }
+  const issues = filter === "all" ? backlog.issues : backlog.issues.filter((i) => isTodo(i) === (filter === "todo"));
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription>
+          Open issues on GitHub. Write them there, by hand or with Claude Code, and start a run for one when you want it worked on.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {graphName ? (
+          <Backlog
+            projectId={project.id}
+            graphs={graphs}
+            graphName={graphName}
+            filter={filter}
+            counts={backlog.counts}
+            issues={issues}
+            repoUrl={`https://github.com/${project.repoOwner}/${project.repoName}`}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">Create a graph under Settings to start runs.</p>
+        )}
       </CardContent>
     </Card>
   );
@@ -210,6 +251,9 @@ export default async function ProjectPage({
       </div>
       <ProjectTabs active={tab} counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length }}>
         {tab === "runs" && <RunsTab project={project} runs={runs} />}
+        {tab === "issues" && (
+          <IssuesTab project={project} graphs={graphs.map((g) => g.name)} graphName={latestGraph?.name} filter={parseBacklogFilter(query)} />
+        )}
         {tab === "pulls" && <PullsTab projectId={project.id} filter={parsePullFilter(query)} />}
         {tab === "settings" && <SettingsTab project={project} graphs={graphs} runCount={runs.length} />}
       </ProjectTabs>

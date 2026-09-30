@@ -16,6 +16,7 @@ export class FakeGitHub implements GitHubPort {
   async listIssues(_repo: RepoRef): Promise<IssueSummary[]> {
     return [...this.issues.values()]
       .filter((i) => i.state === "open")
+      .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
       .map((i) => ({ number: i.number, title: i.title, url: i.url, labels: i.labels ?? [], author: i.author ?? null, updatedAt: i.updatedAt ?? "" }));
   }
 

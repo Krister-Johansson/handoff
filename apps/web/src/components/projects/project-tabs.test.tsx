@@ -10,6 +10,7 @@ test("parseProjectTab defaults to runs and ignores unknown tabs", () => {
   expect(parseProjectTab({})).toBe("runs");
   expect(parseProjectTab({ tab: "pulls" })).toBe("pulls");
   expect(parseProjectTab({ tab: "settings" })).toBe("settings");
+  expect(parseProjectTab({ tab: "issues" })).toBe("issues");
   expect(parseProjectTab({ tab: "nope" })).toBe("runs");
 });
 
