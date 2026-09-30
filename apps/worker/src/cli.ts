@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { parseArgs } from "node:util";
-import { compileGraph } from "@handoff/core";
+import { compileGraph, suggestProjectName } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibrary, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, type GitHubPort } from "@handoff/github";
@@ -11,7 +11,7 @@ import { gcClaudeSessions } from "./gc.ts";
 export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; github?: GitHubPort | null };
 
 const USAGE = `usage:
-  handoff project add --name <name> --repo <owner/name> [--branch <default>] [--clone <path>]
+  handoff project add --repo <owner/name> [--name <name>] [--branch <default>] [--clone <path>]
   handoff graph import --project <name> --name <graph> <file.json>
   handoff run --project <name> --graph <graph> --task "<task>" [--follow]
   handoff runs
@@ -70,7 +70,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     }) : null;
     const [project] = await db
       .insert(projects)
-      .values({ name: need(values, "name"), repoOwner: owner, repoName, repoId, defaultBranch: values.branch ?? "main", localClonePath: values.clone ?? null })
+      .values({ name: values.name ?? suggestProjectName(repoName, []), repoOwner: owner, repoName, repoId, defaultBranch: values.branch ?? "main", localClonePath: values.clone ?? null })
       .onConflictDoUpdate({
         target: projects.name,
         set: { repoOwner: owner, repoName, repoId, defaultBranch: values.branch ?? "main", localClonePath: values.clone ?? null },

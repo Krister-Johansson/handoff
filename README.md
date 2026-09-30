@@ -45,7 +45,7 @@ The dashboard has no login and listens only on 127.0.0.1. Keep it that way.
 
 ## Your first run
 
-1. Open **Projects** and add the repository as `owner/name`. Use a throwaway repository first.
+1. Open **Projects**, press **Add project** and pick the repository. The project is named after it. Use a throwaway repository first.
 2. Create a graph from the template **Plan, code, test, review, PR, merge with retry loops**.
 3. In the editor, select the **Test** node and set its command to whatever proves the change works in that repository, for example `npm test`. Save.
 4. Press **Run**, describe the task, and watch the run page.

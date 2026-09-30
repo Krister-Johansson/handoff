@@ -32,7 +32,22 @@ export type PrSnapshot = {
 };
 
 /** Everything the engine needs from GitHub. OctokitGitHub in production, FakeGitHub in tests. */
+/** A repository the configured credential can reach, for picking a project's repository. */
+export type RepoSummary = {
+  id: number;
+  owner: string;
+  name: string;
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+  description: string | null;
+  pushedAt: string | null;
+  archived: boolean;
+};
+
 export interface GitHubPort {
+  /** Repositories this credential can reach, most recently pushed first. */
+  listRepos(): Promise<RepoSummary[]>;
   getRepoId(repo: RepoRef): Promise<number>;
   findPrByHead(repo: RepoRef, branch: string): Promise<PrInfo | undefined>;
   createPr(repo: RepoRef, input: { head: string; base: string; title: string; body: string }): Promise<PrInfo>;

@@ -11,3 +11,4 @@ export * from "./context/render.ts";
 export * from "./graph/react-flow.ts";
 export * from "./secrets/redact.ts";
 export * from "./secrets/pass-env.ts";
+export * from "./project-name.ts";
