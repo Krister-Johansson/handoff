@@ -176,11 +176,9 @@ function NodeInspector({
         </FieldDescription>
       </Field>
       <KeyField node={node} dispatch={dispatch} onSelect={onSelect} />
-      {!node.data.isStart && (
-        <Button variant="outline" size="sm" onClick={() => dispatch({ type: "setStart", id: node.id })}>
-          Make this the start node
-        </Button>
-      )}
+      <MakeStart node={node} graph={graph} dispatch={dispatch} />
+
+      <FlowFields type={type} config={config} setConfig={setConfig} />
 
       {CLI_TYPES.has(type) && (
         <>
@@ -331,6 +329,45 @@ function ToolsField({
       </Field>
     </>
   );
+}
+
+/** Without a Start node, any step but a Finish can be where the run starts. */
+function MakeStart({ node, graph, dispatch }: { node: FlowNode; graph: FlowGraph; dispatch: Dispatch<EditorAction> }) {
+  if (node.data.isStart || node.data.nodeType === "finish" || graph.nodes.some((n) => n.data.nodeType === "start")) return null;
+  return (
+    <Button variant="outline" size="sm" onClick={() => dispatch({ type: "setStart", id: node.id })}>
+      Make this the start node
+    </Button>
+  );
+}
+
+/** Start's trigger and Finish's notification. */
+function FlowFields({ type, config, setConfig }: { type: NodeType; config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void }) {
+  if (type === "start") {
+    return (
+      <Field>
+        <FieldLabel htmlFor="start-trigger">Trigger</FieldLabel>
+        <NativeSelect id="start-trigger" value={str(config.trigger) || "run"} onChange={(e) => setConfig({ trigger: e.target.value })}>
+          <NativeSelectOption value="run">Run</NativeSelectOption>
+        </NativeSelect>
+        <FieldDescription>Starts when you press Run or start a run for issues. The task and linked issues go on to the next step.</FieldDescription>
+      </Field>
+    );
+  }
+  if (type === "finish") {
+    return (
+      <Field orientation="horizontal">
+        <Switch id="finish-notify" checked={config.notify !== false} onCheckedChange={(on) => setConfig({ notify: on })} />
+        <FieldContent>
+          <FieldLabel htmlFor="finish-notify" className="font-normal">
+            Notify when done
+          </FieldLabel>
+          <FieldDescription>The header bell, a desktop notification and Claude Code say the run finished.</FieldDescription>
+        </FieldContent>
+      </Field>
+    );
+  }
+  return null;
 }
 
 /** The pull request node: what it waits for before it decides between ready and fix. */

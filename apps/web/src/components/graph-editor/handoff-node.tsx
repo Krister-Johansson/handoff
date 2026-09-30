@@ -21,7 +21,6 @@ const statusRing: Record<string, string> = {
 
 function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
   const Icon = NODE_ICONS[data.nodeType as NodeType] ?? NODE_ICONS.function;
-  const library = (data.library?.skills?.length ?? 0) + (data.library?.mcp?.length ?? 0) + (data.library?.agents?.length ?? 0);
   return (
     <div
       className={cn(
@@ -35,18 +34,28 @@ function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
         <Icon className="size-4 shrink-0 text-muted-foreground" />
         <span className="truncate text-sm font-medium">{data.label}</span>
       </div>
-      <div className="flex flex-wrap items-center gap-1">
-        <span className="truncate font-mono text-[10px] text-muted-foreground">{id}</span>
-        {data.isStart && <Badge variant="secondary">start</Badge>}
-        {library > 0 && <Badge variant="outline">{library} library</Badge>}
-        {data.issues?.length ? (
-          <Badge variant="destructive" title={data.issues.join("\n")}>
-            {data.issues.length === 1 ? "issue" : `${data.issues.length} issues`}
-          </Badge>
-        ) : null}
-        {data.status && <StatusBadge status={data.status} label={data.attempts && data.attempts > 1 ? `${data.status} ×${data.attempts}` : data.status} />}
-      </div>
+      <NodeBadges id={id} data={data} />
       <Ports id={id} data={data} />
+    </div>
+  );
+}
+
+/** The node's key and badges: start, library, issues and, in a run, its status. */
+function NodeBadges({ id, data }: { id: string; data: HandoffNodeData }) {
+  const library = (data.library?.skills?.length ?? 0) + (data.library?.mcp?.length ?? 0) + (data.library?.agents?.length ?? 0);
+  const issues = data.issues ?? [];
+  const status = data.status;
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <span className="truncate font-mono text-[10px] text-muted-foreground">{id}</span>
+      {data.isStart && data.nodeType !== "start" && <Badge variant="secondary">start</Badge>}
+      {library > 0 && <Badge variant="outline">{library} library</Badge>}
+      {issues.length > 0 && (
+        <Badge variant="destructive" title={issues.join("\n")}>
+          {issues.length === 1 ? "issue" : `${issues.length} issues`}
+        </Badge>
+      )}
+      {status && <StatusBadge status={status} label={data.attempts && data.attempts > 1 ? `${status} ×${data.attempts}` : status} />}
     </div>
   );
 }

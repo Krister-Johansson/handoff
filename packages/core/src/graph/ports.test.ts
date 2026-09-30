@@ -117,7 +117,8 @@ test("the plan, review, approve, build graph compiles, and every way back is a f
   const back = result.graph.graph.edges().map((e) => result.graph.graph.getEdgeAttributes(e)).filter((e) => e.loop);
   expect(back.map((e) => e.key).sort()).toEqual(["approval->planner", "ask->coder", "plan-review->planner", "pr->coder", "tester->coder"]);
   expect(back.every((e) => e.input === "feedback" && e.maxAttempts === 3)).toBe(true);
-  expect(result.graph.order.slice(0, 4)).toEqual(["planner", "plan-review", "approval", "coder"]);
+  expect(result.graph.order.slice(0, 5)).toEqual(["start", "planner", "plan-review", "approval", "coder"]);
+  expect(result.graph.order.at(-1)).toBe("finish");
 });
 
 describe("Start and Finish", () => {

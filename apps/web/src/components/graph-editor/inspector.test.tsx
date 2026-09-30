@@ -130,3 +130,26 @@ test("a pull request node says how long to wait for CI to start on a repository 
   fireEvent.change(screen.getByLabelText("Go on if no check starts within (minutes)"), { target: { value: "5" } });
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { noChecksAfterMinutes: 5 } } });
 });
+
+test("Start says what starts the run, and with a Start no other node can be made the start", () => {
+  const withStart: FlowGraph = {
+    ...graph,
+    attributes: { startNode: "start" },
+    nodes: [{ id: "start", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "start", label: "Start", isStart: true, config: { trigger: "run" } } }, ...graph.nodes.map((n) => ({ ...n, data: { ...n.data, isStart: false } }))],
+  };
+  const { rerender } = render(<Inspector graph={withStart} selection={{ nodeId: "start" }} library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("Trigger")).toHaveValue("run");
+  expect(screen.getByText(/press Run or start a run for issues/i)).toBeInTheDocument();
+  rerender(<Inspector graph={withStart} selection={{ nodeId: "planner" }} library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  expect(screen.queryByRole("button", { name: "Make this the start node" })).not.toBeInTheDocument();
+});
+
+test("Finish can stop notifying", () => {
+  const dispatch = vi.fn();
+  const withFinish: FlowGraph = { ...graph, nodes: [...graph.nodes, { id: "finish", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "finish", label: "Finish", isStart: false, config: { notify: true } } }] };
+  render(<Inspector graph={withFinish} selection={{ nodeId: "finish" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  const notify = screen.getByRole("switch", { name: "Notify when done" });
+  expect(notify).toBeChecked();
+  fireEvent.click(notify);
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "finish", patch: { config: { notify: false } } });
+});

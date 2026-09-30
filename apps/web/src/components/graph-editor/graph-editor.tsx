@@ -90,6 +90,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   }, [signature, runLayout, getNodes]);
 
   const issues = useMemo(() => issuesOf(graph), [graph]);
+  const hasStart = graph.nodes.some((n) => n.data.nodeType === "start");
   // Each node's issue messages, for its red border and badge; edges with an issue draw red.
   const nodeIssues = useMemo(() => {
     const byNode = new Map<string, string[]>();
@@ -165,7 +166,14 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                 return (
                   <Tooltip key={type}>
                     <TooltipTrigger asChild>
-                      <Button variant="ghost" size="icon-sm" aria-label={`Add ${NODE_LABELS[type]}`} onClick={() => addNode(type)}>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Add ${NODE_LABELS[type]}`}
+                        // A graph has one Start.
+                        disabled={type === "start" && hasStart}
+                        onClick={() => addNode(type)}
+                      >
                         <Icon />
                       </Button>
                     </TooltipTrigger>

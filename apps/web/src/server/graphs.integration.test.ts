@@ -52,7 +52,14 @@ describe("projects and graphs", () => {
     const saved = await createGraphFromTemplate(db, project.id, "plan-first", "plan");
     expect(saved).toMatchObject({ ok: true });
     const graph = await getGraphForEdit(db, project.id, "plan-first");
-    expect((graph?.document as { nodes: { key: string }[] }).nodes.map((n) => n.key)).toEqual(["planner", "plan-review", "approval", "coder", "tester", "ask", "pr", "merge"]);
+    expect((graph?.document as { nodes: { key: string }[] }).nodes.map((n) => n.key)).toEqual(["start", "planner", "plan-review", "approval", "coder", "tester", "ask", "pr", "merge", "finish"]);
+  });
+
+  test("an empty graph starts with a Start node", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await createGraphFromTemplate(db, project.id, "blank", "empty");
+    const graph = await getGraphForEdit(db, project.id, "blank");
+    expect(graph?.document).toMatchObject({ attributes: { startNode: "start" }, nodes: [{ key: "start", attributes: { type: "start" } }], edges: [] });
   });
 
   test("save rejects a graph that does not compile with the compile errors", async () => {
