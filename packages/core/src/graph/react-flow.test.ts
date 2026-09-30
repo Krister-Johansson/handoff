@@ -16,6 +16,11 @@ describe("React Flow mapping", () => {
     expect(flow.edges.find((e) => e.id === "coder->pr")).toMatchObject({ source: "coder", target: "pr", type: "handoff", data: { loop: false, condition: { eq: ["node.output.status", "done"] } } });
   });
 
+  test("toReactFlow opens an empty graph that has no start node yet", () => {
+    const flow = toReactFlow({ attributes: { startNode: "" }, nodes: [], edges: [] });
+    expect(flow).toMatchObject({ attributes: { startNode: "" }, nodes: [], edges: [] });
+  });
+
   test("fromReactFlow(toReactFlow(g)) round-trips the linear and loop fixtures", () => {
     for (const fixture of [linear, loop]) {
       expect(normalize(fromReactFlow(toReactFlow(fixture)))).toEqual(normalize(GraphDocumentSchema.parse(fixture)));

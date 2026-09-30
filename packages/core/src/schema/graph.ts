@@ -45,7 +45,8 @@ export const GraphDocumentSchema = z.object({
   attributes: z
     .object({
       name: z.string().optional(),
-      startNode: z.string().min(1),
+      /** Empty only in a draft with no nodes yet; compileGraph refuses to run it. */
+      startNode: z.string(),
       exhaustedGate: z.string().optional(),
     })
     .loose(),
