@@ -134,3 +134,23 @@ test("gitAuthEnv passes the extraheader to git through GIT_CONFIG_* variables, n
     GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from("x-access-token:tok").toString("base64")}`,
   });
 });
+
+test("upsertPrComment updates the comment that carries the marker", async () => {
+  const { fetch, calls } = fakeFetch({
+    "GET /repos/octo/sample/issues/7/comments": () => ({ json: [{ id: 1, body: "LGTM" }, { id: 5, body: "<!-- handoff:x -->\nold" }] }),
+    "PATCH /repos/octo/sample/issues/comments/5": () => ({ json: { id: 5 } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.upsertPrComment(repo, 7, "<!-- handoff:x -->", "<!-- handoff:x -->\nnew")).toEqual({ id: 5, created: false });
+  expect(calls.at(-1)).toMatchObject({ method: "PATCH", body: { body: "<!-- handoff:x -->\nnew" } });
+});
+
+test("upsertPrComment creates the comment when none carries the marker", async () => {
+  const { fetch, calls } = fakeFetch({
+    "GET /repos/octo/sample/issues/7/comments": () => ({ json: [{ id: 1, body: "LGTM" }] }),
+    "POST /repos/octo/sample/issues/7/comments": () => ({ status: 201, json: { id: 9 } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.upsertPrComment(repo, 7, "<!-- handoff:x -->", "<!-- handoff:x -->\nnotes")).toEqual({ id: 9, created: true });
+  expect(calls.at(-1)).toMatchObject({ method: "POST", body: { body: "<!-- handoff:x -->\nnotes" } });
+});
