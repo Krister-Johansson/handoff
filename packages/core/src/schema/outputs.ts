@@ -80,6 +80,8 @@ export const HumanAnswerSchema = z.object({
   answer: z.string(),
   option: z.string().optional(),
   approved: z.boolean().optional(),
+  /** The person approved on condition their comments are fixed: the gate lets the fixed work through. */
+  afterFixes: z.boolean().optional(),
   /** Comments on quoted parts or lines of what the gate showed, when the person reviewed something. */
   comments: z.array(PersonCommentSchema).optional(),
   answeredBy: z.string(),

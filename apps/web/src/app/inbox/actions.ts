@@ -53,7 +53,7 @@ export async function cancelAction(_: InboxActionState, form: FormData): Promise
 const ReviewAnswerSchema = z.object({
   questionId: z.string().uuid(),
   runId: z.string().uuid(),
-  option: z.enum(["approve", "changes"]),
+  option: z.enum(["approve", "changes", "fix"]),
   note: z.string().max(10_000),
   comments: z
     .array(
@@ -74,7 +74,7 @@ export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchem
   const parsed = ReviewAnswerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That review cannot be sent." };
   const { questionId, runId, option, note, comments } = parsed.data;
-  if (option === "changes" && !note && comments.length === 0) return { ok: false, error: "Say what to change: add a comment or a note." };
+  if (option !== "approve" && !note && comments.length === 0) return { ok: false, error: "Say what to change: add a comment or a note." };
   try {
     await answerQuestion(getDb(), questionId, { answer: note || (option === "approve" ? "Approved." : "Changes requested."), option, comments, answeredBy: "dashboard" });
   } catch (error) {

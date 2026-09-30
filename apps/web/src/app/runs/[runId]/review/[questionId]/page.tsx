@@ -3,14 +3,55 @@ import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ArrowLeftIcon } from "lucide-react";
+import { CodeReview } from "@/components/review/code-review";
 import { PlanReview } from "@/components/review/plan-review";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
+import type { LineComment } from "@/lib/line-comments";
 import { getReview } from "@/server/review";
 
 export const dynamic = "force-dynamic";
 
-type Answered = NonNullable<NonNullable<Awaited<ReturnType<typeof getReview>>>["answered"]>;
+type Review = NonNullable<Awaited<ReturnType<typeof getReview>>>;
+type Answered = NonNullable<Review["answered"]>;
+
+const VERDICT: Record<string, { status: "succeeded" | "waiting"; label: string }> = {
+  approve: { status: "succeeded", label: "Approved" },
+  fix: { status: "succeeded", label: "Approved after fixes" },
+  changes: { status: "waiting", label: "Changes requested" },
+};
+
+function Verdict({ answered }: { answered: Answered }) {
+  const verdict = VERDICT[answered.option ?? ""] ?? VERDICT.changes!;
+  return (
+    <div className="flex flex-col gap-2 text-sm">
+      <div className="flex items-center gap-2">
+        <StatusBadge status={verdict.status} label={verdict.label} />
+        <span className="text-muted-foreground">by {answered.answeredBy}</span>
+      </div>
+      <p>{answered.answer}</p>
+    </div>
+  );
+}
+
+/** Line comments from an answered code review, in the shape the diff shows them. */
+const lineComments = (answered: Answered): LineComment[] =>
+  answered.comments.flatMap((c) =>
+    c.path && c.line !== undefined ? [{ path: c.path, side: c.side ?? "new", line: c.line, ...(c.endLine !== undefined ? { endLine: c.endLine } : {}), quote: c.quote ?? "", body: c.body }] : [],
+  );
+
+function ReviewBody({ review, runId }: { review: Review; runId: string }) {
+  const { review: shown, answered } = review;
+  if (shown.kind === "code" && shown.files) {
+    return (
+      <div className="flex flex-col gap-4">
+        {answered && <Verdict answered={answered} />}
+        <CodeReview questionId={review.id} runId={runId} from={shown.backTo ?? shown.from} markdown={shown.markdown} files={shown.files} {...(answered ? { answered: lineComments(answered) } : {})} />
+      </div>
+    );
+  }
+  return answered ? <AnsweredReview markdown={shown.markdown} answered={answered} /> : <PlanReview questionId={review.id} runId={runId} from={shown.backTo ?? shown.from} markdown={shown.markdown} />;
+}
 
 /** A review that was already answered: what was reviewed, the verdict, the note and the comments. */
 function AnsweredReview({ markdown, answered }: { markdown: string; answered: Answered }) {
@@ -20,11 +61,7 @@ function AnsweredReview({ markdown, answered }: { markdown: string; answered: An
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
       </article>
       <aside className="flex flex-col gap-3 text-sm">
-        <div className="flex items-center gap-2">
-          <StatusBadge status={answered.option === "approve" ? "succeeded" : "waiting"} label={answered.option === "approve" ? "Approved" : "Changes requested"} />
-          <span className="text-muted-foreground">by {answered.answeredBy}</span>
-        </div>
-        <p>{answered.answer}</p>
+        <Verdict answered={answered} />
         {answered.comments.length > 0 && (
           <ul aria-label="Comments" className="flex flex-col gap-2">
             {answered.comments.map((comment) => (
@@ -55,14 +92,12 @@ export default async function ReviewPage({ params }: { params: Promise<{ runId: 
         <p className="text-muted-foreground">
           {review.answered
             ? "This review has been answered."
-            : `Select text to comment on it. Request changes sends your comments back to ${review.review.from}, which tries again; Approve lets the run go on.`}
+            : review.review.kind === "code"
+              ? `Click a line number, or shift-click a second one for a range, to comment on those lines. Submit review sends your comments back to ${review.review.backTo ?? review.review.from} or lets the run go on.`
+              : `Select text to comment on it. Submit your review to send your comments back to ${review.review.backTo ?? review.review.from} or let the run go on.`}
         </p>
       </div>
-      {review.answered ? (
-        <AnsweredReview markdown={review.review.markdown} answered={review.answered} />
-      ) : (
-        <PlanReview questionId={review.id} runId={runId} markdown={review.review.markdown} />
-      )}
+      <ReviewBody review={review} runId={runId} />
     </main>
   );
 }

@@ -62,7 +62,7 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
  * the reviewer looked at (the node feeding it), with the reviewer's verdict and comments below, so
  * the person approves the plan itself rather than the reviewer's opinion of it.
  */
-type Review = { from: string; kind: string; markdown: string; files?: DiffFile[] };
+type Review = { from: string; kind: string; markdown: string; files?: DiffFile[]; backTo?: string };
 
 function reviewFor(ctx: ExecutorContext, from: string): Review {
   const sender = ctx.graph.node(from);
@@ -101,7 +101,10 @@ async function compose(ctx: ExecutorContext, branchDiff: BranchDiff | undefined)
   if (asked?.text) return { question: asked.text, options: asked.options ?? [], context: { reason: "needs_input", from: trigger?.from } };
   const config = ctx.node.config;
   // Review mode: show what arrived, so the person can read it, comment and approve or ask for changes.
-  const review = trigger?.from ? await withCode(ctx, reviewFor(ctx, trigger.from), branchDiff) : undefined;
+  const found = trigger?.from ? await withCode(ctx, reviewFor(ctx, trigger.from), branchDiff) : undefined;
+  // Where the person's comments go when they ask for changes, which is not always the node that sent the work.
+  const backTo = ctx.graph.outEdges(ctx.node.key).find((e) => e.port === "changes")?.target;
+  const review = found && backTo ? { ...found, backTo } : found;
   return {
     question: typeof config.question === "string" ? config.question : review ? `Review the ${review.kind} from ${review.from}` : "Approve continuing?",
     options: Array.isArray(config.options) ? config.options.map(String) : ["approve", "changes"],
@@ -118,6 +121,16 @@ export function humanGateExecutor(deps: { db: Db; branchDiff?: BranchDiff }): No
     needsWorkdir: false,
     async execute(ctx): Promise<ExecutorOutcome> {
       let [question] = await deps.db.select().from(questions).where(eq(questions.nodeExecutionId, ctx.execution.id));
+      const approvedAfterFixes = obj(ctx.state.approvedAfterFixes);
+      const preApproved = approvedAfterFixes[ctx.node.key];
+      if (!question && preApproved && ctx.execution.trigger?.kind !== "exhausted") {
+        // The person approved this gate once their comments were fixed: the fixed work goes on without a new question.
+        const by = String(obj(preApproved).answeredBy ?? "unknown");
+        const { [ctx.node.key]: _used, ...rest } = approvedAfterFixes;
+        ctx.emit("human.auto_approved", { approvedBy: by });
+        const answer = { answer: "Approved after fixes.", option: "approve", approved: true, answeredBy: by, answeredAt: new Date().toISOString() };
+        return { kind: "completed", output: answer, statePatch: { human: { ...ctx.state.human, [ctx.node.key]: answer }, approvedAfterFixes: rest } };
+      }
       if (!question) {
         const ask = await compose(ctx, deps.branchDiff);
         [question] = await deps.db
@@ -130,18 +143,23 @@ export function humanGateExecutor(deps: { db: Db; branchDiff?: BranchDiff }): No
       }
       if (question.answer === null) return { kind: "waiting", wait: { kind: "human", token: question.id } };
 
+      // "Approve after fixes" routes like changes; the gate remembers to let the fixed work through.
+      const afterFixes = question.option === "fix";
+      const option = afterFixes ? "changes" : question.option;
       const answer = {
         answer: question.answer,
-        ...(question.option ? { option: question.option } : {}),
-        ...(question.option === "approve" || question.option === "reject" || question.option === "changes" ? { approved: question.option === "approve" } : {}),
+        ...(option ? { option } : {}),
+        ...(option === "approve" || option === "reject" || option === "changes" ? { approved: option === "approve" } : {}),
+        ...(afterFixes ? { afterFixes: true } : {}),
         ...(question.comments.length ? { comments: question.comments } : {}),
         answeredBy: question.answeredBy ?? "unknown",
         answeredAt: (question.answeredAt ?? new Date()).toISOString(),
       };
       const statePatch: Record<string, unknown> = { human: { ...ctx.state.human, [ctx.node.key]: answer } };
+      if (afterFixes) statePatch.approvedAfterFixes = { ...approvedAfterFixes, [ctx.node.key]: { answeredBy: answer.answeredBy } };
       // A review that asks for changes, comments, or has a note of its own is a decision every later step must keep to.
       const note = DEFAULT_NOTES.has(question.answer.trim()) ? undefined : question.answer;
-      const decided = question.option === "changes" || question.option === "reject" || question.comments.length > 0 || note !== undefined;
+      const decided = option === "changes" || option === "reject" || question.comments.length > 0 || note !== undefined;
       if ((question.context as { reason?: string }).reason === "approval" && decided) {
         const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
         statePatch.decisions = [...previous, { gate: ctx.node.key, ...(note ? { note } : {}), comments: question.comments }];
