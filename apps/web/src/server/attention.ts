@@ -25,7 +25,12 @@ async function waitingReviews(db: Db) {
 export async function listAttention(db: Db): Promise<AttentionItem[]> {
   const [inbox, reviews] = await Promise.all([listInbox(db), waitingReviews(db)]);
   return [
-    ...inbox.questions.map((q): AttentionItem => ({ id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: q.question, href: `/runs/${q.runId}` })),
+    ...inbox.questions.map((q): AttentionItem => {
+      const review = (q.context as { review?: { from?: string; kind?: string } }).review;
+      return review
+        ? { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: the ${review.kind} from ${review.from} needs your approval`, body: q.task, href: `/runs/${q.runId}/review/${q.id}` }
+        : { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: q.question, href: `/runs/${q.runId}` };
+    }),
     ...inbox.failedRuns.map((f): AttentionItem => ({ id: `failed:${f.executionId}`, kind: "failed", title: `${f.projectName}: run failed at ${f.nodeKey}`, body: f.task, href: `/runs/${f.runId}` })),
     ...reviews.map((r): AttentionItem => ({
       id: `review:${r.executionId}:${r.pr!.number}`,

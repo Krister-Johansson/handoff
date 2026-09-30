@@ -58,7 +58,17 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     pr: run.prNumber ? { number: run.prNumber, url: `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` } : null,
     issues: run.issues.map((i) => ({ number: i.number, title: i.title, url: i.url })),
     steps: executions.map((e) => ({ node: e.nodeKey, attempt: e.attempt, status: e.status })),
-    questions: openQuestions.map((q) => ({ id: q.id, node: q.nodeKey, question: q.question, options: q.options ?? [] })),
+    questions: openQuestions.map((q) => {
+      const review = (q.context as { review?: { markdown?: string } }).review;
+      return {
+        id: q.id,
+        node: q.nodeKey,
+        question: q.question,
+        options: q.options ?? [],
+        // A review shows what to approve; the person can also comment on it in the dashboard.
+        ...(review?.markdown ? { review: review.markdown, review_url: `${deps.baseUrl}/runs/${run.id}/review/${q.id}` } : {}),
+      };
+    }),
     failed: failed ? { node: failed.nodeKey, attempt: failed.attempt, error: errorMessage(failed.error) } : null,
   };
 }
@@ -208,12 +218,20 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     "answer_question",
     {
       description: "Answers a question a run asked, which lets it continue. Only answer with the user's decision.",
-      inputSchema: { question_id: z.string(), answer: z.string().min(1), option: z.string().optional().describe("One of the question's options, when it has them") },
+      inputSchema: {
+        question_id: z.string(),
+        answer: z.string().min(1),
+        option: z.string().optional().describe("One of the question's options, when it has them: approve or changes for a review"),
+        comments: z
+          .array(z.object({ quote: z.string().optional().describe("The passage the comment is about"), body: z.string() }))
+          .optional()
+          .describe("For a review: comments on quoted passages, sent back with changes"),
+      },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ question_id, answer, option }) =>
+    ({ question_id, answer, option, comments }) =>
       tool(async () => {
-        const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), answeredBy: "claude-code" });
+        const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: "claude-code" });
         return { answered: true, run_id: row.runId, url: `${baseUrl}/runs/${row.runId}` };
       }),
   );
