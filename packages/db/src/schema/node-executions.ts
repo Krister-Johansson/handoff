@@ -22,6 +22,8 @@ export const nodeExecutions = pgTable(
     heartbeatAt: tstz("heartbeat_at"),
     reclaimCount: integer("reclaim_count").notNull().default(0),
     interruptCount: integer("interrupt_count").notNull().default(0),
+    /** Automatic retries after retryable failures such as rate limits. */
+    retryCount: integer("retry_count").notNull().default(0),
     waitKind: waitKind("wait_kind"),
     waitKey: text("wait_key"),
     waitToken: uuid("wait_token").unique(),
