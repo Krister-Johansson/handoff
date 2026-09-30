@@ -93,7 +93,7 @@ export function AttentionNotifier({ load = fetchAttention, intervalMs = 15_000 }
           </section>
         )}
         <Separator />
-        <Link href="/settings#notifications" className="text-xs text-muted-foreground hover:underline">
+        <Link href="/settings?tab=notifications" className="text-xs text-muted-foreground hover:underline">
           Notification settings
         </Link>
       </PopoverContent>

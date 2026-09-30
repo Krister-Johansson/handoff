@@ -1,12 +1,15 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { ReactNode } from "react";
 import { headers } from "next/headers";
 import { AgentConnection } from "@/components/settings/agent-connection";
 import { NotificationSettingsLoader } from "@/components/settings/notification-settings-loader";
+import { SettingsTabs } from "@/components/settings/settings-tabs";
 import { ThemeSetting } from "@/components/settings/theme-setting";
 import { lastAgentConnection } from "@/server/agent-endpoint";
 import { AgentTokenStore, defaultAgentTokenFile } from "@/server/agent-token";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { parseSettingsTab } from "@/lib/settings-tab";
 
 export const dynamic = "force-dynamic";
 
@@ -24,43 +27,52 @@ function connectionLine(): string | undefined {
   return last ? `Last connected: ${last.client} at ${time.format(last.at)}.` : undefined;
 }
 
-export default async function SettingsPage() {
+/** A settings card: a small label for the group, a title, what it is for, and the setting. */
+function Section({ group, title, description, children }: { group: string; title: string; description: string; children: ReactNode }) {
+  return (
+    <Card className="max-w-3xl">
+      <CardHeader>
+        <p className="text-xs font-medium tracking-[0.2em] text-muted-foreground uppercase">{group}</p>
+        <CardTitle className="text-2xl font-semibold tracking-tight">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+export default async function SettingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const tab = parseSettingsTab(await searchParams);
   const h = await headers();
   const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host") ?? "localhost:3000"}`;
-  const token = new AgentTokenStore(defaultAgentTokenFile()).read();
+  const token = tab === "agents" ? new AgentTokenStore(defaultAgentTokenFile()).read() : undefined;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">Settings for this dashboard. Project settings are on each project&apos;s Settings tab.</p>
       </div>
-      <Card id="appearance" className="max-w-2xl scroll-mt-6">
-        <CardHeader>
-          <CardTitle>Appearance</CardTitle>
-          <CardDescription>Light, dark, or the same as your system. This browser keeps the choice.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ThemeSetting />
-        </CardContent>
-      </Card>
-      <Card id="agents" className="max-w-2xl scroll-mt-6">
-        <CardHeader>
-          <CardTitle>Connect Claude Code</CardTitle>
-          <CardDescription>Let your Claude Code session see your projects and runs, start runs for issues and answer what runs ask.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <AgentConnection origin={origin} checkout={checkoutRoot()} initialToken={token} lastConnection={connectionLine()} />
-        </CardContent>
-      </Card>
-      <Card id="notifications" className="max-w-2xl scroll-mt-6">
-        <CardHeader>
-          <CardTitle>Notifications</CardTitle>
-          <CardDescription>How this browser tells you that a run needs you.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <NotificationSettingsLoader />
-        </CardContent>
-      </Card>
+      <SettingsTabs active={tab}>
+        {tab === "appearance" && (
+          <Section group="Preferences" title="Appearance" description="How the dashboard looks. This browser keeps the choice.">
+            <ThemeSetting />
+          </Section>
+        )}
+        {tab === "notifications" && (
+          <Section group="Preferences" title="Notifications" description="How this browser tells you that a run needs you.">
+            <NotificationSettingsLoader />
+          </Section>
+        )}
+        {tab === "agents" && (
+          <Section
+            group="Integrations"
+            title="Connect Claude Code"
+            description="Let your Claude Code session see your projects and runs, start runs for issues and answer what runs ask."
+          >
+            <AgentConnection origin={origin} checkout={checkoutRoot()} initialToken={token} lastConnection={connectionLine()} />
+          </Section>
+        )}
+      </SettingsTabs>
     </main>
   );
 }
