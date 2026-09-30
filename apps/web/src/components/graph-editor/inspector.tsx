@@ -247,12 +247,12 @@ function NodeInspector({
             <FieldLabel htmlFor="gate-mode">Mode</FieldLabel>
             <NativeSelect id="gate-mode" value={gateMode(config)} onChange={(e) => setConfig({ mode: e.target.value })}>
               <NativeSelectOption value="approval">Review and approve what reaches it</NativeSelectOption>
-              <NativeSelectOption value="question">Answer a question a coder asked</NativeSelectOption>
+              <NativeSelectOption value="question">Answer a question a planner or coder asked</NativeSelectOption>
             </NativeSelect>
             <FieldDescription>
               {gateMode(config) === "approval"
                 ? "You review the output that reaches in, comment on it, then approve or ask for changes."
-                : "The coder's question is asked; the answer goes back on answered."}
+                : "The planner's or coder's question is asked; the answer goes back on answered."}
             </FieldDescription>
           </Field>
           {gateMode(config) === "approval" && (

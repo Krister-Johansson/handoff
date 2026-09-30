@@ -4,6 +4,7 @@ import loop from "../fixtures/loop.graph.json" with { type: "json" };
 import planReview from "../fixtures/plan-review.graph.json" with { type: "json" };
 import { GraphDocumentSchema } from "../schema/graph.ts";
 import { compileGraph } from "./compile.ts";
+import { evaluateCondition } from "../conditions/evaluate.ts";
 import { portsOf, withPorts } from "./ports.ts";
 
 const ids = (ports: { id: string }[]) => ports.map((p) => p.id);
@@ -105,7 +106,10 @@ describe("withPorts", () => {
       for (const edge of before.graph.graph.edges()) {
         const a = before.graph.graph.getEdgeAttributes(edge);
         const b = after.graph.graph.getEdgeAttributes(edge);
-        expect({ on: b.on, condition: b.condition ?? null, loop: b.loop }, edge).toEqual({ on: a.on, condition: a.condition ?? null, loop: a.loop });
+        // A planner's done now excludes its questions; for outputs without a status it routes the same.
+        const planner = before.graph.graph.source(edge) === "planner" && a.condition === undefined;
+        const expected = planner ? { neq: ["node.output.status", "needs_input"] } : (a.condition ?? null);
+        expect({ on: b.on, condition: b.condition ?? null, loop: b.loop }, edge).toEqual({ on: a.on, condition: expected, loop: a.loop });
       }
     }
   });
@@ -165,4 +169,12 @@ describe("Start and Finish", () => {
       { key: "finish->planner", source: "finish", target: "planner", attributes: {} },
     ]))).toContain("invalid_finish");
   });
+});
+
+test("a planner can ask: needs input next to done, and an old output without a status still counts as done", () => {
+  const ports = portsOf("planner", {}).outputs;
+  expect(ports.map((p) => p.id)).toEqual(["done", "needs_input"]);
+  const done = ports.find((p) => p.id === "done")!.condition!;
+  expect(evaluateCondition(done, { node: { output: { plan: "p", steps: [], ownedPaths: [] } } } as never)).toBe(true);
+  expect(evaluateCondition(done, { node: { output: { status: "needs_input" } } } as never)).toBe(false);
 });

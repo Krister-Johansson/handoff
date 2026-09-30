@@ -186,7 +186,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
             kind: "completed",
             output: result.validated,
             cost,
-            ...(ctx.node.type === "planner" ? { statePatch: { plan: result.validated } } : {}),
+            // A planner's question is not a plan: the run keeps no plan until the answer comes back.
+            ...(ctx.node.type === "planner" && (result.validated as { status?: string }).status !== "needs_input" ? { statePatch: { plan: result.validated } } : {}),
           };
         case "interrupted":
           return { kind: "interrupted" };
