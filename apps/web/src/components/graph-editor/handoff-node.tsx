@@ -1,6 +1,6 @@
 "use client";
 
-import { Handle, Position, useConnection, useStore, type Node, type NodeProps } from "@xyflow/react";
+import { Handle, Position, useConnection, type Node, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { CUSTOM_HANDLE, portsOf, type FlowNodeData, type NodeType } from "@handoff/core";
 import { Badge } from "@/components/ui/badge";
@@ -60,11 +60,7 @@ function Ports({ id, data }: { id: string; data: HandoffNodeData }) {
   const out = [...outputs.map((o) => ({ id: o.id, label: o.label, back: o.tone === "back" })), ...(data.customOut ? [{ id: CUSTOM_HANDLE, label: "custom", back: false }] : [])];
   // While an edge is being dragged, each handle says whether it can take it.
   const from = useConnection((c): HandleEnd | null => (c.inProgress ? { node: c.fromNode.id, type: c.fromHandle.type } : null));
-  // A string, so the selector result compares by value and the node re-renders only when it changes.
-  const open = useStore((s) =>
-    from ? `${canConnect(from, { node: id, type: "source" }, s.edges) ? "s" : ""}${canConnect(from, { node: id, type: "target" }, s.edges) ? "t" : ""}` : null,
-  );
-  const tone = (type: "source" | "target") => (open === null ? undefined : open.includes(type === "source" ? "s" : "t") ? "can" : "cannot");
+  const tone = (type: "source" | "target") => (from === null ? undefined : canConnect(from, { node: id, type }) ? "can" : "cannot");
   return (
     <div className="-mx-3 grid grid-cols-2 gap-x-2 font-mono text-[10px] text-muted-foreground">
       <div className="flex flex-col gap-1">

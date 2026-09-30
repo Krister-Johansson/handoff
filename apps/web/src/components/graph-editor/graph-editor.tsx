@@ -149,8 +149,8 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
             onNodesChange={(changes) => edit({ type: "nodesChange", changes })}
             onEdgesChange={(changes) => edit({ type: "edgesChange", changes })}
             onConnect={(c) => edit({ type: "connect", source: c.source, target: c.target, sourceHandle: c.sourceHandle, targetHandle: c.targetHandle })}
-            // One edge per pair of nodes, and never a node into itself: the graph is simple.
-            isValidConnection={(c) => canConnect({ node: c.source, type: "source" }, { node: c.target, type: "target" }, graph.edges)}
+            // Never a node into itself. A pair that already has an edge gets that edge re-wired (see the connect action).
+            isValidConnection={(c) => canConnect({ node: c.source, type: "source" }, { node: c.target, type: "target" })}
             onSelectionChange={onSelectionChange}
             fitView
             minZoom={0.15}

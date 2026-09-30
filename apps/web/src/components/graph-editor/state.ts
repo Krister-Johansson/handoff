@@ -1,5 +1,5 @@
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from "@xyflow/react";
-import { compileGraph, CUSTOM_HANDLE, fromReactFlow, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
+import { compileGraph, CUSTOM_HANDLE, fromReactFlow, gateMode, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
 
 export const NODE_LABELS: Record<NodeType, string> = {
   planner: "Planner",
@@ -35,6 +35,23 @@ function uniqueId(taken: Set<string>, base: string, first: number): string {
   return id;
 }
 
+/** A human gate's output that stands for "go on" in each mode. */
+const GO_ON = { approval: "approve", question: "answered" } as const;
+
+/**
+ * When a human gate switches mode its outputs change, so edges leaving its old "go on" port move to
+ * the new one (approve and answered). Edges from other ports stay, and show an issue if they no longer fit.
+ */
+function withGatePorts(before: FlowGraph, nodes: FlowNode[], id: string): FlowEdge[] {
+  const was = before.nodes.find((n) => n.id === id);
+  const now = nodes.find((n) => n.id === id);
+  if (!was || !now || now.data.nodeType !== "human_gate") return before.edges;
+  const from = GO_ON[gateMode(was.data.config)];
+  const to = GO_ON[gateMode(now.data.config)];
+  if (from === to) return before.edges;
+  return before.edges.map((e) => (e.source === id && e.data.port === from ? { ...e, sourceHandle: to, data: { ...e.data, port: to } } : e));
+}
+
 /** Pure editor state transitions over the React Flow view of a graphology document. */
 export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph {
   switch (action.type) {
@@ -46,12 +63,27 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
     case "edgesChange":
       return { ...state, edges: applyEdgeChanges(action.changes, state.edges) };
     case "connect": {
-      const taken = new Set(state.edges.map((e) => e.id));
-      const base = `${action.source}->${action.target}`;
-      const id = taken.has(base) ? uniqueId(taken, base, 2) : base;
       // The handles are the source's output port and the target's input; an edge without them has a custom condition.
       const port = action.sourceHandle && action.sourceHandle !== CUSTOM_HANDLE ? action.sourceHandle : undefined;
-      const input = action.targetHandle === "feedback" ? "feedback" : port ? "in" : undefined;
+      const input: "in" | "feedback" | undefined = action.targetHandle === "feedback" ? "feedback" : port ? "in" : undefined;
+      const existing = state.edges.find((e) => e.source === action.source && e.target === action.target);
+      if (existing) {
+        // One edge per pair: re-wire it to the new ports. The new port decides routing, so a custom condition goes.
+        const { loop, priority, maxAttempts, onExhausted, overrides } = existing.data;
+        const data = {
+          on: "passed" as const,
+          loop,
+          priority,
+          ...(maxAttempts !== undefined ? { maxAttempts } : {}),
+          ...(onExhausted !== undefined ? { onExhausted } : {}),
+          ...(overrides !== undefined ? { overrides } : {}),
+          ...(port ? { port } : {}),
+          ...(input ? { input } : {}),
+        };
+        const rewired: FlowEdge = { ...existing, sourceHandle: port ?? CUSTOM_HANDLE, targetHandle: input ?? "in", data };
+        return { ...state, edges: state.edges.map((e) => (e.id === existing.id ? rewired : e)) };
+      }
+      const id = `${action.source}->${action.target}`;
       const edge: FlowEdge = {
         id,
         source: action.source,
@@ -79,13 +111,12 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
         nodes: [...state.nodes, node],
       };
     }
-    case "updateNode":
-      return {
-        ...state,
-        nodes: state.nodes.map((n) =>
-          n.id === action.id ? { ...n, data: { ...n.data, ...action.patch, config: { ...n.data.config, ...(action.patch.config ?? {}) } } } : n,
-        ),
-      };
+    case "updateNode": {
+      const nodes = state.nodes.map((n) =>
+        n.id === action.id ? { ...n, data: { ...n.data, ...action.patch, config: { ...n.data.config, ...(action.patch.config ?? {}) } } } : n,
+      );
+      return { ...state, nodes, edges: withGatePorts(state, nodes, action.id) };
+    }
     case "replaceNodeConfig":
       return { ...state, nodes: state.nodes.map((n) => (n.id === action.id ? { ...n, data: { ...n.data, config: action.config } } : n)) };
     case "updateEdge":
