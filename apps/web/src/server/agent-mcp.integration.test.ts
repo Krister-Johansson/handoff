@@ -40,7 +40,7 @@ test("the tools are listed, and read-only ones say so", async () => {
   const { tools } = await client.listTools();
   const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
   expect(Object.keys(byName).sort()).toEqual(
-    ["answer_question", "cancel_run", "get_project", "get_run", "list_attention", "list_backlog", "list_library", "list_projects", "list_runs", "repair_run", "run_again", "start_run"].sort(),
+    ["add_project", "answer_question", "cancel_run", "get_project", "get_run", "list_attention", "list_backlog", "list_library", "list_projects", "list_runs", "repair_run", "run_again", "start_run"].sort(),
   );
   expect(byName.list_backlog?.annotations?.readOnlyHint).toBe(true);
   expect(byName.cancel_run?.annotations?.destructiveHint).toBe(true);
@@ -91,4 +91,11 @@ test("what needs attention comes with links to the dashboard", async () => {
   await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run_id));
   await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
   expect(await call("list_attention")).toEqual([expect.objectContaining({ kind: "failed", title: "sandbox: run failed at planner", url: `${BASE}/runs/${run_id}` })]);
+});
+
+test("add_project adds a repository the credential can reach, on its default branch, and refuses one twice", async () => {
+  github.repos = [{ id: 7, owner: "octo", name: "widgets", fullName: "octo/widgets", defaultBranch: "trunk", private: false, description: null, pushedAt: null, archived: false }];
+  expect(await call("add_project", { repo: "octo/widgets" })).toMatchObject({ name: "widgets", repo: "octo/widgets", default_branch: "trunk", url: expect.stringMatching(new RegExp(`^${BASE}/projects/`)) });
+  expect((await call("list_projects")).map((p: { name: string }) => p.name)).toEqual(["sandbox", "widgets"]);
+  expect(await call("add_project", { repo: "octo/widgets" })).toEqual({ error: expect.stringMatching(/already a project/) });
 });

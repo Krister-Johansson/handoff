@@ -5,7 +5,7 @@ import { answerQuestion, cancelRun, repairNodeExecution } from "@handoff/engine/
 import type { GitHubPort } from "@handoff/github";
 import { listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
-import { getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
+import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
 import { getRunDetail, listRuns } from "./queries";
 
 export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; baseUrl: string };
@@ -84,6 +84,27 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
         url: `${baseUrl}/projects/${p.id}`,
       })),
     ),
+  );
+
+  server.registerTool(
+    "add_project",
+    {
+      description: "Adds a GitHub repository as a handoff project. Runs branch off its default branch; new projects have no graph until one is created on the project's Settings tab.",
+      inputSchema: {
+        repo: z.string().describe("owner/name on GitHub"),
+        name: z.string().optional().describe("Project name; defaults to the repository's"),
+        default_branch: z.string().optional().describe("Defaults to the repository's default branch"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    },
+    ({ repo, name, default_branch }) =>
+      tool(async () => {
+        const known = (await listProjects(db)).find((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === repo.toLowerCase());
+        if (known) throw new Error(`${repo} is already a project: ${known.name}.`);
+        const listed = default_branch ? undefined : (await github?.listRepos().catch(() => []))?.find((r) => r.fullName.toLowerCase() === repo.toLowerCase());
+        const project = await createProject(db, { repo, defaultBranch: default_branch ?? listed?.defaultBranch ?? "main", ...(name ? { name } : {}) }, github);
+        return { name: project.name, id: project.id, repo: `${project.repoOwner}/${project.repoName}`, default_branch: project.defaultBranch, url: `${baseUrl}/projects/${project.id}` };
+      }),
   );
 
   server.registerTool(
