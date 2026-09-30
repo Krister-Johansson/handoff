@@ -2,11 +2,15 @@ import type { EdgeAttributes } from "@handoff/core";
 import { describeCondition } from "@/lib/condition-text";
 import { MAX_LABEL_CHARS } from "@/lib/elk-layout";
 
-/** The text on an edge: when it fires, its condition and its loop budget. */
+/** Whether an edge loops back: marked as a loop, or sending feedback (a loop of three by default). */
+export const loops = (data: EdgeAttributes | undefined) => Boolean(data?.loop || data?.input === "feedback");
+
+/** The text on an edge: its port (or custom condition), when it fires and its loop budget. */
 export function edgeLabel(data: EdgeAttributes | undefined): string {
-  const condition = describeCondition(data?.condition);
-  const loop = data?.loop ? `loop ×${data.maxAttempts ?? "?"}` : "";
-  const on = data?.on && data.on !== "passed" ? `on ${data.on}` : "";
+  const port = data?.port?.replace("_", " ");
+  const condition = port ? (data?.condition ? `${port} (custom)` : port) : describeCondition(data?.condition);
+  const loop = loops(data) ? `loop ×${data?.maxAttempts ?? (data?.input === "feedback" ? 3 : "?")}` : "";
+  const on = !port && data?.on && data.on !== "passed" ? `on ${data.on}` : "";
   const label = [on, condition, loop].filter(Boolean).join(" · ");
   return label.length > MAX_LABEL_CHARS ? `${label.slice(0, MAX_LABEL_CHARS - 1)}…` : label;
 }
@@ -21,7 +25,7 @@ export function loopPath(sx: number, sy: number, tx: number, ty: number): [strin
 /** Loop edges are dashed; failure edges are red; the label shows the condition and loop budget. */
 export function edgeStyle(data: EdgeAttributes | undefined, selected: boolean | undefined) {
   return {
-    strokeDasharray: data?.loop ? "6 4" : undefined,
+    strokeDasharray: loops(data) ? "6 4" : undefined,
     stroke: data?.on === "failed" ? "var(--destructive)" : selected ? "var(--primary)" : "var(--muted-foreground)",
     strokeWidth: selected ? 2 : 1.5,
   };

@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from "react";
 import { TrashIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
-import { ConditionSchema, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { ConditionSchema, gateMode, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
@@ -17,6 +17,12 @@ import type { EditorAction } from "./state";
 export type LibraryNames = { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
 
 const CLI_TYPES = new Set<NodeType>(["planner", "coder", "reviewer"]);
+
+const INSTRUCTION_HINTS: Partial<Record<NodeType, string>> = {
+  planner: "Plan in small steps; name the files each step touches.",
+  coder: "Follow the repository's lint rules; keep commits small.",
+  reviewer: "Review the plan, not code: is it complete, ordered and testable?",
+};
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const num = (v: unknown) => (typeof v === "number" ? String(v) : "");
 const csv = (v: string) =>
@@ -215,21 +221,16 @@ function NodeInspector({
             />
             <FieldDescription>Comma separated, in --allowedTools syntax. Empty uses the defaults shown.</FieldDescription>
           </Field>
-          <Field orientation="horizontal">
-            <Switch
-              id="node-feedback"
-              checked={node.data.contextSelector?.includeFeedback ?? false}
-              onCheckedChange={(on) =>
-                dispatch({
-                  type: "updateNode",
-                  id: node.id,
-                  patch: { contextSelector: { stateKeys: [], repoPaths: [], includePriorAttempt: true, ...node.data.contextSelector, includeFeedback: on } },
-                })
-              }
+          <Field>
+            <FieldLabel htmlFor="node-instructions">Instructions</FieldLabel>
+            <Textarea
+              id="node-instructions"
+              rows={5}
+              placeholder={INSTRUCTION_HINTS[type]}
+              defaultValue={str(config.instructions)}
+              onBlur={(e) => (e.target.value.trim() ? setConfig({ instructions: e.target.value.trim() }) : clearConfig("instructions"))}
             />
-            <FieldLabel htmlFor="node-feedback" className="font-normal">
-              Include PR feedback in context
-            </FieldLabel>
+            <FieldDescription>Markdown added to this step&apos;s built-in role. What reaches the feedback input comes along on its own.</FieldDescription>
           </Field>
           {type === "coder" && <ContractChecks node={node} dispatch={dispatch} />}
           <LibraryPicker node={node} library={library} dispatch={dispatch} />
@@ -269,19 +270,29 @@ function NodeInspector({
       {type === "human_gate" && (
         <>
           <Field>
-            <FieldLabel htmlFor="gate-question">Question</FieldLabel>
-            <Textarea id="gate-question" rows={3} defaultValue={str(config.question)} onBlur={(e) => (e.target.value.trim() ? setConfig({ question: e.target.value.trim() }) : clearConfig("question"))} />
-            <FieldDescription>Used when the gate is not answering a node&apos;s own question or an exhausted loop.</FieldDescription>
+            <FieldLabel htmlFor="gate-mode">Mode</FieldLabel>
+            <NativeSelect id="gate-mode" value={gateMode(config)} onChange={(e) => setConfig({ mode: e.target.value })}>
+              <NativeSelectOption value="approval">Review and approve what reaches it</NativeSelectOption>
+              <NativeSelectOption value="question">Answer a question a coder asked</NativeSelectOption>
+            </NativeSelect>
+            <FieldDescription>
+              {gateMode(config) === "approval"
+                ? "You review the output that reaches in, comment on it, then approve or ask for changes."
+                : "The coder's question is asked; the answer goes back on answered."}
+            </FieldDescription>
           </Field>
-          <Field>
-            <FieldLabel htmlFor="gate-options">Options</FieldLabel>
-            <Input
-              id="gate-options"
-              placeholder="approve, reject"
-              defaultValue={Array.isArray(config.options) ? (config.options as string[]).join(", ") : ""}
-              onBlur={(e) => (e.target.value.trim() ? setConfig({ options: csv(e.target.value) }) : clearConfig("options"))}
-            />
-          </Field>
+          {gateMode(config) === "approval" && (
+            <Field>
+              <FieldLabel htmlFor="gate-question">Question</FieldLabel>
+              <Textarea
+                id="gate-question"
+                rows={2}
+                placeholder="Review the plan from planner-1"
+                defaultValue={str(config.question)}
+                onBlur={(e) => (e.target.value.trim() ? setConfig({ question: e.target.value.trim() }) : clearConfig("question"))}
+              />
+            </Field>
+          )}
           <Field orientation="horizontal">
             <Switch
               id="gate-exhausted"
@@ -342,13 +353,43 @@ function ConditionField({ edge, dispatch }: { edge: FlowEdge; dispatch: Dispatch
   );
 }
 
-function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowGraph; dispatch: Dispatch<EditorAction> }) {
-  const gates = graph.nodes.filter((n) => n.data.nodeType === "human_gate");
+function LoopFields({ edge, gates, dispatch }: { edge: FlowEdge; gates: FlowNode[]; dispatch: Dispatch<EditorAction> }) {
+  const feedback = edge.data.input === "feedback";
   return (
-    <FieldGroup>
-      <FieldDescription className="font-mono text-xs">
-        {edge.source} to {edge.target}
-      </FieldDescription>
+    <>
+      <Field>
+        <FieldLabel htmlFor="edge-attempts">Max attempts</FieldLabel>
+        <Input
+          id="edge-attempts"
+          type="number"
+          min={1}
+          value={num(edge.data.maxAttempts ?? (feedback ? 3 : undefined))}
+          onChange={(e) => dispatch({ type: "updateEdge", id: edge.id, patch: { maxAttempts: e.target.value ? Number(e.target.value) : undefined } })}
+        />
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="edge-exhausted">When attempts run out</FieldLabel>
+        <NativeSelect
+          id="edge-exhausted"
+          value={edge.data.onExhausted ?? ""}
+          onChange={(e) => dispatch({ type: "updateEdge", id: edge.id, patch: { onExhausted: e.target.value || undefined } })}
+        >
+          <NativeSelectOption value="">Use the graph&apos;s exhaustion gate, or fail the run</NativeSelectOption>
+          {gates.map((g) => (
+            <NativeSelectOption key={g.id} value={g.id}>
+              Ask at {g.data.label}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Field>
+    </>
+  );
+}
+
+/** The raw routing of an edge: when it follows, a condition, and a loop without a feedback input. */
+function AdvancedEdgeFields({ edge, gates, dispatch }: { edge: FlowEdge; gates: FlowNode[]; dispatch: Dispatch<EditorAction> }) {
+  return (
+    <>
       <Field>
         <FieldLabel htmlFor="edge-on">Follow when the source</FieldLabel>
         <NativeSelect id="edge-on" value={edge.data.on} onChange={(e) => dispatch({ type: "updateEdge", id: edge.id, patch: { on: e.target.value as "passed" | "failed" | "any" } })}>
@@ -376,48 +417,55 @@ function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowG
         </NativeSelect>
       </Field>
       <ConditionField key={`${edge.id}:${JSON.stringify(edge.data.condition ?? null)}`} edge={edge} dispatch={dispatch} />
-      <Field orientation="horizontal">
-        <Switch
-          id="edge-loop"
-          checked={edge.data.loop}
-          onCheckedChange={(on) => dispatch({ type: "updateEdge", id: edge.id, patch: on ? { loop: true, maxAttempts: edge.data.maxAttempts ?? 3 } : { loop: false, maxAttempts: undefined, onExhausted: undefined } })}
-        />
-        <FieldContent>
-          <FieldLabel htmlFor="edge-loop" className="font-normal">
-            Loop back
-          </FieldLabel>
-          <FieldDescription>Allows a cycle through this edge, bounded by max attempts.</FieldDescription>
-        </FieldContent>
-      </Field>
-      {edge.data.loop && (
+      {edge.data.input !== "feedback" && (
         <>
-          <Field>
-            <FieldLabel htmlFor="edge-attempts">Max attempts</FieldLabel>
-            <Input
-              id="edge-attempts"
-              type="number"
-              min={1}
-              value={num(edge.data.maxAttempts)}
-              onChange={(e) => dispatch({ type: "updateEdge", id: edge.id, patch: { maxAttempts: e.target.value ? Number(e.target.value) : undefined } })}
+          <Field orientation="horizontal">
+            <Switch
+              id="edge-loop"
+              checked={edge.data.loop}
+              onCheckedChange={(on) => dispatch({ type: "updateEdge", id: edge.id, patch: on ? { loop: true, maxAttempts: edge.data.maxAttempts ?? 3 } : { loop: false, maxAttempts: undefined, onExhausted: undefined } })}
             />
+            <FieldContent>
+              <FieldLabel htmlFor="edge-loop" className="font-normal">
+                Loop back
+              </FieldLabel>
+              <FieldDescription>Allows a cycle through this edge, bounded by max attempts.</FieldDescription>
+            </FieldContent>
           </Field>
-          <Field>
-            <FieldLabel htmlFor="edge-exhausted">When attempts run out</FieldLabel>
-            <NativeSelect
-              id="edge-exhausted"
-              value={edge.data.onExhausted ?? ""}
-              onChange={(e) => dispatch({ type: "updateEdge", id: edge.id, patch: { onExhausted: e.target.value || undefined } })}
-            >
-              <NativeSelectOption value="">Use the graph&apos;s exhaustion gate, or fail the run</NativeSelectOption>
-              {gates.map((g) => (
-                <NativeSelectOption key={g.id} value={g.id}>
-                  Ask at {g.data.label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </Field>
+          {edge.data.loop && <LoopFields edge={edge} gates={gates} dispatch={dispatch} />}
         </>
       )}
+    </>
+  );
+}
+
+function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowGraph; dispatch: Dispatch<EditorAction> }) {
+  const gates = graph.nodes.filter((n) => n.data.nodeType === "human_gate");
+  const label = (id: string) => graph.nodes.find((n) => n.id === id)?.data.label ?? id;
+  const port = edge.data.port?.replace("_", " ");
+  const input = edge.data.input ?? "in";
+  return (
+    <FieldGroup>
+      <p className="text-sm">
+        {label(edge.source)}: {port ?? "custom condition"} → {label(edge.target)}: {input}
+      </p>
+      {input === "feedback" && (
+        <>
+          <FieldDescription>
+            {label(edge.source)} sends its output back to {label(edge.target)}, which tries again with it as feedback.
+          </FieldDescription>
+          <LoopFields edge={edge} gates={gates} dispatch={dispatch} />
+        </>
+      )}
+      <details className="flex flex-col gap-4" open={!edge.data.port}>
+        <summary className="cursor-pointer text-sm font-medium">Advanced</summary>
+        <FieldGroup className="pt-3">
+          <FieldDescription>
+            {edge.data.port ? `A condition here replaces the ${port} port's.` : "This edge has no port, so this condition decides when it is followed."}
+          </FieldDescription>
+          <AdvancedEdgeFields edge={edge} gates={gates} dispatch={dispatch} />
+        </FieldGroup>
+      </details>
       <Button variant="destructive" size="sm" onClick={() => dispatch({ type: "remove", ids: [edge.id] })}>
         <TrashIcon data-icon="inline-start" />
         Delete edge
