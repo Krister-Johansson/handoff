@@ -84,3 +84,14 @@ test("a full model id can be typed when no alias fits", () => {
   fireEvent.blur(id);
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { config: { model: "claude-sonnet-5-5" } } });
 });
+
+test("a step can allow every tool instead of a list", () => {
+  const dispatch = vi.fn();
+  const { rerender } = render(<Inspector graph={graph} selection={{ nodeId: "planner" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  fireEvent.click(screen.getByRole("switch", { name: "Allow every tool" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { config: { allTools: true } } });
+  const everything: FlowGraph = { ...graph, nodes: graph.nodes.map((n) => (n.id === "planner" ? { ...n, data: { ...n.data, config: { allTools: true } } } : n)) };
+  rerender(<Inspector graph={everything} selection={{ nodeId: "planner" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("Allowed tools")).toBeDisabled();
+  expect(screen.getByText(/WebFetch/)).toBeInTheDocument();
+});

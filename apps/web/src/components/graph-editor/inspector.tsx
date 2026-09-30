@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from "react";
 import { TrashIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
-import { ConditionSchema, EFFORT_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { ALL_TOOLS, ConditionSchema, EFFORT_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
@@ -194,18 +194,7 @@ function NodeInspector({
               onChange={(e) => (e.target.value ? setConfig({ maxTurns: Number(e.target.value) }) : clearConfig("maxTurns"))}
             />
           </Field>
-          <Field>
-            <FieldLabel htmlFor="node-tools">Allowed tools</FieldLabel>
-            <Textarea
-              id="node-tools"
-              rows={3}
-              className="font-mono text-xs"
-              placeholder={nodeCatalog[type].allowedTools.join(", ")}
-              defaultValue={Array.isArray(config.allowedTools) ? (config.allowedTools as string[]).join(", ") : ""}
-              onBlur={(e) => (e.target.value.trim() ? setConfig({ allowedTools: csv(e.target.value) }) : clearConfig("allowedTools"))}
-            />
-            <FieldDescription>Comma separated, in --allowedTools syntax. Empty uses the defaults shown.</FieldDescription>
-          </Field>
+          <ToolsField type={type} config={config} setConfig={setConfig} clearConfig={clearConfig} />
           <Field>
             <FieldLabel htmlFor="node-instructions">Instructions</FieldLabel>
             <Textarea
@@ -298,6 +287,47 @@ function NodeInspector({
         Delete node
       </Button>
     </FieldGroup>
+  );
+}
+
+/** The tools a CLI step may use: a list, the type's defaults, or every tool. */
+function ToolsField({
+  type,
+  config,
+  setConfig,
+  clearConfig,
+}: {
+  type: NodeType;
+  config: Record<string, unknown>;
+  setConfig: (patch: Record<string, unknown>) => void;
+  clearConfig: (key: string) => void;
+}) {
+  const all = config.allTools === true;
+  return (
+    <>
+      <Field orientation="horizontal">
+        <Switch id="node-all-tools" checked={all} onCheckedChange={(on) => (on ? setConfig({ allTools: true }) : clearConfig("allTools"))} />
+        <FieldContent>
+          <FieldLabel htmlFor="node-all-tools" className="font-normal">
+            Allow every tool
+          </FieldLabel>
+          <FieldDescription>Nothing is ever asked, including any shell command. MCP tools of the node&apos;s library are added either way.</FieldDescription>
+        </FieldContent>
+      </Field>
+      <Field>
+        <FieldLabel htmlFor="node-tools">Allowed tools</FieldLabel>
+        <Textarea
+          id="node-tools"
+          rows={3}
+          className="font-mono text-xs"
+          disabled={all}
+          placeholder={nodeCatalog[type].allowedTools.join(", ")}
+          defaultValue={Array.isArray(config.allowedTools) ? (config.allowedTools as string[]).join(", ") : ""}
+          onBlur={(e) => (e.target.value.trim() ? setConfig({ allowedTools: csv(e.target.value) }) : clearConfig("allowedTools"))}
+        />
+        <FieldDescription>{all ? `Every tool: ${ALL_TOOLS.join(", ")}.` : "Comma separated, in --allowedTools syntax. Empty uses the defaults shown."}</FieldDescription>
+      </Field>
+    </>
   );
 }
 

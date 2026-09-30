@@ -1,4 +1,4 @@
-import { nodeCatalog, type CheckResult, type CompiledNode, type ContextPacket, type ReviewComment, type RunState } from "@handoff/core";
+import { ALL_TOOLS, nodeCatalog, type CheckResult, type CompiledNode, type ContextPacket, type ReviewComment, type RunState } from "@handoff/core";
 import type { NodeExecutionRow } from "@handoff/db";
 
 export const DEFAULT_MAX_TURNS = 60;
@@ -68,7 +68,8 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
   const stateSlice = pick(state, selector.stateKeys.length ? selector.stateKeys : defaultKeys);
   const ownedPaths = state.plan?.ownedPaths ?? [];
   const configTools = node.config.allowedTools;
-  const allowedTools = Array.isArray(configTools) ? configTools.map(String) : nodeCatalog[node.type].allowedTools;
+  const allowedTools =
+    node.config.allTools === true ? ALL_TOOLS : Array.isArray(configTools) ? configTools.map(String) : nodeCatalog[node.type].allowedTools;
   const maxTurns = typeof node.config.maxTurns === "number" ? node.config.maxTurns : DEFAULT_MAX_TURNS;
 
   const packet: ContextPacket = {

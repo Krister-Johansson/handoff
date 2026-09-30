@@ -9,6 +9,14 @@ export type CatalogEntry = {
 };
 
 const readOnlyTools = ["Read", "Glob", "Grep"];
+
+/**
+ * Every Claude Code tool a headless step can use, for a node that allows every tool: still passed
+ * as an explicit --allowedTools list. Tools that publish outside the run (Artifact) or manage the
+ * session (worktrees, plan mode, cron) stay out, and so do the task tools, which listing would
+ * turn on for models that leave them off.
+ */
+export const ALL_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "Bash", "WebFetch", "WebSearch", "Agent", "Skill"];
 const coderTools = [...readOnlyTools, "Edit", "Write", "Bash(git *)", "Bash(pnpm *)", "Bash(npm *)", "Bash(npx *)"];
 
 export const nodeCatalog: Record<NodeType, CatalogEntry> = {
