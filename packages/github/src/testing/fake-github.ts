@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import type { GitHubPort, IssueDetail, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
 type FakePr = PrSnapshot & { base: string; body: string };
@@ -66,6 +67,7 @@ export class FakeGitHub implements GitHubPort {
       mergeable: "MERGEABLE",
       reviewDecision: null,
       checks: { state: "PENDING", contexts: [] },
+      reviews: [],
       reviewThreads: [],
       comments: [],
     };
@@ -73,9 +75,19 @@ export class FakeGitHub implements GitHubPort {
     return { number, url: pr.url, headSha: pr.headSha };
   }
 
+  /** A local origin repository: when set, a PR's head follows its branch there, as a push moves it on GitHub. */
+  origin: string | undefined;
+
   async getPrSnapshot(_repo: RepoRef, number: number): Promise<PrSnapshot> {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
+    if (this.origin) {
+      try {
+        pr.headSha = execFileSync("git", ["-C", this.origin, "rev-parse", `refs/heads/${pr.headRef}`], { encoding: "utf8" }).trim();
+      } catch {
+        // The branch is not in the origin (yet): keep the head the PR was opened with.
+      }
+    }
     return structuredClone(pr);
   }
 
@@ -116,6 +128,24 @@ export class FakeGitHub implements GitHubPort {
       contexts: failed.map((f) => ({ name: f.name, status: "COMPLETED", conclusion: "FAILURE", url: `https://ci/${f.jobId}`, checkRunId: f.jobId })),
     };
     for (const f of failed) if (f.log) this.jobLogs.set(f.jobId, f.log);
+  }
+
+  /**
+   * A review on the PR's current head commit, the way a review bot such as CodeRabbit leaves one:
+   * a summary body and unresolved inline threads, usually with state COMMENTED.
+   */
+  reviewOnHead(
+    number: number,
+    author: string,
+    review: { state?: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED"; body?: string; threads?: { path: string; line?: number; body: string }[] } = {},
+  ) {
+    const pr = this.prs.get(number)!;
+    const id = String(this.next++ * 1000);
+    pr.reviews.push({ id, state: review.state ?? "COMMENTED", body: review.body ?? "", author, commitSha: pr.headSha, submittedAt: new Date().toISOString() });
+    pr.reviewThreads.push(
+      ...(review.threads ?? []).map((t, i) => ({ isResolved: false, comments: [{ id: `${id}-${i}`, author, body: t.body, path: t.path, ...(t.line ? { line: t.line } : {}), url: `https://review/${number}#${id}-${i}` }] })),
+    );
+    return id;
   }
 
   review(number: number, decision: "APPROVED" | "CHANGES_REQUESTED", comments: { author: string; body: string; path?: string; line?: number }[] = []) {

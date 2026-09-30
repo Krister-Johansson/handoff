@@ -58,6 +58,19 @@ export type PullRequestReviewDecision =
   /** A review is required before the pull request can be merged. */
   | 'REVIEW_REQUIRED';
 
+/** The possible states of a pull request review. */
+export type PullRequestReviewState =
+  /** A review allowing the pull request to merge. */
+  | 'APPROVED'
+  /** A review blocking the pull request from merging. */
+  | 'CHANGES_REQUESTED'
+  /** An informational review. */
+  | 'COMMENTED'
+  /** A review that has been dismissed. */
+  | 'DISMISSED'
+  /** A review that has not yet been submitted. */
+  | 'PENDING';
+
 /** The possible states of a pull request. */
 export type PullRequestState =
   /** A pull request that has been closed without being merged. */
@@ -90,7 +103,13 @@ export type PullRequestSnapshotQueryVariables = Exact<{
 export type PullRequestSnapshotQuery = { repository: { pullRequest: { number: number, title: string, isDraft: boolean, additions: number, deletions: number, changedFiles: number, updatedAt: string, url: string, headRefOid: string, headRefName: string, state: PullRequestState, merged: boolean, mergeable: MergeableState, reviewDecision: PullRequestReviewDecision | null, commits: { nodes: Array<{ commit: { statusCheckRollup: { state: StatusState, contexts: { nodes: Array<
                   | { __typename: 'CheckRun', databaseId: number | null, name: string, status: CheckStatusState, conclusion: CheckConclusionState | null, detailsUrl: string | null }
                   | { __typename: 'StatusContext', context: string, state: StatusState, targetUrl: string | null }
-                 | null> | null } } | null } } | null> | null }, reviewThreads: { nodes: Array<{ isResolved: boolean, comments: { nodes: Array<{ body: string, path: string, line: number | null, url: string, author:
+                 | null> | null } } | null } } | null> | null }, reviews: { nodes: Array<{ databaseId: number | null, state: PullRequestReviewState, body: string, submittedAt: string | null, author:
+            | { login: string }
+            | { login: string }
+            | { login: string }
+            | { login: string }
+            | { login: string }
+           | null, commit: { oid: string } | null } | null> | null } | null, reviewThreads: { nodes: Array<{ isResolved: boolean, comments: { nodes: Array<{ databaseId: number | null, body: string, path: string, line: number | null, url: string, author:
                 | { login: string }
                 | { login: string }
                 | { login: string }
@@ -167,11 +186,26 @@ export const PullRequestSnapshotDocument = new TypedDocumentString(`
           }
         }
       }
+      reviews(last: 50) {
+        nodes {
+          databaseId
+          state
+          body
+          submittedAt
+          author {
+            login
+          }
+          commit {
+            oid
+          }
+        }
+      }
       reviewThreads(first: 100) {
         nodes {
           isResolved
           comments(first: 1) {
             nodes {
+              databaseId
               author {
                 login
               }

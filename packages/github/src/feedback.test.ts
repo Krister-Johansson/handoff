@@ -19,6 +19,7 @@ const base: PrSnapshot = {
   mergeable: "MERGEABLE",
   reviewDecision: null,
   checks: { state: "SUCCESS", contexts: [] },
+  reviews: [],
   reviewThreads: [],
   comments: [],
 };

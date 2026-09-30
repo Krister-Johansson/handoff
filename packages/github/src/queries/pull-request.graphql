@@ -41,11 +41,26 @@ query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
           }
         }
       }
+      reviews(last: 50) {
+        nodes {
+          databaseId
+          state
+          body
+          submittedAt
+          author {
+            login
+          }
+          commit {
+            oid
+          }
+        }
+      }
       reviewThreads(first: 100) {
         nodes {
           isResolved
           comments(first: 1) {
             nodes {
+              databaseId
               author {
                 login
               }

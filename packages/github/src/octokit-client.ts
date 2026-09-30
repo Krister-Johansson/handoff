@@ -155,9 +155,18 @@ export class OctokitGitHub implements GitHubPort {
       checks: rollup
         ? { state: rollup.state, contexts: present<NonNullable<GqlContext>>(rollup.contexts.nodes).flatMap((c) => toCheckContext(c)) }
         : null,
+      reviews: present(pr.reviews?.nodes).map((r) => ({
+        id: String(r.databaseId ?? ""),
+        state: r.state,
+        body: r.body,
+        author: r.author?.login ?? "ghost",
+        commitSha: r.commit?.oid ?? null,
+        submittedAt: r.submittedAt ?? null,
+      })),
       reviewThreads: present(pr.reviewThreads.nodes).map((t) => ({
         isResolved: t.isResolved,
         comments: present(t.comments.nodes).map((c) => ({
+          ...(c.databaseId ? { id: String(c.databaseId) } : {}),
           author: c.author?.login ?? "ghost",
           body: c.body,
           ...(c.path ? { path: c.path } : {}),

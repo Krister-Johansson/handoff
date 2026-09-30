@@ -27,7 +27,9 @@ export type PrSnapshot = {
   reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | null;
   /** statusCheckRollup of the head commit; null when no checks have reported yet. */
   checks: { state: "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED" | string; contexts: CheckContext[] } | null;
-  reviewThreads: { isResolved: boolean; comments: { author: string; body: string; path?: string; line?: number; url: string }[] }[];
+  /** Submitted reviews, newest last: who reviewed which commit, with what verdict and summary. */
+  reviews: { id: string; state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING" | string; body: string; author: string; commitSha: string | null; submittedAt: string | null }[];
+  reviewThreads: { isResolved: boolean; comments: { id?: string; author: string; body: string; path?: string; line?: number; url: string }[] }[];
   comments: { author: string; body: string; url: string }[];
 };
 
