@@ -61,6 +61,8 @@ export interface GitHubPort {
   getRepoId(repo: RepoRef): Promise<number>;
   findPrByHead(repo: RepoRef, branch: string): Promise<PrInfo | undefined>;
   createPr(repo: RepoRef, input: { head: string; base: string; title: string; body: string }): Promise<PrInfo>;
+  /** Replaces a pull request's title and description. */
+  updatePr(repo: RepoRef, number: number, input: { title: string; body: string }): Promise<void>;
   getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot>;
   getJobLogTail(repo: RepoRef, jobId: number, lines?: number): Promise<string | undefined>;
   mergePr(repo: RepoRef, number: number, method?: "squash" | "merge" | "rebase"): Promise<{ merged: boolean; sha?: string }>;

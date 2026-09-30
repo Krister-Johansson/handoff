@@ -15,6 +15,8 @@ export const CoderOutputSchema = z
     commitSha: z.string().optional(),
     /** Files outside the plan's owned paths that the change needed, each with the reason. */
     extraPaths: z.array(z.object({ path: z.string().min(1), reason: z.string().min(1) })).optional(),
+    /** The pull request's title and description, written for a reviewer of the change. */
+    pr: z.object({ title: z.string().min(1).max(256), body: z.string().min(1) }).optional(),
   })
   .refine((o) => o.status !== "needs_input" || o.question !== undefined, {
     message: "needs_input requires a question",

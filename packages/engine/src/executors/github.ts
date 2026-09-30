@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ReviewerOutputSchema, type CoderOutput, type PlannerOutput } from "@handoff/core";
+import { CoderOutputSchema, ReviewerOutputSchema, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
@@ -12,16 +12,25 @@ const repoOf = (ctx: ExecutorContext): RepoRef => ({ owner: ctx.project.repoOwne
 const flag = (config: Record<string, unknown>, key: string, fallback: boolean) =>
   typeof config[key] === "boolean" ? (config[key] as boolean) : fallback;
 
-function prBody(ctx: ExecutorContext): string {
-  const plan = ctx.state.plan as PlannerOutput | undefined;
-  const coder = ctx.state.nodes.coder?.output as CoderOutput | undefined;
-  const lines = [`Task: ${ctx.state.task}`, ""];
-  if (coder?.summary) lines.push("## Summary", "", coder.summary, "");
-  if (plan) lines.push("## Plan", "", plan.plan, "", ...plan.steps.map((s) => `- ${s}`), "");
+/** The latest output of the coder that feeds this PR node, or of any coder in the graph. */
+function coderOutput(ctx: ExecutorContext): CoderOutput | undefined {
+  const feeding = ctx.graph.inEdges(ctx.node.key).map((e) => e.source);
+  const coders = [...feeding, ...ctx.graph.order].filter((key) => ctx.graph.node(key)?.type === "coder");
+  for (const key of coders) {
+    const parsed = CoderOutputSchema.safeParse(ctx.state.nodes[key]?.output);
+    if (parsed.success) return parsed.data;
+  }
+  return undefined;
+}
+
+/** The PR text: the coder's own title and description when it wrote them, then the issues it closes. */
+function prText(ctx: ExecutorContext): { title: string; body: string } {
+  const coder = coderOutput(ctx);
+  const lines = [coder?.pr?.body ?? coder?.summary ?? `Task: ${ctx.state.task}`, ""];
   // GitHub closes these issues when the pull request merges into the default branch.
   if (ctx.state.issues?.length) lines.push(...ctx.state.issues.map((i) => `Closes #${i.number}`), "");
   lines.push(`Opened by handoff run \`${ctx.run.id}\`.`);
-  return lines.join("\n");
+  return { title: coder?.pr?.title ?? title(ctx.state.task), body: lines.join("\n") };
 }
 
 /** The latest comments of every Reviewer node, as one PR comment body, or undefined when there are none. */
@@ -70,11 +79,12 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
 
       let number = ctx.state.prNumber;
       if (number === undefined) {
-        const pr =
-          (await deps.github.findPrByHead(repo, ctx.run.branchName)) ??
-          (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, title: title(ctx.state.task), body: prBody(ctx) }));
+        const pr = (await deps.github.findPrByHead(repo, ctx.run.branchName)) ?? (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, ...prText(ctx) }));
         number = pr.number;
         await ctx.recordPrNumber(number);
+      } else if (pushing && coderOutput(ctx)?.pr) {
+        // A later round rewrote the description of the change; the pull request follows it.
+        await deps.github.updatePr(repo, number, prText(ctx));
       }
       let repoId = ctx.project.repoId;
       if (repoId === null) {

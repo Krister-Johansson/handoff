@@ -75,6 +75,13 @@ export class FakeGitHub implements GitHubPort {
     return { number, url: pr.url, headSha: pr.headSha };
   }
 
+  async updatePr(_repo: RepoRef, number: number, input: { title: string; body: string }): Promise<void> {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR #${number}`);
+    pr.title = input.title;
+    pr.body = input.body;
+  }
+
   /** A local origin repository: when set, a PR's head follows its branch there, as a push moves it on GitHub. */
   origin: string | undefined;
 

@@ -44,6 +44,15 @@ test("createPr posts title, body, head and base", async () => {
   expect(calls[0]!.body).toEqual({ head: "b", base: "main", title: "T", body: "B" });
 });
 
+test("updatePr patches the title and body of a pull request", async () => {
+  const { fetch, calls } = fakeFetch({
+    "PATCH /repos/octo/sample/pulls/8": () => ({ json: { number: 8, html_url: "https://github.com/octo/sample/pull/8", head: { sha: "def", ref: "b" } } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  await gh.updatePr(repo, 8, { title: "T2", body: "B2" });
+  expect(calls[0]!.body).toEqual({ title: "T2", body: "B2" });
+});
+
 test("getPrSnapshot maps the GraphQL pull request, rollup and review threads", async () => {
   const { fetch } = fakeFetch({
     "POST /graphql": () => ({
