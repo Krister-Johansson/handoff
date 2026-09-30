@@ -39,7 +39,7 @@ export default async function RunsPage() {
               <TableBody>
                 {rows.map((run) => (
                   <TableRow key={run.id}>
-                    <TableCell className="max-w-72 truncate font-medium">
+                    <TableCell className="w-full max-w-0 truncate font-medium">
                       <Link href={`/runs/${run.id}`} className="hover:underline">
                         {run.task}
                       </Link>
@@ -47,8 +47,8 @@ export default async function RunsPage() {
                     <TableCell className="text-muted-foreground">
                       {run.owner}/{run.repo}
                     </TableCell>
-                    <TableCell className="max-w-56 truncate font-mono text-xs">{run.branchName}</TableCell>
-                    <TableCell className="text-muted-foreground tabular-nums">{run.createdAt.toLocaleString()}</TableCell>
+                    <TableCell className="max-w-48 truncate font-mono text-xs">{run.branchName}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground tabular-nums">{run.createdAt.toLocaleString()}</TableCell>
                     <TableCell className="text-right">
                       <StatusBadge status={run.status} />
                     </TableCell>
