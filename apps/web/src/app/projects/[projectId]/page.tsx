@@ -234,8 +234,7 @@ export default async function ProjectPage({
   const tab = parseProjectTab(query);
   const detail = await getProjectDetail(getDb(), projectId);
   if (!detail) notFound();
-  const { project, graphs, runs } = detail;
-  const latestGraph = [...graphs].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())[0];
+  const { project, graphs, runs, defaultGraph } = detail;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -245,14 +244,14 @@ export default async function ProjectPage({
             {project.repoOwner}/{project.repoName}
           </a>
         </div>
-        {!project.isDemo && latestGraph && (
-          <StartRunDialog projectId={project.id} graphs={graphs.map((g) => g.name)} graphName={latestGraph.name} label="New run" size="default" />
+        {!project.isDemo && defaultGraph && (
+          <StartRunDialog projectId={project.id} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} label="New run" size="default" />
         )}
       </div>
       <ProjectTabs active={tab} counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length }}>
         {tab === "runs" && <RunsTab project={project} runs={runs} />}
         {tab === "issues" && (
-          <IssuesTab project={project} graphs={graphs.map((g) => g.name)} graphName={latestGraph?.name} filter={parseBacklogFilter(query)} />
+          <IssuesTab project={project} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} filter={parseBacklogFilter(query)} />
         )}
         {tab === "pulls" && <PullsTab projectId={project.id} filter={parsePullFilter(query)} />}
         {tab === "settings" && <SettingsTab project={project} graphs={graphs} runCount={runs.length} />}
