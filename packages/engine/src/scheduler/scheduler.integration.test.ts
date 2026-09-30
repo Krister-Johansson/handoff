@@ -195,3 +195,48 @@ describe("scheduler", () => {
     expect(executions[0]?.status).toBe("running");
   });
 });
+
+describe("automatic retries", () => {
+  test("a retryable failure re-queues the same execution after a backoff and runs it again", async () => {
+    const { run } = await startRun(db, linear);
+    let calls = 0;
+    const planner: NodeExecutor = {
+      needsWorkdir: false,
+      execute: async () =>
+        ++calls === 1
+          ? { kind: "failed", error: { code: "cli_rate_limited", message: "usage limit reached" }, retryable: true, retryAfterMs: 0 }
+          : { kind: "completed", output: plannerOut, statePatch: { plan: plannerOut } },
+    };
+    await drain(engineDeps(db, registry({ planner })));
+    const { run: row, executions, types } = await inspect(db, run.id);
+    const planners = executions.filter((e) => e.nodeKey === "planner");
+    expect(planners).toHaveLength(1);
+    expect(planners[0]).toMatchObject({ status: "passed", retryCount: 1 });
+    expect(types).toContain("node.retrying");
+    expect(row.status).toBe("succeeded");
+  });
+
+  test("a retryable failure waits for its backoff before running again", async () => {
+    const { run } = await startRun(db, linear);
+    const planner: NodeExecutor = {
+      needsWorkdir: false,
+      execute: async () => ({ kind: "failed", error: { code: "cli_rate_limited", message: "limit" }, retryable: true, retryAfterMs: 60_000 }),
+    };
+    await drain(engineDeps(db, registry({ planner })));
+    const [planner1] = (await inspect(db, run.id)).executions;
+    expect(planner1).toMatchObject({ status: "pending", retryCount: 1 });
+    expect(planner1!.runnableAt.getTime()).toBeGreaterThan(Date.now() + 50_000);
+  });
+
+  test("a retryable failure fails the node once maxRetries is used", async () => {
+    const { run } = await startRun(db, linear);
+    const planner: NodeExecutor = {
+      needsWorkdir: false,
+      execute: async () => ({ kind: "failed", error: { code: "cli_rate_limited", message: "limit" }, retryable: true, retryAfterMs: 0 }),
+    };
+    await drain(engineDeps(db, registry({ planner }), { maxRetries: 2 }));
+    const { run: row, executions } = await inspect(db, run.id);
+    expect(executions[0]).toMatchObject({ status: "failed", retryCount: 2, error: { code: "cli_rate_limited" } });
+    expect(row.status).toBe("failed");
+  });
+});

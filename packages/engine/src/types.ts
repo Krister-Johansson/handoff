@@ -39,7 +39,7 @@ export type ExecutionError = { code: string; message: string; detail?: unknown }
 export type ExecutorOutcome =
   | { kind: "completed"; output: unknown; statePatch?: Record<string, unknown>; cost?: { usd?: number | undefined; usage?: unknown } }
   | { kind: "waiting"; wait: { kind: "github_pr" | "human" | "timer"; key?: string; token?: string; deadlineAt?: Date } }
-  | { kind: "failed"; error: ExecutionError; retryable?: boolean }
+  | { kind: "failed"; error: ExecutionError; retryable?: boolean; retryAfterMs?: number }
   | { kind: "interrupted" };
 
 export interface NodeExecutor {

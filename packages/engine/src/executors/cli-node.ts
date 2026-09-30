@@ -1,5 +1,5 @@
 import { contractRegistry, isContractName, renderContextPacket, type NodeType } from "@handoff/core";
-import type { CliExecutor, CliSession } from "@handoff/cli-adapter";
+import type { CliExecutor, CliRunOptions, CliRunRequest, CliSession } from "@handoff/cli-adapter";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
 export type CliNodeOptions = { cli: CliExecutor; maxTurns: number; timeoutMs: number; idleTimeoutMs?: number; model?: string };
@@ -24,6 +24,19 @@ function answerToResume(ctx: ExecutorContext): { sessionId: string; text: string
   const asked = (previous?.output as { status?: string } | undefined)?.status === "needs_input";
   if (!answer || !asked || !previous?.sessionId) return undefined;
   return { sessionId: previous.sessionId, text: answer.option ? `${answer.option}: ${answer.answer}` : answer.answer };
+}
+
+const FATAL_API_ERRORS = new Set(["authentication_failed", "oauth_org_not_allowed", "billing_error", "account_on_hold"]);
+const RATE_LIMIT_TEXT = /rate.?limit|usage limit|\b429\b|overloaded/i;
+const FINISH_TURNS = 10;
+const FINISH_PROMPT =
+  "You ran out of turns. Stop exploring now: commit what is done and return the structured output required by the output contract, with status failed if the work is not finished.";
+
+/** Claude usage-limit messages end with "|<unix seconds>" when the limit resets. */
+function retryAfter(text: string): { retryAfterMs?: number } {
+  const match = /\|(\d{10})\b/.exec(text);
+  if (!match) return {};
+  return { retryAfterMs: Math.max(60_000, Number(match[1]) * 1000 - Date.now()) };
 }
 
 /** Names of required MCP servers that the CLI reported as failed, missing or skipped at init. */
@@ -63,34 +76,69 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
 
       let mcpProblems: string[] = [];
-      const result = await options.cli.run(
-        {
-          prompt,
-          systemPrompt: renderContextPacket(ctx.packet),
-          cwd: ctx.workdir.path,
-          ...(ctx.workdir.container ? { container: ctx.workdir.container } : {}),
-          stagingDir: ctx.stagingDir,
-          allowedTools: ctx.packet.constraints.allowedTools,
-          maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns,
-          contract: contractRegistry[contractName],
-          addDirs: ctx.library?.addDirs ?? [],
-          ...(ctx.library?.mcpConfigPath ? { mcpConfigPath: ctx.library.mcpConfigPath } : {}),
-          ...(ctx.library?.agents ? { agents: ctx.library.agents } : {}),
-          session,
-          timeoutMs: options.timeoutMs,
-          ...(options.idleTimeoutMs ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
-          ...(options.model ? { model: options.model } : {}),
+      let fatalRetryError: string | undefined;
+      let rateLimited = false;
+      const local = new AbortController();
+      const forward = () => local.abort();
+      if (ctx.signal.aborted) local.abort();
+      ctx.signal.addEventListener("abort", forward, { once: true });
+      const base: Omit<CliRunRequest, "prompt" | "session" | "maxTurns"> = {
+        systemPrompt: renderContextPacket(ctx.packet),
+        cwd: ctx.workdir.path,
+        ...(ctx.workdir.container ? { container: ctx.workdir.container } : {}),
+        stagingDir: ctx.stagingDir,
+        allowedTools: ctx.packet.constraints.allowedTools,
+        contract: contractRegistry[contractName],
+        addDirs: ctx.library?.addDirs ?? [],
+        ...(ctx.library?.mcpConfigPath ? { mcpConfigPath: ctx.library.mcpConfigPath } : {}),
+        ...(ctx.library?.agents ? { agents: ctx.library.agents } : {}),
+        timeoutMs: options.timeoutMs,
+        ...(options.idleTimeoutMs ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
+        ...(options.model ? { model: options.model } : {}),
+      };
+      const runOptions: CliRunOptions = {
+        signal: local.signal,
+        onEvent: (event) => {
+          if (event.type === "cli.system.init") mcpProblems = mcpInitProblems(event.payload, ctx.library?.mcpServers ?? []);
+          if (event.type === "cli.system.api_retry") {
+            const error = (event.payload as { error?: string } | undefined)?.error;
+            if (error && FATAL_API_ERRORS.has(error)) {
+              fatalRetryError = error;
+              local.abort();
+            }
+            if (error === "rate_limit" || error === "overloaded") rateLimited = true;
+          }
+          ctx.emit(event.type, event.payload);
         },
-        {
-          signal: ctx.signal,
-          onEvent: (event) => {
-            if (event.type === "cli.system.init") mcpProblems = mcpInitProblems(event.payload, ctx.library?.mcpServers ?? []);
-            ctx.emit(event.type, event.payload);
-          },
-          onSessionId: (id) => ctx.setSessionId(id),
-        },
-      );
+        onSessionId: (id) => ctx.setSessionId(id),
+      };
+      let result = await options.cli.run({ ...base, prompt, session, maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns }, runOptions);
+      if (result.outcome === "error_max_turns" && !local.signal.aborted) {
+        // One short resumed turn to wrap up, instead of failing work that is nearly done.
+        const id = result.sessionId ?? session.id;
+        ctx.emit("node.finishing", { reason: "max_turns" });
+        result = await options.cli.run({ ...base, prompt: FINISH_PROMPT, session: { mode: "resume", id }, maxTurns: FINISH_TURNS }, runOptions);
+      }
+      ctx.signal.removeEventListener("abort", forward);
 
+      if (fatalRetryError) {
+        return {
+          kind: "failed",
+          error: {
+            code: "cli_auth_failed",
+            message: `Claude rejected the request (${fatalRetryError}). Run \`claude setup-token\` and update CLAUDE_CODE_OAUTH_TOKEN, then repair this node.`,
+          },
+        };
+      }
+      const text = `${result.errorMessage ?? ""}\n${result.stderrTail}`;
+      if (result.outcome === "error" && (rateLimited || RATE_LIMIT_TEXT.test(text))) {
+        return {
+          kind: "failed",
+          error: { code: "cli_rate_limited", message: result.errorMessage ?? "Claude usage or rate limit reached" },
+          retryable: true,
+          ...retryAfter(text),
+        };
+      }
       const cost = { usd: result.costUsd, usage: result.usage };
       if (mcpProblems.length && result.outcome !== "interrupted") {
         return { kind: "failed", error: { code: "mcp_unavailable", message: `MCP servers did not start: ${mcpProblems.join(", ")}` } };

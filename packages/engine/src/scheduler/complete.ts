@@ -320,3 +320,27 @@ export async function releaseForReclaim(tx: DbTx, input: { row: NodeExecutionRow
     { type: "node.interrupted", payload: { nodeKey: input.row.nodeKey }, nodeExecutionId: input.row.id },
   ]);
 }
+
+/** Puts a retryable failure back in the queue after a delay, keeping the same execution and session. */
+export async function scheduleRetry(tx: DbTx, input: { row: NodeExecutionRow; workerId: string; error: ExecutionError; delayMs: number }) {
+  const { row } = input;
+  const [updated] = await tx
+    .update(nodeExecutions)
+    .set({
+      ...releasedLease,
+      status: "pending",
+      error: input.error,
+      retryCount: sql`${nodeExecutions.retryCount} + 1`,
+      runnableAt: sql`now() + (${Math.max(0, Math.round(input.delayMs))}::int * interval '1 millisecond')`,
+    })
+    .where(owned(row, input.workerId))
+    .returning();
+  if (!updated) throw new LeaseLostError(row.id);
+  await appendEvents(tx, row.runId, [
+    {
+      type: "node.retrying",
+      payload: { nodeKey: row.nodeKey, attempt: row.attempt, retry: updated.retryCount, delayMs: input.delayMs, error: input.error },
+      nodeExecutionId: row.id,
+    },
+  ]);
+}

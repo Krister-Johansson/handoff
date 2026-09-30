@@ -55,7 +55,7 @@ test("Coder node with status needs_input passes the contract without checks", as
 });
 
 test("a CLI error fails the node with the CLI outcome as the error code", async () => {
-  const cli = new FakeCliExecutor([{ result: { outcome: "error_max_turns" } }]);
+  const cli = new FakeCliExecutor([{ result: { outcome: "error_max_turns" } }, { result: { outcome: "error_max_turns" } }]);
   const { run } = await startRun(db, linear);
   await drain(engineDeps(db, registry(cli)));
   const planner = (await inspect(db, run.id)).executions[0]!;
@@ -71,4 +71,44 @@ test("a reclaimed CLI node resumes its recorded session instead of starting a ne
   const planner = (await inspect(db, run.id)).executions[0]!;
   expect(cli.requests[0]!.session.mode).toBe("new");
   expect(cli.requests[1]!.session).toEqual({ mode: "resume", id: planner.id });
+});
+
+test("a rate-limited CLI run is retried later instead of failing the node", async () => {
+  const cli = new FakeCliExecutor([
+    { result: { outcome: "error", errorMessage: "API Error: 429 rate limit exceeded" } },
+    { output: plannerOut },
+  ]);
+  const { run } = await startRun(db, linear);
+  const deps = engineDeps(db, registry(cli), { retryBackoffMs: 0 });
+  await runOnce(deps);
+  let planner = (await inspect(db, run.id)).executions[0]!;
+  expect(planner).toMatchObject({ status: "pending", retryCount: 1 });
+  await runOnce(deps);
+  planner = (await inspect(db, run.id)).executions[0]!;
+  expect(planner.status).toBe("passed");
+});
+
+test("an authentication failure stops the node at once with a clear message", async () => {
+  const cli = new FakeCliExecutor([
+    async (request, options) => {
+      await options.onEvent({ type: "cli.system.api_retry", payload: { type: "system", subtype: "api_retry", attempt: 1, error: "authentication_failed" } });
+      const interrupted = { outcome: "interrupted" as const, exitCode: 143, stderrTail: "" };
+      if (options.signal.aborted) return interrupted;
+      return new Promise((resolve) => options.signal.addEventListener("abort", () => resolve(interrupted)));
+    },
+  ]);
+  const { run } = await startRun(db, linear);
+  await runOnce(engineDeps(db, registry(cli)));
+  const planner = (await inspect(db, run.id)).executions[0]!;
+  expect(planner).toMatchObject({ status: "failed", error: { code: "cli_auth_failed", message: expect.stringContaining("claude setup-token") } });
+});
+
+test("running out of turns gets one resumed turn to finish and return the contract", async () => {
+  const cli = new FakeCliExecutor([{ result: { outcome: "error_max_turns" } }, { output: plannerOut }]);
+  const { run } = await startRun(db, linear);
+  await runOnce(engineDeps(db, registry(cli)));
+  const planner = (await inspect(db, run.id)).executions[0]!;
+  expect(planner.status).toBe("passed");
+  expect(cli.requests[1]!.session).toEqual({ mode: "resume", id: planner.id });
+  expect(cli.requests[1]!.prompt).toMatch(/out of turns/i);
 });

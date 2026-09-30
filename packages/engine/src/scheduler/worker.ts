@@ -21,7 +21,7 @@ import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary }
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
-import { completeFailed, completePassed, LeaseLostError, releaseForReclaim, yieldWaiting } from "./complete.ts";
+import { completeFailed, completePassed, LeaseLostError, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
 export type EngineDeps = {
   db: Db;
@@ -36,6 +36,10 @@ export type EngineDeps = {
   /** Resolves the git remote for a project; defaults to localClonePath or the GitHub https URL. */
   remoteUrl?: (project: typeof projects.$inferSelect) => string;
   log?: (message: string, detail?: unknown) => void;
+  /** Automatic retries for retryable failures (rate limits, timeouts) before the node fails. Default 3. */
+  maxRetries?: number;
+  /** Base backoff for retries without a hint; doubles each retry. Default 60 s. */
+  retryBackoffMs?: number;
   /** Where ${secret:NAME} references in the library resolve from. Defaults to process.env. */
   secrets?: Record<string, string | undefined>;
 };
@@ -323,9 +327,16 @@ async function applyOutcome(
     case "waiting":
       await db.transaction((tx) => yieldWaiting(tx, { row, workerId, wait: outcome.wait }));
       return;
-    case "failed":
+    case "failed": {
+      const maxRetries = deps.maxRetries ?? 3;
+      if (outcome.retryable && row.retryCount < maxRetries) {
+        const delayMs = outcome.retryAfterMs ?? (deps.retryBackoffMs ?? 60_000) * 2 ** row.retryCount;
+        await db.transaction((tx) => scheduleRetry(tx, { row, workerId, error: outcome.error, delayMs }));
+        return;
+      }
       await db.transaction((tx) => completeFailed(tx, { row, workerId, graph, error: outcome.error }));
       return;
+    }
     case "interrupted":
       await db.transaction((tx) => releaseForReclaim(tx, { row, workerId }));
       return;

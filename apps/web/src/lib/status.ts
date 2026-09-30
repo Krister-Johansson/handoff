@@ -26,6 +26,7 @@ export function statusFromEvent(type: string): string | undefined {
       "node.woken": "pending",
       "node.interrupted": "pending",
       "node.reclaimed": "pending",
+      "node.retrying": "pending",
       "node.repaired": "repaired",
     } as Record<string, string>
   )[type];
