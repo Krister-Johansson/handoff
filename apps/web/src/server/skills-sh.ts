@@ -1,8 +1,11 @@
+import { parseOwnerPage, parseRepoPage } from "./skills-sh-pages";
+
 type Fetch = typeof globalThis.fetch;
 
 export type SkillsShResult = { id: string; source: string; skillId: string; name: string; installs: number };
 export type SkillsShDownload = { files: { path: string; content: string }[]; hash: string };
 
+const NAME = /^[\w.-]+$/;
 const SKILL_ID = /^[\w.-]+\/[\w.-]+\/[\w.-]+$/;
 const isSkillId = (id: string) => SKILL_ID.test(id) && id.split("/").every((part) => part !== "." && part !== "..");
 
@@ -31,6 +34,25 @@ export class SkillsShClient {
     const path = id.split("/").map(encodeURIComponent).join("/");
     const data = await this.get<{ files?: { path: string; contents: string }[]; hash?: string }>(`${this.base}/api/download/${path}`);
     return { files: (data.files ?? []).map((f) => ({ path: f.path, content: f.contents })), hash: data.hash ?? "" };
+  }
+
+  /** The owner's repositories on skills.sh (skills.sh/<owner>). */
+  async owner(owner: string): Promise<{ repo: string; skills: number }[]> {
+    if (!NAME.test(owner) || owner === "." || owner === "..") throw new Error(`${owner} is not a skills.sh owner`);
+    return parseOwnerPage(await this.page(`${this.base}/${owner}`), owner);
+  }
+
+  /** A repository's skills on skills.sh (skills.sh/<owner>/<repo>). */
+  async repository(repo: string): Promise<{ id: string; skillId: string; installs: number }[]> {
+    const parts = repo.split("/");
+    if (parts.length !== 2 || !parts.every((p) => NAME.test(p) && p !== "." && p !== "..")) throw new Error(`${repo} is not a skills.sh repository (owner/repo)`);
+    return parseRepoPage(await this.page(`${this.base}/${repo}`), repo);
+  }
+
+  private async page(url: string): Promise<string> {
+    const response = await this.fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`skills.sh answered ${response.status} for ${new URL(url).pathname}`);
+    return response.text();
   }
 
   private async get<T>(url: string): Promise<T> {

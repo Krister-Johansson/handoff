@@ -84,6 +84,11 @@ function SkillsBySource({ groups }: { groups: SkillSourceGroup<SkillIndexRow>[] 
               </a>
             )}
             <span className="text-muted-foreground">{group.skills.length}</span>
+            {group.registry === "skills.sh" && group.repo && (
+              <Link href={`/library/skills-sh/${group.repo}`} className="ml-auto text-xs font-normal text-muted-foreground hover:underline">
+                Choose skills
+              </Link>
+            )}
           </h3>
           <EntryTable segment="skills" rows={group.skills.map(skillRow)} noun="skill" />
         </section>

@@ -6,6 +6,7 @@ import { listLibraryIndex } from "@handoff/db";
 import { getDb } from "@/lib/db";
 import { importSkill, type ImportResult } from "@/server/skill-import";
 import { SkillsShClient, type SkillsShResult } from "@/server/skills-sh";
+import { syncSkillsShRepo, type SyncReport } from "@/server/skills-sh-sync";
 
 export type SkillsShHit = SkillsShResult & { inLibrary: string | null };
 export type ImportState = { error?: string; result?: ImportResult };
@@ -37,4 +38,21 @@ export async function importSkillAction(_: ImportState, form: FormData): Promise
   revalidatePath(`/library/skills/${result.name}`);
   if (form.get("$stay")) return { result };
   redirect(`/library/skills/${result.name}`);
+}
+
+export type SyncState = { report?: SyncReport; error?: string };
+
+/** Applies a skills.sh repository's ticked skills to the library: adds the new ones, removes the unticked ones. */
+export async function syncRepoAction(_: SyncState, form: FormData): Promise<SyncState> {
+  const repo = String(form.get("repo") ?? "");
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return { error: "Unknown repository." };
+  const want = form.getAll("want").map(String);
+  try {
+    const report = await syncSkillsShRepo(getDb(), client, { repo, want });
+    revalidatePath("/library");
+    revalidatePath(`/library/skills-sh/${repo}`);
+    return { report };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
 }
