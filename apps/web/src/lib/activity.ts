@@ -19,11 +19,15 @@ const toolName = (name: string) => {
   return mcp ? `${mcp[1]} · ${mcp[2]}` : name;
 };
 
+/** A run's worktree, which agents name by its absolute path: `<home>/.handoff/worktrees/<run id>`. */
+const WORKTREE = /\S*\/\.handoff\/worktrees\/[0-9a-f-]{36}(\/)?/g;
+const relative = (text: string) => text.replace(WORKTREE, (_, slash: string | undefined) => (slash ? "" : "."));
+
 /** What a tool call is about, in one line: the file, the command, the search or the question. */
 const targetOf = (input: Record<string, unknown>) => {
-  for (const key of ["file_path", "path", "command", "pattern", "query", "url", "skill", "description", "prompt"]) {
+  for (const key of ["file_path", "command", "pattern", "query", "url", "skill", "path", "description", "prompt"]) {
     const value = input[key];
-    if (typeof value === "string" && value.trim()) return value.trim().split("\n")[0]!;
+    if (typeof value === "string" && value.trim()) return relative(value.trim().split("\n")[0]!);
   }
   return undefined;
 };
