@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { answerQuestion, cancelRun, repairNodeExecution } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
+import { markViewed } from "@/server/review";
 
 export type InboxActionState = { ok?: boolean; error?: string };
 
@@ -82,4 +83,14 @@ export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchem
   }
   refresh(runId);
   redirect(`/runs/${runId}`);
+}
+
+const ViewedSchema = z.object({ runId: z.string().uuid(), path: z.string().min(1).max(1_000), blobSha: z.string().min(1).max(100), viewed: z.boolean() });
+
+/** Marks a version of a file viewed, or not, in a run's code review. */
+export async function markViewedAction(input: z.input<typeof ViewedSchema>): Promise<InboxActionState> {
+  const parsed = ViewedSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That file cannot be marked." };
+  await markViewed(getDb(), parsed.data);
+  return { ok: true };
 }

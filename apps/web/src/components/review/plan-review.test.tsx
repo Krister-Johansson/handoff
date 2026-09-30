@@ -4,7 +4,10 @@ import { PlanReview } from "./plan-review";
 
 const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
-beforeEach(() => actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true }));
+beforeEach(() => {
+  actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true });
+  window.localStorage.clear();
+});
 
 const props = { questionId: "q1", runId: "r1", from: "planner", markdown: "Store todos in a JSON file and add a CLI.\n\n## Steps\n\n1. Add storage" };
 

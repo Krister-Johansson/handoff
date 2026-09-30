@@ -44,8 +44,19 @@ const CHOICES: {
  * How a person finishes a review: an overall comment and one of three choices. Request changes and
  * approve after fixes both send the comments back; the second lets the fixed work through the gate.
  */
-export function SubmitReview({ questionId, runId, target, comments }: { questionId: string; runId: string; target: string; comments: SentComment[] }) {
-  const [note, setNote] = useState("");
+type SubmitProps = {
+  questionId: string;
+  runId: string;
+  target: string;
+  comments: SentComment[];
+  note: string;
+  setNote: (note: string) => void;
+  /** Called as the review is sent, to drop the kept draft, and again if sending failed, to keep it. */
+  onSending?: () => void;
+  onFailed?: () => void;
+};
+
+export function SubmitReview({ questionId, runId, target, comments, note, setNote, onSending, onFailed }: SubmitProps) {
   const [option, setOption] = useState<ReviewOption>();
   const [error, setError] = useState<string>();
   const [pending, startSubmit] = useTransition();
@@ -57,6 +68,8 @@ export function SubmitReview({ questionId, runId, target, comments }: { question
       return;
     }
     setError(undefined);
+    // A sent review redirects to the run, so the draft goes first and comes back if the send fails.
+    onSending?.();
     startSubmit(async () => {
       const result = await answerReviewAction({
         questionId,
@@ -65,7 +78,10 @@ export function SubmitReview({ questionId, runId, target, comments }: { question
         note: note.trim(),
         comments,
       });
-      if (result && "error" in result && result.error) setError(result.error);
+      if (result && "error" in result && result.error) {
+        setError(result.error);
+        onFailed?.();
+      }
     });
   };
 

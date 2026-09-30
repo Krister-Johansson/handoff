@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { quoteRanges } from "@/lib/quote-ranges";
+import { useReviewDraft } from "@/lib/use-review-draft";
 import { SubmitReview } from "./submit-review";
 
 type Comment = { quote: string; body: string };
@@ -95,7 +96,7 @@ function useSelectedText(root: React.RefObject<HTMLElement | null>) {
 export function PlanReview({ questionId, runId, from, markdown }: { questionId: string; runId: string; from: string; markdown: string }) {
   const article = useRef<HTMLElement>(null);
   const [selected, setSelected] = useSelectedText(article);
-  const [comments, setComments] = useState<Comment[]>([]);
+  const { comments, setComments, note, setNote, onSending, onFailed } = useReviewDraft<Comment>(questionId);
   useQuoteHighlights(article, comments.map((c) => c.quote));
 
   return (
@@ -114,7 +115,7 @@ export function PlanReview({ questionId, runId, from, markdown }: { questionId: 
           onCancel={() => setSelected(undefined)}
         />
         <CommentList comments={comments} onRemove={(index) => setComments((list) => list.filter((_, i) => i !== index))} />
-        <SubmitReview questionId={questionId} runId={runId} target={from} comments={comments} />
+        <SubmitReview questionId={questionId} runId={runId} target={from} comments={comments} note={note} setNote={setNote} onSending={onSending} onFailed={onFailed} />
       </aside>
     </div>
   );
