@@ -331,3 +331,77 @@ describe("repositories without CI", () => {
     expect((await inspect(db, created.id)).executions.find((e) => e.nodeKey === "pr")?.status).toBe("waiting");
   });
 });
+
+describe("the pull request's title and body", () => {
+  const writer = (...rounds: { title: string; body: string }[]): NodeExecutor => ({
+    needsWorkdir: true,
+    execute: async (ctx) => {
+      writeFileSync(join(ctx.workdir!.path, "CHANGELOG.md"), `# Changelog attempt ${ctx.execution.attempt}\n`);
+      git(ctx.workdir!.path, "add", "-A");
+      git(ctx.workdir!.path, "commit", "-qm", "Add changelog");
+      const pr = rounds[Math.min(ctx.execution.attempt, rounds.length) - 1];
+      return { kind: "completed", output: { status: "done", summary: "Added CHANGELOG.md", ...(pr ? { pr } : {}) } };
+    },
+  });
+  const graph = {
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "coder-1", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "pr", attributes: { type: "pr", x: 0, y: 0 } },
+      { key: "merge", attributes: { type: "merge", x: 0, y: 0 } },
+    ],
+    edges: [
+      { key: "planner->coder-1", source: "planner", target: "coder-1", attributes: { port: "done" } },
+      { key: "coder-1->pr", source: "coder-1", target: "pr", attributes: { port: "done" } },
+      { key: "pr->merge", source: "pr", target: "merge", attributes: { port: "ready" } },
+      { key: "pr->coder-1", source: "pr", target: "coder-1", attributes: { port: "fix" } },
+    ],
+  };
+  async function opened(coderNode: NodeExecutor) {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    github.origin = origin;
+    const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+    const run = await createRun(db, {
+      projectId: project.id,
+      graphVersionId: graphVersion.id,
+      task: "Add a CHANGELOG.md",
+      issues: [{ number: 12, title: "Changelog", url: "https://github.com/octo/sample/issues/12", body: "" }],
+    });
+    const deps = engineDeps(db, { planner, coder: coderNode, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) }, {
+      workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }),
+    });
+    await drain(deps);
+    return { github, deps, run };
+  }
+
+  test("the coder's title and body open the pull request, with the issues it closes and no plan", async () => {
+    const { github } = await opened(writer({ title: "Add a changelog", body: "Adds CHANGELOG.md with today's entry.\n\nVerified with npm test." }));
+    const pr = github.prs.get(1)!;
+    expect(pr.title).toBe("Add a changelog");
+    expect(pr.body).toContain("Adds CHANGELOG.md with today's entry.");
+    expect(pr.body).toContain("Closes #12");
+    expect(pr.body).toContain("Opened by handoff run");
+    expect(pr.body).not.toContain("## Plan");
+  });
+
+  test("without a PR text from the coder, the task is the title and its summary the body", async () => {
+    const { github } = await opened(writer());
+    const pr = github.prs.get(1)!;
+    expect(pr.title).toBe("Add a CHANGELOG.md");
+    expect(pr.body).toContain("Added CHANGELOG.md");
+    expect(pr.body).not.toContain("## Plan");
+  });
+
+  test("a later round that rewrites the PR text updates the pull request", async () => {
+    const { github, deps } = await opened(writer({ title: "Add a changelog", body: "First." }, { title: "Add a dated changelog", body: "Second." }));
+    github.setChecks(1, "FAILURE");
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    const pr = github.prs.get(1)!;
+    expect(pr.title).toBe("Add a dated changelog");
+    expect(pr.body).toContain("Second.");
+    expect(pr.body).toContain("Closes #12");
+  });
+});

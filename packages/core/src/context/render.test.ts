@@ -110,3 +110,7 @@ test("the constraints say how to change a file outside the owned paths", () => {
   const md = renderContextPacket(packet);
   expect(md).toContain("If the change needs a file outside these, list it in extraPaths with the reason; any other file outside them fails the step.");
 });
+
+test("the constraints keep agents to the repository's commit conventions, without invented trailers", () => {
+  expect(renderContextPacket(packet)).toContain("- Follow the repository's commit conventions. Add no trailers, such as Co-Authored-By, unless the repository asks for them.");
+});

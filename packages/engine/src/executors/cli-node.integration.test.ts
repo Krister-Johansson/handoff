@@ -149,3 +149,12 @@ test("a code review node asks for Claude Code's code-review skill on the run's b
   expect(request.allowedTools).toEqual(expect.arrayContaining(["Skill", "Bash(git diff *)"]));
   expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "coder")?.status).toBe("passed");
 });
+
+test("the planner is asked for a short plan, and the coder for a PR title and description written for a reviewer", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
+  await startRun(db, linear);
+  await drain(engineDeps(db, registry(cli)));
+  expect(cli.requests[0]!.prompt).toContain("Keep plan to a few sentences on the approach; put the ordered work in steps and do not repeat the steps in plan.");
+  expect(cli.requests[1]!.prompt).toContain("fill pr with a title and a description of the change for a reviewer");
+  expect(cli.requests[1]!.prompt).toContain("Do not restate the plan.");
+});

@@ -7,8 +7,11 @@ export type CliNodeOptions = { cli: CliExecutor; maxTurns: number; timeoutMs: nu
 
 const PROMPTS: Partial<Record<NodeType, string>> = {
   planner:
-    "Plan the task in the system prompt. Read the repository as needed but do not edit files. Return the plan, the ordered steps and the paths the change will own.",
-  coder: "Implement the task in the system prompt in this repository, following the plan in the run state. Commit your work with git when done.",
+    "Plan the task in the system prompt. Read the repository as needed but do not edit files. Return the plan, the ordered steps and the paths the change will own. " +
+    "Keep plan to a few sentences on the approach; put the ordered work in steps and do not repeat the steps in plan.",
+  coder:
+    "Implement the task in the system prompt in this repository, following the plan in the run state. Commit your work with git when done. " +
+    "When you finish, fill pr with a title and a description of the change for a reviewer: what changed and why, what you left out, and how you verified it. Do not restate the plan.",
   reviewer:
     "Review the work against the task: the changes on this branch, unless the step's instructions name something else, such as the plan. Do not edit files. " +
     "Return request_changes with one comment per finding that leaves the work wrong or incomplete against the task. " +
