@@ -1,6 +1,8 @@
 "use client";
 
+import { canConnect } from "@/lib/connect-rules";
 import { flowOf } from "@/lib/flow";
+import { InvalidEdgesContext } from "./edge-issues";
 import { Background, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes, type OnSelectionChangeParams } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useReducer, useState, useTransition } from "react";
 import { AlertTriangleIcon, CheckIcon, LayoutGridIcon, SaveIcon } from "lucide-react";
@@ -88,8 +90,17 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   }, [signature, runLayout, getNodes]);
 
   const issues = useMemo(() => issuesOf(graph), [graph]);
-  const invalidNodes = useMemo(() => new Set(issues.map((i) => i.nodeKey).filter(Boolean)), [issues]);
-  const nodes = useMemo(() => graph.nodes.map((n) => (invalidNodes.has(n.id) ? { ...n, data: { ...n.data, invalid: true } } : n)), [graph.nodes, invalidNodes]);
+  // Each node's issue messages, for its red border and badge; edges with an issue draw red.
+  const nodeIssues = useMemo(() => {
+    const byNode = new Map<string, string[]>();
+    for (const issue of issues) if (issue.nodeKey) byNode.set(issue.nodeKey, [...(byNode.get(issue.nodeKey) ?? []), issue.message]);
+    return byNode;
+  }, [issues]);
+  const invalidEdges = useMemo(() => new Set(issues.flatMap((i) => (i.edgeKey ? [i.edgeKey] : []))), [issues]);
+  const nodes = useMemo(
+    () => graph.nodes.map((n) => (nodeIssues.has(n.id) ? { ...n, data: { ...n.data, invalid: true, issues: nodeIssues.get(n.id)! } } : n)),
+    [graph.nodes, nodeIssues],
+  );
 
   const edit = useCallback((action: Parameters<typeof dispatch>[0]) => {
     dispatch(action);
@@ -127,6 +138,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
 
   return (
     <EdgeRoutesContext.Provider value={routes}>
+      <InvalidEdgesContext.Provider value={invalidEdges}>
       <div className="grid h-[calc(100svh-3.5rem)] grid-cols-[minmax(0,1fr)_22rem]">
         <div className="relative min-w-0">
           <ReactFlow<FlowNode, FlowEdge>
@@ -138,7 +150,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
             onEdgesChange={(changes) => edit({ type: "edgesChange", changes })}
             onConnect={(c) => edit({ type: "connect", source: c.source, target: c.target, sourceHandle: c.sourceHandle, targetHandle: c.targetHandle })}
             // One edge per pair of nodes, and never a node into itself: the graph is simple.
-            isValidConnection={(c) => c.source !== c.target && !graph.edges.some((e) => e.source === c.source && e.target === c.target)}
+            isValidConnection={(c) => canConnect({ node: c.source, type: "source" }, { node: c.target, type: "target" }, graph.edges)}
             onSelectionChange={onSelectionChange}
             fitView
             minZoom={0.15}
@@ -234,6 +246,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
           </ScrollArea>
         </aside>
       </div>
+      </InvalidEdgesContext.Provider>
     </EdgeRoutesContext.Provider>
   );
 }

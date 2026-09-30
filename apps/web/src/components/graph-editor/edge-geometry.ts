@@ -23,11 +23,11 @@ export function loopPath(sx: number, sy: number, tx: number, ty: number): [strin
 }
 
 /** Loop edges are dashed; failure edges are red; the label shows the condition and loop budget. */
-export function edgeStyle(data: EdgeAttributes | undefined, selected: boolean | undefined) {
+export function edgeStyle(data: EdgeAttributes | undefined, selected: boolean | undefined, invalid = false) {
   return {
     strokeDasharray: loops(data) ? "6 4" : undefined,
-    stroke: data?.on === "failed" ? "var(--destructive)" : selected ? "var(--primary)" : "var(--muted-foreground)",
-    strokeWidth: selected ? 2 : 1.5,
+    stroke: invalid || data?.on === "failed" ? "var(--destructive)" : selected ? "var(--primary)" : "var(--muted-foreground)",
+    strokeWidth: invalid || selected ? 2 : 1.5,
   };
 }
 

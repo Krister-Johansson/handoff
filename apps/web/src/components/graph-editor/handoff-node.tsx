@@ -1,14 +1,15 @@
 "use client";
 
-import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
+import { Handle, Position, useConnection, useStore, type Node, type NodeProps } from "@xyflow/react";
 import { memo } from "react";
 import { CUSTOM_HANDLE, portsOf, type FlowNodeData, type NodeType } from "@handoff/core";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/runs/status-badge";
+import { canConnect, type HandleEnd } from "@/lib/connect-rules";
 import { cn } from "@/lib/utils";
 import { NODE_ICONS } from "./node-icons";
 
-export type HandoffNodeData = FlowNodeData & { status?: string; attempts?: number; invalid?: boolean };
+export type HandoffNodeData = FlowNodeData & { status?: string; attempts?: number; invalid?: boolean; issues?: string[] };
 export type HandoffNode = Node<HandoffNodeData, "handoff">;
 
 const statusRing: Record<string, string> = {
@@ -26,7 +27,7 @@ function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
       className={cn(
         "flex w-52 flex-col gap-2 rounded-lg border bg-card p-3 text-card-foreground shadow-sm",
         selected && "border-primary",
-        data.invalid && "border-destructive",
+        data.invalid && "border-2 border-destructive ring-2 ring-destructive/20",
         data.status && statusRing[data.status],
       )}
     >
@@ -38,9 +39,14 @@ function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
         <span className="truncate font-mono text-[10px] text-muted-foreground">{id}</span>
         {data.isStart && <Badge variant="secondary">start</Badge>}
         {library > 0 && <Badge variant="outline">{library} library</Badge>}
+        {data.issues?.length ? (
+          <Badge variant="destructive" title={data.issues.join("\n")}>
+            {data.issues.length === 1 ? "issue" : `${data.issues.length} issues`}
+          </Badge>
+        ) : null}
         {data.status && <StatusBadge status={data.status} label={data.attempts && data.attempts > 1 ? `${data.status} ×${data.attempts}` : data.status} />}
       </div>
-      <Ports data={data} />
+      <Ports id={id} data={data} />
     </div>
   );
 }
@@ -49,27 +55,43 @@ function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
  * The node's inputs on the left and outputs on the right, one labelled handle each. The rows reach
  * the node's border, so each handle sits on it and ELK can route to its measured position.
  */
-function Ports({ data }: { data: HandoffNodeData }) {
+function Ports({ id, data }: { id: string; data: HandoffNodeData }) {
   const { inputs, outputs } = portsOf(data.nodeType, data.config);
   const out = [...outputs.map((o) => ({ id: o.id, label: o.label, back: o.tone === "back" })), ...(data.customOut ? [{ id: CUSTOM_HANDLE, label: "custom", back: false }] : [])];
+  // While an edge is being dragged, each handle says whether it can take it.
+  const from = useConnection((c): HandleEnd | null => (c.inProgress ? { node: c.fromNode.id, type: c.fromHandle.type } : null));
+  // A string, so the selector result compares by value and the node re-renders only when it changes.
+  const open = useStore((s) =>
+    from ? `${canConnect(from, { node: id, type: "source" }, s.edges) ? "s" : ""}${canConnect(from, { node: id, type: "target" }, s.edges) ? "t" : ""}` : null,
+  );
+  const tone = (type: "source" | "target") => (open === null ? undefined : open.includes(type === "source" ? "s" : "t") ? "can" : "cannot");
   return (
     <div className="-mx-3 grid grid-cols-2 gap-x-2 font-mono text-[10px] text-muted-foreground">
       <div className="flex flex-col gap-1">
         {inputs.map((input) => (
-          <div key={input.id} className="relative pl-3">
-            {input.label}
-            <Handle type="target" id={input.id} position={Position.Left} />
-          </div>
+          <PortRow key={input.id} label={input.label} tone={tone("target")}>
+            <Handle type="target" id={input.id} position={Position.Left} isConnectableEnd={tone("target") !== "cannot"} className={handleClass(tone("target"))} />
+          </PortRow>
         ))}
       </div>
       <div className="flex flex-col items-end gap-1">
         {out.map((port) => (
-          <div key={port.id} className={cn("relative pr-3", port.back && "text-destructive")}>
-            {port.label}
-            <Handle type="source" id={port.id} position={Position.Right} />
-          </div>
+          <PortRow key={port.id} label={port.label} tone={tone("source")} back={port.back} side="right">
+            <Handle type="source" id={port.id} position={Position.Right} isConnectableEnd={tone("source") !== "cannot"} className={handleClass(tone("source"))} />
+          </PortRow>
         ))}
       </div>
+    </div>
+  );
+}
+
+const handleClass = (tone: "can" | "cannot" | undefined) => cn(tone === "can" && "!size-3 !bg-primary ring-2 ring-primary/30", tone === "cannot" && "opacity-30");
+
+function PortRow({ label, tone, back, side = "left", children }: { label: string; tone: "can" | "cannot" | undefined; back?: boolean; side?: "left" | "right"; children: React.ReactNode }) {
+  return (
+    <div className={cn("relative", side === "left" ? "pl-3" : "pr-3", back && "text-destructive", tone === "cannot" && "opacity-30", tone === "can" && "font-medium text-foreground")}>
+      {label}
+      {children}
     </div>
   );
 }

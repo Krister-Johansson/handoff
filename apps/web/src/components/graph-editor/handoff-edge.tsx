@@ -5,12 +5,14 @@ import { memo } from "react";
 import type { EdgeAttributes } from "@handoff/core";
 import { cn } from "@/lib/utils";
 import { loops, edgeLabel, edgeStyle, loopPath, roundedPath, routeFor } from "./edge-geometry";
+import { useEdgeInvalid } from "./edge-issues";
 import { useEdgeRoute } from "./elk-routes";
 
 export type HandoffEdge = Edge<EdgeAttributes & { taken?: boolean }, "handoff">;
 
 function HandoffEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd }: EdgeProps<HandoffEdge>) {
   const route = useEdgeRoute(id);
+  const invalid = useEdgeInvalid(id);
   const points = routeFor(route, { sourceX, sourceY, targetX, targetY });
   let path: string;
   let label: { x: number; y: number; width?: number };
@@ -27,7 +29,7 @@ function HandoffEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePositio
   const text = edgeLabel(data);
   return (
     <>
-      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={edgeStyle(data, selected)} />
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={edgeStyle(data, selected, invalid)} />
       {text && (
         <EdgeLabelRenderer>
           <div
