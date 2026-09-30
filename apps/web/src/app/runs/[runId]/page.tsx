@@ -6,6 +6,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/ca
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
 import { RunLive } from "@/components/runs/run-live";
 import { getDb } from "@/lib/db";
+import { formatCost, formatDuration } from "@/lib/format";
 import { getRunDetail } from "@/server/queries";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
   if (!detail) notFound();
   const { run, project, executions, events, graph, openQuestions, failed } = detail;
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
+  const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <div className="flex items-center justify-between">
@@ -35,6 +37,8 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
               {project.repoOwner}/{project.repoName}
             </span>
             <span>{run.branchName}</span>
+            {totalCost > 0 && <span title="Client-side estimate reported by the Claude CLI">{formatCost(totalCost)} est.</span>}
+            {run.startedAt && run.finishedAt && <span>{formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}</span>}
             {run.prNumber !== null && (
               <a className="hover:underline" href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
                 PR #{run.prNumber}
@@ -59,7 +63,14 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
       <RunLive
         runId={run.id}
         initialStatus={run.status}
-        initialExecutions={executions.map((e) => ({ ...e, status: e.status }))}
+        initialExecutions={executions.map((e) => ({
+          id: e.id,
+          nodeKey: e.nodeKey,
+          attempt: e.attempt,
+          status: e.status,
+          costUsd: e.costUsd,
+          durationMs: e.startedAt && e.finishedAt ? e.finishedAt.getTime() - e.startedAt.getTime() : null,
+        }))}
         initialEvents={events}
         graphDocument={graph?.document}
       />

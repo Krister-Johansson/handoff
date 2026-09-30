@@ -221,7 +221,16 @@ export async function completePassed(
   const routed = await route(tx, input.graph, row, "passed", input.output, merged);
   lead.push(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
-    { type: "node.passed", payload: { nodeKey: row.nodeKey, attempt: row.attempt }, nodeExecutionId: row.id },
+    {
+      type: "node.passed",
+      payload: {
+        nodeKey: row.nodeKey,
+        attempt: row.attempt,
+        ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd } : {}),
+        ...(row.startedAt ? { durationMs: Date.now() - row.startedAt.getTime() } : {}),
+      },
+      nodeExecutionId: row.id,
+    },
   );
   await finishRouting(tx, input.graph, row.runId, row, routed, lead);
 }

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import type { CliExecutor, CliRunRequest, CliRunOptions, CliRunResult } from "@handoff/cli-adapter";
-import { createDb, graphs, graphVersions, projects, wakeByKey, eq } from "@handoff/db";
+import { createDb, deleteProject, graphs, graphVersions, projects, wakeByKey, eq } from "@handoff/db";
 import { cliNodeExecutor, createRun, startWorker, type NodeExecutor } from "@handoff/engine";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -77,8 +77,12 @@ const merge: NodeExecutor = {
 };
 
 async function seed() {
+  if (process.argv.includes("--reset")) {
+    for (const p of await db.select().from(projects).where(eq(projects.isDemo, true))) await deleteProject(db, p.id);
+    console.log("removed demo projects");
+  }
   let [project] = await db.select().from(projects).where(eq(projects.name, "demo"));
-  project ??= (await db.insert(projects).values({ name: "demo", repoOwner: "demo", repoName: "sample", defaultBranch: "main" }).returning())[0]!;
+  project ??= (await db.insert(projects).values({ name: "demo", repoOwner: "demo", repoName: "sample", defaultBranch: "main", isDemo: true }).returning())[0]!;
   let [graph] = await db.select().from(graphs).where(eq(graphs.projectId, project.id));
   graph ??= (await db.insert(graphs).values({ projectId: project.id, name: "linear", latestVersion: 1 }).returning())[0]!;
   let [version] = await db.select().from(graphVersions).where(eq(graphVersions.graphId, graph.id));

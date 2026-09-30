@@ -20,6 +20,7 @@ export async function listProjects(db: Db) {
       repoOwner: projects.repoOwner,
       repoName: projects.repoName,
       defaultBranch: projects.defaultBranch,
+      isDemo: projects.isDemo,
       runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,
       activeRuns: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id" and r.status in ('queued','running','waiting'))`,
     })

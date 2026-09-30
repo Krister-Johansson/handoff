@@ -37,6 +37,7 @@ export default async function ProjectsPage() {
                   </CardHeader>
                   <CardContent className="flex gap-2">
                     <Badge variant="outline">{p.runCount} runs</Badge>
+                    {p.isDemo && <Badge variant="secondary">demo</Badge>}
                     {p.activeRuns > 0 && <Badge variant="secondary">{p.activeRuns} active</Badge>}
                   </CardContent>
                 </Card>

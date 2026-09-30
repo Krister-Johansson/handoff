@@ -240,3 +240,14 @@ describe("automatic retries", () => {
     expect(row.status).toBe("failed");
   });
 });
+
+test("node.passed events carry the node's cost and duration", async () => {
+  const { run } = await startRun(db, linear);
+  const planner: NodeExecutor = {
+    needsWorkdir: false,
+    execute: async () => ({ kind: "completed", output: plannerOut, statePatch: { plan: plannerOut }, cost: { usd: 0.1234 } }),
+  };
+  await runOnce(engineDeps(db, registry({ planner })));
+  const passed = (await inspect(db, run.id)).events.find((e) => e.type === "node.passed")!;
+  expect(passed.payload).toMatchObject({ nodeKey: "planner", costUsd: 0.1234, durationMs: expect.any(Number) });
+});
