@@ -11,6 +11,7 @@ import {
 } from "../schema/graph.ts";
 import { passEnvProblem } from "../secrets/pass-env.ts";
 import { isNodeType, nodeCatalog } from "./catalog.ts";
+import { isEffortLevel, isModelName } from "./models.ts";
 import { portsOf } from "./ports.ts";
 
 export type CompileErrorCode =
@@ -27,7 +28,9 @@ export type CompileErrorCode =
   | "secret_in_graph"
   | "invalid_pass_env"
   | "unknown_port"
-  | "no_feedback_input";
+  | "no_feedback_input"
+  | "invalid_effort"
+  | "invalid_model";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -142,6 +145,12 @@ export function compileGraph(input: unknown): CompileResult {
     for (const names of passEnvs) {
       const problem = passEnvProblem(names);
       if (problem) errors.push({ code: "invalid_pass_env", message: `node ${key}: ${problem}`, nodeKey: key });
+    }
+    if (attributes.config.effort !== undefined && !isEffortLevel(attributes.config.effort)) {
+      errors.push({ code: "invalid_effort", message: `node ${key}: effort must be low, medium, high, xhigh or max`, nodeKey: key });
+    }
+    if (attributes.config.model !== undefined && !isModelName(attributes.config.model)) {
+      errors.push({ code: "invalid_model", message: `node ${key}: model must be a Claude Code alias such as opus, or a model id`, nodeKey: key });
     }
     graph.addNode(key, {
       key,

@@ -35,6 +35,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     timeoutMs: env.HANDOFF_CLI_TIMEOUT_MS,
     idleTimeoutMs: 10 * 60_000,
     ...(env.HANDOFF_MODEL ? { model: env.HANDOFF_MODEL } : {}),
+    ...(env.HANDOFF_EFFORT ? { effort: env.HANDOFF_EFFORT } : {}),
   });
   const db = createDb(env.DATABASE_URL);
   const git = new GitWorktreeProvider({

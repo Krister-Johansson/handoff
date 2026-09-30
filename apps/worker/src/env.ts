@@ -18,6 +18,8 @@ const Schema = z.object({
   HANDOFF_MAX_TURNS: intFrom(60),
   HANDOFF_CLI_TIMEOUT_MS: intFrom(45 * 60_000),
   HANDOFF_MODEL: optional,
+  /** Default --effort for planner, coder and reviewer nodes that set none: low, medium, high, xhigh or max. */
+  HANDOFF_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().catch(undefined),
   HANDOFF_PR_RECONCILE_MS: intFrom(10 * 60_000),
   HANDOFF_WORKSPACE: z.enum(["worktree", "docker"]).catch("worktree").default("worktree"),
   HANDOFF_DOCKER_IMAGE: z.string().default("handoff-runner:2.1.285"),

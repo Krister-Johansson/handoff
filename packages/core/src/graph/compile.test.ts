@@ -76,6 +76,17 @@ describe("compileGraph", () => {
     expect(result.ok ? [] : result.errors).toEqual([{ code: "missing_start_node", message: "The graph has no start node yet. Add a node; the first one becomes the start." }]);
   });
 
+  test("compileGraph rejects an effort Claude Code does not know and a model that is not an alias or id", () => {
+    const doc = clone();
+    (doc.nodes[0]!.attributes as Record<string, unknown>).config = { effort: "extreme", model: "opus; rm -rf /" };
+    expect(codes(compileGraph(doc))).toEqual(expect.arrayContaining(["invalid_effort", "invalid_model"]));
+    const fine = clone();
+    (fine.nodes[0]!.attributes as Record<string, unknown>).config = { effort: "max", model: "opus[1m]" };
+    expect(compileGraph(fine).ok).toBe(true);
+    (fine.nodes[0]!.attributes as Record<string, unknown>).config = { model: "claude-opus-5-5" };
+    expect(compileGraph(fine).ok).toBe(true);
+  });
+
   test("compileGraph rejects a node unreachable from the start node", () => {
     const doc = clone();
     doc.nodes.push({ key: "orphan", attributes: { type: "tester", label: "Orphan", x: 0, y: 200 } });

@@ -66,6 +66,11 @@ describe("buildClaudeArgv", () => {
     expect(flagValue(argv, "--model")).toBe("opus");
   });
 
+  test("buildClaudeArgv sets the effort only when given", () => {
+    expect(buildClaudeArgv(base)).not.toContain("--effort");
+    expect(flagValue(buildClaudeArgv({ ...base, effort: "xhigh" }), "--effort")).toBe("xhigh");
+  });
+
   test("buildClaudeArgv passes claudeMdExcludes in --settings only when given", () => {
     const argv = buildClaudeArgv({ ...base, claudeMdExcludes: ["/a/CLAUDE.md"] });
     expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true, claudeMdExcludes: ["/a/CLAUDE.md"] });
