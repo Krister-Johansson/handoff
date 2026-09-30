@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, type KeyboardEvent } from "react";
 import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
 import { createGraphAction, createProjectAction, deleteGraphAction, renameGraphAction, startRunAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,12 @@ export function NewGraphForm({ projectId, templates }: { projectId: string; temp
   );
 }
 
+function submitOnModEnter(event: KeyboardEvent<HTMLTextAreaElement>) {
+  if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+  event.preventDefault();
+  event.currentTarget.form?.requestSubmit();
+}
+
 export function StartRunDialog({ projectId, graphName, size = "sm" }: { projectId: string; graphName: string; size?: "sm" | "default" }) {
   const [state, action, pending] = useActionState(startRunAction, {} as ActionState);
   return (
@@ -88,8 +94,16 @@ export function StartRunDialog({ projectId, graphName, size = "sm" }: { projectI
           <FieldGroup>
             <Field data-invalid={state.error ? true : undefined}>
               <FieldLabel htmlFor="run-task">Task</FieldLabel>
-              <Textarea id="run-task" name="task" rows={5} placeholder="Add a CHANGELOG.md with today's date" defaultValue={state.values?.task} />
-              <FieldDescription>The Planner reads this first; be as specific as you would with a colleague.</FieldDescription>
+              <Textarea
+                id="run-task"
+                name="task"
+                rows={5}
+                className="max-h-[40dvh]"
+                placeholder="Add a CHANGELOG.md with today's date"
+                defaultValue={state.values?.task}
+                onKeyDown={submitOnModEnter}
+              />
+              <FieldDescription>The Planner reads this first; be as specific as you would with a colleague. Cmd or Ctrl+Enter starts the run.</FieldDescription>
               {state.error && <FieldError>{state.error}</FieldError>}
             </Field>
           </FieldGroup>
