@@ -34,3 +34,16 @@ export function correlationKeys(event: string, payload: Payload): string[] {
   }
   return [...new Set(prs)].map((n) => prKey(repoId, n));
 }
+
+/** Head branch of a check or workflow event; used when GitHub leaves its pull_requests list empty. */
+export function headBranch(event: string, payload: Payload): string | undefined {
+  const branch =
+    event === "check_suite"
+      ? obj(payload.check_suite).head_branch
+      : event === "check_run"
+        ? obj(obj(payload.check_run).check_suite).head_branch
+        : event === "workflow_run"
+          ? obj(payload.workflow_run).head_branch
+          : undefined;
+  return typeof branch === "string" && branch ? branch : undefined;
+}

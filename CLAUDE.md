@@ -39,6 +39,7 @@ pnpm doctor:react   # after any change under apps/web
 pnpm db:generate    # after a schema change; review the SQL, commit it. Never drizzle-kit push.
 pnpm db:migrate
 pnpm dev:web
+pnpm dev:webhooks owner/repo   # relays that repo's webhooks to localhost (gh extension cli/gh-webhook)
 pnpm dev:worker     # needs CLAUDE_CODE_OAUTH_TOKEN and GITHUB_TOKEN (or a GitHub App) in .env
 pnpm demo           # seeds a demo run with simulated Claude events
 pnpm handoff <cmd>  # project add, graph import, run, runs, answer, run repair|cancel, library, gc

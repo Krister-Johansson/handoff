@@ -1,5 +1,5 @@
-import { appendEvents, eq, inArray, nodeExecutions, sql, wakeByKey, webhookDeliveries, type Db } from "@handoff/db";
-import { correlationKeys, verifyGitHubSignature } from "@handoff/github";
+import { and, appendEvents, eq, inArray, isNotNull, nodeExecutions, projects, runs, sql, wakeByKey, webhookDeliveries, type Db } from "@handoff/db";
+import { correlationKeys, headBranch, prKey, verifyGitHubSignature } from "@handoff/github";
 
 const json = (body: unknown, status: number) => Response.json(body, { status });
 
@@ -26,6 +26,16 @@ export async function handleGitHubWebhook(db: Db, request: Request, secret: stri
   const repository = payload.repository as { id?: unknown } | undefined;
   const installation = payload.installation as { id?: unknown } | undefined;
   const keys = correlationKeys(event, payload);
+  // Check events often arrive with an empty pull_requests list; fall back to the run on that branch.
+  const branch = headBranch(event, payload);
+  if (keys.length === 0 && branch && typeof repository?.id === "number") {
+    const matches = await db
+      .select({ prNumber: runs.prNumber })
+      .from(runs)
+      .innerJoin(projects, eq(projects.id, runs.projectId))
+      .where(and(eq(projects.repoId, repository.id), eq(runs.branchName, branch), isNotNull(runs.prNumber)));
+    for (const m of matches) keys.push(prKey(repository.id, m.prNumber!));
+  }
 
   const [stored] = await db
     .insert(webhookDeliveries)

@@ -34,3 +34,11 @@ test("correlationKeys returns nothing for unrelated events or payloads without a
   expect(correlationKeys("push", { repository })).toEqual([]);
   expect(correlationKeys("pull_request", { pull_request: { number: 7 } })).toEqual([]);
 });
+
+test("headBranch reads the branch from check and workflow payloads", async () => {
+  const { headBranch } = await import("./webhook-events.ts");
+  expect(headBranch("check_suite", { check_suite: { head_branch: "b1" } })).toBe("b1");
+  expect(headBranch("check_run", { check_run: { check_suite: { head_branch: "b2" } } })).toBe("b2");
+  expect(headBranch("workflow_run", { workflow_run: { head_branch: "b3" } })).toBe("b3");
+  expect(headBranch("pull_request", { pull_request: { head: { ref: "b4" } } })).toBeUndefined();
+});
