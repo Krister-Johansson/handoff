@@ -20,6 +20,8 @@ export const ALL_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit
 const coderTools = [...readOnlyTools, "Edit", "Write", "Bash(git *)", "Bash(pnpm *)", "Bash(npm *)", "Bash(npx *)"];
 
 export const nodeCatalog: Record<NodeType, CatalogEntry> = {
+  start: { executorKind: "function", contract: "start_output", allowedTools: [] },
+  finish: { executorKind: "function", contract: "finish_output", allowedTools: [] },
   planner: { executorKind: "cli", contract: "planner_output", allowedTools: readOnlyTools },
   coder: { executorKind: "cli", contract: "coder_output", allowedTools: coderTools },
   reviewer: { executorKind: "cli", contract: "reviewer_output", allowedTools: [...readOnlyTools, "Bash(git diff *)", "Bash(git log *)", "Bash(git show *)"] },

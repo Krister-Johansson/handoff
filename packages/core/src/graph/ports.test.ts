@@ -119,3 +119,49 @@ test("the plan, review, approve, build graph compiles, and every way back is a f
   expect(back.every((e) => e.input === "feedback" && e.maxAttempts === 3)).toBe(true);
   expect(result.graph.order.slice(0, 4)).toEqual(["planner", "plan-review", "approval", "coder"]);
 });
+
+describe("Start and Finish", () => {
+  const flow = (edges: { key: string; source: string; target: string; attributes: Record<string, unknown> }[], extra: { key: string; attributes: Record<string, unknown> }[] = []) => ({
+    attributes: { startNode: "start" },
+    nodes: [
+      { key: "start", attributes: { type: "start", config: { trigger: "run" }, x: 0, y: 0 } },
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "finish", attributes: { type: "finish", config: { notify: true }, x: 0, y: 0 } },
+      ...extra,
+    ],
+    edges,
+  });
+
+  test("Start has a run output and no input; Finish has an input and no outputs", () => {
+    expect(portsOf("start", {})).toEqual({ inputs: [], outputs: [expect.objectContaining({ id: "run", kind: "continue" })] });
+    expect(portsOf("finish", {})).toEqual({ inputs: [{ id: "in", label: "in" }], outputs: [] });
+  });
+
+  test("a graph from Start through a step to Finish compiles", () => {
+    const result = compileGraph(flow([
+      { key: "start->planner", source: "start", target: "planner", attributes: { port: "run" } },
+      { key: "planner->finish", source: "planner", target: "finish", attributes: { port: "done" } },
+    ]));
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.graph.executorKind("start")).toBe("function");
+    expect(result.graph.order).toEqual(["start", "planner", "finish"]);
+  });
+
+  test("only one Start, it is where the run starts, nothing leads into it, and nothing leaves Finish", () => {
+    const codes = (doc: unknown) => {
+      const result = compileGraph(doc);
+      return result.ok ? [] : result.errors.map((e) => e.code);
+    };
+    expect(codes(flow([{ key: "start->planner", source: "start", target: "planner", attributes: { port: "run" } }], [{ key: "start-2", attributes: { type: "start", x: 0, y: 0 } }]))).toContain("invalid_start");
+    expect(codes({ ...flow([{ key: "start->planner", source: "start", target: "planner", attributes: { port: "run" } }]), attributes: { startNode: "planner" } })).toContain("invalid_start");
+    expect(codes(flow([
+      { key: "start->planner", source: "start", target: "planner", attributes: { port: "run" } },
+      { key: "planner->start", source: "planner", target: "start", attributes: { port: "done" } },
+    ]))).toContain("invalid_start");
+    expect(codes(flow([
+      { key: "start->planner", source: "start", target: "planner", attributes: { port: "run" } },
+      { key: "planner->finish", source: "planner", target: "finish", attributes: { port: "done" } },
+      { key: "finish->planner", source: "finish", target: "planner", attributes: {} },
+    ]))).toContain("invalid_finish");
+  });
+});

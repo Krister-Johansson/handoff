@@ -74,6 +74,16 @@ export const HumanAnswerSchema = z.object({
 
 export const FunctionOutputSchema = z.record(z.string(), z.unknown());
 
+/** What a Start node hands the graph: how the run was started and the task with its linked issues. */
+export const StartOutputSchema = z.object({
+  trigger: z.literal("run"),
+  task: z.string(),
+  issues: z.array(z.object({ number: z.number().int(), title: z.string(), url: z.string() })),
+});
+
+/** A Finish node's record of the end of the run. */
+export const FinishOutputSchema = z.object({ notified: z.boolean() });
+
 export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
 export type CoderOutput = z.infer<typeof CoderOutputSchema>;
 export type ReviewerOutput = z.infer<typeof ReviewerOutputSchema>;

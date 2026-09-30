@@ -2,6 +2,7 @@ import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } 
 import { compileGraph, CUSTOM_HANDLE, fromReactFlow, gateMode, portKind, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
 
 export const NODE_LABELS: Record<NodeType, string> = {
+  start: "Start",
   planner: "Planner",
   coder: "Coder",
   reviewer: "Reviewer",
@@ -10,6 +11,7 @@ export const NODE_LABELS: Record<NodeType, string> = {
   pr: "Pull request",
   merge: "Merge",
   human_gate: "Human gate",
+  finish: "Finish",
   function: "Function",
 };
 

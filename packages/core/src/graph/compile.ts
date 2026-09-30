@@ -31,7 +31,9 @@ export type CompileErrorCode =
   | "no_feedback_input"
   | "invalid_effort"
   | "invalid_model"
-  | "invalid_review_level";
+  | "invalid_review_level"
+  | "invalid_start"
+  | "invalid_finish";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -196,6 +198,17 @@ export function compileGraph(input: unknown): CompileResult {
     }
     graph.addDirectedEdgeWithKey(key, source, target, { ...resolved, key, source, target });
     if (!resolved.loop && !acyclic.hasEdge(source, target)) acyclic.addDirectedEdge(source, target);
+  }
+
+  // A Start node, when the graph has one, is the only start and nothing leads into it; nothing leaves a Finish node.
+  const starts = graph.filterNodes((_, a) => a.type === "start");
+  if (starts.length > 1) errors.push({ code: "invalid_start", message: `the graph has ${starts.length} Start nodes; keep one`, nodeKey: starts[1]! });
+  for (const start of starts) {
+    if (start !== document.attributes.startNode) errors.push({ code: "invalid_start", message: `${start} is a Start node but the run starts at ${document.attributes.startNode}`, nodeKey: start });
+    for (const edge of graph.inEdges(start)) errors.push({ code: "invalid_start", message: `nothing can lead into ${start}, the Start node`, edgeKey: edge });
+  }
+  for (const finish of graph.filterNodes((_, a) => a.type === "finish")) {
+    for (const edge of graph.outEdges(finish)) errors.push({ code: "invalid_finish", message: `nothing can leave ${finish}, a Finish node`, edgeKey: edge });
   }
 
   const startNode = document.attributes.startNode;
