@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
-import { redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
+import { passEnvProblem, pickEnv, redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
 
 const execFileAsync = promisify(execFile);
 const TAIL_LINES = 200;
@@ -29,11 +29,19 @@ export async function shell(
   cwd: string,
   timeoutMs: number,
   container?: string,
+  passEnv: readonly string[] = [],
 ): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
+  const problem = passEnvProblem(passEnv);
+  if (problem) throw new Error(problem);
+  const passed = pickEnv(passEnv, process.env);
   return new Promise((resolve) => {
+    // docker exec -e NAME reads the value from the docker client's environment, so values stay out of argv.
     const child = container
-      ? spawn("docker", ["exec", "-e", "CI=true", "-w", cwd, container, "sh", "-c", command], { stdio: ["ignore", "pipe", "pipe"] })
-      : spawn("sh", ["-c", command], { cwd, env: commandEnv(), stdio: ["ignore", "pipe", "pipe"] });
+      ? spawn("docker", ["exec", "-e", "CI=true", ...Object.keys(passed).flatMap((name) => ["-e", name]), "-w", cwd, container, "sh", "-c", command], {
+          env: { ...process.env, ...passed },
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+      : spawn("sh", ["-c", command], { cwd, env: { ...commandEnv(), ...passed }, stdio: ["ignore", "pipe", "pipe"] });
     const lines: string[] = [];
     // One partial-line buffer per stream, so a chunk boundary never splits or blanks a line.
     const partial = { stdout: "", stderr: "" };
@@ -92,7 +100,7 @@ export async function runCheck(check: DeterministicCheck, ctx: CheckContext): Pr
     case "command": {
       const expected = check.kind === "command" ? check.expectExitCode : 0;
       const timeout = check.kind === "tests_green" ? check.timeoutMs : 600_000;
-      const result = await shell(check.command, needWorkdir(check, ctx), timeout, ctx.container);
+      const result = await shell(check.command, needWorkdir(check, ctx), timeout, ctx.container, check.passEnv);
       if (result.timedOut) return done(false, `\`${check.command}\` timed out after ${timeout} ms`, result.output);
       return done(result.exitCode === expected, `\`${check.command}\` exited ${result.exitCode}`, result.output);
     }
