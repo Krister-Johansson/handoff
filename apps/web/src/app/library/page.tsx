@@ -11,10 +11,11 @@ import type { McpCheck } from "@handoff/engine/mcp-check";
 import { CHECK_STATUS } from "@/lib/mcp-check-status";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
+import { groupSkillsBySource, type SkillSourceGroup } from "@/lib/skill-sources";
 
 export const dynamic = "force-dynamic";
 
-type Row = { name: string; detail: string; version: number; extra?: string | undefined; source?: string | undefined; check?: McpCheck | null };
+type Row = { name: string; detail: string; version: number; extra?: string | undefined; check?: McpCheck | null };
 
 /** The last check of an MCP server, as a colored badge; "Not tested" before the first one. */
 function CheckBadge({ check }: { check: McpCheck | null }) {
@@ -39,7 +40,7 @@ function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; nou
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Name</TableHead>
+          <TableHead className="w-60">Name</TableHead>
           <TableHead>Details</TableHead>
           <TableHead className="text-right">Version</TableHead>
         </TableRow>
@@ -55,11 +56,6 @@ function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; nou
             <TableCell className="w-full max-w-0 truncate text-muted-foreground">
               {row.detail}
               {row.extra && <span className="ml-2 text-xs">{row.extra}</span>}
-              {row.source && (
-                <Badge variant="outline" className="ml-2" title={`Imported from skills.sh/${row.source}`}>
-                  skills.sh
-                </Badge>
-              )}
             </TableCell>
             <TableCell className="text-right whitespace-nowrap">
               {row.check !== undefined && <CheckBadge check={row.check} />} <Badge variant="outline">v{row.version}</Badge>
@@ -70,6 +66,34 @@ function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; nou
     </Table>
   );
 }
+
+const REGISTRY_LABEL = { "skills.sh": "skills.sh", github: "GitHub", local: "Written here" } as const;
+
+/** Skills in one table per source: each skills.sh or GitHub repository, then the skills written here. */
+function SkillsBySource({ groups }: { groups: SkillSourceGroup<SkillIndexRow>[] }) {
+  if (groups.length === 0) return <EntryTable segment="skills" rows={[]} noun="skill" />;
+  return (
+    <div className="flex flex-col gap-6">
+      {groups.map((group) => (
+        <section key={`${group.registry}:${group.repo ?? ""}`} aria-label={group.repo ?? "Written here"} className="flex flex-col gap-2">
+          <h3 className="flex items-center gap-2 text-sm font-medium">
+            <Badge variant={group.registry === "local" ? "outline" : "secondary"}>{REGISTRY_LABEL[group.registry]}</Badge>
+            {group.repo && group.href && (
+              <a href={group.href} className="font-mono hover:underline">
+                {group.repo}
+              </a>
+            )}
+            <span className="text-muted-foreground">{group.skills.length}</span>
+          </h3>
+          <EntryTable segment="skills" rows={group.skills.map(skillRow)} noun="skill" />
+        </section>
+      ))}
+    </div>
+  );
+}
+
+type SkillIndexRow = Awaited<ReturnType<typeof listLibraryIndex>>["skills"][number];
+const skillRow = (s: SkillIndexRow): Row => ({ name: s.name, detail: s.description, version: s.version, extra: s.fileCount ? `${s.fileCount + 1} files` : undefined });
 
 const TABS = ["skills", "mcp", "agents", "groups"] as const;
 
@@ -83,7 +107,8 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       label: "Skills",
       noun: "skill",
       description: "SKILL.md instructions, with their supporting files, staged into a node's session with --add-dir.",
-      rows: skills.map((s) => ({ name: s.name, detail: s.description, version: s.version, extra: s.fileCount ? `${s.fileCount + 1} files` : undefined, source: s.source?.id })),
+      rows: skills.map(skillRow),
+      body: <SkillsBySource groups={groupSkillsBySource(skills)} />,
     },
     {
       value: "mcp",
@@ -156,7 +181,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
                 </CardAction>
               </CardHeader>
               <CardContent>
-                <EntryTable segment={s.value} rows={s.rows} noun={s.noun} />
+                {"body" in s && s.body ? s.body : <EntryTable segment={s.value} rows={s.rows} noun={s.noun} />}
               </CardContent>
             </Card>
           </TabsContent>

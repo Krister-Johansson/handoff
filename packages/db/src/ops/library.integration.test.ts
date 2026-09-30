@@ -81,3 +81,19 @@ test("an MCP server keeps its last check until it is saved again", async () => {
   await upsertMcpServer(db, { name: "docs", transport: "http", url: "https://example.com/mcp/v2" });
   expect((await listLibraryIndex(db)).mcp[0]!.lastCheck).toBeNull();
 });
+
+test("deleting a skill takes it out of the groups that list it", async () => {
+  await upsertSkill(db, { name: "tdd", description: "d", body: "b" });
+  await upsertSkill(db, { name: "pdf", description: "d", body: "b" });
+  await upsertGroup(db, { name: "g", description: "", skills: ["pdf", "tdd"], mcp: [], agents: [] });
+  await deleteLibraryEntry(db, "skill", "tdd");
+  expect((await listLibraryIndex(db)).groups[0]!.skills).toEqual(["pdf"]);
+  expect((await getLibraryByNames(db, { skills: [], mcp: [], agents: [], groups: ["g"] })).missing).toEqual([]);
+});
+
+test("deleting a group leaves an agent of the same name alone", async () => {
+  await upsertAgent(db, { name: "same", description: "d", prompt: "p" });
+  await upsertGroup(db, { name: "same", description: "", skills: [], mcp: [], agents: ["same"] });
+  await deleteLibraryEntry(db, "group", "same");
+  expect((await listLibraryIndex(db)).agents.map((a) => a.name)).toEqual(["same"]);
+});

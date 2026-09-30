@@ -147,9 +147,19 @@ export async function getLibraryByNames(db: DbExecutor, selection: { skills: str
   return { skills, mcp, agents, missing };
 }
 
+/** Deletes an entry. A deleted skill, MCP server or agent is also taken out of every group that lists it. */
 export async function deleteLibraryEntry(db: DbExecutor, kind: "skill" | "mcp" | "agent" | "group", name: string) {
-  if (kind === "group") await db.delete(libraryGroups).where(eq(libraryGroups.name, name));
-  if (kind === "skill") await db.delete(librarySkills).where(eq(librarySkills.name, name));
-  else if (kind === "mcp") await db.delete(libraryMcpServers).where(eq(libraryMcpServers.name, name));
-  else await db.delete(libraryAgents).where(eq(libraryAgents.name, name));
+  if (kind === "group") {
+    await db.delete(libraryGroups).where(eq(libraryGroups.name, name));
+    return;
+  }
+  const table = kind === "skill" ? librarySkills : kind === "mcp" ? libraryMcpServers : libraryAgents;
+  const column = kind === "skill" ? libraryGroups.skills : kind === "mcp" ? libraryGroups.mcp : libraryGroups.agents;
+  const key = kind === "skill" ? "skills" : kind;
+  await db.delete(table).where(eq(table.name, name));
+  // jsonb `-` removes the string from the array; `?` finds the groups that contain it.
+  await db
+    .update(libraryGroups)
+    .set({ [key]: sql`${column} - ${name}::text` })
+    .where(sql`${column} ? ${name}`);
 }
