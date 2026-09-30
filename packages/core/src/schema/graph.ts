@@ -12,6 +12,8 @@ export const LibrarySelectionSchema = z.object({
   skills: z.array(z.string()).default([]),
   mcp: z.array(z.string()).default([]),
   agents: z.array(z.string()).default([]),
+  /** Library groups; each expands to its skills, MCP servers and agents when the node runs. */
+  groups: z.array(z.string()).default([]),
 });
 export type LibrarySelection = z.infer<typeof LibrarySelectionSchema>;
 

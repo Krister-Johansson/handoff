@@ -1,10 +1,12 @@
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import type { DbExecutor } from "../client.ts";
-import { libraryAgents, libraryMcpServers, librarySkills, type SkillSource } from "../schema/index.ts";
+import { libraryAgents, libraryGroups, libraryMcpServers, librarySkills, type SkillSource } from "../schema/index.ts";
 
 export type SkillRow = typeof librarySkills.$inferSelect;
 export type McpServerRow = typeof libraryMcpServers.$inferSelect;
 export type AgentRow = typeof libraryAgents.$inferSelect;
+export type GroupRow = typeof libraryGroups.$inferSelect;
+export type GroupInput = { name: string; description: string; skills: string[]; mcp: string[]; agents: string[] };
 
 export type SkillInput = {
   name: string;
@@ -73,22 +75,43 @@ export async function upsertAgent(db: DbExecutor, input: AgentInput): Promise<Ag
   return row!;
 }
 
+export async function upsertGroup(db: DbExecutor, input: GroupInput): Promise<GroupRow> {
+  const values = { name: input.name, description: input.description, skills: input.skills, mcp: input.mcp, agents: input.agents };
+  const [row] = await db
+    .insert(libraryGroups)
+    .values(values)
+    .onConflictDoUpdate({ target: libraryGroups.name, set: { ...values, version: sql`${libraryGroups.version} + 1` } })
+    .returning();
+  return row!;
+}
+
 export async function listLibrary(db: DbExecutor) {
-  const [skills, mcp, agents] = await Promise.all([
+  const [skills, mcp, agents, groups] = await Promise.all([
     db.select().from(librarySkills).orderBy(asc(librarySkills.name)),
     db.select().from(libraryMcpServers).orderBy(asc(libraryMcpServers.name)),
     db.select().from(libraryAgents).orderBy(asc(libraryAgents.name)),
+    db.select().from(libraryGroups).orderBy(asc(libraryGroups.name)),
   ]);
-  return { skills, mcp, agents };
+  return { skills, mcp, agents, groups };
 }
 
-export async function getLibraryByNames(db: DbExecutor, names: { skills: string[]; mcp: string[]; agents: string[] }) {
+/**
+ * Library entries by name. Groups named in `groups` are expanded into their entries and merged with
+ * the names given directly; missing groups and entries are reported, groups first.
+ */
+export async function getLibraryByNames(db: DbExecutor, selection: { skills: string[]; mcp: string[]; agents: string[]; groups?: string[] }) {
+  const groupNames = selection.groups ?? [];
+  const groups = groupNames.length ? await db.select().from(libraryGroups).where(inArray(libraryGroups.name, groupNames)) : [];
+  const missingGroups = groupNames.filter((n) => !groups.some((g) => g.name === n)).map((n) => `group ${n}`);
+  const union = (direct: string[], key: "skills" | "mcp" | "agents") => [...new Set([...direct, ...groups.flatMap((g) => g[key])])];
+  const names = { skills: union(selection.skills, "skills"), mcp: union(selection.mcp, "mcp"), agents: union(selection.agents, "agents") };
   const [skills, mcp, agents] = await Promise.all([
     names.skills.length ? db.select().from(librarySkills).where(inArray(librarySkills.name, names.skills)) : Promise.resolve([] as SkillRow[]),
     names.mcp.length ? db.select().from(libraryMcpServers).where(inArray(libraryMcpServers.name, names.mcp)) : Promise.resolve([] as McpServerRow[]),
     names.agents.length ? db.select().from(libraryAgents).where(inArray(libraryAgents.name, names.agents)) : Promise.resolve([] as AgentRow[]),
   ]);
   const missing = [
+    ...missingGroups,
     ...names.skills.filter((n) => !skills.some((s) => s.name === n)).map((n) => `skill ${n}`),
     ...names.mcp.filter((n) => !mcp.some((s) => s.name === n)).map((n) => `mcp server ${n}`),
     ...names.agents.filter((n) => !agents.some((s) => s.name === n)).map((n) => `agent ${n}`),
@@ -96,7 +119,8 @@ export async function getLibraryByNames(db: DbExecutor, names: { skills: string[
   return { skills, mcp, agents, missing };
 }
 
-export async function deleteLibraryEntry(db: DbExecutor, kind: "skill" | "mcp" | "agent", name: string) {
+export async function deleteLibraryEntry(db: DbExecutor, kind: "skill" | "mcp" | "agent" | "group", name: string) {
+  if (kind === "group") await db.delete(libraryGroups).where(eq(libraryGroups.name, name));
   if (kind === "skill") await db.delete(librarySkills).where(eq(librarySkills.name, name));
   else if (kind === "mcp") await db.delete(libraryMcpServers).where(eq(libraryMcpServers.name, name));
   else await db.delete(libraryAgents).where(eq(libraryAgents.name, name));

@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import type { CliRunRequest, CliRunResult } from "@handoff/cli-adapter";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { upsertAgent, upsertMcpServer, upsertSkill } from "@handoff/db";
+import { upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
@@ -70,6 +70,19 @@ test("a skill's frontmatter beyond name and description is written back to its S
   await startRun(db, graphWithLibrary({ skills: ["tdd"] }));
   await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)]))));
   expect(seen[0]!.files.tdd).toBe("---\nname: tdd\ndescription: Test first\nlicense: MIT\nallowed-tools: Read, Edit\n---\n\nBody.\n");
+});
+
+test("a node that enables a group gets the group's skills and agents", async () => {
+  await upsertSkill(db, { name: "tdd", description: "Test first", body: "Write the failing test first." });
+  await upsertAgent(db, { name: "explorer", description: "Reads code", prompt: "Explore." });
+  await upsertGroup(db, { name: "quality", description: "Testing habits", skills: ["tdd"], mcp: [], agents: ["explorer"] });
+  const seen: Seen[] = [];
+  const { run } = await startRun(db, graphWithLibrary({ groups: ["quality"] }));
+  await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)]))));
+  expect(Object.keys(seen[0]!.files)).toEqual(["tdd"]);
+  expect(Object.keys(seen[0]!.request.agents ?? {})).toEqual(["explorer"]);
+  const staged = (await inspect(db, run.id)).events.find((e) => e.type === "library.materialized");
+  expect(staged?.payload).toMatchObject({ groups: ["quality"], skills: [{ name: "tdd" }] });
 });
 
 test("mcp.json resolves secrets from the engine environment and never from the database", async () => {

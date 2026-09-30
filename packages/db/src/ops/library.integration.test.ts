@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { truncateAll } from "../testing/reset.ts";
 import { createTestDb } from "../testing/test-db.ts";
-import { deleteLibraryEntry, getLibraryByNames, listLibrary, upsertAgent, upsertMcpServer, upsertSkill } from "./library.ts";
+import { deleteLibraryEntry, getLibraryByNames, listLibrary, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "./library.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -34,4 +34,27 @@ test("deleting an entry removes it", async () => {
   await upsertSkill(db, { name: "tdd", description: "d", body: "b" });
   await deleteLibraryEntry(db, "skill", "tdd");
   expect((await listLibrary(db)).skills).toEqual([]);
+});
+
+test("a group bundles entries under a name and is versioned like them", async () => {
+  const first = await upsertGroup(db, { name: "frontend", description: "UI work", skills: ["tdd", "shadcn"], mcp: ["docs"], agents: [] });
+  const second = await upsertGroup(db, { name: "frontend", description: "UI work", skills: ["tdd"], mcp: [], agents: ["explorer"] });
+  expect([first.version, second.version]).toEqual([1, 2]);
+  expect((await listLibrary(db)).groups.map((g) => [g.name, g.skills, g.agents])).toEqual([["frontend", ["tdd"], ["explorer"]]]);
+});
+
+test("getLibraryByNames expands groups into their entries, merged with names given directly", async () => {
+  await upsertSkill(db, { name: "tdd", description: "d", body: "b" });
+  await upsertSkill(db, { name: "shadcn", description: "d", body: "b" });
+  await upsertAgent(db, { name: "explorer", description: "reads code", prompt: "Explore." });
+  await upsertGroup(db, { name: "frontend", description: "", skills: ["shadcn", "tdd"], mcp: [], agents: ["explorer"] });
+  const found = await getLibraryByNames(db, { skills: ["tdd"], mcp: [], agents: [], groups: ["frontend"] });
+  expect(found.skills.map((s) => s.name).sort()).toEqual(["shadcn", "tdd"]);
+  expect(found.agents.map((a) => a.name)).toEqual(["explorer"]);
+  expect(found.missing).toEqual([]);
+});
+
+test("a missing group, or a group naming a missing entry, is reported", async () => {
+  await upsertGroup(db, { name: "stale", description: "", skills: ["gone"], mcp: [], agents: [] });
+  expect((await getLibraryByNames(db, { skills: [], mcp: [], agents: [], groups: ["stale", "nope"] })).missing).toEqual(["group nope", "skill gone"]);
 });

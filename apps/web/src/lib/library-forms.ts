@@ -1,6 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { looksLikeSecret } from "@handoff/core";
-import type { AgentInput, McpServerInput, SkillInput } from "@handoff/db";
+import type { AgentInput, GroupInput, McpServerInput, SkillInput } from "@handoff/db";
 
 export type FormResult<T> = { ok: true; data: T } | { ok: false; errors: Record<string, string> };
 
@@ -132,4 +132,14 @@ export function parseAgentForm(form: FormData): FormResult<AgentInput> {
   if (!prompt) errors.prompt = "The agent needs a prompt.";
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, data: { name, description, prompt, tools: list(text(form, "tools")), model: text(form, "model") || null } };
+}
+
+export function parseGroupForm(form: FormData): FormResult<GroupInput> {
+  const errors: Record<string, string> = {};
+  const name = text(form, "name");
+  checkName(name, errors);
+  const pick = (key: string) => [...new Set(form.getAll(key).map(String).filter(Boolean))];
+  const data = { name, description: text(form, "description"), skills: pick("skills"), mcp: pick("mcp"), agents: pick("agents") };
+  if (data.skills.length + data.mcp.length + data.agents.length === 0) errors.entries = "Choose at least one skill, MCP server or agent.";
+  return Object.keys(errors).length ? { ok: false, errors } : { ok: true, data };
 }

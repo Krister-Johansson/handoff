@@ -272,8 +272,9 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
           skills: [...new Set([...node.library.skills, ...(overrides?.skills ?? [])])],
           mcp: [...new Set([...node.library.mcp, ...(overrides?.mcp ?? [])])],
           agents: [...new Set([...node.library.agents, ...(overrides?.agents ?? [])])],
+          groups: [...new Set([...node.library.groups, ...(overrides?.groups ?? [])])],
         };
-        if (selection.skills.length || selection.mcp.length || selection.agents.length) {
+        if (selection.skills.length || selection.mcp.length || selection.agents.length || selection.groups.length) {
           library = await materializeLibrary(db, selection, stagingDir, deps.secrets ?? process.env);
           buffer.push({ type: "library.materialized", payload: library.used, nodeExecutionId: row.id });
         }

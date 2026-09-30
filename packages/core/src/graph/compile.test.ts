@@ -141,7 +141,7 @@ describe("library and secrets", () => {
     (doc.nodes[1]!.attributes as Record<string, unknown>).library = { skills: ["tdd"], mcp: ["docs"], agents: ["explorer"] };
     const result = compileGraph(doc);
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.graph.node("coder").library).toEqual({ skills: ["tdd"], mcp: ["docs"], agents: ["explorer"] });
+    if (result.ok) expect(result.graph.node("coder").library).toEqual({ skills: ["tdd"], mcp: ["docs"], agents: ["explorer"], groups: [] });
   });
 
   test("an edge can add library entries for the executions it creates", () => {

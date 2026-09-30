@@ -12,7 +12,12 @@ export type MaterializedLibrary = {
   mcpServers: string[];
   allowedTools: string[];
   agents?: Record<string, AgentDefinition>;
-  used: { skills: { name: string; version: number }[]; mcp: { name: string; version: number }[]; agents: { name: string; version: number }[] };
+  used: {
+    groups: string[];
+    skills: { name: string; version: number }[];
+    mcp: { name: string; version: number }[];
+    agents: { name: string; version: number }[];
+  };
 };
 
 const SECRET_REF = /\$\{secret:([A-Z0-9_]+)\}/g;
@@ -59,6 +64,7 @@ export async function materializeLibrary(
     mcpServers: [],
     allowedTools: [],
     used: {
+      groups: selection.groups,
       skills: found.skills.map((s) => ({ name: s.name, version: s.version })),
       mcp: found.mcp.map((s) => ({ name: s.name, version: s.version })),
       agents: found.agents.map((s) => ({ name: s.name, version: s.version })),
