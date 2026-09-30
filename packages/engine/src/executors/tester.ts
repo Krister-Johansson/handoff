@@ -17,7 +17,7 @@ export function testerExecutor(): NodeExecutor {
       const problem = passEnvProblem(passEnv);
       if (problem) return { kind: "failed", error: { code: "invalid_pass_env", message: problem } };
       ctx.emit("shell.started", { command });
-      const result = await shell(command, ctx.workdir.path, timeoutMs, ctx.workdir.container, passEnv as string[]);
+      const result = await shell(command, ctx.workdir.path, timeoutMs, ctx.workdir.container, passEnv as string[], ctx.signal);
       const output = { passed: result.exitCode === 0 && !result.timedOut, command, exitCode: result.exitCode, tail: result.output };
       ctx.emit("shell.finished", { command, exitCode: result.exitCode, timedOut: result.timedOut });
       return { kind: "completed", output, statePatch: { testResults: output } };

@@ -102,6 +102,7 @@ export function renderContextPacket(packet: ContextPacket): string {
     `- Tools available: ${packet.constraints.allowedTools.join(", ") || "(none)"}`,
     `- Turn budget: ${packet.constraints.maxTurns}`,
     "- Commit your changes with git before finishing. Do not push.",
+    "- If you start a server or a watcher, stop it before you finish. Do not use port 3000: the handoff dashboard runs there.",
     "",
   );
   out.push(

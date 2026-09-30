@@ -4,3 +4,4 @@ export * from "./claude/env.ts";
 export * from "./claude/executor.ts";
 export * from "./stream-json/parser.ts";
 export * from "./events.ts";
+export * from "./processes.ts";

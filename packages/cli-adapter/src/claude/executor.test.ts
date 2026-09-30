@@ -19,6 +19,7 @@ function setup(scenario: Parameters<typeof fakeClaude>[0], opts: { killGraceMs?:
     baseEnv: { ...process.env, ANTHROPIC_API_KEY: "must-not-leak", ...fake.env },
     passthroughEnv: ["FAKE_CLAUDE_SCENARIO", "FAKE_CLAUDE_RECORD"],
     killGraceMs: opts.killGraceMs ?? 200,
+    trackIntervalMs: 50,
   });
   const cwd = mkdtempSync(join(tmpdir(), "handoff-cwd-"));
   const stagingDir = mkdtempSync(join(tmpdir(), "handoff-stage-"));
@@ -188,4 +189,28 @@ test("executor reports the child pid as soon as claude starts", async () => {
   );
   expect(pids).toHaveLength(1);
   expect(pids[0]).toBeGreaterThan(0);
+});
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+test("processes claude started and left running are stopped when it exits, in its group or in their own", async () => {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "bg-")), "pids");
+  const { executor, request, onEvent } = setup({
+    background: [{ pidFile }, { pidFile, detached: true }],
+    lines: [lines.init(), lines.assistantText("started the dev server"), lines.result({ structured_output: { status: "done", summary: "ok" } })],
+    lineDelayMs: 300,
+  });
+  const result = await executor.run(request, { signal: new AbortController().signal, onEvent });
+  expect(result.outcome).toBe("success");
+  const pids = readFileSync(pidFile, "utf8").trim().split("\n").map(Number);
+  expect(pids).toHaveLength(2);
+  await new Promise((r) => setTimeout(r, 300));
+  expect(pids.filter(alive)).toEqual([]);
 });
