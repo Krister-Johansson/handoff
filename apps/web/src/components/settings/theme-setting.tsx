@@ -31,21 +31,21 @@ export function ThemeSetting() {
         value={current}
         onValueChange={(value) => value && setTheme(value)}
         aria-label="Theme"
-        className="grid w-full max-w-md grid-cols-3 gap-1 rounded-xl border bg-muted/50 p-1"
+        className="inline-flex w-fit gap-0.5 rounded-lg border bg-muted/50 p-0.5"
       >
         {CHOICES.map(({ value, label, icon: Icon }) => (
           <ToggleGroupItem
             key={value}
             value={value}
             aria-label={label}
-            className="h-10 rounded-lg text-muted-foreground data-[state=on]:bg-foreground data-[state=on]:text-background data-[state=on]:shadow-sm hover:data-[state=on]:bg-foreground hover:data-[state=on]:text-background"
+            className="h-7 rounded-md px-2.5 text-xs text-muted-foreground data-[state=on]:bg-foreground data-[state=on]:text-background data-[state=on]:shadow-sm hover:data-[state=on]:bg-foreground hover:data-[state=on]:text-background"
           >
             <Icon />
             {label}
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
-      <p className="min-h-5 text-sm text-muted-foreground">{chosen?.description}</p>
+      <p className="min-h-4 text-xs text-muted-foreground">{chosen?.description}</p>
     </div>
   );
 }
