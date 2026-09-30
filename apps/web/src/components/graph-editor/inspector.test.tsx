@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import type { FlowGraph } from "@handoff/core";
 import { Inspector } from "./inspector";
@@ -42,4 +42,23 @@ test("a human gate either reviews what reaches it or answers a question", () => 
   expect(screen.getByLabelText("Mode")).toHaveValue("approval");
   fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "question" } });
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "gate", patch: { config: { mode: "question" } } });
+});
+
+test("a node's library is shown as badges and chosen in a dialog", async () => {
+  const dispatch = vi.fn();
+  const choices = { ...library, skills: [{ name: "tdd", detail: "Test first", source: "mattpocock/skills" }, { name: "unslop", detail: "Plain prose", source: "Written here" }] };
+  const withLibrary: FlowGraph = { ...graph, nodes: graph.nodes.map((n) => (n.id === "planner" ? { ...n, data: { ...n.data, library: { skills: ["unslop"], mcp: [], agents: [], groups: [] } } } : n)) };
+  render(<Inspector graph={withLibrary} selection={{ nodeId: "planner" }} library={choices} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(within(screen.getByRole("list", { name: "Chosen library" })).getByText("unslop")).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox", { name: "tdd" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Choose" }));
+  const dialog = await screen.findByRole("dialog", { name: "Library for Planner" });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "tdd" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { library: { skills: ["unslop", "tdd"], mcp: [], agents: [], groups: [] } } });
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Remove skill unslop" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "planner", patch: { library: { skills: [], mcp: [], agents: [], groups: [] } } });
 });

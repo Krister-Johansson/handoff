@@ -14,7 +14,8 @@ import type { EdgeRoute, LayoutResult } from "@/lib/elk-layout";
 import { EdgeRoutesContext, useElkLayout, useMeasuredSignature } from "./elk-routes";
 import { HandoffEdgeComponent } from "./handoff-edge";
 import { HandoffNodeComponent } from "./handoff-node";
-import { Inspector, type LibraryNames } from "./inspector";
+import type { LibraryChoices } from "@/lib/library-choices";
+import { Inspector } from "./inspector";
 import { NODE_ICONS } from "./node-icons";
 import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
 
@@ -28,7 +29,7 @@ type Props = {
   graphName: string;
   version: number;
   document: unknown;
-  library: LibraryNames;
+  library: LibraryChoices;
   versions: VersionItem[];
   runSlot?: React.ReactNode;
 };
