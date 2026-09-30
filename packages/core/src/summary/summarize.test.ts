@@ -36,3 +36,7 @@ test("long text is cut, and unknown output has no summary", () => {
   expect(summarizeOutput({ something: 1 })).toBeUndefined();
   expect(summarizeOutput(null)).toBeUndefined();
 });
+
+test("a planner that asks is summarized by its question", () => {
+  expect(summarizeOutput({ status: "needs_input", plan: "", steps: [], ownedPaths: [], question: { text: "SQLite or JSON?" } })).toBe("Asked: SQLite or JSON?");
+});

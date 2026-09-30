@@ -1,10 +1,21 @@
 import { z } from "zod";
 
-export const PlannerOutputSchema = z.object({
-  plan: z.string().min(1),
-  steps: z.array(z.string()),
-  ownedPaths: z.array(z.string()),
-});
+/**
+ * A plan, or a question when the task leaves a decision to a person. Outputs from before planners
+ * could ask have no status and are plans.
+ */
+export const PlannerOutputSchema = z
+  .object({
+    status: z.enum(["done", "needs_input"]).optional(),
+    plan: z.string(),
+    steps: z.array(z.string()),
+    ownedPaths: z.array(z.string()),
+    question: z.object({ text: z.string().min(1), options: z.array(z.string()).optional() }).optional(),
+  })
+  .refine((o) => (o.status === "needs_input" ? o.question !== undefined : o.plan.trim().length > 0), {
+    message: "a plan needs text, and needs_input needs a question",
+    path: ["plan"],
+  });
 
 export const CoderOutputSchema = z
   .object({

@@ -176,3 +176,37 @@ test("a plain approval with the default note adds no decision", async () => {
   await drain(deps);
   expect(cli.requests[1]!.systemPrompt).not.toContain("# Decisions from the person reviewing this run");
 });
+
+test("a planner that needs a decision asks through a question gate, and the answer resumes its session", async () => {
+  const graph = {
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "ask", attributes: { type: "human_gate", config: { mode: "question" }, x: 300, y: 0 } },
+      { key: "coder", attributes: { type: "coder", x: 600, y: 0 } },
+    ],
+    edges: [
+      { key: "planner->ask", source: "planner", target: "ask", attributes: { port: "needs_input" } },
+      { key: "ask->planner", source: "ask", target: "planner", attributes: { port: "answered" } },
+      { key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done" } },
+    ],
+  };
+  const cli = new FakeCliExecutor([{ output: { status: "needs_input", plan: "", steps: [], ownedPaths: [], question: { text: "SQLite or a JSON file?", options: ["SQLite", "JSON"] } } }]);
+  const { run } = await startRun(db, graph, "Build a todo app");
+  const deps = engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 }), coder: scripted(done(outputs.coderDone)), human_gate: humanGateExecutor({ db }) });
+  await drain(deps);
+
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  expect(question).toMatchObject({ question: "SQLite or a JSON file?", options: ["SQLite", "JSON"] });
+  expect((await inspect(db, run.id)).run.state).not.toHaveProperty("plan");
+
+  cli.push({ output: { ...plan, status: "done" } });
+  await answerQuestion(db, question!.id, { answer: "SQLite, it is a real app.", option: "SQLite", answeredBy: "krister" });
+  await drain(deps);
+  const resumed = cli.requests[1]!;
+  expect(resumed.session).toMatchObject({ mode: "resume" });
+  expect(resumed.prompt).toContain("SQLite, it is a real app.");
+  const { run: row, executions } = await inspect(db, run.id);
+  expect(row.state).toMatchObject({ plan: { plan: plan.plan } });
+  expect(executions.find((e) => e.nodeKey === "coder")?.status).toBe("passed");
+});

@@ -73,7 +73,13 @@ function triggerText(trigger: ExecutionDetail["trigger"]): string {
   return trigger.from ? `after ${trigger.from}` : "";
 }
 
-function PlannerView({ data: { plan, steps, ownedPaths } }: { data: PlannerOutput }) {
+function PlannerView({ data: { status, question, plan, steps, ownedPaths } }: { data: PlannerOutput }) {
+  if (status === "needs_input" && question)
+    return (
+      <Section title="Question">
+        <p>{question.text}</p>
+      </Section>
+    );
   return (
     <>
       <Section title="Plan">

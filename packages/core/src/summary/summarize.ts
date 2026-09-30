@@ -26,7 +26,11 @@ const join = (lead: string, tail?: string) => {
 /** One line saying what a node produced, from its output contract; undefined for output it does not know. */
 export function summarizeOutput(output: unknown): string | undefined {
   const planner = PlannerOutputSchema.safeParse(output);
-  if (planner.success) return join(planner.data.plan, plural(planner.data.steps.length, "step"));
+  if (planner.success) {
+    const { status, question, plan, steps } = planner.data;
+    if (status === "needs_input" && question) return join(`Asked: ${question.text}`);
+    return join(plan, plural(steps.length, "step"));
+  }
   const coder = CoderOutputSchema.safeParse(output);
   if (coder.success) {
     const { status, summary, question, filesChanged } = coder.data;

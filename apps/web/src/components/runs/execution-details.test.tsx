@@ -25,6 +25,12 @@ test("a Planner shows its plan, steps and owned paths", () => {
   expect(screen.getByText("src/**")).toBeInTheDocument();
 });
 
+test("a Planner that asks shows its question instead of a plan", () => {
+  render(<ExecutionDetails detail={{ ...base, nodeType: "planner", output: { status: "needs_input", plan: "", steps: [], ownedPaths: [], question: { text: "SQLite or JSON?" } } }} />);
+  expect(screen.getByText("SQLite or JSON?")).toBeInTheDocument();
+  expect(screen.queryByText("Plan")).not.toBeInTheDocument();
+});
+
 test("a Coder shows its summary, changed files and commit", () => {
   render(
     <ExecutionDetails

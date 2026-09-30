@@ -25,7 +25,7 @@ const out = (id: string, label: string, condition?: Condition, kind: OutputPort[
 export const FEEDBACK_TARGETS = new Set(["planner", "coder", "reviewer", "code_review"]);
 
 const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, OutputPort[]> = {
-  planner: [out("done", "done")],
+  planner: [out("done", "done", { neq: ["node.output.status", "needs_input"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
   coder: [out("done", "done", { eq: ["node.output.status", "done"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
   reviewer: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "feedback")],
   code_review: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "feedback")],
@@ -76,7 +76,9 @@ export function withPorts(document: GraphDocument): GraphDocument {
     const target = nodes.get(edge.target)?.attributes;
     if (!source || !target || edge.attributes.port) return edge;
     const candidates = source.type === "human_gate" ? [...GATE_APPROVAL, ...GATE_QUESTION] : portsOf(source.type, source.config).outputs;
-    const port = candidates.find((p) => p.on === edge.attributes.on && same(p.condition, edge.attributes.condition));
+    // Before planners could ask, their done port had no condition, so an unconditioned planner edge is done.
+    const plannerDone = source.type === "planner" && !edge.attributes.condition ? candidates.find((p) => p.id === "done") : undefined;
+    const port = plannerDone ?? candidates.find((p) => p.on === edge.attributes.on && same(p.condition, edge.attributes.condition));
     if (!port) return edge;
     if (port.id === "answered") questionGates.add(edge.source);
     const feedback = port.kind === "feedback";
