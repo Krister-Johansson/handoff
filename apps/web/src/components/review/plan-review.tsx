@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { MessageSquarePlusIcon, XIcon } from "lucide-react";
-import { answerReviewAction } from "@/app/inbox/actions";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { quoteRanges } from "@/lib/quote-ranges";
+import { SubmitReview } from "./submit-review";
 
 type Comment = { quote: string; body: string };
 
@@ -89,23 +89,14 @@ function useSelectedText(root: React.RefObject<HTMLElement | null>) {
 }
 
 /**
- * A human gate's review: what reached the gate as markdown, comments on selected passages, a note,
- * and approve or request changes. Changes go back to the step's feedback input with every quote.
+ * A human gate's review: what reached the gate as markdown, comments on selected passages, and an
+ * overall comment with request changes, approve, or approve after fixes. Comments go back with every quote.
  */
-export function PlanReview({ questionId, runId, markdown }: { questionId: string; runId: string; markdown: string }) {
+export function PlanReview({ questionId, runId, from, markdown }: { questionId: string; runId: string; from: string; markdown: string }) {
   const article = useRef<HTMLElement>(null);
   const [selected, setSelected] = useSelectedText(article);
   const [comments, setComments] = useState<Comment[]>([]);
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string>();
-  const [pending, startSubmit] = useTransition();
   useQuoteHighlights(article, comments.map((c) => c.quote));
-
-  const submit = (option: "approve" | "changes") =>
-    startSubmit(async () => {
-      const result = await answerReviewAction({ questionId, runId, option, note: note.trim(), comments });
-      if (result && "error" in result && result.error) setError(result.error);
-    });
 
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
@@ -123,19 +114,7 @@ export function PlanReview({ questionId, runId, markdown }: { questionId: string
           onCancel={() => setSelected(undefined)}
         />
         <CommentList comments={comments} onRemove={(index) => setComments((list) => list.filter((_, i) => i !== index))} />
-        <Field>
-          <FieldLabel htmlFor="review-note">Note for the planner</FieldLabel>
-          <Textarea id="review-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional. Sent with your comments." />
-        </Field>
-        {error && <FieldError>{error}</FieldError>}
-        <div className="flex gap-2">
-          <Button type="button" disabled={pending} onClick={() => submit("approve")}>
-            Approve
-          </Button>
-          <Button type="button" variant="outline" disabled={pending} onClick={() => submit("changes")}>
-            Request changes
-          </Button>
-        </div>
+        <SubmitReview questionId={questionId} runId={runId} target={from} comments={comments} />
       </aside>
     </div>
   );

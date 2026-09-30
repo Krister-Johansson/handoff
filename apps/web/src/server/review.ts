@@ -1,6 +1,8 @@
+import type { DiffFile } from "@handoff/core";
 import { and, eq, projects, questions, runs, type Db } from "@handoff/db";
 
-export type ReviewContext = { from: string; kind: string; markdown: string };
+/** What the gate showed for review; a code review also carries the branch's changed files. */
+export type ReviewContext = { from: string; kind: string; markdown: string; files?: DiffFile[]; backTo?: string };
 
 /** A human gate's review question with its run, or undefined when there is none with that id on that run. */
 export async function getReview(db: Db, runId: string, questionId: string) {
