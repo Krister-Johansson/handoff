@@ -119,6 +119,8 @@ export async function createGraphFromTemplate(db: Db, projectId: string, name: s
 }
 
 export async function startRunFromGraph(db: Db, input: { projectId: string; graphName: string; task: string }) {
+  const [project] = await db.select({ isDemo: projects.isDemo }).from(projects).where(eq(projects.id, input.projectId));
+  if (project?.isDemo) throw new Error("This is a demo project with simulated runs. Add a real repository to run a graph.");
   const latest = await getGraphForEdit(db, input.projectId, input.graphName);
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
   return createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task: input.task });

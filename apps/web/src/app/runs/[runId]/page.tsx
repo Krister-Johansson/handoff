@@ -28,7 +28,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
             Runs
           </Link>
         </Button>
-        {active ? <CancelRunButton runId={run.id} /> : <RunAgainButton runId={run.id} />}
+        {active ? <CancelRunButton runId={run.id} /> : !project.isDemo && <RunAgainButton runId={run.id} />}
       </div>
       <Card>
         <CardHeader>

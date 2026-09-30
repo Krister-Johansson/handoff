@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { eq, graphVersions, runs } from "@handoff/db";
+import { eq, graphVersions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjects, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
@@ -135,5 +135,13 @@ describe("renaming and deleting graphs", () => {
     await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
     const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "t" });
     await expect(runAgain(db, run.id)).rejects.toThrow(/still queued/);
+  });
+
+  test("a demo project cannot start runs, because its repository does not exist", async () => {
+    const project = await createProject(db, { name: "demo", repo: "demo/sample", defaultBranch: "main" });
+    await db.update(projects).set({ isDemo: true }).where(eq(projects.id, project.id));
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    await expect(startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "t" })).rejects.toThrow(/demo project/);
+    expect(await db.select().from(runs)).toEqual([]);
   });
 });
