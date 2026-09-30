@@ -64,8 +64,13 @@ test("parseMcpForm reads args per line and env as KEY=VALUE lines", () => {
   );
   expect(result).toEqual({
     ok: true,
-    data: { name: "docs", transport: "stdio", command: "npx", args: ["-y", "docs-mcp"], url: null, env: { API_KEY: "${secret:DOCS_KEY}", MODE: "fast" }, headers: {}, tools: ["search", "fetch"] },
+    data: { name: "docs", transport: "stdio", command: "npx", args: ["-y", "docs-mcp"], url: null, env: { API_KEY: "${secret:DOCS_KEY}", MODE: "fast" }, headers: {}, tools: ["search", "fetch"], auth: "headers" },
   });
+});
+
+test("parseMcpForm keeps OAuth sign-in for http servers only", () => {
+  expect(parseMcpForm(form({ name: "context7", transport: "http", url: "https://mcp.context7.com/mcp/oauth", auth: "oauth" }))).toMatchObject({ ok: true, data: { auth: "oauth" } });
+  expect(parseMcpForm(form({ name: "docs", transport: "stdio", command: "npx", auth: "oauth" }))).toMatchObject({ ok: true, data: { auth: "headers" } });
 });
 
 test("parseMcpForm requires a command for stdio and a URL for http", () => {

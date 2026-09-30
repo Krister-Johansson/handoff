@@ -118,6 +118,7 @@ export function parseMcpForm(form: FormData): FormResult<McpServerInput> {
       env,
       headers,
       tools: list(text(form, "tools")),
+      auth: transport === "http" && text(form, "auth") === "oauth" ? "oauth" : "headers",
     },
   };
 }

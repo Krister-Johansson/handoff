@@ -24,6 +24,7 @@ import {
 } from "@handoff/db";
 import { validateContract } from "../contract/validate.ts";
 import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary } from "../library/materialize.ts";
+import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
@@ -48,6 +49,8 @@ export type EngineDeps = {
   retryBackoffMs?: number;
   /** Where ${secret:NAME} references in the library resolve from. Defaults to process.env. */
   secrets?: Record<string, string | undefined>;
+  /** Where OAuth tokens for MCP servers are read from. Defaults to the store at defaultOAuthDir(). */
+  oauth?: McpOAuthStore;
 };
 
 const EVENT_FLUSH_MS = 100;
@@ -275,7 +278,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
           groups: [...new Set([...node.library.groups, ...(overrides?.groups ?? [])])],
         };
         if (selection.skills.length || selection.mcp.length || selection.agents.length || selection.groups.length) {
-          library = await materializeLibrary(db, selection, stagingDir, deps.secrets ?? process.env);
+          library = await materializeLibrary(db, selection, stagingDir, deps.secrets ?? process.env, deps.oauth);
           buffer.push({ type: "library.materialized", payload: library.used, nodeExecutionId: row.id });
         }
       }

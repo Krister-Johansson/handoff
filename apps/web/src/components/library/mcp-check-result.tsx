@@ -13,7 +13,7 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
 
 /** What a server check found: status, server, tools (tickable, to become the allowed tools), resources, prompts. */
-export function McpCheckResult({ check, onAllow }: { check: McpCheck; onAllow: (tools: string[]) => void }) {
+export function McpCheckResult({ check, onAllow, onUseOAuth }: { check: McpCheck; onAllow: (tools: string[]) => void; onUseOAuth?: () => void }) {
   const [ticked, setTicked] = useState(() => new Set(check.tools.map((t) => t.name)));
   const status = CHECK_STATUS[check.status];
   const toggle = (name: string, on: boolean) => {
@@ -39,6 +39,11 @@ export function McpCheckResult({ check, onAllow }: { check: McpCheck; onAllow: (
         )}
       </div>
       {check.message && <pre className="max-h-48 overflow-auto rounded-md bg-muted/50 p-2 font-mono text-xs whitespace-pre-wrap">{check.message}</pre>}
+      {check.oauthAvailable && onUseOAuth && (
+        <Button type="button" size="sm" variant="outline" className="self-start" onClick={onUseOAuth}>
+          Use OAuth sign-in
+        </Button>
+      )}
       {check.tools.length > 0 && (
         <>
           <ul className="flex flex-col gap-2">

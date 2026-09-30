@@ -56,3 +56,13 @@ test("Test server checks the form's current values, and Allow fills the allowed 
   fireEvent.click(screen.getByRole("button", { name: "Allow only the ticked tools" }));
   expect(screen.getByLabelText("Allowed tools")).toHaveValue("fetch");
 });
+
+test("a server that offers OAuth can be switched to OAuth sign-in from the test result", async () => {
+  actions.testMcpServerAction.mockResolvedValue({ check: { ...ok, status: "needs_auth", tools: [], oauthAvailable: true, message: "The server answered 401 and supports OAuth sign-in." } });
+  const server = { name: "context7", transport: "http" as const, command: null, args: [], url: "https://mcp.context7.com/mcp/oauth", env: {}, headers: {}, tools: [], auth: "headers" as const };
+  render(<McpServerForm initial={server} />);
+  expect(screen.getByLabelText("Authentication")).toHaveValue("headers");
+  fireEvent.click(screen.getByRole("button", { name: "Test server" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Use OAuth sign-in" }));
+  expect(screen.getByLabelText("Authentication")).toHaveValue("oauth");
+});

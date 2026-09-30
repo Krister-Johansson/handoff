@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { deleteLibraryEntry, getLibraryByNames, recordMcpCheck, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
 import { checkMcpServer, type McpCheck } from "@handoff/engine/mcp-check";
 import { getDb } from "@/lib/db";
+import { getOAuthStore } from "@/lib/oauth-store";
 import { parseAgentForm, parseGroupForm, parseMcpForm, parseSkillForm, type FormResult } from "@/lib/library-forms";
 
 export type FormState = { ok?: boolean; message?: string; errors?: Record<string, string>; values?: Record<string, string> };
@@ -42,14 +43,16 @@ export async function testMcpServerAction(_: McpTestState, form: FormData): Prom
   const parsed = parseMcpForm(form);
   if (!parsed.ok) return { errors: parsed.errors };
   const d = parsed.data;
-  const config = { transport: d.transport, command: d.command ?? null, args: d.args ?? [], url: d.url ?? null, env: d.env ?? {}, headers: d.headers ?? {} };
-  const check = await checkMcpServer(config, { secrets: process.env });
+  const auth = d.auth ?? "headers";
+  const config = { name: d.name, auth, transport: d.transport, command: d.command ?? null, args: d.args ?? [], url: d.url ?? null, env: d.env ?? {}, headers: d.headers ?? {} };
+  const check = await checkMcpServer(config, { secrets: process.env, oauth: getOAuthStore() });
   if (!form.get("$new")) {
     const [saved] = (await getLibraryByNames(getDb(), { skills: [], mcp: [parsed.data.name], agents: [] })).mcp;
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
     if (
       saved &&
       saved.transport === config.transport &&
+      saved.auth === auth &&
       same([saved.command, saved.args, saved.url, saved.env, saved.headers], [config.command, config.args, config.url, config.env, config.headers])
     ) {
       await recordMcpCheck(getDb(), saved.name, check);

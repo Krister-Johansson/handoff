@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
@@ -10,6 +11,7 @@ import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
 import type { ExecutorRegistry } from "../types.ts";
+import { McpOAuthStore } from "./mcp-oauth.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -125,6 +127,35 @@ test("an mcp server with a missing secret fails the execution before spawning", 
   expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "coder")).toMatchObject({
     status: "failed",
     error: { code: "library_unavailable", message: expect.stringContaining("DOCS_KEY") },
+  });
+});
+
+test("an OAuth MCP server gets the signed-in access token as its Authorization header", async () => {
+  await upsertMcpServer(db, { name: "context7", transport: "http", url: "https://mcp.context7.com/mcp/oauth", auth: "oauth", headers: { "X-Client": "handoff" } });
+  const oauth = new McpOAuthStore(mkdtempSync(join(tmpdir(), "handoff-oauth-")));
+  oauth.write("context7", {
+    serverUrl: "https://mcp.context7.com/mcp/oauth",
+    redirectUrl: "http://localhost:3000/library/mcp/oauth/callback",
+    tokens: { access_token: "at-9", token_type: "Bearer", expires_in: 3600 },
+    tokensSavedAt: Date.now(),
+  });
+  const seen: Seen[] = [];
+  await startRun(db, graphWithLibrary({ mcp: ["context7"] }));
+  await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)])), { oauth }));
+  expect(seen[0]!.mcp).toEqual({
+    mcpServers: { context7: { type: "http", url: "https://mcp.context7.com/mcp/oauth", headers: { "X-Client": "handoff", Authorization: "Bearer at-9" } } },
+  });
+});
+
+test("an OAuth MCP server nobody signed in to fails the execution before spawning", async () => {
+  await upsertMcpServer(db, { name: "context7", transport: "http", url: "https://mcp.context7.com/mcp/oauth", auth: "oauth" });
+  const cli = new FakeCliExecutor([]);
+  const { run } = await startRun(db, graphWithLibrary({ mcp: ["context7"] }));
+  await drain(engineDeps(db, registry(cli), { oauth: new McpOAuthStore(mkdtempSync(join(tmpdir(), "handoff-oauth-"))) }));
+  expect(cli.requests).toHaveLength(0);
+  expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "coder")?.error).toMatchObject({
+    code: "library_unavailable",
+    message: expect.stringContaining("context7 needs sign-in"),
   });
 });
 
