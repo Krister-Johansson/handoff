@@ -1,7 +1,7 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { compileGraph, type CompileError } from "@handoff/core";
-import { and, desc, eq, graphs, graphVersions, projects, runs, sql, type Db } from "@handoff/db";
+import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
 import { createRun } from "@handoff/engine/runs";
 import type { GitHubPort } from "@handoff/github";
 
@@ -122,4 +122,28 @@ export async function startRunFromGraph(db: Db, input: { projectId: string; grap
   const latest = await getGraphForEdit(db, input.projectId, input.graphName);
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
   return createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task: input.task });
+}
+
+const GRAPH_NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+export async function renameGraph(db: Db, projectId: string, from: string, to: string) {
+  if (!GRAPH_NAME.test(to)) throw new Error("Graph name: lowercase letters, digits and dashes.");
+  const [taken] = await db.select({ id: graphs.id }).from(graphs).where(and(eq(graphs.projectId, projectId), eq(graphs.name, to)));
+  if (taken) throw new Error(`A graph named ${to} already exists.`);
+  await db.update(graphs).set({ name: to }).where(and(eq(graphs.projectId, projectId), eq(graphs.name, from)));
+}
+
+/** Deletes a graph and its versions; refused while any run is pinned to one of its versions. */
+export async function deleteGraph(db: Db, projectId: string, name: string) {
+  await db.transaction(async (tx) => {
+    const [graph] = await tx.select({ id: graphs.id }).from(graphs).where(and(eq(graphs.projectId, projectId), eq(graphs.name, name)));
+    if (!graph) return;
+    const versionIds = (await tx.select({ id: graphVersions.id }).from(graphVersions).where(eq(graphVersions.graphId, graph.id))).map((v) => v.id);
+    if (versionIds.length) {
+      const [{ n } = { n: 0 }] = await tx.select({ n: sql<number>`count(*)::int` }).from(runs).where(inArray(runs.graphVersionId, versionIds));
+      if (n > 0) throw new Error(`${n} run${n === 1 ? "" : "s"} used this graph, so it cannot be deleted. Rename it instead.`);
+      await tx.delete(graphVersions).where(eq(graphVersions.graphId, graph.id));
+    }
+    await tx.delete(graphs).where(eq(graphs.id, graph.id));
+  });
 }

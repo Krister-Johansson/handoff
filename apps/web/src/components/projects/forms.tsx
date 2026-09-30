@@ -1,8 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { PlayIcon } from "lucide-react";
-import { createGraphAction, createProjectAction, startRunAction, type ActionState } from "@/app/projects/actions";
+import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
+import { createGraphAction, createProjectAction, deleteGraphAction, renameGraphAction, startRunAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -98,6 +98,53 @@ export function StartRunDialog({ projectId, graphName, size = "sm" }: { projectI
               Start run
             </Button>
           </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Rename or delete a graph. Delete is refused while runs are pinned to its versions. */
+export function GraphSettingsDialog({ projectId, graphName }: { projectId: string; graphName: string }) {
+  const [renameState, rename, renaming] = useActionState(renameGraphAction, {} as ActionState);
+  const [deleteState, remove, deleting] = useActionState(deleteGraphAction, {} as ActionState);
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button size="icon-sm" variant="ghost" aria-label={`Settings for ${graphName}`}>
+          <MoreHorizontalIcon />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Graph settings</DialogTitle>
+          <DialogDescription>
+            Rename <span className="font-mono">{graphName}</span>, or delete it if no run has used it.
+          </DialogDescription>
+        </DialogHeader>
+        <form action={rename}>
+          <input type="hidden" name="projectId" value={projectId} />
+          <input type="hidden" name="from" value={graphName} />
+          <FieldGroup>
+            <Field data-invalid={renameState.error ? true : undefined}>
+              <FieldLabel htmlFor={`rename-${graphName}`}>New name</FieldLabel>
+              <Input id={`rename-${graphName}`} name="to" defaultValue={renameState.values?.to ?? graphName} />
+              {renameState.error && <FieldError>{renameState.error}</FieldError>}
+            </Field>
+            <Button type="submit" disabled={renaming}>
+              Rename
+            </Button>
+          </FieldGroup>
+        </form>
+        <form action={remove}>
+          <input type="hidden" name="projectId" value={projectId} />
+          <input type="hidden" name="name" value={graphName} />
+          <FieldGroup>
+            {deleteState.error && <FieldError>{deleteState.error}</FieldError>}
+            <Button type="submit" variant="destructive" disabled={deleting}>
+              Delete graph
+            </Button>
+          </FieldGroup>
         </form>
       </DialogContent>
     </Dialog>
