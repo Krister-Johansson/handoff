@@ -110,7 +110,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
               <TableBody>
                 {runs.map((run) => (
                   <TableRow key={run.id}>
-                    <TableCell className="max-w-72 truncate">
+                    <TableCell className="w-full max-w-0 truncate">
                       <Link href={`/runs/${run.id}`} className="hover:underline">
                         {run.task}
                       </Link>
