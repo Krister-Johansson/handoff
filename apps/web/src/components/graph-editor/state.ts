@@ -1,5 +1,5 @@
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from "@xyflow/react";
-import { compileGraph, CUSTOM_HANDLE, fromReactFlow, gateMode, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
+import { compileGraph, CUSTOM_HANDLE, fromReactFlow, gateMode, portKind, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
 
 export const NODE_LABELS: Record<NodeType, string> = {
   planner: "Planner",
@@ -49,7 +49,8 @@ function withGatePorts(before: FlowGraph, nodes: FlowNode[], id: string): FlowEd
   const from = GO_ON[gateMode(was.data.config)];
   const to = GO_ON[gateMode(now.data.config)];
   if (from === to) return before.edges;
-  return before.edges.map((e) => (e.source === id && e.data.port === from ? { ...e, sourceHandle: to, data: { ...e.data, port: to } } : e));
+  const input = portKind("human_gate", now.data.config, to) === "feedback" ? "feedback" : "in";
+  return before.edges.map((e) => (e.source === id && e.data.port === from ? { ...e, sourceHandle: to, data: { ...e.data, port: to, input } } : e));
 }
 
 /** Pure editor state transitions over the React Flow view of a graphology document. */
@@ -63,9 +64,12 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
     case "edgesChange":
       return { ...state, edges: applyEdgeChanges(action.changes, state.edges) };
     case "connect": {
-      // The handles are the source's output port and the target's input; an edge without them has a custom condition.
+      // The source handle is the output port; an edge without one has a custom condition. Every node has
+      // one input, and the port's kind says whether the edge continues the work or sends feedback.
       const port = action.sourceHandle && action.sourceHandle !== CUSTOM_HANDLE ? action.sourceHandle : undefined;
-      const input: "in" | "feedback" | undefined = action.targetHandle === "feedback" ? "feedback" : port ? "in" : undefined;
+      const source = state.nodes.find((n) => n.id === action.source);
+      const kind = source ? portKind(source.data.nodeType, source.data.config, port) : undefined;
+      const input: "in" | "feedback" | undefined = kind === "feedback" ? "feedback" : port ? "in" : undefined;
       const existing = state.edges.find((e) => e.source === action.source && e.target === action.target);
       if (existing) {
         // One edge per pair: re-wire it to the new ports. The new port decides routing, so a custom condition goes.
@@ -80,7 +84,7 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
           ...(port ? { port } : {}),
           ...(input ? { input } : {}),
         };
-        const rewired: FlowEdge = { ...existing, sourceHandle: port ?? CUSTOM_HANDLE, targetHandle: input ?? "in", data };
+        const rewired: FlowEdge = { ...existing, sourceHandle: port ?? CUSTOM_HANDLE, targetHandle: "in", data };
         return { ...state, edges: state.edges.map((e) => (e.id === existing.id ? rewired : e)) };
       }
       const id = `${action.source}->${action.target}`;
@@ -89,7 +93,7 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
         source: action.source,
         target: action.target,
         sourceHandle: port ?? CUSTOM_HANDLE,
-        targetHandle: input ?? "in",
+        targetHandle: "in",
         type: "handoff",
         data: { on: "passed", loop: false, priority: 0, ...(port ? { port } : {}), ...(input ? { input } : {}) },
       };

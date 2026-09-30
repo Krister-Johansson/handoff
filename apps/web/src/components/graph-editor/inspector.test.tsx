@@ -12,7 +12,7 @@ const graph: FlowGraph = {
     { id: "gate", type: "handoff", position: { x: 600, y: 0 }, data: { nodeType: "human_gate", label: "Gate", isStart: false, config: {} } },
   ],
   edges: [
-    { id: "reviewer->planner", source: "reviewer", target: "planner", sourceHandle: "changes", targetHandle: "feedback", type: "handoff", data: { on: "passed", loop: false, priority: 0, port: "changes", input: "feedback" } },
+    { id: "reviewer->planner", source: "reviewer", target: "planner", sourceHandle: "changes", targetHandle: "in", type: "handoff", data: { on: "passed", loop: false, priority: 0, port: "changes", input: "feedback" } },
   ],
 };
 
