@@ -66,6 +66,33 @@ test("enabled skills are written as SKILL.md under the staging dir and passed wi
   expect(coder?.payload).toMatchObject({ skills: [{ name: "tdd", version: 1 }] });
 });
 
+test("a node with skills may call the Skill tool, since the CLI denies tools it does not list", async () => {
+  await upsertSkill(db, { name: "tdd", description: "Test first", body: "Write the failing test first." });
+  const seen: Seen[] = [];
+  await startRun(db, graphWithLibrary({ skills: ["tdd"] }));
+  await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)]))));
+  expect(seen[0]!.request.allowedTools).toContain("Skill");
+  expect(seen[0]!.request.allowedTools).not.toContain("Agent");
+});
+
+test("a node with agents may call the Agent tool", async () => {
+  await upsertAgent(db, { name: "explorer", description: "Reads code", prompt: "Explore." });
+  const seen: Seen[] = [];
+  await startRun(db, graphWithLibrary({ agents: ["explorer"] }));
+  await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)]))));
+  expect(seen[0]!.request.allowedTools).toContain("Agent");
+  expect(seen[0]!.request.allowedTools).not.toContain("Skill");
+});
+
+test("a node without skills or agents gets neither tool", async () => {
+  await upsertMcpServer(db, { name: "docs", transport: "http", url: "https://mcp.example.com" });
+  const seen: Seen[] = [];
+  await startRun(db, graphWithLibrary({ mcp: ["docs"] }));
+  await drain(engineDeps(db, registry(new FakeCliExecutor([capture(seen, outputs.coderDone)]))));
+  expect(seen[0]!.request.allowedTools).not.toContain("Skill");
+  expect(seen[0]!.request.allowedTools).not.toContain("Agent");
+});
+
 test("a project's default library is added to every CLI node, next to what the node enables", async () => {
   await upsertSkill(db, { name: "tdd", description: "Test first", body: "Write the failing test first." });
   await upsertSkill(db, { name: "ci-triage", description: "Triage CI", body: "Read the logs." });

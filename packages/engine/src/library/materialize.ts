@@ -121,5 +121,8 @@ export async function materializeLibrary(
       ]),
     );
   }
+  // The CLI runs without permission prompts and denies unlisted tools, so staged skills and agents need their tools.
+  if (found.skills.length) result.allowedTools.push("Skill");
+  if (found.agents.length) result.allowedTools.push("Agent");
   return result;
 }
