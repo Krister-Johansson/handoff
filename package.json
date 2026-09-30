@@ -9,7 +9,6 @@
   "scripts": {
     "dev:web": "pnpm --filter @handoff/web dev",
     "dev:worker": "pnpm --filter @handoff/worker dev",
-    "dev:tunnel": "ngrok http --url=$NGROK_URL 3000",
     "handoff": "pnpm --filter @handoff/worker handoff",
     "db:up": "docker compose up -d --wait",
     "db:down": "docker compose down",
@@ -27,7 +26,8 @@
     "doctor:react": "cd apps/web && npx -y react-doctor@latest .",
     "demo": "pnpm --filter @handoff/worker demo",
     "docker:runner": "docker build -f docker/runner.Dockerfile -t handoff-runner:2.1.285 docker",
-    "demo:reset": "pnpm --filter @handoff/worker demo --reset"
+    "demo:reset": "pnpm --filter @handoff/worker demo --reset",
+    "dev:webhooks": "sh scripts/forward-webhooks.sh"
   },
   "devDependencies": {
     "@types/node": "24.19.0",

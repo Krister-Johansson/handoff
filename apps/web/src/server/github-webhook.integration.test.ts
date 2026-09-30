@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, listEventsAfter, nodeExecutions, webhookDeliveries } from "@handoff/db";
+import { eq, listEventsAfter, nodeExecutions, projects, runs, webhookDeliveries } from "@handoff/db";
 import { createTestDb, seedExecution, seedRun, truncateAll } from "@handoff/db/testing";
 import { signPayload } from "@handoff/github/testing";
 import { handleGitHubWebhook } from "./github-webhook.ts";
@@ -63,4 +63,16 @@ test("webhook route stores a delivery once and returns 200 on redelivery", async
 test("webhook route accepts events that match no execution", async () => {
   const response = await handleGitHubWebhook(db, request("push", { repository: { id: 42 } }, { delivery: "d-2" }), secret);
   expect(response.status).toBe(202);
+});
+
+test("a check event without pull requests wakes the PR node of the run on that branch", async () => {
+  const { run, project } = await seedRun(db, { status: "waiting" });
+  await db.update(projects).set({ repoId: 42 }).where(eq(projects.id, project.id));
+  await db.update(runs).set({ prNumber: 7, branchName: "handoff/fix-1" }).where(eq(runs.id, run.id));
+  const execution = await seedExecution(db, run.id, { nodeKey: "pr", nodeType: "pr", executorKind: "github", status: "waiting", waitKey: "gh:pr:42:7" });
+  const payload = { action: "completed", repository: { id: 42 }, check_suite: { head_sha: "abc", head_branch: "handoff/fix-1", pull_requests: [] } };
+  const response = await handleGitHubWebhook(db, request("check_suite", payload, { delivery: "d-9" }), secret);
+  expect(response.status).toBe(202);
+  const [row] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.id, execution.id));
+  expect(row?.status).toBe("pending");
 });
