@@ -27,10 +27,23 @@ describe("graph editor state", () => {
     expect(documentOf(state).edges.find((e) => e.key === "reviewer-1->planner")!.attributes).toMatchObject({ port: "changes", input: "feedback" });
   });
 
-  test("connecting the same pair twice gets a unique edge key", () => {
-    let state = editorReducer(initial(), { type: "connect", source: "coder", target: "pr" });
-    state = editorReducer(state, { type: "connect", source: "coder", target: "pr" });
-    expect(state.edges.filter((e) => e.source === "coder" && e.target === "pr").map((e) => e.id)).toEqual(["coder->pr", "coder->pr-2", "coder->pr-3"]);
+  test("connecting two nodes that already have an edge re-wires that edge to the new ports, keeping its settings", () => {
+    let state = editorReducer(initial(), { type: "addNode", nodeType: "human_gate", position: { x: 0, y: 0 } });
+    state = editorReducer(state, { type: "connect", source: "human_gate-1", target: "coder", sourceHandle: "approve", targetHandle: "feedback" });
+    state = editorReducer(state, { type: "updateEdge", id: "human_gate-1->coder", patch: { maxAttempts: 5 } });
+    state = editorReducer(state, { type: "connect", source: "human_gate-1", target: "coder", sourceHandle: "changes", targetHandle: "in" });
+    const edges = state.edges.filter((e) => e.source === "human_gate-1" && e.target === "coder");
+    expect(edges).toHaveLength(1);
+    expect(edges[0]).toMatchObject({ id: "human_gate-1->coder", sourceHandle: "changes", targetHandle: "in", data: { port: "changes", input: "in", maxAttempts: 5 } });
+  });
+
+  test("switching a gate to answering a question moves its approve edges to answered, and back", () => {
+    let state = editorReducer(initial(), { type: "addNode", nodeType: "human_gate", position: { x: 0, y: 0 } });
+    state = editorReducer(state, { type: "connect", source: "human_gate-1", target: "coder", sourceHandle: "approve", targetHandle: "feedback" });
+    state = editorReducer(state, { type: "updateNode", id: "human_gate-1", patch: { config: { mode: "question" } } });
+    expect(state.edges.find((e) => e.id === "human_gate-1->coder")).toMatchObject({ sourceHandle: "answered", data: { port: "answered", input: "feedback" } });
+    state = editorReducer(state, { type: "updateNode", id: "human_gate-1", patch: { config: { mode: "approval" } } });
+    expect(state.edges.find((e) => e.id === "human_gate-1->coder")).toMatchObject({ sourceHandle: "approve", data: { port: "approve" } });
   });
 
   test("updating an edge to a loop with attempts is reflected in the document and validation", () => {
