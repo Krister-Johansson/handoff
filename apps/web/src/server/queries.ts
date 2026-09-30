@@ -1,5 +1,6 @@
-import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
+import { and, asc, desc, edgeTraversals, eq, graphs, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
 import type { RunFilter } from "../lib/run-filter.ts";
+import { loopEdgeKeys } from "../lib/sent-back.ts";
 import type { StreamedEvent } from "./events-stream";
 
 /** Newest first, optionally narrowed to a status ("active" covers queued, running and waiting) and a project name. */
@@ -74,7 +75,20 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
     nodeExecutionId: e.nodeExecutionId,
     createdAt: e.createdAt.toISOString(),
   }));
-  return { ...run, executions, events, graph: version, openQuestions, failed };
+  // A node that passed and then took a loop edge sent its work back; it reads as sent back, not passed.
+  const loops = [...loopEdgeKeys(version?.document)];
+  const sentBack = loops.length
+    ? new Set(
+        (
+          await db
+            .select({ id: edgeTraversals.fromExecutionId })
+            .from(edgeTraversals)
+            .where(and(eq(edgeTraversals.runId, runId), inArray(edgeTraversals.edgeKey, loops)))
+        ).map((t) => t.id),
+      )
+    : new Set<string>();
+  const shown = executions.map((e) => (e.status === "passed" && sentBack.has(e.id) ? { ...e, status: "sent_back" as const } : e));
+  return { ...run, executions: shown, events, graph: version, openQuestions, failed };
 }
 
 /** One execution of a run with what it produced, for the run page's node details. */

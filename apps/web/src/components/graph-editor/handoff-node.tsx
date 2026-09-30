@@ -55,7 +55,7 @@ function NodeBadges({ id, data }: { id: string; data: HandoffNodeData }) {
           {issues.length === 1 ? "issue" : `${issues.length} issues`}
         </Badge>
       )}
-      {status && <StatusBadge status={status} label={data.attempts && data.attempts > 1 ? `${status} ×${data.attempts}` : status} />}
+      {status && <StatusBadge status={status} label={`${status.replaceAll("_", " ")}${data.attempts && data.attempts > 1 ? ` ×${data.attempts}` : ""}`} />}
     </div>
   );
 }
