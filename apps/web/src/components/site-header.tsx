@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { AttentionNotifier } from "@/components/attention-notifier";
 import { InboxLink } from "@/components/inbox-link";
 import { WorkerStatus } from "@/components/worker-status";
 
@@ -24,7 +25,8 @@ export function SiteHeader() {
           ))}
           <InboxLink />
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          <AttentionNotifier />
           <WorkerStatus />
         </div>
       </div>
