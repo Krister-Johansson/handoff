@@ -3,8 +3,8 @@ import { createdAt, id, tstz } from "./columns.ts";
 import { nodeExecutions } from "./node-executions.ts";
 import { runs } from "./runs.ts";
 
-/** A comment a person made on a quoted part of what they reviewed. */
-export type QuestionComment = { quote?: string; body: string };
+/** A comment a person made on a quoted part, or on lines of a file, of what they reviewed. */
+export type QuestionComment = { quote?: string; body: string; path?: string; line?: number; endLine?: number; side?: "old" | "new" };
 
 /** A question for a person, asked by a Human gate. Its id is the gate execution's wait token. */
 export const questions = pgTable(

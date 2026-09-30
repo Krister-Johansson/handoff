@@ -74,6 +74,16 @@ test("a question is answered once for the person, and a second answer is refused
   expect(await call("answer_question", { question_id: question!.id, answer: "Apache-2.0" })).toEqual({ error: expect.stringMatching(/already answered/) });
 });
 
+test("a review can be answered with comments on lines of a file", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  const gate = await seedExecution(db, run_id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [question] = await db.insert(questions).values({ runId: run_id, nodeExecutionId: gate.id, question: "Review the code from coder", options: ["approve", "changes"] }).returning();
+  const comment = { path: "src/a.ts", line: 3, endLine: 4, quote: "const a = 1;", body: "Rename this." };
+  expect(await call("answer_question", { question_id: question!.id, answer: "One change.", option: "changes", comments: [comment] })).toMatchObject({ answered: true });
+  const [answered] = await db.select().from(questions).where(eq(questions.id, question!.id));
+  expect(answered?.comments).toEqual([comment]);
+});
+
 test("a failed run is repaired at its failed step, and a run can be cancelled", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.update(nodeExecutions).set({ status: "failed", error: { code: "x", message: "boom" } }).where(eq(nodeExecutions.runId, run_id));

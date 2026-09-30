@@ -223,9 +223,17 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
         answer: z.string().min(1),
         option: z.string().optional().describe("One of the question's options, when it has them: approve or changes for a review"),
         comments: z
-          .array(z.object({ quote: z.string().optional().describe("The passage the comment is about"), body: z.string() }))
+          .array(
+            z.object({
+              quote: z.string().optional().describe("The passage or code the comment is about"),
+              body: z.string(),
+              path: z.string().optional().describe("For a code review: the file"),
+              line: z.number().int().positive().optional().describe("For a code review: the first line, in the new file"),
+              endLine: z.number().int().positive().optional().describe("For a code review: the last line, when the comment covers several"),
+            }),
+          )
           .optional()
-          .describe("For a review: comments on quoted passages, sent back with changes"),
+          .describe("For a review: comments on quoted passages or on lines of files"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },

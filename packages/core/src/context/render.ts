@@ -1,7 +1,21 @@
 export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined };
 
 /** A comment on code (path and line) or on a quoted part of a text such as a plan. */
-export type ReviewComment = { author: string; path?: string | undefined; line?: number | undefined; quote?: string | undefined; body: string; resolved: boolean };
+export type ReviewComment = {
+  author: string;
+  path?: string | undefined;
+  line?: number | undefined;
+  endLine?: number | undefined;
+  quote?: string | undefined;
+  body: string;
+  resolved: boolean;
+};
+
+type Place = { path?: string | undefined; line?: number | undefined; endLine?: number | undefined };
+
+/** Where a comment points: `src/a.ts:3-4`, `src/a.ts:3`, `src/a.ts`, or nothing. */
+const placeOf = (c: Place) => (c.path ? `${c.path}${c.line !== undefined ? `:${c.line}${c.endLine !== undefined && c.endLine !== c.line ? `-${c.endLine}` : ""}` : ""}` : "");
+const quoted = (q: string) => `"${q.replace(/\s+/g, " ").trim()}"`;
 
 export type ContextPacket = {
   task: string;
@@ -13,7 +27,7 @@ export type ContextPacket = {
   /** The step's own instructions from the graph, on top of its built-in role. */
   instructions?: string;
   /** What people decided at review gates earlier in the run: binding for every later step. */
-  decisions?: { gate: string; note?: string | undefined; comments: { quote?: string | undefined; body: string }[] }[];
+  decisions?: { gate: string; note?: string | undefined; comments: ({ quote?: string | undefined; body: string } & Place)[] }[];
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
   suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
   issues?: { number: number; title: string; url: string; body: string }[];
@@ -42,7 +56,11 @@ export function renderContextPacket(packet: ContextPacket): string {
     );
     for (const decision of packet.decisions) {
       if (decision.note) out.push(`- ${decision.note}`);
-      for (const c of decision.comments) out.push(c.quote ? `- On "${c.quote.replace(/\s+/g, " ").trim()}": ${c.body}` : `- ${c.body}`);
+      for (const c of decision.comments) {
+        const place = placeOf(c);
+        const on = c.quote ? `${place ? `${place} on` : "On"} ${quoted(c.quote)}: ` : place ? `${place}: ` : "";
+        out.push(`- ${on}${c.body}`);
+      }
     }
     out.push("");
   }
@@ -108,8 +126,8 @@ export function renderContextPacket(packet: ContextPacket): string {
     if (open.length) {
       out.push("## Review comments", "");
       for (const c of open) {
-        const where = c.path ? `${c.path}${c.line !== undefined ? `:${c.line}` : ""} - ` : "";
-        const quote = c.quote ? ` on "${c.quote.replace(/\s+/g, " ").trim()}"` : "";
+        const where = c.path ? `${placeOf(c)} - ` : "";
+        const quote = c.quote ? ` on ${quoted(c.quote)}` : "";
         out.push(`- ${where}${c.author}${quote}: ${c.body}`);
       }
       out.push("");
