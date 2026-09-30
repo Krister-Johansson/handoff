@@ -26,6 +26,7 @@ export type McpServerInput = {
   env?: Record<string, string>;
   headers?: Record<string, string>;
   tools?: string[];
+  auth?: "headers" | "oauth";
 };
 export type AgentInput = { name: string; description: string; prompt: string; tools?: string[]; model?: string | null };
 
@@ -56,6 +57,7 @@ export async function upsertMcpServer(db: DbExecutor, input: McpServerInput): Pr
     env: input.env ?? {},
     headers: input.headers ?? {},
     tools: input.tools ?? [],
+    auth: input.auth ?? "headers",
   };
   const [row] = await db
     .insert(libraryMcpServers)

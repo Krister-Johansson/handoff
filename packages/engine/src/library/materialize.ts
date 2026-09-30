@@ -3,6 +3,7 @@ import { dirname, join, normalize } from "node:path";
 import type { AgentDefinition } from "@handoff/cli-adapter";
 import { renderSkillMarkdown, type LibrarySelection } from "@handoff/core";
 import { getLibraryByNames, type DbExecutor, type McpServerRow } from "@handoff/db";
+import { defaultOAuthDir, mcpAccessToken, McpOAuthStore } from "./mcp-oauth.ts";
 
 export class LibraryUnavailableError extends Error {}
 
@@ -36,26 +37,40 @@ export function resolveSecrets(values: Record<string, string>, secrets: Record<s
   );
 }
 
-function mcpEntry(server: McpServerRow, secrets: Record<string, string | undefined>, missing: Set<string>) {
+async function mcpEntry(server: McpServerRow, secrets: Record<string, string | undefined>, missing: Set<string>, oauth: McpOAuthStore) {
   const env = resolveSecrets(server.env, secrets, missing);
   const headers = resolveSecrets(server.headers, secrets, missing);
   if (server.transport === "stdio") {
     return { type: "stdio", command: server.command ?? "", args: server.args, ...(Object.keys(env).length ? { env } : {}) };
   }
+  if (server.auth === "oauth") {
+    // The token only lands in the staged mcp.json, which is removed with the staging dir.
+    headers.Authorization = `Bearer ${await mcpAccessToken(oauth, { name: server.name, serverUrl: server.url ?? "" })}`;
+  }
   return { type: "http", url: server.url ?? "", ...(Object.keys(headers).length ? { headers } : {}) };
+}
+
+async function mcpEntries(servers: McpServerRow[], secrets: Record<string, string | undefined>, oauth: McpOAuthStore) {
+  const missing = new Set<string>();
+  const results = await Promise.allSettled(servers.map(async (server) => [server.name, await mcpEntry(server, secrets, missing, oauth)] as const));
+  if (missing.size) throw new LibraryUnavailableError(`missing secrets for MCP servers: ${[...missing].join(", ")}`);
+  const failed = results.flatMap((r) => (r.status === "rejected" ? [(r.reason as Error).message] : []));
+  if (failed.length) throw new LibraryUnavailableError(failed.join("; "));
+  return Object.fromEntries(results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])));
 }
 
 
 /**
  * Writes the node's enabled library entries into its staging dir: skills under
  * <staging>/library/.claude/skills (passed with --add-dir), MCP servers into <staging>/mcp.json with
- * secrets resolved from the worker environment, and agents as --agents definitions.
+ * secrets resolved from the worker environment and OAuth tokens from the OAuth store, and agents as --agents definitions.
  */
 export async function materializeLibrary(
   db: DbExecutor,
   selection: LibrarySelection,
   stagingDir: string,
   secrets: Record<string, string | undefined>,
+  oauth: McpOAuthStore = new McpOAuthStore(defaultOAuthDir()),
 ): Promise<MaterializedLibrary> {
   const found = await getLibraryByNames(db, selection);
   if (found.missing.length) throw new LibraryUnavailableError(`not in the library: ${found.missing.join(", ")}`);
@@ -89,9 +104,7 @@ export async function materializeLibrary(
   }
 
   if (found.mcp.length) {
-    const missing = new Set<string>();
-    const mcpServers = Object.fromEntries(found.mcp.map((server) => [server.name, mcpEntry(server, secrets, missing)]));
-    if (missing.size) throw new LibraryUnavailableError(`missing secrets for MCP servers: ${[...missing].join(", ")}`);
+    const mcpServers = await mcpEntries(found.mcp, secrets, oauth);
     const path = join(stagingDir, "mcp.json");
     mkdirSync(stagingDir, { recursive: true });
     writeFileSync(path, JSON.stringify({ mcpServers }, null, 2), { mode: 0o600 });

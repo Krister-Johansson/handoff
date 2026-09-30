@@ -56,7 +56,7 @@ function TextField({
   );
 }
 
-export type McpServerValues = { name: string; transport: "stdio" | "http"; command: string | null; args: string[]; url: string | null; env: Record<string, string>; headers: Record<string, string>; tools: string[] };
+export type McpServerValues = { name: string; transport: "stdio" | "http"; auth: "headers" | "oauth"; command: string | null; args: string[]; url: string | null; env: Record<string, string>; headers: Record<string, string>; tools: string[] };
 export type AgentValues = { name: string; description: string; prompt: string; tools: string[]; model: string | null };
 
 const pairLines = (values: Record<string, string>, separator: string) =>
@@ -81,6 +81,7 @@ export function McpServerForm({ initial }: { initial?: McpServerValues }) {
   const [, startTest] = useTransition();
   const [tools, setTools] = useState(state.values?.tools ?? initial?.tools.join(", ") ?? "");
   const transport = state.values?.transport ?? initial?.transport ?? "stdio";
+  const [auth, setAuth] = useState(state.values?.auth ?? initial?.auth ?? "headers");
   return (
     <form action={action}>
       <FieldGroup>
@@ -95,6 +96,14 @@ export function McpServerForm({ initial }: { initial?: McpServerValues }) {
         <TextField name="command" label="Command" state={state} placeholder="npx" description="For stdio servers." defaultValue={initial?.command ?? ""} />
         <TextField name="args" label="Arguments" state={state} multiline rows={3} placeholder={"-y\n@example/docs-mcp"} description="One per line." defaultValue={initial?.args.join("\n")} />
         <TextField name="url" label="URL" state={state} placeholder="https://mcp.example.com" description="For http servers." defaultValue={initial?.url ?? ""} />
+        <Field>
+          <FieldLabel htmlFor="field-auth">Authentication</FieldLabel>
+          <NativeSelect id="field-auth" name="auth" value={auth} onChange={(e) => setAuth(e.target.value)}>
+            <NativeSelectOption value="headers">Headers (API key or token)</NativeSelectOption>
+            <NativeSelectOption value="oauth">OAuth sign-in</NativeSelectOption>
+          </NativeSelect>
+          <FieldDescription>For http servers. With OAuth sign-in, save the server, then sign in on its page; runs send the token as an Authorization header.</FieldDescription>
+        </Field>
         <TextField
           name="env"
           label="Environment"
@@ -140,7 +149,7 @@ export function McpServerForm({ initial }: { initial?: McpServerValues }) {
           <Status state={state} />
         </Field>
         {tested.errors && <FieldError>{Object.values(tested.errors).join(" ")}</FieldError>}
-        {tested.check && <McpCheckResult key={tested.check.checkedAt} check={tested.check} onAllow={(names) => setTools(names.join(", "))} />}
+        {tested.check && <McpCheckResult key={tested.check.checkedAt} check={tested.check} onAllow={(names) => setTools(names.join(", "))} onUseOAuth={() => setAuth("oauth")} />}
       </FieldGroup>
     </form>
   );

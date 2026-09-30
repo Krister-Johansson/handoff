@@ -30,6 +30,12 @@ test("an MCP server stores secret references, not values", async () => {
   expect(server.env).toEqual({ TOKEN: "${secret:MCP_GH_TOKEN}" });
 });
 
+test("an http MCP server signs in with OAuth or sends headers, headers by default", async () => {
+  expect((await upsertMcpServer(db, { name: "plain", transport: "http", url: "https://example.com/mcp" })).auth).toBe("headers");
+  const oauth = await upsertMcpServer(db, { name: "context7", transport: "http", url: "https://mcp.context7.com/mcp/oauth", auth: "oauth" });
+  expect(oauth.auth).toBe("oauth");
+});
+
 test("deleting an entry removes it", async () => {
   await upsertSkill(db, { name: "tdd", description: "d", body: "b" });
   await deleteLibraryEntry(db, "skill", "tdd");

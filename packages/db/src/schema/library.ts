@@ -2,6 +2,8 @@ import { integer, jsonb, pgEnum, pgTable, text } from "drizzle-orm/pg-core";
 import { createdAt, id, updatedAt } from "./columns.ts";
 
 export const mcpTransport = pgEnum("mcp_transport", ["stdio", "http"]);
+/** How handoff authenticates to an http server: headers it sends, or an OAuth sign-in from the dashboard. */
+export const mcpAuth = pgEnum("mcp_auth", ["headers", "oauth"]);
 
 /** A SKILL.md (plus supporting files) that nodes can enable by name. */
 export const librarySkills = pgTable("library_skills", {
@@ -41,6 +43,8 @@ export const libraryMcpServers = pgTable("library_mcp_servers", {
   url: text("url"),
   env: jsonb("env").$type<Record<string, string>>().notNull().default({}),
   headers: jsonb("headers").$type<Record<string, string>>().notNull().default({}),
+  /** OAuth tokens are never stored here; they live in the worker's OAuth store (see @handoff/engine mcp-oauth). */
+  auth: mcpAuth("auth").notNull().default("headers"),
   /** Tool names to allow; empty means every tool of the server (mcp__<name>__*). */
   tools: jsonb("tools").$type<string[]>().notNull().default([]),
   /** The latest connection check of this configuration; cleared when the server is saved again. */
