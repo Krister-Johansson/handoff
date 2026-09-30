@@ -27,7 +27,8 @@ test("the drawer shows what the agent thought, said and ran, with each command's
   render(<ExecutionActivity runId="r1" executionId="e1" live={[]} />);
   expect(await screen.findByText("Reading the docs first.")).toBeInTheDocument();
   expect(screen.getByText("The docs want a temp dir.")).toBeInTheDocument();
-  expect(screen.getByText("pnpm test")).toBeInTheDocument();
+  // Tool calls fold into one step; opening it shows each call, and opening a call its output.
+  fireEvent.click(screen.getByText("Ran a command"));
   fireEvent.click(screen.getByText("pnpm test"));
   expect(screen.getByText("✓")).toBeInTheDocument();
   expect(screen.getByText(/claude-fable-5-1/)).toBeInTheDocument();
