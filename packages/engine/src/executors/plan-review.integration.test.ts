@@ -148,3 +148,31 @@ test("what a person decided at a gate reaches every later step, so a reviewer ca
   expect(secondReview.systemPrompt).toContain('- On "JSON file": Use SQLite instead.');
   expect(secondReview.systemPrompt).toContain("One change.");
 });
+
+test("a note written with an approval is a decision the coder keeps to", async () => {
+  const cli = new FakeCliExecutor([{ output: plan }]);
+  const { run } = await startRun(db, reviewGraph, "Build a todo app");
+  const agent = cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 });
+  const deps = engineDeps(db, { planner: agent, coder: agent, human_gate: humanGateExecutor({ db }) });
+  await drain(deps);
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  cli.push({ output: outputs.coderDone });
+  await answerQuestion(db, question!.id, { answer: "Approved, but add a smoke test.", option: "approve", answeredBy: "krister" });
+  await drain(deps);
+  const coder = cli.requests[1]!;
+  expect(coder.systemPrompt).toContain("# Decisions from the person reviewing this run");
+  expect(coder.systemPrompt).toContain("- Approved, but add a smoke test.");
+});
+
+test("a plain approval with the default note adds no decision", async () => {
+  const cli = new FakeCliExecutor([{ output: plan }]);
+  const { run } = await startRun(db, reviewGraph, "Build a todo app");
+  const agent = cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 });
+  const deps = engineDeps(db, { planner: agent, coder: agent, human_gate: humanGateExecutor({ db }) });
+  await drain(deps);
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  cli.push({ output: outputs.coderDone });
+  await answerQuestion(db, question!.id, { answer: "Approved.", option: "approve", answeredBy: "krister" });
+  await drain(deps);
+  expect(cli.requests[1]!.systemPrompt).not.toContain("# Decisions from the person reviewing this run");
+});
