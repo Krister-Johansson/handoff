@@ -10,7 +10,9 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
     "Plan the task in the system prompt. Read the repository as needed but do not edit files. Return the plan, the ordered steps and the paths the change will own.",
   coder: "Implement the task in the system prompt in this repository, following the plan in the run state. Commit your work with git when done.",
   reviewer:
-    "Review the work against the task: the changes on this branch, unless the step's instructions name something else, such as the plan. Do not edit files. Return a verdict and comments.",
+    "Review the work against the task: the changes on this branch, unless the step's instructions name something else, such as the plan. Do not edit files. " +
+    "Return request_changes with one comment per finding that leaves the work wrong or incomplete against the task. " +
+    "Approve only when you have no such finding; comments you add to an approval reach the later steps as suggestions.",
 };
 
 const modelOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.node.config.model === "string" ? ctx.node.config.model : options.model);

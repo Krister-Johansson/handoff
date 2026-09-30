@@ -76,3 +76,16 @@ test("a person's comments on a quoted part of the plan are shown with the quote"
   expect(md).toContain("- person on \"Use a JSON file for storage\": Use SQLite instead.");
   expect(md).toContain("changes: Close, a few fixes.");
 });
+
+test("suggestions a reviewer left with an approval follow the person's decisions", () => {
+  const md = renderContextPacket({
+    ...packet,
+    decisions: [{ gate: "gate", note: "Use SQLite.", comments: [] }],
+    suggestions: [{ from: "reviewer", comments: [{ path: "docs/features.md", line: 14, body: "Keep the t3env schema empty." }, { body: "Say in the PR that db:seed fails until F04." }] }],
+  });
+  const headings = md.split("\n").filter((l) => l.startsWith("# "));
+  expect(headings.indexOf("# Suggestions from reviewers")).toBe(headings.indexOf("# Decisions from the person reviewing this run") + 1);
+  expect(md).toContain("- docs/features.md:14 - reviewer: Keep the t3env schema empty.");
+  expect(md).toContain("- reviewer: Say in the PR that db:seed fails until F04.");
+  expect(md).toMatch(/decisions from the person take precedence/i);
+});

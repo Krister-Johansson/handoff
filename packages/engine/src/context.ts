@@ -72,6 +72,23 @@ function decisionsOf(state: RunState): NonNullable<ContextPacket["decisions"]> {
   }));
 }
 
+/**
+ * Comments that came with an approval, from any other step whose latest output approves: advice the
+ * run would otherwise drop, since only request_changes sends comments back. Recognised by shape.
+ */
+function suggestionsOf(state: RunState, self: string): NonNullable<ContextPacket["suggestions"]> {
+  return Object.entries(state.nodes).flatMap(([key, result]) => {
+    const o = obj(result.output);
+    if (key === self || o.verdict !== "approve" || !Array.isArray(o.comments) || o.comments.length === 0) return [];
+    const comments = o.comments.map(obj).map((c) => ({
+      ...(typeof c.path === "string" ? { path: c.path } : {}),
+      ...(typeof c.line === "number" ? { line: c.line } : {}),
+      body: String(c.body ?? ""),
+    }));
+    return [{ from: key, comments }];
+  });
+}
+
 /** What the node is allowed to believe: a slice of run state, owned paths, and why it is running again. */
 export function selectContext(node: CompiledNode, state: RunState, execution: NodeExecutionRow): ContextPacket {
   const selector = node.contextSelector;
@@ -92,6 +109,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     outputContract: node.contract.output,
     ...(typeof node.config.instructions === "string" && node.config.instructions.trim() ? { instructions: node.config.instructions.trim() } : {}),
     ...(decisionsOf(state).length ? { decisions: decisionsOf(state) } : {}),
+    ...(suggestionsOf(state, node.key).length ? { suggestions: suggestionsOf(state, node.key) } : {}),
     ...(state.issues?.length ? { issues: state.issues } : {}),
   };
 

@@ -14,6 +14,8 @@ export type ContextPacket = {
   instructions?: string;
   /** What people decided at review gates earlier in the run: binding for every later step. */
   decisions?: { gate: string; note?: string | undefined; comments: { quote?: string | undefined; body: string }[] }[];
+  /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
+  suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
   issues?: { number: number; title: string; url: string; body: string }[];
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
@@ -41,6 +43,18 @@ export function renderContextPacket(packet: ContextPacket): string {
     for (const decision of packet.decisions) {
       if (decision.note) out.push(`- ${decision.note}`);
       for (const c of decision.comments) out.push(c.quote ? `- On "${c.quote.replace(/\s+/g, " ").trim()}": ${c.body}` : `- ${c.body}`);
+    }
+    out.push("");
+  }
+  if (packet.suggestions?.length) {
+    out.push(
+      "# Suggestions from reviewers",
+      "",
+      "A reviewer approved earlier work in this run and left these suggestions. Apply the ones that fit this step. Decisions from the person take precedence.",
+      "",
+    );
+    for (const s of packet.suggestions) {
+      for (const c of s.comments) out.push(`- ${c.path ? `${c.path}${c.line !== undefined ? `:${c.line}` : ""} - ` : ""}${s.from}: ${c.body}`);
     }
     out.push("");
   }
