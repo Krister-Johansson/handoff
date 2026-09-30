@@ -70,6 +70,12 @@ describe("compileGraph", () => {
     expect(codes(compileGraph(doc))).toContain("missing_start_node");
   });
 
+  test("compileGraph says an empty graph has no start node yet, and does not compile it", () => {
+    const result = compileGraph({ attributes: { startNode: "" }, nodes: [], edges: [] });
+    expect(result.ok).toBe(false);
+    expect(result.ok ? [] : result.errors).toEqual([{ code: "missing_start_node", message: "The graph has no start node yet. Add a node; the first one becomes the start." }]);
+  });
+
   test("compileGraph rejects a node unreachable from the start node", () => {
     const doc = clone();
     doc.nodes.push({ key: "orphan", attributes: { type: "tester", label: "Orphan", x: 0, y: 200 } });

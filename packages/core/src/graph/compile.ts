@@ -157,7 +157,9 @@ export function compileGraph(input: unknown): CompileResult {
   }
 
   const startNode = document.attributes.startNode;
-  if (!graph.hasNode(startNode)) {
+  if (!startNode) {
+    errors.push({ code: "missing_start_node", message: "The graph has no start node yet. Add a node; the first one becomes the start." });
+  } else if (!graph.hasNode(startNode)) {
     errors.push({ code: "missing_start_node", message: `start node ${startNode} does not exist`, nodeKey: startNode });
   } else {
     const reached = new Set<string>();
