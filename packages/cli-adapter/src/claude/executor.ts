@@ -32,7 +32,8 @@ export class ClaudeCliExecutor implements CliExecutor {
 
     const argv = buildClaudeArgv({
       prompt: request.prompt,
-      jsonSchema: z.toJSONSchema(request.contract),
+      // Draft-07: the Claude CLI's validator rejects the 2020-12 $schema that Zod emits by default.
+      jsonSchema: z.toJSONSchema(request.contract, { target: "draft-7" }),
       allowedTools: request.allowedTools,
       maxTurns: request.maxTurns,
       systemPromptFile,
