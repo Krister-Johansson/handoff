@@ -8,8 +8,34 @@ import { Button } from "@/components/ui/button";
 
 const RESULT = { unchanged: "Already up to date with skills.sh.", updated: "Updated from skills.sh.", imported: "Imported." };
 
-/** Where an imported skill came from, with a check against skills.sh for a newer version. */
-export function SkillSource({ id }: { id: string }) {
+/** github.com/owner/repo, or the skill's folder in it for a skill below the repository root. */
+function githubHref(id: string) {
+  const [owner, repo, ...folder] = id.split("/");
+  return folder.length ? `https://github.com/${owner}/${repo}/tree/HEAD/${folder.join("/")}` : `https://github.com/${owner}/${repo}`;
+}
+
+/**
+ * Where an imported skill came from. A skills.sh skill can be checked for a newer version; a skill
+ * from a GitHub repository is updated by importing the repository again.
+ */
+export function SkillSource({ source }: { source: { registry: "skills.sh" | "github"; id: string } }) {
+  if (source.registry === "github") {
+    return (
+      <Alert>
+        <AlertTitle>
+          Imported from{" "}
+          <a href={githubHref(source.id)} className="font-mono underline-offset-4 hover:underline">
+            github.com/{source.id}
+          </a>
+        </AlertTitle>
+        <AlertDescription>Importing the repository again updates this skill and replaces edits made here.</AlertDescription>
+      </Alert>
+    );
+  }
+  return <SkillsShSource id={source.id} />;
+}
+
+function SkillsShSource({ id }: { id: string }) {
   const [state, action, pending] = useActionState(importSkillAction, {} as ImportState);
   return (
     <Alert>

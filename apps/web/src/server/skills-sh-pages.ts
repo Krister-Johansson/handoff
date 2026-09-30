@@ -68,3 +68,49 @@ export function parseRepoPage(html: string, repo: string): { id: string; skillId
   if (skills.length === 0) throw new Error(`skills.sh lists no skills for ${repo}`);
   return skills;
 }
+
+export type SkillPageDetails = {
+  summary?: string;
+  points: string[];
+  installs?: number;
+  repository?: string;
+  githubStars?: number;
+  firstSeen?: string;
+  audits: { name: string; result: string }[];
+};
+
+const AUDIT_RESULT = /^(pass|passed|fail|failed|warn|warning|critical|high|medium|low|safe|unknown|error)$/i;
+
+/**
+ * What skills.sh shows about one skill: its summary and key points, installs, repository, GitHub stars,
+ * first seen date and security audits. Sections the page does not have are left out.
+ */
+export function parseSkillPage(html: string): SkillPageDetails {
+  const lines = pieces(html.replace(/<script\b.*?<\/script>/gs, "").replace(/<head\b.*?<\/head>/gs, ""));
+  const at = (label: string) => lines.indexOf(label);
+  const after = (label: string) => (at(label) >= 0 ? lines[at(label) + 1] : undefined);
+  const details: SkillPageDetails = { points: [], audits: [] };
+
+  const summaryAt = at("Summary");
+  if (summaryAt >= 0) {
+    details.summary = lines[summaryAt + 1]!;
+    const end = lines.indexOf("SKILL.md", summaryAt);
+    details.points = lines.slice(summaryAt + 2, end > summaryAt ? end : summaryAt + 2);
+  }
+  const installs = parseCount(after("Installs") ?? "");
+  if (installs !== undefined) details.installs = installs;
+  const repository = after("Repository");
+  if (repository && /^[\w.-]+\/[\w.-]+$/.test(repository)) details.repository = repository;
+  const stars = parseCount(after("GitHub Stars") ?? "");
+  if (stars !== undefined) details.githubStars = stars;
+  const firstSeen = after("First Seen");
+  if (firstSeen) details.firstSeen = firstSeen;
+
+  const auditsAt = at("Security Audits");
+  if (auditsAt >= 0) {
+    for (let i = auditsAt + 1; i + 1 < lines.length && AUDIT_RESULT.test(lines[i + 1]!); i += 2) {
+      details.audits.push({ name: lines[i]!, result: lines[i + 1]! });
+    }
+  }
+  return details;
+}

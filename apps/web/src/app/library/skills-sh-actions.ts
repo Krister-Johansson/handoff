@@ -6,6 +6,7 @@ import { listLibraryIndex } from "@handoff/db";
 import { getDb } from "@/lib/db";
 import { importSkill, type ImportResult } from "@/server/skill-import";
 import { SkillsShClient, type SkillsShResult } from "@/server/skills-sh";
+import type { SkillPageDetails } from "@/server/skills-sh-pages";
 import { syncSkillsShRepo, type SyncReport } from "@/server/skills-sh-sync";
 
 export type SkillsShHit = SkillsShResult & { inLibrary: string | null };
@@ -52,6 +53,15 @@ export async function syncRepoAction(_: SyncState, form: FormData): Promise<Sync
     revalidatePath("/library");
     revalidatePath(`/library/skills-sh/${repo}`);
     return { report };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+/** skills.sh's details of one skill, for expanding a row in a repository's list. */
+export async function skillDetailsAction(id: string): Promise<{ details: SkillPageDetails } | { error: string }> {
+  try {
+    return { details: await client.skillDetails(id) };
   } catch (error) {
     return { error: (error as Error).message };
   }
