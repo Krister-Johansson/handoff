@@ -1,4 +1,8 @@
-export type AttentionItem = { id: string; kind: "question" | "failed" | "review"; title: string; body: string; href: string };
+/** Something to tell a person about. A finished run is news, but needs no action, unlike the other kinds. */
+export type AttentionItem = { id: string; kind: "question" | "failed" | "review" | "finished"; title: string; body: string; href: string };
+
+/** Whether an item waits on a person: everything except a run that finished. */
+export const needsAction = (item: AttentionItem) => item.kind !== "finished";
 export type NotifyPrefs = { desktop: boolean; sound: boolean };
 
 const PREFS_KEY = "handoff.notify";

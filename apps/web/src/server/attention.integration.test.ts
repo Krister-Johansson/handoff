@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, questions, runs } from "@handoff/db";
+import { appendEvents, eq, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { listAttention } from "./attention";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
@@ -56,4 +56,19 @@ test("a review at a human gate says what needs approval and links to the review 
   expect(await listAttention(db)).toEqual([
     { id: `question:${question!.id}`, kind: "question", title: "sandbox: the plan from planner needs your approval", body: "Build a todo app", href: `/runs/${run.id}/review/${question!.id}` },
   ]);
+});
+
+test("a run that reached a Finish node with notify on is listed as finished for a day, links to the run and needs no action", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const done = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a truncate helper" });
+  const quiet = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Quiet run" });
+  const old = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Old run" });
+  await db.transaction((tx) => appendEvents(tx, done.id, [{ type: "run.finish", payload: { notify: true } }]));
+  await db.transaction((tx) => appendEvents(tx, quiet.id, [{ type: "run.finish", payload: { notify: false } }]));
+  await db.transaction((tx) => appendEvents(tx, old.id, [{ type: "run.finish", payload: { notify: true } }]));
+  await db.execute(sql`update events set created_at = now() - interval '2 days' where run_id = ${old.id}`);
+  for (const run of [done, quiet, old]) await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, run.id));
+
+  expect(await listAttention(db)).toEqual([{ id: `finished:${done.id}`, kind: "finished", title: "sandbox: run finished", body: "Add a truncate helper", href: `/runs/${done.id}` }]);
 });
