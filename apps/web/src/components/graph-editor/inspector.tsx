@@ -11,10 +11,11 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { ChosenLibrary, LibraryChooser } from "@/components/library/library-chooser";
+import type { LibraryChoices } from "@/lib/library-choices";
 import { PassEnvField } from "./pass-env-field";
 import type { EditorAction } from "./state";
 
-export type LibraryNames = { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
 
 const CLI_TYPES = new Set<NodeType>(["planner", "coder", "reviewer"]);
 
@@ -31,49 +32,32 @@ const csv = (v: string) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-function LibraryPicker({ node, library, dispatch }: { node: FlowNode; library: LibraryNames; dispatch: Dispatch<EditorAction> }) {
+/** The node's skills, MCP servers, agents and groups: badges, and a dialog to choose them. */
+function LibraryPicker({ node, library, dispatch }: { node: FlowNode; library: LibraryChoices; dispatch: Dispatch<EditorAction> }) {
   const selected = {
     skills: node.data.library?.skills ?? [],
     mcp: node.data.library?.mcp ?? [],
     agents: node.data.library?.agents ?? [],
     groups: node.data.library?.groups ?? [],
   };
-  const groups = [
-    { key: "groups" as const, legend: "Groups" },
-    { key: "skills" as const, legend: "Skills" },
-    { key: "mcp" as const, legend: "MCP servers" },
-    { key: "agents" as const, legend: "Subagents" },
-  ];
-  const toggle = (group: keyof LibraryNames, name: string, on: boolean) => {
-    const next = { ...selected, [group]: on ? [...selected[group], name] : selected[group].filter((n) => n !== name) };
-    dispatch({ type: "updateNode", id: node.id, patch: { library: next } });
-  };
+  const set = (library: typeof selected) => dispatch({ type: "updateNode", id: node.id, patch: { library } });
   return (
-    <>
-      {groups.map((group) => (
-        <FieldSet key={group.key}>
-          <FieldLegend variant="label">{group.legend}</FieldLegend>
-          {library[group.key].length === 0 ? (
-            <FieldDescription>None in the library yet.</FieldDescription>
-          ) : (
-            <FieldGroup data-slot="checkbox-group">
-              {library[group.key].map((name) => (
-                <Field key={name} orientation="horizontal">
-                  <Checkbox
-                    id={`lib-${group.key}-${name}`}
-                    checked={selected[group.key].includes(name)}
-                    onCheckedChange={(on) => toggle(group.key, name, on === true)}
-                  />
-                  <FieldLabel htmlFor={`lib-${group.key}-${name}`} className="font-mono text-xs font-normal">
-                    {name}
-                  </FieldLabel>
-                </Field>
-              ))}
-            </FieldGroup>
-          )}
-        </FieldSet>
-      ))}
-    </>
+    <Field>
+      <FieldLabel>Library</FieldLabel>
+      <ChosenLibrary selection={selected} empty="Nothing enabled here." onRemove={(kind, name) => set({ ...selected, [kind]: selected[kind].filter((n) => n !== name) })} />
+      <div>
+        <LibraryChooser
+          available={library}
+          initial={selected}
+          title={`Library for ${node.data.label}`}
+          description="Skills, MCP servers, agents and groups this step gets, on top of the project's default library."
+          onSave={(chosen) => {
+            set(chosen);
+            return true;
+          }}
+        />
+      </div>
+    </Field>
   );
 }
 
@@ -169,7 +153,7 @@ function NodeInspector({
 }: {
   node: FlowNode;
   graph: FlowGraph;
-  library: LibraryNames;
+  library: LibraryChoices;
   dispatch: Dispatch<EditorAction>;
   onSelect: (nodeId: string) => void;
 }) {
@@ -483,7 +467,7 @@ export function Inspector({
 }: {
   graph: FlowGraph;
   selection: { nodeId?: string; edgeId?: string };
-  library: LibraryNames;
+  library: LibraryChoices;
   dispatch: Dispatch<EditorAction>;
   onSelect: (nodeId: string) => void;
 }) {

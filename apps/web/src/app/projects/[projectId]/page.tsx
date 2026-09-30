@@ -18,10 +18,9 @@ import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
 import { parseBacklogFilter, parseProjectTab } from "@/lib/project-tab";
 import { parsePullFilter } from "@/lib/pull-filter";
-import { listLibraryIndex } from "@handoff/db";
 import { getProjectDetail, TEMPLATES } from "@/server/graphs";
 import { DefaultLibrary } from "@/components/projects/default-library";
-import { groupSkillsBySource } from "@/lib/skill-sources";
+import { libraryChoices } from "@/server/library-choices";
 import { isTodo, listBacklog, type BacklogFilter } from "@/server/backlog";
 import { listProjectPulls, type PullFilter } from "@/server/pulls";
 
@@ -148,13 +147,7 @@ async function IssuesTab({ project, graphs, graphName, filter }: { project: Deta
 
 /** The library entries every run of the project gets, picked from the whole library. */
 async function DefaultLibraryCard({ project }: { project: Detail["project"] }) {
-  const { skills, mcp, agents, groups } = await listLibraryIndex(getDb());
-  const available = {
-    skills: groupSkillsBySource(skills).flatMap((g) => g.skills.map((s) => ({ name: s.name, detail: s.description, source: g.repo ?? "Written here" }))),
-    mcp: mcp.map((m) => ({ name: m.name, detail: m.url ?? `${m.command} ${m.args.join(" ")}` })),
-    agents: agents.map((a) => ({ name: a.name, detail: a.description })),
-    groups: groups.map((g) => ({ name: g.name, detail: g.description || [...g.skills, ...g.mcp, ...g.agents].join(", ") })),
-  };
+  const available = await libraryChoices(getDb());
   return (
     <Card>
       <CardHeader>
