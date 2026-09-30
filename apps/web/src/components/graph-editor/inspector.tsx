@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from "react";
 import { TrashIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
-import { ALL_TOOLS, ConditionSchema, EFFORT_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { ALL_TOOLS, ConditionSchema, DEFAULT_REVIEW_LEVEL, EFFORT_LEVELS, REVIEW_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
@@ -17,12 +17,13 @@ import { PassEnvField } from "./pass-env-field";
 import type { EditorAction } from "./state";
 
 
-const CLI_TYPES = new Set<NodeType>(["planner", "coder", "reviewer"]);
+const CLI_TYPES = new Set<NodeType>(["planner", "coder", "reviewer", "code_review"]);
 
 const INSTRUCTION_HINTS: Partial<Record<NodeType, string>> = {
   planner: "Plan in small steps; name the files each step touches.",
   coder: "Follow the repository's lint rules; keep commits small.",
   reviewer: "Review the plan, not code: is it complete, ordered and testable?",
+  code_review: "Only report problems that would break the linked issues' behaviour.",
 };
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 const num = (v: unknown) => (typeof v === "number" ? String(v) : "");
@@ -182,6 +183,21 @@ function NodeInspector({
 
       {CLI_TYPES.has(type) && (
         <>
+          {type === "code_review" && (
+            <Field>
+              <FieldLabel htmlFor="review-level">Review level</FieldLabel>
+              <NativeSelect id="review-level" value={str(config.level) || DEFAULT_REVIEW_LEVEL} onChange={(e) => setConfig({ level: e.target.value })}>
+                {REVIEW_LEVELS.map((level) => (
+                  <NativeSelectOption key={level} value={level}>
+                    {level}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <FieldDescription>
+                Runs Claude Code&apos;s code-review skill on the run&apos;s branch. Higher levels look further and cost more; the cloud ultra review is not available here.
+              </FieldDescription>
+            </Field>
+          )}
           <ModelFields config={config} setConfig={setConfig} clearConfig={clearConfig} />
           <Field>
             <FieldLabel htmlFor="node-turns">Max turns</FieldLabel>

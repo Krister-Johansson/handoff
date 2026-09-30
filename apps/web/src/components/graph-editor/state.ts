@@ -5,6 +5,7 @@ export const NODE_LABELS: Record<NodeType, string> = {
   planner: "Planner",
   coder: "Coder",
   reviewer: "Reviewer",
+  code_review: "Code review",
   tester: "Tester",
   pr: "Pull request",
   merge: "Merge",

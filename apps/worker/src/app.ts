@@ -55,6 +55,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       planner: agent,
       coder: agent,
       reviewer: agent,
+      code_review: agent,
       tester: testerExecutor(),
       human_gate: humanGateExecutor({ db }),
       pr: prNodeExecutor({ github, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }),

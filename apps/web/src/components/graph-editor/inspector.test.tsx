@@ -95,3 +95,12 @@ test("a step can allow every tool instead of a list", () => {
   expect(screen.getByLabelText("Allowed tools")).toBeDisabled();
   expect(screen.getByText(/WebFetch/)).toBeInTheDocument();
 });
+
+test("a code review node picks how thorough the review is", () => {
+  const dispatch = vi.fn();
+  const review: FlowGraph = { ...graph, nodes: [...graph.nodes, { id: "review", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "code_review", label: "Code review", isStart: false, config: {} } }] };
+  render(<Inspector graph={review} selection={{ nodeId: "review" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("Review level")).toHaveValue("high");
+  fireEvent.change(screen.getByLabelText("Review level"), { target: { value: "max" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "review", patch: { config: { level: "max" } } });
+});
