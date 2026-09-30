@@ -72,6 +72,16 @@ export async function recordMcpCheck(db: DbExecutor, name: string, check: Record
   await db.update(libraryMcpServers).set({ lastCheck: check }).where(eq(libraryMcpServers.name, name));
 }
 
+/** Sets which of an MCP server's tools runs may use; empty allows every tool. The last check stays valid. */
+export async function setMcpAllowedTools(db: DbExecutor, name: string, tools: string[]): Promise<McpServerRow | undefined> {
+  const [row] = await db
+    .update(libraryMcpServers)
+    .set({ tools, version: sql`${libraryMcpServers.version} + 1` })
+    .where(eq(libraryMcpServers.name, name))
+    .returning();
+  return row;
+}
+
 export async function upsertAgent(db: DbExecutor, input: AgentInput): Promise<AgentRow> {
   const values = { name: input.name, description: input.description, prompt: input.prompt, tools: input.tools ?? [], model: input.model ?? null };
   const [row] = await db

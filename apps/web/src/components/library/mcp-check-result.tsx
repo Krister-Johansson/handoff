@@ -1,29 +1,20 @@
 "use client";
 
-import { useState } from "react";
 import type { McpCheck } from "@handoff/engine/mcp-check";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { allowedFromTicked, tickedTools } from "@/lib/allowed-tools";
 import { formatDuration } from "@/lib/format";
 import { CHECK_STATUS } from "@/lib/mcp-check-status";
+import { McpToolPicker } from "./mcp-tool-picker";
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 
-
-/** What a server check found: status, server, tools (tickable, to become the allowed tools), resources, prompts. */
-export function McpCheckResult({ check, onAllow, onUseOAuth }: { check: McpCheck; onAllow: (tools: string[]) => void; onUseOAuth?: () => void }) {
-  const [ticked, setTicked] = useState(() => new Set(check.tools.map((t) => t.name)));
+/** A check's outcome: status, server, counts and what to do when it did not connect. */
+export function McpCheckStatus({ check, onUseOAuth }: { check: McpCheck; onUseOAuth?: (() => void) | undefined }) {
   const status = CHECK_STATUS[check.status];
-  const toggle = (name: string, on: boolean) => {
-    const next = new Set(ticked);
-    if (on) next.add(name);
-    else next.delete(name);
-    setTicked(next);
-  };
   return (
-    <section aria-label="Server check" className="flex flex-col gap-3 rounded-lg border p-4">
+    <>
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <StatusBadge status={status.tone} label={status.label} />
         {check.server && (
@@ -44,43 +35,36 @@ export function McpCheckResult({ check, onAllow, onUseOAuth }: { check: McpCheck
           Use OAuth sign-in
         </Button>
       )}
-      {check.tools.length > 0 && (
-        <>
-          <ul className="flex flex-col gap-2">
-            {check.tools.map((tool) => (
-              <li key={tool.name}>
-                <Field orientation="horizontal" className="items-start">
-                  <Checkbox id={`tool-${tool.name}`} checked={ticked.has(tool.name)} onCheckedChange={(on) => toggle(tool.name, on === true)} />
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <FieldLabel htmlFor={`tool-${tool.name}`} className="font-mono text-xs">
-                      {tool.name}
-                    </FieldLabel>
-                    {tool.description && (
-                      <span title={tool.description} className="line-clamp-2 text-xs text-muted-foreground">
-                        {tool.description}
-                      </span>
-                    )}
-                    {tool.inputSchema !== undefined && (
-                      <details className="text-xs">
-                        <summary className="cursor-pointer text-muted-foreground">Input schema</summary>
-                        <pre className="mt-1 max-h-48 overflow-auto rounded-md bg-muted/50 p-2 font-mono">{JSON.stringify(tool.inputSchema, null, 2)}</pre>
-                      </details>
-                    )}
-                  </div>
-                </Field>
-              </li>
-            ))}
-          </ul>
-          <div className="flex gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => onAllow(check.tools.filter((t) => ticked.has(t.name)).map((t) => t.name))}>
-              Allow only the ticked tools
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => onAllow([])}>
-              Allow every tool
-            </Button>
-          </div>
-        </>
-      )}
+    </>
+  );
+}
+
+/** What a server check found, with its tools ticked as allowed; unticking one restricts runs to the rest. */
+export function McpCheckResult({
+  check,
+  allowed,
+  onAllowedChange,
+  onUseOAuth,
+}: {
+  check: McpCheck;
+  allowed: string[];
+  onAllowedChange: (allowed: string[]) => void;
+  onUseOAuth?: () => void;
+}) {
+  const names = check.tools.map((t) => t.name);
+  const ticked = tickedTools(names, allowed);
+  const toggle = (name: string, on: boolean) => {
+    const next = new Set(ticked);
+    if (on) next.add(name);
+    else next.delete(name);
+    // An empty list means every tool, so the last ticked tool stays ticked.
+    if (next.size === 0) return;
+    onAllowedChange(allowedFromTicked(names, next));
+  };
+  return (
+    <section aria-label="Server check" className="flex flex-col gap-3 rounded-lg border p-4">
+      <McpCheckStatus check={check} onUseOAuth={onUseOAuth} />
+      {check.tools.length > 0 && <McpToolPicker tools={check.tools} ticked={ticked} onToggle={toggle} />}
     </section>
   );
 }

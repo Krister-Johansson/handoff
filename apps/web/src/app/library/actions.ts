@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { deleteLibraryEntry, getLibraryByNames, recordMcpCheck, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
+import { deleteLibraryEntry, getLibraryByNames, recordMcpCheck, setMcpAllowedTools, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
 import { checkMcpServer, type McpCheck } from "@handoff/engine/mcp-check";
 import { getDb } from "@/lib/db";
 import { getOAuthStore } from "@/lib/oauth-store";
@@ -61,6 +61,25 @@ export async function testMcpServerAction(_: McpTestState, form: FormData): Prom
       revalidatePath("/library");
     }
   }
+  return { check };
+}
+
+/** Sets which of a saved MCP server's tools runs may use; an empty list allows every tool. */
+export async function saveMcpToolsAction(name: string, tools: string[]): Promise<{ ok: true } | { error: string }> {
+  const row = await setMcpAllowedTools(getDb(), name, tools);
+  if (!row) return { error: `There is no MCP server named ${name}.` };
+  revalidatePath("/library");
+  revalidatePath(`/library/mcp/${encodeURIComponent(name)}`);
+  return { ok: true };
+}
+
+/** Checks a saved MCP server with its saved configuration and records the result. */
+export async function checkSavedMcpAction(name: string): Promise<{ check: McpCheck } | { error: string }> {
+  const [server] = (await getLibraryByNames(getDb(), { skills: [], mcp: [name], agents: [] })).mcp;
+  if (!server) return { error: `There is no MCP server named ${name}.` };
+  const check = await checkMcpServer(server, { secrets: process.env, oauth: getOAuthStore() });
+  await recordMcpCheck(getDb(), name, check);
+  revalidatePath("/library");
   return { check };
 }
 

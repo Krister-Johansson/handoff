@@ -4,7 +4,8 @@ import type { McpCheck } from "@handoff/engine/mcp-check";
 import { mcpSignInStatus } from "@handoff/engine/mcp-oauth";
 import { McpServerForm } from "@/components/library/forms";
 import { McpSignIn } from "@/components/library/mcp-sign-in";
-import { McpTools } from "@/components/library/mcp-tools";
+import { McpToolsPanel } from "@/components/library/mcp-tools";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { EntryPage } from "@/components/library/entry-page";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/lib/db";
@@ -19,7 +20,7 @@ function signInStatus(name: string, url: string) {
   return { ...status, ...(expiresAt ? { expiresAt: time.format(new Date(expiresAt)) } : {}) };
 }
 
-export default async function McpServerPage({ params, searchParams }: { params: Promise<{ name: string }>; searchParams: Promise<{ signed_in?: string; oauth_error?: string }> }) {
+export default async function McpServerPage({ params, searchParams }: { params: Promise<{ name: string }>; searchParams: Promise<{ signed_in?: string; oauth_error?: string; tab?: string }> }) {
   const [{ name }, query] = await Promise.all([params, searchParams]);
   const [server] = (await getLibraryByNames(getDb(), { skills: [], mcp: [decodeURIComponent(name)], agents: [] })).mcp;
   if (!server) notFound();
@@ -34,12 +35,22 @@ export default async function McpServerPage({ params, searchParams }: { params: 
           signedIn={query.signed_in === "1"}
         />
       )}
-      <McpTools check={check} allowed={server.tools} {...(check ? { checkedLabel: time.format(new Date(check.checkedAt)) } : {})} />
-      <Card className="max-w-2xl">
-        <CardContent>
-          <McpServerForm initial={server} />
-        </CardContent>
-      </Card>
+      <Tabs defaultValue={query.tab === "settings" ? "settings" : "tools"}>
+        <TabsList>
+          <TabsTrigger value="tools">Tools</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+        </TabsList>
+        <TabsContent value="tools" className="pt-2">
+          <McpToolsPanel key={server.version} name={server.name} check={check} allowed={server.tools} />
+        </TabsContent>
+        <TabsContent value="settings" className="pt-2">
+          <Card className="max-w-2xl">
+            <CardContent>
+              <McpServerForm key={server.version} initial={server} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </EntryPage>
   );
 }
