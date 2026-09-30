@@ -45,3 +45,19 @@ test("a failed request says what failed", async () => {
   const { fetch } = fakeFetch({});
   await expect(new SkillsShClient({ fetch }).download("a/b/c")).rejects.toThrow(/skills.sh.*404/);
 });
+
+test("owner and repository pages are read from skills.sh's own pages", async () => {
+  const page = (href: string, text: string) => `<html><body><main><a href="${href}"><h3>${text}</h3><span>5</span></a></main></body></html>`;
+  const calls: string[] = [];
+  const fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    calls.push(url);
+    if (url === "https://skills.sh/mattpocock") return new Response(page("/mattpocock/skills", "skills 3 skills"));
+    if (url === "https://skills.sh/mattpocock/skills") return new Response(page("/mattpocock/skills/tdd", "tdd"));
+    return new Response("", { status: 404 });
+  }) as typeof globalThis.fetch;
+  const client = new SkillsShClient({ fetch });
+  expect(await client.owner("mattpocock")).toEqual([{ repo: "mattpocock/skills", skills: 3 }]);
+  expect(await client.repository("mattpocock/skills")).toEqual([{ id: "mattpocock/skills/tdd", skillId: "tdd", installs: 5 }]);
+  await expect(client.owner("../x")).rejects.toThrow(/owner/);
+});

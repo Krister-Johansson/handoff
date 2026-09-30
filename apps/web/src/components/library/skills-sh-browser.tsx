@@ -66,7 +66,9 @@ export function SkillsShBrowser() {
                   {hit.name}
                 </a>
                 <span className="flex gap-3 text-xs text-muted-foreground">
-                  <span>{hit.source}</span>
+                  <Link href={`/library/skills-sh/${hit.source}`} className="hover:underline">
+                    {hit.source}
+                  </Link>
                   <span>{installs.format(hit.installs)} installs</span>
                 </span>
               </div>
