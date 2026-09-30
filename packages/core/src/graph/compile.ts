@@ -11,7 +11,7 @@ import {
 } from "../schema/graph.ts";
 import { passEnvProblem } from "../secrets/pass-env.ts";
 import { isNodeType, nodeCatalog } from "./catalog.ts";
-import { isEffortLevel, isModelName } from "./models.ts";
+import { isEffortLevel, isModelName, isReviewLevel } from "./models.ts";
 import { portsOf } from "./ports.ts";
 
 export type CompileErrorCode =
@@ -30,7 +30,8 @@ export type CompileErrorCode =
   | "unknown_port"
   | "no_feedback_input"
   | "invalid_effort"
-  | "invalid_model";
+  | "invalid_model"
+  | "invalid_review_level";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -148,6 +149,9 @@ export function compileGraph(input: unknown): CompileResult {
     }
     if (attributes.config.effort !== undefined && !isEffortLevel(attributes.config.effort)) {
       errors.push({ code: "invalid_effort", message: `node ${key}: effort must be low, medium, high, xhigh or max`, nodeKey: key });
+    }
+    if (attributes.type === "code_review" && attributes.config.level !== undefined && !isReviewLevel(attributes.config.level)) {
+      errors.push({ code: "invalid_review_level", message: `node ${key}: review level must be low, medium, high, xhigh or max`, nodeKey: key });
     }
     if (attributes.config.model !== undefined && !isModelName(attributes.config.model)) {
       errors.push({ code: "invalid_model", message: `node ${key}: model must be a Claude Code alias such as opus, or a model id`, nodeKey: key });

@@ -135,3 +135,17 @@ test("a node that allows every tool gets Claude Code's full list, still named on
   expect(tools).not.toContain("Artifact");
   expect(cli.requests[0]!.allowedTools).not.toContain("Bash");
 });
+
+test("a code review node asks for Claude Code's code-review skill on the run's branch at its level, with the Skill tool", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { verdict: "approve", comments: [] } }]);
+  const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
+  const coder = doc.nodes.find((n) => n.key === "coder")!;
+  coder.attributes.type = "code_review";
+  coder.attributes.config = { level: "medium" };
+  const { run } = await startRun(db, doc);
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), code_review: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr: stopAfterCoder } as unknown as ExecutorRegistry));
+  const request = cli.requests[1]!;
+  expect(request.prompt).toContain(`skill code-review, args "medium ${run.branchName}"`);
+  expect(request.allowedTools).toEqual(expect.arrayContaining(["Skill", "Bash(git diff *)"]));
+  expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "coder")?.status).toBe("passed");
+});

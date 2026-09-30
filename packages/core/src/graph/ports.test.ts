@@ -11,6 +11,7 @@ const ids = (ports: { id: string }[]) => ports.map((p) => p.id);
 describe("ports", () => {
   test("each node type has fixed outputs, and planner and coder take feedback", () => {
     expect(ids(portsOf("reviewer", {}).outputs)).toEqual(["approve", "changes"]);
+    expect(ids(portsOf("code_review", {}).outputs)).toEqual(["approve", "changes"]);
     expect(ids(portsOf("coder", {}).outputs)).toEqual(["done", "needs_input"]);
     expect(ids(portsOf("tester", {}).outputs)).toEqual(["pass", "fail"]);
     expect(ids(portsOf("pr", {}).outputs)).toEqual(["ready", "fix"]);

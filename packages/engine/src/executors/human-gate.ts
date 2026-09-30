@@ -25,7 +25,7 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
       ].join("\n"),
     };
   }
-  if (fromType === "reviewer" && typeof o.verdict === "string") {
+  if ((fromType === "reviewer" || fromType === "code_review") && typeof o.verdict === "string") {
     const comments = Array.isArray(o.comments) ? o.comments.map(obj) : [];
     return {
       kind: "review",

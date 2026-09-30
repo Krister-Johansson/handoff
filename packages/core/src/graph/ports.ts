@@ -22,6 +22,7 @@ const OUTPUTS: Record<Exclude<NodeType, "human_gate">, OutputPort[]> = {
   planner: [out("done", "done")],
   coder: [out("done", "done", { eq: ["node.output.status", "done"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
   reviewer: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "back")],
+  code_review: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "back")],
   tester: [out("pass", "pass", { eq: ["node.output.passed", true] }), out("fail", "fail", { eq: ["node.output.passed", false] }, "back")],
   pr: [
     out("ready", "ready", { all: [{ eq: ["node.output.feedback.ci.status", "success"] }, { neq: ["node.output.feedback.review.decision", "changes_requested"] }] }),

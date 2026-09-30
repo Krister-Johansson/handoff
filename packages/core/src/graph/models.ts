@@ -21,3 +21,8 @@ const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._@:-]*(\[[0-9a-z]+\])?$/;
 
 export const isEffortLevel = (value: unknown): value is EffortLevel => typeof value === "string" && (EFFORT_LEVELS as readonly string[]).includes(value);
 export const isModelName = (value: unknown): value is string => typeof value === "string" && value.length <= 100 && MODEL_NAME.test(value);
+
+/** Levels of Claude Code's local code review. ultra is a billed cloud review that only a person can start. */
+export const REVIEW_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export const DEFAULT_REVIEW_LEVEL = "high";
+export const isReviewLevel = (value: unknown) => typeof value === "string" && (REVIEW_LEVELS as readonly string[]).includes(value);

@@ -87,6 +87,15 @@ describe("compileGraph", () => {
     expect(compileGraph(fine).ok).toBe(true);
   });
 
+  test("a code review node takes a local review level, never the billed ultra review", () => {
+    const doc = clone();
+    (doc.nodes[1]!.attributes as Record<string, unknown>).type = "code_review";
+    (doc.nodes[1]!.attributes as Record<string, unknown>).config = { level: "ultra" };
+    expect(codes(compileGraph(doc))).toContain("invalid_review_level");
+    (doc.nodes[1]!.attributes as Record<string, unknown>).config = { level: "xhigh" };
+    expect(codes(compileGraph(doc))).not.toContain("invalid_review_level");
+  });
+
   test("compileGraph rejects a node unreachable from the start node", () => {
     const doc = clone();
     doc.nodes.push({ key: "orphan", attributes: { type: "tester", label: "Orphan", x: 0, y: 200 } });

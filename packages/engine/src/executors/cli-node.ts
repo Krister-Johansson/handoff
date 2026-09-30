@@ -1,4 +1,4 @@
-import { contractRegistry, isContractName, renderContextPacket, type NodeType } from "@handoff/core";
+import { contractRegistry, DEFAULT_REVIEW_LEVEL, isContractName, renderContextPacket, type NodeType } from "@handoff/core";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliSession } from "@handoff/cli-adapter";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
@@ -17,8 +17,21 @@ const modelOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.n
 const effortOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.node.config.effort === "string" ? ctx.node.config.effort : options.effort);
 
 /** The first prompt of a session: the role, plus pointers to the step's instructions and to what was sent back. */
+/**
+ * A code review node runs Claude Code's code-review skill through the Skill tool. Typing the
+ * /code-review command as the prompt would run it outside the conversation, with no structured
+ * output for routing.
+ */
+function codeReviewPrompt(ctx: ExecutorContext): string {
+  const level = typeof ctx.node.config.level === "string" ? ctx.node.config.level : DEFAULT_REVIEW_LEVEL;
+  return [
+    `Review this branch's changes against ${ctx.run.baseBranch} with the code-review skill: invoke it with the Skill tool, skill code-review, args "${level} ${ctx.run.branchName}".`,
+    "Do not edit files. Then return request_changes with one comment per finding (path, line, body), or approve when it finds nothing.",
+  ].join(" ");
+}
+
 function firstPrompt(ctx: ExecutorContext): string {
-  const role = PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`;
+  const role = ctx.node.type === "code_review" ? codeReviewPrompt(ctx) : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
   return [
     role,
     ...(ctx.packet.instructions ? ["Follow the instructions for this step in the system prompt."] : []),
