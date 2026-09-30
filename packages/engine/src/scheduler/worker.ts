@@ -280,7 +280,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         }
       }
       const packet = selectContext(node, state, row);
-      if (library?.allowedTools.length) packet.constraints.allowedTools = [...packet.constraints.allowedTools, ...library.allowedTools];
+      if (library?.allowedTools.length) packet.constraints.allowedTools = [...new Set([...packet.constraints.allowedTools, ...library.allowedTools])];
       await db.update(nodeExecutions).set({ contextPacket: packet }).where(eq(nodeExecutions.id, row.id));
       outcome = await executor.execute({
         run,
