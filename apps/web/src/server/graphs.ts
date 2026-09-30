@@ -124,6 +124,21 @@ export async function startRunFromGraph(db: Db, input: { projectId: string; grap
   return createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task: input.task });
 }
 
+/** Starts the same task again on the latest version of the graph an earlier run used. */
+export async function runAgain(db: Db, runId: string) {
+  const [earlier] = await db
+    .select({ projectId: runs.projectId, task: runs.task, status: runs.status, graphName: graphs.name })
+    .from(runs)
+    .innerJoin(graphVersions, eq(graphVersions.id, runs.graphVersionId))
+    .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+    .where(eq(runs.id, runId));
+  if (!earlier) throw new Error("run not found");
+  if (earlier.status === "queued" || earlier.status === "running" || earlier.status === "waiting") {
+    throw new Error(`The run is still ${earlier.status}.`);
+  }
+  return startRunFromGraph(db, { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task });
+}
+
 const GRAPH_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 export async function renameGraph(db: Db, projectId: string, from: string, to: string) {
