@@ -32,6 +32,12 @@ export function feedbackFrom(output: unknown): { failedChecks: CheckResult[]; re
       });
     }
   }
+  // A person at a Human gate who asked for changes, commenting on quoted parts of what they reviewed.
+  if (typeof o.option === "string" && Array.isArray(o.comments)) {
+    for (const c of o.comments.map(obj)) {
+      reviewComments.push({ author: "person", body: String(c.body ?? ""), ...(typeof c.quote === "string" ? { quote: c.quote } : {}), resolved: false });
+    }
+  }
   const feedback = obj(o.feedback);
   const ci = obj(feedback.ci);
   if (Array.isArray(ci.failedJobs)) {
@@ -72,6 +78,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     repoPaths: selector.repoPaths.length ? selector.repoPaths : ownedPaths,
     constraints: { ownedPaths, allowedTools, maxTurns },
     outputContract: node.contract.output,
+    ...(typeof node.config.instructions === "string" && node.config.instructions.trim() ? { instructions: node.config.instructions.trim() } : {}),
     ...(state.issues?.length ? { issues: state.issues } : {}),
   };
 
@@ -81,7 +88,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     const answer = state.human[trigger.from];
     if (answer) packet.humanAnswer = answer.option ? `${answer.option}: ${answer.answer}` : answer.answer;
     const { failedChecks, reviewComments } = feedbackFrom(from?.output);
-    if (failedChecks.length || reviewComments.length) {
+    if (failedChecks.length || reviewComments.length || answer) {
       packet.priorAttempt = { summary: `Sent back by ${trigger.from} via ${trigger.edgeKey}.`, failedChecks, reviewComments };
     }
   }

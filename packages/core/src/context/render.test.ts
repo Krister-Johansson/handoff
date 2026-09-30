@@ -59,3 +59,20 @@ test("renderContextPacket lists linked issues after the task, with long bodies c
   expect(md).toContain("(issue body cut at 4000 characters)");
   expect(md.length).toBeLessThan(9_000);
 });
+
+test("a step's instructions follow the task", () => {
+  const md = renderContextPacket({ ...packet, instructions: "Review the plan, not code." });
+  const headings = md.split("\n").filter((l) => l.startsWith("# "));
+  expect(headings.slice(0, 2)).toEqual(["# Task", "# Instructions for this step"]);
+  expect(md).toContain("Review the plan, not code.");
+});
+
+test("a person's comments on a quoted part of the plan are shown with the quote", () => {
+  const md = renderContextPacket({
+    ...packet,
+    priorAttempt: { summary: "Sent back by gate via gate->planner.", failedChecks: [], reviewComments: [{ author: "person", quote: "Use a JSON file for storage", body: "Use SQLite instead.", resolved: false }] },
+    humanAnswer: "changes: Close, a few fixes.",
+  });
+  expect(md).toContain("- person on \"Use a JSON file for storage\": Use SQLite instead.");
+  expect(md).toContain("changes: Close, a few fixes.");
+});

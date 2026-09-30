@@ -4,6 +4,38 @@ import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts
 
 type Ask = { question: string; options: string[]; context: Record<string, unknown> };
 
+const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
+const strings = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+
+/** What reached the gate, as markdown a person can read and comment on, by the kind of node that sent it. */
+export function reviewOf(fromType: string | undefined, output: unknown): { kind: string; markdown: string } {
+  const o = obj(output);
+  if (fromType === "planner" && typeof o.plan === "string") {
+    const steps = strings(o.steps);
+    const paths = strings(o.ownedPaths);
+    return {
+      kind: "plan",
+      markdown: [
+        o.plan.trim(),
+        ...(steps.length ? ["", "## Steps", "", ...steps.map((step, i) => `${i + 1}. ${step}`)] : []),
+        ...(paths.length ? ["", "## Files it will change", "", ...paths.map((p) => `- \`${p}\``)] : []),
+      ].join("\n"),
+    };
+  }
+  if (fromType === "reviewer" && typeof o.verdict === "string") {
+    const comments = Array.isArray(o.comments) ? o.comments.map(obj) : [];
+    return {
+      kind: "review",
+      markdown: [`Verdict: **${o.verdict === "approve" ? "approve" : "request changes"}**`, "", ...comments.map((c) => `- ${c.path ? `\`${String(c.path)}${c.line ? `:${String(c.line)}` : ""}\` ` : ""}${String(c.body ?? "")}`)].join("\n"),
+    };
+  }
+  if (fromType === "coder" && typeof o.summary === "string") {
+    const files = strings(o.filesChanged);
+    return { kind: "change", markdown: [o.summary.trim(), ...(files.length ? ["", "## Files changed", "", ...files.map((f) => `- \`${f}\``)] : [])].join("\n") };
+  }
+  return { kind: "output", markdown: ["```json", JSON.stringify(output ?? null, null, 2), "```"].join("\n") };
+}
+
 function compose(ctx: ExecutorContext): Ask {
   const trigger = ctx.execution.trigger;
   if (trigger?.kind === "exhausted") {
@@ -18,10 +50,12 @@ function compose(ctx: ExecutorContext): Ask {
   const asked = (from as { question?: { text?: string; options?: string[] } } | undefined)?.question;
   if (asked?.text) return { question: asked.text, options: asked.options ?? [], context: { reason: "needs_input", from: trigger?.from } };
   const config = ctx.node.config;
+  // Review mode: show what arrived, so the person can read it, comment and approve or ask for changes.
+  const review = trigger?.from ? { from: trigger.from, ...reviewOf(ctx.graph.node(trigger.from)?.type, from) } : undefined;
   return {
-    question: typeof config.question === "string" ? config.question : `Approve continuing after ${trigger?.from ?? "the previous step"}?`,
-    options: Array.isArray(config.options) ? config.options.map(String) : ["approve", "reject"],
-    context: { reason: "approval", from: trigger?.from },
+    question: typeof config.question === "string" ? config.question : review ? `Review the ${review.kind} from ${review.from}` : "Approve continuing?",
+    options: Array.isArray(config.options) ? config.options.map(String) : ["approve", "changes"],
+    context: { reason: "approval", from: trigger?.from, ...(review ? { review } : {}) },
   };
 }
 
@@ -49,7 +83,8 @@ export function humanGateExecutor(deps: { db: Db }): NodeExecutor {
       const answer = {
         answer: question.answer,
         ...(question.option ? { option: question.option } : {}),
-        ...(question.option === "approve" || question.option === "reject" ? { approved: question.option === "approve" } : {}),
+        ...(question.option === "approve" || question.option === "reject" || question.option === "changes" ? { approved: question.option === "approve" } : {}),
+        ...(question.comments.length ? { comments: question.comments } : {}),
         answeredBy: question.answeredBy ?? "unknown",
         answeredAt: (question.answeredAt ?? new Date()).toISOString(),
       };

@@ -48,7 +48,7 @@ export function QuestionCard({ item, compact = false }: { item: QuestionItem; co
         <CardFooter className="flex flex-wrap gap-2 pt-4">
           {item.options.length > 0 ? (
             item.options.map((option) => (
-              <Button key={option} type="submit" name="option" value={option} variant={option === "abort" || option === "reject" ? "outline" : "default"} disabled={pending}>
+              <Button key={option} type="submit" name="option" value={option} variant={option === "abort" || option === "reject" || option === "changes" ? "outline" : "default"} disabled={pending}>
                 {option}
               </Button>
             ))
