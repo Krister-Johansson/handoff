@@ -56,3 +56,26 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
   }));
   return { ...run, executions, events, graph: version, openQuestions, failed };
 }
+
+/** One execution of a run with what it produced, for the run page's node details. */
+export async function getExecutionDetail(db: DbExecutor, runId: string, executionId: string) {
+  const [row] = await db
+    .select({
+      id: nodeExecutions.id,
+      nodeKey: nodeExecutions.nodeKey,
+      nodeType: nodeExecutions.nodeType,
+      attempt: nodeExecutions.attempt,
+      status: nodeExecutions.status,
+      output: nodeExecutions.output,
+      checks: nodeExecutions.checks,
+      error: nodeExecutions.error,
+      trigger: nodeExecutions.trigger,
+      costUsd: nodeExecutions.costUsd,
+      startedAt: nodeExecutions.startedAt,
+      finishedAt: nodeExecutions.finishedAt,
+      repairNote: nodeExecutions.repairNote,
+    })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.id, executionId)));
+  return row;
+}
