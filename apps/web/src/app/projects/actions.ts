@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
+import { deleteProject, updateProject } from "@/server/project-admin";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphVersion, renameGraph, runAgain, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
@@ -33,6 +34,29 @@ export async function listReposAction(): Promise<{ repos: AvailableRepo[] } | { 
   } catch (error) {
     return { error: `Could not list repositories from GitHub: ${(error as Error).message}` };
   }
+}
+
+export async function updateProjectAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const projectId = field(form, "projectId");
+  const values = { name: field(form, "name"), defaultBranch: field(form, "defaultBranch") };
+  try {
+    await updateProject(getDb(), projectId, values);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message, values };
+  }
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${projectId}`);
+  return { ok: true };
+}
+
+export async function deleteProjectAction(_: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await deleteProject(getDb(), field(form, "projectId"));
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath("/projects");
+  return { ok: true };
 }
 
 export async function createGraphAction(_: ActionState, form: FormData): Promise<ActionState> {
