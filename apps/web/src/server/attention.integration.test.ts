@@ -42,3 +42,18 @@ test("questions, failed runs and pull requests waiting for review each become on
     ]),
   );
 });
+
+test("a review at a human gate says what needs approval and links to the review page", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Build a todo app" });
+  const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [question] = await db
+    .insert(questions)
+    .values({ runId: run.id, nodeExecutionId: gate.id, question: "Review the plan from planner", options: ["approve", "changes"], context: { reason: "approval", from: "planner", review: { from: "planner", kind: "plan", markdown: "Plan" } } })
+    .returning();
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
+  expect(await listAttention(db)).toEqual([
+    { id: `question:${question!.id}`, kind: "question", title: "sandbox: the plan from planner needs your approval", body: "Build a todo app", href: `/runs/${run.id}/review/${question!.id}` },
+  ]);
+});

@@ -128,3 +128,7 @@
     @apply font-sans;
     }
 }
+/* Passages a person commented on while reviewing a plan (see components/review/plan-review.tsx). */
+::highlight(review-comment) {
+  background-color: color-mix(in oklab, var(--color-amber-300) 55%, transparent);
+}

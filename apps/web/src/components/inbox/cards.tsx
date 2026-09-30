@@ -16,9 +16,48 @@ const REASONS: Record<string, string> = {
   approval: "Approval requested",
 };
 
-export type QuestionItem = { id: string; question: string; options: string[]; runId: string; task: string; nodeKey: string; projectName: string; reason: string };
+export type QuestionItem = {
+  id: string;
+  question: string;
+  options: string[];
+  runId: string;
+  task: string;
+  nodeKey: string;
+  projectName: string;
+  reason: string;
+  context?: Record<string, unknown>;
+};
+
+/** A question that asks for a review is answered on the review page, where the person can comment. */
+function ReviewLink({ item, compact }: { item: QuestionItem; compact: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">{REASONS.approval}</Badge>
+          {!compact && (
+            <Link href={`/runs/${item.runId}`} className="truncate hover:underline">
+              {item.projectName}: {item.task}
+            </Link>
+          )}
+        </CardDescription>
+        <CardTitle className="text-base leading-snug">{item.question}</CardTitle>
+      </CardHeader>
+      <CardFooter>
+        <Button asChild>
+          <Link href={`/runs/${item.runId}/review/${item.id}`}>Open the review</Link>
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
 
 export function QuestionCard({ item, compact = false }: { item: QuestionItem; compact?: boolean }) {
+  if (item.context?.review) return <ReviewLink item={item} compact={compact} />;
+  return <AnswerCard item={item} compact={compact} />;
+}
+
+function AnswerCard({ item, compact }: { item: QuestionItem; compact: boolean }) {
   const [state, action, pending] = useActionState(answerAction, {} as InboxActionState);
   return (
     <Card>
