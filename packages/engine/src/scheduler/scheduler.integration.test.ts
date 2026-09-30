@@ -87,6 +87,22 @@ describe("scheduler", () => {
     expect(released).toEqual([run.id]);
   });
 
+  test("an executor crash is stored and reported with secrets redacted", async () => {
+    const { run } = await startRun(db, linear);
+    const crashing: NodeExecutor = {
+      needsWorkdir: false,
+      execute: async () => {
+        throw new Error("Command failed: git -c http.extraheader=AUTHORIZATION: basic c2VjcmV0LXRva2Vu clone");
+      },
+    };
+    await drain(engineDeps(db, registry({ planner: crashing })));
+    const { executions } = await inspect(db, run.id);
+    expect(executions[0]?.error).toMatchObject({ code: "executor_crashed", message: expect.stringContaining("AUTHORIZATION: basic [redacted]") });
+    const stored = JSON.stringify(await db.$client.query("select payload from events where run_id = $1", [run.id]).then((r) => r.rows));
+    expect(stored).not.toContain("c2VjcmV0");
+    expect(JSON.stringify(executions)).not.toContain("c2VjcmV0");
+  });
+
   test("a failed execution with no failed edge marks the run failed and creates no successor", async () => {
     const { run } = await startRun(db, linear);
     const failing: NodeExecutor = { needsWorkdir: false, execute: async () => ({ kind: "failed", error: { code: "boom", message: "it broke" } }) };

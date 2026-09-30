@@ -126,9 +126,11 @@ test("mergePr squashes by default and reports the merge sha", async () => {
   expect(calls[0]!.body).toMatchObject({ merge_method: "squash" });
 });
 
-test("gitAuthConfig returns an http.extraheader with the token for git over https", async () => {
+test("gitAuthEnv passes the extraheader to git through GIT_CONFIG_* variables, not argv", async () => {
   const gh = OctokitGitHub.withToken("tok", { fetch: fakeFetch({}).fetch });
-  const [flag, value] = await gh.gitAuthConfig(repo);
-  expect(flag).toBe("-c");
-  expect(value).toBe(`http.https://github.com/.extraheader=AUTHORIZATION: basic ${Buffer.from("x-access-token:tok").toString("base64")}`);
+  expect(await gh.gitAuthEnv(repo)).toEqual({
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader",
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from("x-access-token:tok").toString("base64")}`,
+  });
 });

@@ -63,13 +63,13 @@ To look around without GitHub or Claude, `pnpm demo` seeds a demo run with simul
 ## How a run works
 
 - **Graph.** Nodes and edges stored as graphology JSON. Each save is a new version, and a run keeps the version it started with.
-- **Nodes.** Planner, Coder and Reviewer run Claude. Tester runs a shell command. The PR node pushes the branch, opens the pull request and waits for CI and reviews. Merge squash-merges. A Human gate asks you something.
+- **Nodes.** Planner, Coder and Reviewer run Claude. Tester runs a shell command with a minimal environment (`PATH`, `HOME`, locale and `CI=true`, never the worker's tokens or `DATABASE_URL`), because it runs code the agent wrote. The PR node pushes the branch, opens the pull request and waits for CI and reviews. Merge squash-merges. A Human gate asks you something.
 - **Contracts.** Every node returns structured output that must match its schema, and can have deterministic checks such as "tests pass" or "changes stay within the paths the plan claimed". The engine runs the checks, not the model.
 - **Loops.** An edge can loop back, for example from a failed test run to the Coder, with a maximum number of attempts. The Coder gets the failing output in its context. When a loop runs out, the run asks you in the inbox whether to retry or stop.
 - **Waiting.** A node that waits for CI, a review or your answer holds no process. Webhooks, or the periodic re-check, wake it.
 - **Recovery.** A failed node can be repaired in place from the inbox or with `pnpm handoff run repair`. Everything before it is kept. Rate limits are retried automatically with backoff.
 
-The library (**Library** in the dashboard) holds skills, MCP servers and subagents that nodes enable by name. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database.
+The library (**Library** in the dashboard) holds skills, MCP servers and subagents that nodes enable by name. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.
 
 ## Running each run in a container
 

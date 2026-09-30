@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
-import { RunStateSchema } from "@handoff/core";
+import { redactSecrets, RunStateSchema } from "@handoff/core";
 import {
   appendEvents,
   claimNext,
@@ -314,7 +314,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     outcome =
       error instanceof LibraryUnavailableError
         ? { kind: "failed", error: { code: "library_unavailable", message: error.message } }
-        : { kind: "failed", error: { code: "executor_crashed", message: (error as Error).message } };
+        : { kind: "failed", error: { code: "executor_crashed", message: redactSecrets((error as Error).message) } };
   } finally {
     clearInterval(beat);
     clearInterval(flusher);

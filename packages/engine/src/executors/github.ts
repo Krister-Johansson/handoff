@@ -38,10 +38,10 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
 
       if (!ctx.execution.wakeReason) {
         if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "PR node needs the run worktree to push" } };
-        const auth = await deps.github.gitAuthConfig(repo);
-        await execFileAsync("git", [...auth, "push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], {
+        const auth = await deps.github.gitAuthEnv(repo);
+        await execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], {
           cwd: ctx.workdir.path,
-          env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+          env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...auth },
         });
       }
 

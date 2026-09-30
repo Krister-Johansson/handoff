@@ -125,10 +125,10 @@ export class OctokitGitHub implements GitHubPort {
     return { merged: data.merged, ...(data.sha ? { sha: data.sha } : {}) };
   }
 
-  async gitAuthConfig(repo: RepoRef): Promise<string[]> {
+  async gitAuthEnv(repo: RepoRef): Promise<Record<string, string>> {
     const token = await this.tokenFor(repo);
     const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
-    return ["-c", `http.https://github.com/.extraheader=AUTHORIZATION: basic ${basic}`];
+    return { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}` };
   }
 }
 

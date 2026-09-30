@@ -10,3 +10,4 @@ export * from "./schema/run-state.ts";
 export * from "./context/render.ts";
 export * from "./graph/react-flow.ts";
 export * from "./graph/layout.ts";
+export * from "./secrets/redact.ts";
