@@ -56,9 +56,11 @@ describe("graph editor state", () => {
   });
 });
 
-test("tidy layout changes positions only", () => {
+test("applying a layout moves nodes to its positions and changes nothing else", () => {
   const before = initial();
-  const after = editorReducer(before, { type: "layout" });
+  const after = editorReducer(before, { type: "applyLayout", positions: { planner: { x: 12.4, y: 40 }, coder: { x: 300, y: 40 } } });
+  expect(after.nodes.find((n) => n.id === "planner")!.position).toEqual({ x: 12.4, y: 40 });
+  expect(after.nodes.find((n) => n.id === "pr")!.position).toEqual(before.nodes.find((n) => n.id === "pr")!.position);
   expect(after.nodes.map((n) => n.data)).toEqual(before.nodes.map((n) => n.data));
   expect(after.edges).toEqual(before.edges);
 });

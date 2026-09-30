@@ -1,5 +1,5 @@
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from "@xyflow/react";
-import { compileGraph, fromReactFlow, layoutFlow, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
+import { compileGraph, fromReactFlow, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
 
 export const NODE_LABELS: Record<NodeType, string> = {
   planner: "Planner",
@@ -24,7 +24,7 @@ export type EditorAction =
   | { type: "setExhaustedGate"; id: string | undefined }
   | { type: "remove"; ids: string[] }
   | { type: "renameNode"; id: string; to: string }
-  | { type: "layout" }
+  | { type: "applyLayout"; positions: Record<string, { x: number; y: number }> }
   | { type: "reset"; graph: FlowGraph };
 
 function uniqueId(taken: Set<string>, base: string, first: number): string {
@@ -106,8 +106,8 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
     }
     case "renameNode":
       return renameNode(state, action.id, action.to);
-    case "layout":
-      return layoutFlow(state);
+    case "applyLayout":
+      return { ...state, nodes: state.nodes.map((n) => (action.positions[n.id] ? { ...n, position: action.positions[n.id]! } : n)) };
     case "reset":
       return action.graph;
   }
