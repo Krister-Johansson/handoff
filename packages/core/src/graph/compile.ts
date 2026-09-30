@@ -12,7 +12,7 @@ import {
 import { passEnvProblem } from "../secrets/pass-env.ts";
 import { isNodeType, nodeCatalog } from "./catalog.ts";
 import { isEffortLevel, isModelName, isReviewLevel } from "./models.ts";
-import { portsOf } from "./ports.ts";
+import { FEEDBACK_TARGETS, portsOf } from "./ports.ts";
 
 export type CompileErrorCode =
   | "invalid_document"
@@ -91,14 +91,19 @@ function findSecret(value: unknown, path: string): string | undefined {
  */
 function resolvePorts(key: string, attributes: EdgeAttributes, source: CompiledNode, target: CompiledNode, errors: CompileError[]): EdgeAttributes {
   let resolved = attributes;
+  let feedback = attributes.input === "feedback";
   if (attributes.port !== undefined) {
     const port = portsOf(source.type, source.config).outputs.find((p) => p.id === attributes.port);
     if (!port) errors.push({ code: "unknown_port", message: `${source.label} has no output ${attributes.port}`, edgeKey: key });
-    else resolved = { ...resolved, on: port.on, ...(attributes.condition === undefined && port.condition ? { condition: port.condition } : {}) };
+    else {
+      // The port decides what the edge is, whatever input an older editor stored.
+      feedback = port.kind === "feedback";
+      resolved = { ...resolved, on: port.on, input: feedback ? "feedback" : "in", ...(attributes.condition === undefined && port.condition ? { condition: port.condition } : {}) };
+    }
   }
-  if (attributes.input === "feedback") {
-    if (!portsOf(target.type, target.config).inputs.some((i) => i.id === "feedback")) {
-      errors.push({ code: "no_feedback_input", message: `${target.label} has no feedback input`, edgeKey: key });
+  if (feedback) {
+    if (!FEEDBACK_TARGETS.has(target.type)) {
+      errors.push({ code: "no_feedback_input", message: `${target.label} cannot take feedback: only planner, coder, reviewer and code review can`, edgeKey: key });
     }
     resolved = { ...resolved, loop: true, maxAttempts: attributes.maxAttempts ?? 3 };
   }

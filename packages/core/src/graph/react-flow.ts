@@ -19,7 +19,7 @@ export type FlowEdge = {
   target: string;
   /** The source's output port, or CUSTOM_HANDLE for an edge with a custom condition. */
   sourceHandle?: string | null;
-  /** The target's input: in or feedback. */
+  /** The target's input handle: every node has one, `in`. */
   targetHandle?: string | null;
   type: "handoff";
   data: EdgeAttributes;
@@ -55,7 +55,7 @@ export function toReactFlow(input: unknown): FlowGraph {
       source,
       target,
       sourceHandle: attributes.port ?? CUSTOM_HANDLE,
-      targetHandle: attributes.input ?? "in",
+      targetHandle: "in",
       type: "handoff",
       data: attributes,
     })),
@@ -84,8 +84,8 @@ export function fromReactFlow(flow: FlowGraph): GraphDocument {
     edges: flow.edges.map((e) => {
       const { port: _port, input: _input, ...rest } = e.data;
       const port = e.sourceHandle && e.sourceHandle !== CUSTOM_HANDLE ? e.sourceHandle : undefined;
-      // in is the default: it is only written when the edge had an input already.
-      const input = e.targetHandle === "feedback" ? "feedback" : e.data.input !== undefined ? "in" : undefined;
+      // The input (in or feedback) is kept from the edge's data: the editor sets it from the port's kind.
+      const input = e.targetHandle === "feedback" ? "feedback" : e.data.input;
       return { key: e.id, source: e.source, target: e.target, attributes: { ...rest, ...(port ? { port } : {}), ...(input ? { input } : {}) } };
     }),
   });

@@ -9,14 +9,19 @@ import { portsOf, withPorts } from "./ports.ts";
 const ids = (ports: { id: string }[]) => ports.map((p) => p.id);
 
 describe("ports", () => {
-  test("each node type has fixed outputs, and planner and coder take feedback", () => {
+  test("each node type has fixed outputs, one input, and each output continues or sends feedback", () => {
     expect(ids(portsOf("reviewer", {}).outputs)).toEqual(["approve", "changes"]);
     expect(ids(portsOf("code_review", {}).outputs)).toEqual(["approve", "changes"]);
     expect(ids(portsOf("coder", {}).outputs)).toEqual(["done", "needs_input"]);
     expect(ids(portsOf("tester", {}).outputs)).toEqual(["pass", "fail"]);
     expect(ids(portsOf("pr", {}).outputs)).toEqual(["ready", "fix"]);
-    expect(ids(portsOf("planner", {}).inputs)).toEqual(["in", "feedback"]);
+    expect(ids(portsOf("planner", {}).inputs)).toEqual(["in"]);
     expect(ids(portsOf("reviewer", {}).inputs)).toEqual(["in"]);
+    expect(portsOf("tester", {}).outputs.map((p) => [p.id, p.kind])).toEqual([
+      ["pass", "continue"],
+      ["fail", "feedback"],
+    ]);
+    expect(portsOf("human_gate", { mode: "question" }).outputs[0]?.kind).toBe("feedback");
   });
 
   test("a human gate reviews and approves by default, or answers a question", () => {
@@ -36,11 +41,11 @@ const doc = (edges: { key: string; source: string; target: string; attributes: R
 });
 
 describe("compiling ports", () => {
-  test("a port edge follows the port's outcome, and an edge into feedback loops three times", () => {
+  test("a port edge follows the port's outcome, and a feedback port makes a loop of three whatever input was stored", () => {
     const result = compileGraph(
       doc([
         { key: "planner->reviewer", source: "planner", target: "reviewer", attributes: { port: "done" } },
-        { key: "reviewer->planner", source: "reviewer", target: "planner", attributes: { port: "changes", input: "feedback" } },
+        { key: "reviewer->planner", source: "reviewer", target: "planner", attributes: { port: "changes" } },
         { key: "reviewer->gate", source: "reviewer", target: "gate", attributes: { port: "approve" } },
       ]),
     );
@@ -60,12 +65,21 @@ describe("compiling ports", () => {
     expect(result.graph.outEdges("planner")[0]?.condition).toEqual(custom);
   });
 
-  test("an unknown port and feedback into a node without that input are refused", () => {
+  test("an unknown port and feedback into a node that cannot use it are refused", () => {
     const result = compileGraph(doc([
       { key: "planner->reviewer", source: "planner", target: "reviewer", attributes: { port: "approve" } },
-      { key: "reviewer->gate", source: "reviewer", target: "gate", attributes: { port: "approve", input: "feedback" } },
+      { key: "reviewer->gate", source: "reviewer", target: "gate", attributes: { port: "changes" } },
     ]));
-    expect(result.ok ? [] : result.errors.map((e) => e.code)).toEqual(["unknown_port", "no_feedback_input"]);
+    expect(result.ok ? [] : result.errors.map((e) => e.code)).toEqual(expect.arrayContaining(["unknown_port", "no_feedback_input"]));
+  });
+
+  test("a continue port into a node is a plain edge even if feedback was stored", () => {
+    const result = compileGraph(doc([
+      { key: "planner->reviewer", source: "planner", target: "reviewer", attributes: { port: "done", input: "feedback" } },
+      { key: "reviewer->gate", source: "reviewer", target: "gate", attributes: { port: "approve" } },
+    ]));
+    if (!result.ok) throw new Error(JSON.stringify(result.errors));
+    expect(result.graph.outEdges("planner")[0]).toMatchObject({ loop: false, input: "in" });
   });
 });
 

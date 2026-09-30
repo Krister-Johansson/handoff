@@ -29,7 +29,7 @@ describe("React Flow mapping", () => {
       ],
     };
     const flow = toReactFlow(doc);
-    expect(flow.edges.find((e) => e.id === "reviewer->planner")).toMatchObject({ sourceHandle: "changes", targetHandle: "feedback" });
+    expect(flow.edges.find((e) => e.id === "reviewer->planner")).toMatchObject({ sourceHandle: "changes", targetHandle: "in" });
     expect(flow.edges.find((e) => e.id === "planner->reviewer")).toMatchObject({ sourceHandle: "done", targetHandle: "in" });
     const back = fromReactFlow({ ...flow, edges: flow.edges.map((e) => (e.id === "planner->reviewer" ? { ...e, sourceHandle: "done", targetHandle: "in" } : e)) });
     expect(back.edges.find((e) => e.key === "reviewer->planner")?.attributes).toMatchObject({ port: "changes", input: "feedback" });

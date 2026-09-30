@@ -57,7 +57,7 @@ function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
  */
 function Ports({ id, data }: { id: string; data: HandoffNodeData }) {
   const { inputs, outputs } = portsOf(data.nodeType, data.config);
-  const out = [...outputs.map((o) => ({ id: o.id, label: o.label, back: o.tone === "back" })), ...(data.customOut ? [{ id: CUSTOM_HANDLE, label: "custom", back: false }] : [])];
+  const out = [...outputs.map((o) => ({ id: o.id, label: o.label, back: o.kind === "feedback" })), ...(data.customOut ? [{ id: CUSTOM_HANDLE, label: "custom", back: false }] : [])];
   // While an edge is being dragged, each handle says whether it can take it.
   const from = useConnection((c): HandleEnd | null => (c.inProgress ? { node: c.fromNode.id, type: c.fromHandle.type } : null));
   const tone = (type: "source" | "target") => (from === null ? undefined : canConnect(from, { node: id, type }) ? "can" : "cannot");
