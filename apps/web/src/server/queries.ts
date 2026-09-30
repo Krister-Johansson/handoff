@@ -1,7 +1,11 @@
-import { and, asc, desc, eq, graphVersions, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
+import { and, asc, desc, eq, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
+import type { RunFilter } from "../lib/run-filter.ts";
 import type { StreamedEvent } from "./events-stream";
 
-export async function listRuns(db: DbExecutor, limit = 50) {
+/** Newest first, optionally narrowed to a status ("active" covers queued, running and waiting) and a project name. */
+export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 50) {
+  const status =
+    filter.status === "active" ? inArray(runs.status, ["queued", "running", "waiting"]) : filter.status ? eq(runs.status, filter.status) : undefined;
   return db
     .select({
       id: runs.id,
@@ -16,6 +20,7 @@ export async function listRuns(db: DbExecutor, limit = 50) {
     })
     .from(runs)
     .innerJoin(projects, eq(projects.id, runs.projectId))
+    .where(and(status, filter.project ? eq(projects.name, filter.project) : undefined))
     .orderBy(desc(runs.createdAt))
     .limit(limit);
 }
