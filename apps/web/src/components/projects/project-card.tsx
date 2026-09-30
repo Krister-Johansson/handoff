@@ -19,13 +19,22 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { runFilterHref } from "@/lib/run-filter";
 import { cn } from "@/lib/utils";
 import type { ProjectAttention } from "@/server/project-admin";
 
-export type ProjectSummary = { id: string; name: string; repoOwner: string; repoName: string; defaultBranch: string; isDemo: boolean; runCount: number };
+export type ProjectSummary = {
+  id: string;
+  name: string;
+  repoOwner: string;
+  repoName: string;
+  defaultBranch: string;
+  isDemo: boolean;
+  runCount: number;
+  setupCommand?: string | null;
+};
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const ATTENTION_LINK = "relative z-10 rounded-sm underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
@@ -62,6 +71,17 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
             <Field>
               <FieldLabel htmlFor={`edit-branch-${project.id}`}>Default branch</FieldLabel>
               <Input id={`edit-branch-${project.id}`} name="defaultBranch" defaultValue={state.values?.defaultBranch ?? project.defaultBranch} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`edit-setup-${project.id}`}>Setup command</FieldLabel>
+              <Input
+                id={`edit-setup-${project.id}`}
+                name="setupCommand"
+                className="font-mono"
+                placeholder="pnpm install --frozen-lockfile"
+                defaultValue={state.values?.setupCommand ?? project.setupCommand ?? ""}
+              />
+              <FieldDescription>Runs once in each run&apos;s worktree before its first step there, for example to install dependencies. Leave it empty to run nothing.</FieldDescription>
             </Field>
             {state.error && <FieldError>{state.error}</FieldError>}
           </FieldGroup>
