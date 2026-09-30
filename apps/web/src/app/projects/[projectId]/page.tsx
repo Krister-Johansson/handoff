@@ -72,7 +72,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ projec
                             Edit
                           </Link>
                         </Button>
-                        <StartRunDialog projectId={project.id} graphName={g.name} />
+                        {!project.isDemo && <StartRunDialog projectId={project.id} graphName={g.name} />}
                         <GraphSettingsDialog projectId={project.id} graphName={g.name} />
                       </TableCell>
                     </TableRow>
