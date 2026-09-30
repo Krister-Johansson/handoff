@@ -1,9 +1,10 @@
 "use client";
 
+import { flowOf } from "@/lib/flow";
 import { Background, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes, type OnSelectionChangeParams } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useReducer, useState, useTransition } from "react";
 import { AlertTriangleIcon, CheckIcon, LayoutGridIcon, SaveIcon } from "lucide-react";
-import { toReactFlow, type FlowEdge, type FlowNode, type NodeType } from "@handoff/core";
+import { type FlowEdge, type FlowNode, type NodeType } from "@handoff/core";
 import { loadGraphVersionAction, saveGraphAction } from "@/app/projects/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ type Props = {
 };
 
 function Editor({ projectId, graphName, version: initialVersion, document, library, versions: initialVersions, runSlot }: Props) {
-  const [graph, dispatch] = useReducer(editorReducer, document, (doc) => toReactFlow(doc));
+  const [graph, dispatch] = useReducer(editorReducer, document, flowOf);
   const [selection, setSelection] = useState<{ nodeId?: string; edgeId?: string }>({});
   const [version, setVersion] = useState(initialVersion);
   const [saved, setSaved] = useState(true);
@@ -54,7 +55,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
     startTransition(async () => {
       const doc = await loadGraphVersionAction(projectId, graphName, v);
       if (!doc) return;
-      dispatch({ type: "reset", graph: toReactFlow(doc) });
+      dispatch({ type: "reset", graph: flowOf(doc) });
       setSelection({});
       setRestoring(v);
       setSaved(false);
@@ -134,7 +135,9 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
             edgeTypes={edgeTypes}
             onNodesChange={(changes) => edit({ type: "nodesChange", changes })}
             onEdgesChange={(changes) => edit({ type: "edgesChange", changes })}
-            onConnect={(c) => edit({ type: "connect", source: c.source, target: c.target })}
+            onConnect={(c) => edit({ type: "connect", source: c.source, target: c.target, sourceHandle: c.sourceHandle, targetHandle: c.targetHandle })}
+            // One edge per pair of nodes, and never a node into itself: the graph is simple.
+            isValidConnection={(c) => c.source !== c.target && !graph.edges.some((e) => e.source === c.source && e.target === c.target)}
             onSelectionChange={onSelectionChange}
             fitView
             minZoom={0.15}

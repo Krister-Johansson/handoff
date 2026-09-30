@@ -4,7 +4,7 @@ import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps }
 import { memo } from "react";
 import type { EdgeAttributes } from "@handoff/core";
 import { cn } from "@/lib/utils";
-import { edgeLabel, edgeStyle, loopPath, roundedPath, routeFor } from "./edge-geometry";
+import { loops, edgeLabel, edgeStyle, loopPath, roundedPath, routeFor } from "./edge-geometry";
 import { useEdgeRoute } from "./elk-routes";
 
 export type HandoffEdge = Edge<EdgeAttributes & { taken?: boolean }, "handoff">;
@@ -20,7 +20,7 @@ function HandoffEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePositio
     const mid = points[Math.floor(points.length / 2)]!;
     label = box ? { x: box.x + box.width / 2, y: box.y + box.height / 2, width: box.width } : mid;
   } else {
-    const [fallback, x, y] = data?.loop ? loopPath(sourceX, sourceY, targetX, targetY) : getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+    const [fallback, x, y] = loops(data) ? loopPath(sourceX, sourceY, targetX, targetY) : getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
     path = fallback;
     label = { x, y };
   }

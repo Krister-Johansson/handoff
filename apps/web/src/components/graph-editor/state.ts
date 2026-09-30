@@ -1,5 +1,5 @@
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from "@xyflow/react";
-import { compileGraph, fromReactFlow, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
+import { compileGraph, CUSTOM_HANDLE, fromReactFlow, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
 
 export const NODE_LABELS: Record<NodeType, string> = {
   planner: "Planner",
@@ -15,7 +15,7 @@ export const NODE_LABELS: Record<NodeType, string> = {
 export type EditorAction =
   | { type: "nodesChange"; changes: NodeChange<FlowNode>[] }
   | { type: "edgesChange"; changes: EdgeChange<FlowEdge>[] }
-  | { type: "connect"; source: string; target: string }
+  | { type: "connect"; source: string; target: string; sourceHandle?: string | null | undefined; targetHandle?: string | null | undefined }
   | { type: "addNode"; nodeType: NodeType; position: { x: number; y: number } }
   | { type: "updateNode"; id: string; patch: Partial<Omit<FlowNodeData, "config">> & { config?: Record<string, unknown> } }
   | { type: "replaceNodeConfig"; id: string; config: Record<string, unknown> }
@@ -48,7 +48,18 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
       const taken = new Set(state.edges.map((e) => e.id));
       const base = `${action.source}->${action.target}`;
       const id = taken.has(base) ? uniqueId(taken, base, 2) : base;
-      const edge: FlowEdge = { id, source: action.source, target: action.target, type: "handoff", data: { on: "passed", loop: false, priority: 0 } };
+      // The handles are the source's output port and the target's input; an edge without them has a custom condition.
+      const port = action.sourceHandle && action.sourceHandle !== CUSTOM_HANDLE ? action.sourceHandle : undefined;
+      const input = action.targetHandle === "feedback" ? "feedback" : port ? "in" : undefined;
+      const edge: FlowEdge = {
+        id,
+        source: action.source,
+        target: action.target,
+        sourceHandle: port ?? CUSTOM_HANDLE,
+        targetHandle: input ?? "in",
+        type: "handoff",
+        data: { on: "passed", loop: false, priority: 0, ...(port ? { port } : {}), ...(input ? { input } : {}) },
+      };
       return { ...state, edges: [...state.edges, edge] };
     }
     case "addNode": {

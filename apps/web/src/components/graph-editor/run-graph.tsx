@@ -2,7 +2,7 @@
 
 import { Background, Controls, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes } from "@xyflow/react";
 import { useEffect, useMemo, useState } from "react";
-import { toReactFlow } from "@handoff/core";
+import { flowOf } from "@/lib/flow";
 import type { EdgeRoute, LayoutResult } from "@/lib/elk-layout";
 import { cn } from "@/lib/utils";
 import { EdgeRoutesContext, useElkLayout, useMeasuredSignature } from "./elk-routes";
@@ -28,7 +28,7 @@ type Props = {
  * with ELK once the nodes are measured, and again when a node's size changes.
  */
 function LaidOutRunGraph({ document, statuses, onNodeClick, className }: Props) {
-  const flow = useMemo(() => toReactFlow(document), [document]);
+  const flow = useMemo(() => flowOf(document), [document]);
   const [layout, setLayout] = useState<LayoutResult>();
   const signature = useMeasuredSignature();
   const runLayout = useElkLayout();

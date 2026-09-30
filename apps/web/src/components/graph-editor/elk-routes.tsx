@@ -4,7 +4,7 @@ import { useReactFlow, useStore, type Edge, type Node } from "@xyflow/react";
 import { createContext, useCallback, useContext } from "react";
 import type { EdgeAttributes } from "@handoff/core";
 import { elkLayout, type EdgeRoute, type LayoutResult } from "@/lib/elk-layout";
-import { edgeLabel } from "./edge-geometry";
+import { edgeLabel, loops } from "./edge-geometry";
 
 /** Edge routes from the last ELK layout, by edge id. Kept out of the graph document. */
 export const EdgeRoutesContext = createContext<Record<string, EdgeRoute>>({});
@@ -34,10 +34,24 @@ export function useElkLayout(): () => Promise<LayoutResult> {
     () =>
       elkLayout({
         nodes: getNodes().map((n) => {
-          const measured = getInternalNode(n.id)?.measured;
-          return { id: n.id, width: measured?.width ?? 208, height: measured?.height ?? 76 };
+          const internal = getInternalNode(n.id);
+          const bounds = internal?.internals.handleBounds;
+          // Handle centres, measured by React Flow, so each edge leaves from the port it uses.
+          const handles = [
+            ...(bounds?.source ?? []).map((h) => ({ id: h.id ?? "", type: "source" as const, x: h.x + h.width / 2, y: h.y + h.height / 2 })),
+            ...(bounds?.target ?? []).map((h) => ({ id: h.id ?? "", type: "target" as const, x: h.x + h.width / 2, y: h.y + h.height / 2 })),
+          ].filter((h) => h.id);
+          return { id: n.id, width: internal?.measured.width ?? 208, height: internal?.measured.height ?? 76, handles };
         }),
-        edges: getEdges().map((e) => ({ id: e.id, source: e.source, target: e.target, label: edgeLabel(e.data) || undefined, loop: e.data?.loop })),
+        edges: getEdges().map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.sourceHandle,
+          targetHandle: e.targetHandle,
+          label: edgeLabel(e.data) || undefined,
+          loop: loops(e.data),
+        })),
       }),
     [getNodes, getEdges, getInternalNode],
   );

@@ -20,6 +20,13 @@ describe("graph editor state", () => {
     expect(edge.attributes).toEqual({ on: "passed", loop: false, priority: 0 });
   });
 
+  test("connecting reviewer changes to planner feedback records the port and the input", () => {
+    let state = editorReducer(initial(), { type: "addNode", nodeType: "reviewer", position: { x: 0, y: 0 } });
+    state = editorReducer(state, { type: "connect", source: "reviewer-1", target: "planner", sourceHandle: "changes", targetHandle: "feedback" });
+    expect(state.edges.find((e) => e.id === "reviewer-1->planner")).toMatchObject({ sourceHandle: "changes", targetHandle: "feedback" });
+    expect(documentOf(state).edges.find((e) => e.key === "reviewer-1->planner")!.attributes).toMatchObject({ port: "changes", input: "feedback" });
+  });
+
   test("connecting the same pair twice gets a unique edge key", () => {
     let state = editorReducer(initial(), { type: "connect", source: "coder", target: "pr" });
     state = editorReducer(state, { type: "connect", source: "coder", target: "pr" });

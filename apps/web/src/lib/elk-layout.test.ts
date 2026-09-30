@@ -67,3 +67,28 @@ test("labelled edges get a label position that does not cover a node", async () 
     for (const r of rects) expect(overlaps(label, r)).toBe(false);
   }
 });
+
+test("an edge leaves from the output handle it uses and arrives at its input handle", async () => {
+  const handles = [
+    { id: "in", type: "target" as const, x: 0, y: 50 },
+    { id: "feedback", type: "target" as const, x: 0, y: 66 },
+    { id: "approve", type: "source" as const, x: 208, y: 50 },
+    { id: "changes", type: "source" as const, x: 208, y: 66 },
+  ];
+  const result = await elkLayout({
+    nodes: [
+      { id: "planner", width: 208, height: 90, handles },
+      { id: "reviewer", width: 208, height: 90, handles },
+    ],
+    edges: [
+      { id: "planner->reviewer", source: "planner", target: "reviewer", sourceHandle: "approve", targetHandle: "in" },
+      { id: "reviewer->planner", source: "reviewer", target: "planner", sourceHandle: "changes", targetHandle: "feedback", loop: true },
+    ],
+  });
+  const reviewer = result.positions.reviewer!;
+  const planner = result.positions.planner!;
+  const back = result.routes["reviewer->planner"]!.points;
+  expect(back[0]).toEqual({ x: reviewer.x + 208, y: reviewer.y + 66 });
+  expect(back.at(-1)).toEqual({ x: planner.x, y: planner.y + 66 });
+  expect(result.routes["planner->reviewer"]!.points[0]).toEqual({ x: planner.x + 208, y: planner.y + 50 });
+});

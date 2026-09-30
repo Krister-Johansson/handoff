@@ -2,9 +2,19 @@ import ELK, { type ElkExtendedEdge, type ElkNode } from "elkjs/lib/elk.bundled.j
 
 export type Point = { x: number; y: number };
 export type EdgeRoute = { points: Point[]; label?: { x: number; y: number; width: number; height: number } };
+/** A node's handle, where React Flow measured it: x and y from the node's top left. */
+export type LayoutHandle = { id: string; type: "source" | "target"; x: number; y: number };
 export type LayoutInput = {
-  nodes: { id: string; width: number; height: number }[];
-  edges: { id: string; source: string; target: string; label?: string | undefined; loop?: boolean | undefined }[];
+  nodes: { id: string; width: number; height: number; handles?: LayoutHandle[] | undefined }[];
+  edges: {
+    id: string;
+    source: string;
+    target: string;
+    sourceHandle?: string | null | undefined;
+    targetHandle?: string | null | undefined;
+    label?: string | undefined;
+    loop?: boolean | undefined;
+  }[];
 };
 export type LayoutResult = { positions: Record<string, Point>; routes: Record<string, EdgeRoute> };
 
@@ -65,13 +75,24 @@ function topological(input: LayoutInput): LayoutInput["nodes"] {
 
 const inPort = (id: string) => `${id}__in`;
 const outPort = (id: string) => `${id}__out`;
+const handlePort = (node: string, type: LayoutHandle["type"], handle: string) => `${node}__${type}__${handle}`;
 
 /**
- * Layered left-to-right layout with ELK. Every node has one port on each handle (in on the left
- * middle, out on the right middle), so the routes ELK returns start and end where React Flow draws
- * the handles. Loop edges are routed back around the nodes instead of through them.
+ * Layered left-to-right layout with ELK. Every node has one ELK port per measured handle, plus a
+ * port in the middle of each side for edges without a handle, so the routes ELK returns start and
+ * end where React Flow draws the handles. Loop edges are routed back around the nodes instead of
+ * through them.
  */
 export async function elkLayout(input: LayoutInput): Promise<LayoutResult> {
+  const handles = new Map(input.nodes.map((n) => [n.id, new Set((n.handles ?? []).map((h) => handlePort(n.id, h.type, h.id)))]));
+  const sourcePort = (e: LayoutInput["edges"][number]) => {
+    const port = e.sourceHandle ? handlePort(e.source, "source", e.sourceHandle) : "";
+    return handles.get(e.source)?.has(port) ? port : outPort(e.source);
+  };
+  const targetPort = (e: LayoutInput["edges"][number]) => {
+    const port = e.targetHandle ? handlePort(e.target, "target", e.targetHandle) : "";
+    return handles.get(e.target)?.has(port) ? port : inPort(e.target);
+  };
   const graph: ElkNode = {
     id: "root",
     layoutOptions: LAYOUT_OPTIONS,
@@ -83,13 +104,21 @@ export async function elkLayout(input: LayoutInput): Promise<LayoutResult> {
       ports: [
         { id: inPort(n.id), x: 0, y: n.height / 2, width: 0, height: 0, layoutOptions: { "elk.port.side": "WEST" } },
         { id: outPort(n.id), x: n.width, y: n.height / 2, width: 0, height: 0, layoutOptions: { "elk.port.side": "EAST" } },
+        ...(n.handles ?? []).map((h) => ({
+          id: handlePort(n.id, h.type, h.id),
+          x: h.type === "source" ? n.width : 0,
+          y: h.y,
+          width: 0,
+          height: 0,
+          layoutOptions: { "elk.port.side": h.type === "source" ? "EAST" : "WEST" },
+        })),
       ],
     })),
     edges: input.edges.map(
       (e): ElkExtendedEdge => ({
         id: e.id,
-        sources: [outPort(e.source)],
-        targets: [inPort(e.target)],
+        sources: [sourcePort(e)],
+        targets: [targetPort(e)],
         // Forward edges stay as straight as possible so the main path reads as one line.
         ...(e.loop ? {} : { layoutOptions: { "elk.layered.priority.straightness": "10", "elk.layered.priority.direction": "10" } }),
         ...(e.label ? { labels: [{ id: `${e.id}__label`, text: e.label, width: labelWidth(e.label), height: LABEL_HEIGHT }] } : {}),
