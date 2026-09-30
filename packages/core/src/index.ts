@@ -6,6 +6,7 @@ export * from "./schema/graph.ts";
 export * from "./graph/catalog.ts";
 export * from "./graph/compile.ts";
 export * from "./graph/routing.ts";
+export * from "./graph/ports.ts";
 export * from "./schema/run-state.ts";
 export * from "./context/render.ts";
 export * from "./graph/react-flow.ts";

@@ -16,6 +16,25 @@ describe("React Flow mapping", () => {
     expect(flow.edges.find((e) => e.id === "coder->pr")).toMatchObject({ source: "coder", target: "pr", type: "handoff", data: { loop: false, condition: { eq: ["node.output.status", "done"] } } });
   });
 
+  test("an edge's port and input become React Flow handles, and come back", () => {
+    const doc = {
+      attributes: { startNode: "planner" },
+      nodes: [
+        { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+        { key: "reviewer", attributes: { type: "reviewer", x: 300, y: 0 } },
+      ],
+      edges: [
+        { key: "planner->reviewer", source: "planner", target: "reviewer", attributes: { port: "done" } },
+        { key: "reviewer->planner", source: "reviewer", target: "planner", attributes: { port: "changes", input: "feedback" } },
+      ],
+    };
+    const flow = toReactFlow(doc);
+    expect(flow.edges.find((e) => e.id === "reviewer->planner")).toMatchObject({ sourceHandle: "changes", targetHandle: "feedback" });
+    expect(flow.edges.find((e) => e.id === "planner->reviewer")).toMatchObject({ sourceHandle: "done", targetHandle: "in" });
+    const back = fromReactFlow({ ...flow, edges: flow.edges.map((e) => (e.id === "planner->reviewer" ? { ...e, sourceHandle: "done", targetHandle: "in" } : e)) });
+    expect(back.edges.find((e) => e.key === "reviewer->planner")?.attributes).toMatchObject({ port: "changes", input: "feedback" });
+  });
+
   test("toReactFlow opens an empty graph that has no start node yet", () => {
     const flow = toReactFlow({ attributes: { startNode: "" }, nodes: [], edges: [] });
     expect(flow).toMatchObject({ attributes: { startNode: "" }, nodes: [], edges: [] });

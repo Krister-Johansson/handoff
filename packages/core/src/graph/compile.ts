@@ -11,6 +11,7 @@ import {
 } from "../schema/graph.ts";
 import { passEnvProblem } from "../secrets/pass-env.ts";
 import { isNodeType, nodeCatalog } from "./catalog.ts";
+import { portsOf } from "./ports.ts";
 
 export type CompileErrorCode =
   | "invalid_document"
@@ -24,7 +25,9 @@ export type CompileErrorCode =
   | "unknown_contract"
   | "invalid_exhausted_gate"
   | "secret_in_graph"
-  | "invalid_pass_env";
+  | "invalid_pass_env"
+  | "unknown_port"
+  | "no_feedback_input";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -76,6 +79,26 @@ function findSecret(value: unknown, path: string): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * An edge's routing from its ports: the source port sets on and condition (a condition given under
+ * Advanced wins), and the feedback input makes it a loop of three attempts unless it says otherwise.
+ */
+function resolvePorts(key: string, attributes: EdgeAttributes, source: CompiledNode, target: CompiledNode, errors: CompileError[]): EdgeAttributes {
+  let resolved = attributes;
+  if (attributes.port !== undefined) {
+    const port = portsOf(source.type, source.config).outputs.find((p) => p.id === attributes.port);
+    if (!port) errors.push({ code: "unknown_port", message: `${source.label} has no output ${attributes.port}`, edgeKey: key });
+    else resolved = { ...resolved, on: port.on, ...(attributes.condition === undefined && port.condition ? { condition: port.condition } : {}) };
+  }
+  if (attributes.input === "feedback") {
+    if (!portsOf(target.type, target.config).inputs.some((i) => i.id === "feedback")) {
+      errors.push({ code: "no_feedback_input", message: `${target.label} has no feedback input`, edgeKey: key });
+    }
+    resolved = { ...resolved, loop: true, maxAttempts: attributes.maxAttempts ?? 3 };
+  }
+  return resolved;
 }
 
 export function compileGraph(input: unknown): CompileResult {
@@ -149,11 +172,12 @@ export function compileGraph(input: unknown): CompileResult {
       errors.push({ code: "duplicate_key", message: `duplicate edge key ${key}`, edgeKey: key });
       continue;
     }
-    if (attributes.loop && attributes.maxAttempts === undefined) {
+    const resolved = resolvePorts(key, attributes, graph.getNodeAttributes(source), graph.getNodeAttributes(target), errors);
+    if (resolved.loop && resolved.maxAttempts === undefined) {
       errors.push({ code: "loop_without_max_attempts", message: `loop edge ${key} needs maxAttempts`, edgeKey: key });
     }
-    graph.addDirectedEdgeWithKey(key, source, target, { ...attributes, key, source, target });
-    if (!attributes.loop && !acyclic.hasEdge(source, target)) acyclic.addDirectedEdge(source, target);
+    graph.addDirectedEdgeWithKey(key, source, target, { ...resolved, key, source, target });
+    if (!resolved.loop && !acyclic.hasEdge(source, target)) acyclic.addDirectedEdge(source, target);
   }
 
   const startNode = document.attributes.startNode;
