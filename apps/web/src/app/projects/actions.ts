@@ -83,12 +83,12 @@ export async function startRunAction(_: ActionState, form: FormData): Promise<Ac
   const projectId = field(form, "projectId");
   const graphName = field(form, "graphName");
   const task = field(form, "task");
-  if (task.length < 5) return { ok: false, error: "Describe the task in a sentence.", values: { task } };
+  if (task.length < 5) return { ok: false, error: "Describe the task in a sentence.", values: { task, graphName } };
   let id: string;
   try {
     id = (await startRunFromGraph(getDb(), { projectId, graphName, task })).id;
   } catch (error) {
-    return { ok: false, error: (error as Error).message, values: { task } };
+    return { ok: false, error: (error as Error).message, values: { task, graphName } };
   }
   redirect(`/runs/${id}`);
 }

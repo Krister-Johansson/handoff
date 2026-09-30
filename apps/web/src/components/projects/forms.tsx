@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, type KeyboardEvent } from "react";
-import { MoreHorizontalIcon, PlayIcon } from "lucide-react";
+import { MoreHorizontalIcon, PlayIcon, PlusIcon } from "lucide-react";
 import { createGraphAction, deleteGraphAction, renameGraphAction, startRunAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -10,32 +10,48 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
 
-export function NewGraphForm({ projectId, templates }: { projectId: string; templates: { value: string; label: string }[] }) {
+export function NewGraphDialog({ projectId, templates }: { projectId: string; templates: { value: string; label: string }[] }) {
   const [state, action, pending] = useActionState(createGraphAction, {} as ActionState);
   return (
-    <form action={action}>
-      <input type="hidden" name="projectId" value={projectId} />
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="graph-name">Name</FieldLabel>
-          <Input id="graph-name" name="name" placeholder="main" defaultValue={state.values?.name} />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="graph-template">Start from</FieldLabel>
-          <NativeSelect id="graph-template" name="template" defaultValue={state.values?.template ?? "loop"}>
-            {templates.map((t) => (
-              <NativeSelectOption key={t.value} value={t.value}>
-                {t.label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </Field>
-        {state.error && <FieldError>{state.error}</FieldError>}
-        <Button type="submit" disabled={pending}>
-          Create graph
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button size="sm">
+          <PlusIcon data-icon="inline-start" />
+          New graph
         </Button>
-      </FieldGroup>
-    </form>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <form action={action} className="contents">
+          <DialogHeader>
+            <DialogTitle>New graph</DialogTitle>
+            <DialogDescription>Start from a template and edit it in the graph editor.</DialogDescription>
+          </DialogHeader>
+          <input type="hidden" name="projectId" value={projectId} />
+          <FieldGroup>
+            <Field>
+              <FieldLabel htmlFor="graph-name">Name</FieldLabel>
+              <Input id="graph-name" name="name" placeholder="main" defaultValue={state.values?.name} />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="graph-template">Start from</FieldLabel>
+              <NativeSelect id="graph-template" name="template" defaultValue={state.values?.template ?? "loop"}>
+                {templates.map((t) => (
+                  <NativeSelectOption key={t.value} value={t.value}>
+                    {t.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Field>
+            {state.error && <FieldError>{state.error}</FieldError>}
+          </FieldGroup>
+          <DialogFooter>
+            <Button type="submit" disabled={pending}>
+              Create graph
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -45,14 +61,30 @@ function submitOnModEnter(event: KeyboardEvent<HTMLTextAreaElement>) {
   event.currentTarget.form?.requestSubmit();
 }
 
-export function StartRunDialog({ projectId, graphName, size = "sm" }: { projectId: string; graphName: string; size?: "sm" | "default" }) {
+/**
+ * Starts a run of one graph. With `graphs`, the dialog lets you pick which graph runs; `graphName`
+ * is then the preselected one.
+ */
+export function StartRunDialog({
+  projectId,
+  graphName,
+  graphs,
+  label = "Run",
+  size = "sm",
+}: {
+  projectId: string;
+  graphName: string;
+  graphs?: string[];
+  label?: string;
+  size?: "sm" | "default";
+}) {
   const [state, action, pending] = useActionState(startRunAction, {} as ActionState);
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button size={size} variant="outline">
+        <Button size={size} variant={graphs ? "default" : "outline"}>
           <PlayIcon data-icon="inline-start" />
-          Run
+          {label}
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -60,12 +92,30 @@ export function StartRunDialog({ projectId, graphName, size = "sm" }: { projectI
           <DialogHeader>
             <DialogTitle>Start a run</DialogTitle>
             <DialogDescription>
-              Runs the latest saved version of <span className="font-mono">{graphName}</span> against the project repository.
+              {graphs ? (
+                "Runs the latest saved version of the chosen graph against the project repository."
+              ) : (
+                <>
+                  Runs the latest saved version of <span className="font-mono">{graphName}</span> against the project repository.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
           <input type="hidden" name="projectId" value={projectId} />
-          <input type="hidden" name="graphName" value={graphName} />
+          {!graphs && <input type="hidden" name="graphName" value={graphName} />}
           <FieldGroup>
+            {graphs && (
+              <Field>
+                <FieldLabel htmlFor="run-graph">Graph</FieldLabel>
+                <NativeSelect id="run-graph" name="graphName" defaultValue={state.values?.graphName ?? graphName}>
+                  {graphs.map((g) => (
+                    <NativeSelectOption key={g} value={g}>
+                      {g}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </Field>
+            )}
             <Field data-invalid={state.error ? true : undefined}>
               <FieldLabel htmlFor="run-task">Task</FieldLabel>
               <Textarea

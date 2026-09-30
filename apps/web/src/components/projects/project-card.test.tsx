@@ -29,7 +29,7 @@ test("questions, failed runs and pull requests to review call for attention, eac
   expect(screen.getByText("Needs you")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "2 questions" })).toHaveAttribute("href", "/inbox");
   expect(screen.getByRole("link", { name: "1 failed run" })).toHaveAttribute("href", "/runs?status=failed&project=sandbox");
-  expect(screen.getByRole("link", { name: "1 PR to review" })).toHaveAttribute("href", "/projects/p1");
+  expect(screen.getByRole("link", { name: "1 PR to review" })).toHaveAttribute("href", "/projects/p1?tab=pulls");
 });
 
 test("running work and pull requests waiting on CI show as quiet status", () => {
