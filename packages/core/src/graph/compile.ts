@@ -9,6 +9,7 @@ import {
   type GraphDocument,
   type NodeType,
 } from "../schema/graph.ts";
+import { passEnvProblem } from "../secrets/pass-env.ts";
 import { isNodeType, nodeCatalog } from "./catalog.ts";
 
 export type CompileErrorCode =
@@ -22,7 +23,8 @@ export type CompileErrorCode =
   | "loop_without_max_attempts"
   | "unknown_contract"
   | "invalid_exhausted_gate"
-  | "secret_in_graph";
+  | "secret_in_graph"
+  | "invalid_pass_env";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -109,6 +111,14 @@ export function compileGraph(input: unknown): CompileResult {
     const contract = attributes.contract ?? { output: entry.contract, checks: [] };
     if (!isContractName(contract.output)) {
       errors.push({ code: "unknown_contract", message: `node ${key} uses unknown contract ${contract.output}`, nodeKey: key });
+    }
+    const passEnvs = [
+      ...(attributes.config.passEnv !== undefined ? [attributes.config.passEnv] : []),
+      ...contract.checks.flatMap((c) => ("passEnv" in c && c.passEnv !== undefined ? [c.passEnv] : [])),
+    ];
+    for (const names of passEnvs) {
+      const problem = passEnvProblem(names);
+      if (problem) errors.push({ code: "invalid_pass_env", message: `node ${key}: ${problem}`, nodeKey: key });
     }
     graph.addNode(key, {
       key,

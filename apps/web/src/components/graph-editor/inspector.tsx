@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { PassEnvField } from "./pass-env-field";
 import type { EditorAction } from "./state";
 
 export type LibraryNames = { skills: string[]; mcp: string[]; agents: string[] };
@@ -91,13 +92,34 @@ function ContractChecks({ node, dispatch }: { node: FlowNode; dispatch: Dispatch
             defaultValue={tests?.command ?? ""}
             onBlur={(e) => {
               const command = e.target.value.trim();
-              write(command ? [...without("tests_green"), { kind: "tests_green", command, timeoutMs: 600_000 }] : without("tests_green"));
+              write(
+                command
+                  ? [...without("tests_green"), { kind: "tests_green", command, timeoutMs: 600_000, ...(tests?.passEnv ? { passEnv: tests.passEnv } : {}) }]
+                  : without("tests_green"),
+              );
             }}
           />
           <FieldDescription>Runs in the worktree after the node finishes. Leave empty to skip.</FieldDescription>
         </Field>
+        {tests && (
+          <PassEnvField id="check-tests-env" value={tests.passEnv ?? []} onChange={(passEnv) => write([...without("tests_green"), { ...tests, passEnv }])} />
+        )}
       </FieldGroup>
     </FieldSet>
+  );
+}
+
+function TesterSettings({ config, setConfig }: { config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void }) {
+  const passEnv = Array.isArray(config.passEnv) ? config.passEnv.filter((n): n is string => typeof n === "string") : [];
+  return (
+    <>
+      <Field>
+        <FieldLabel htmlFor="node-command">Command</FieldLabel>
+        <Input id="node-command" className="font-mono text-xs" value={str(config.command)} placeholder="npm test" onChange={(e) => setConfig({ command: e.target.value })} />
+        <FieldDescription>Runs in the worktree. Exit 0 means passed.</FieldDescription>
+      </Field>
+      <PassEnvField id="node-pass-env" value={passEnv} onChange={(names) => setConfig({ passEnv: names })} />
+    </>
   );
 }
 
@@ -208,13 +230,7 @@ function NodeInspector({
         </>
       )}
 
-      {type === "tester" && (
-        <Field>
-          <FieldLabel htmlFor="node-command">Command</FieldLabel>
-          <Input id="node-command" className="font-mono text-xs" value={str(config.command)} placeholder="npm test" onChange={(e) => setConfig({ command: e.target.value })} />
-          <FieldDescription>Runs in the worktree. Exit 0 means passed.</FieldDescription>
-        </Field>
-      )}
+      {type === "tester" && <TesterSettings config={config} setConfig={setConfig} />}
 
       {type === "pr" && (
         <>

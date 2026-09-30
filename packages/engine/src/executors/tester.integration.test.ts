@@ -11,11 +11,19 @@ const db = createTestDb();
 beforeEach(() => truncateAll(db));
 afterAll(() => db.$client.end());
 
-const graphWith = (command: string) => {
+const graphWith = (command: string, config: Record<string, unknown> = {}) => {
   const doc = structuredClone(loop);
-  doc.nodes.find((n) => n.key === "tester")!.attributes.config = { command };
+  doc.nodes.find((n) => n.key === "tester")!.attributes.config = { command, ...config };
   return doc;
 };
+
+const testerOnly = () =>
+  engineDeps(db, {
+    planner: scripted(done(outputs.planner, { plan: outputs.planner })),
+    coder: scripted(done(outputs.coderDone)),
+    tester: testerExecutor(),
+    human_gate: scripted({ kind: "waiting", wait: { kind: "human", token: crypto.randomUUID() } }),
+  });
 
 test("Tester runs the command in the workdir and records exit code and tail", async () => {
   const { run } = await startRun(db, graphWith("echo checking; echo 'broken test' >&2; exit 2"));
@@ -32,6 +40,20 @@ test("Tester runs the command in the workdir and records exit code and tail", as
   expect(tester.status).toBe("passed");
   expect(tester.output).toMatchObject({ passed: false, exitCode: 2 });
   expect((tester.output as { tail: string }).tail).toContain("broken test");
+});
+
+test("Tester passes the variables named in config.passEnv to its command", async () => {
+  process.env.APP_TEST_DB = "postgres://localhost/app_test";
+  process.env.NOT_PASSED = "hidden";
+  try {
+    const { run } = await startRun(db, graphWith('echo "[$APP_TEST_DB][$NOT_PASSED]"', { passEnv: ["APP_TEST_DB"] }));
+    await drain(testerOnly(), 30);
+    const tester = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "tester")!;
+    expect((tester.output as { tail: string }).tail).toBe("[postgres://localhost/app_test][]");
+  } finally {
+    delete process.env.APP_TEST_DB;
+    delete process.env.NOT_PASSED;
+  }
 });
 
 test("Reviewer node is spawned with read-only allowed tools", async () => {
