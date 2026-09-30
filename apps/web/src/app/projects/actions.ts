@@ -7,6 +7,7 @@ import { eq, projects } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub } from "@/lib/github";
 import { deleteProject, updateProject } from "@/server/project-admin";
+import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphVersion, renameGraph, runAgain, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
@@ -106,6 +107,22 @@ export async function listIssuesAction(projectId: string): Promise<{ issues: Iss
   } catch (error) {
     return { error: `Could not list issues from GitHub: ${(error as Error).message}` };
   }
+}
+
+export async function archivePullAction(_: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    await archiveRun(getDb(), field(form, "runId"));
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath("/projects/[projectId]", "page");
+  return { ok: true };
+}
+
+export async function unarchivePullAction(_: ActionState, form: FormData): Promise<ActionState> {
+  await unarchiveRun(getDb(), field(form, "runId"));
+  revalidatePath("/projects/[projectId]", "page");
+  return { ok: true };
 }
 
 export async function runAgainAction(_: ActionState, form: FormData): Promise<ActionState> {

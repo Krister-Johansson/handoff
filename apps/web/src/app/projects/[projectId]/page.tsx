@@ -4,7 +4,8 @@ import { PencilIcon } from "lucide-react";
 import { GraphSettingsDialog, NewGraphDialog, StartRunDialog } from "@/components/projects/forms";
 import { ProjectSettingsActions } from "@/components/projects/project-card";
 import { ProjectTabs } from "@/components/projects/project-tabs";
-import { PullRequestList } from "@/components/pulls/pr-list";
+import { PullRequestList, type PullItem } from "@/components/pulls/pr-list";
+import { ArchivePullButton, PullFilters } from "@/components/pulls/pull-filters";
 import { IssueLinks } from "@/components/runs/issue-links";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +16,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
 import { parseProjectTab } from "@/lib/project-tab";
+import { parsePullFilter } from "@/lib/pull-filter";
 import { getProjectDetail, TEMPLATES } from "@/server/graphs";
-import { listProjectPulls } from "@/server/pulls";
+import { listProjectPulls, type PullFilter } from "@/server/pulls";
 
 export const dynamic = "force-dynamic";
 
@@ -78,8 +80,9 @@ function RunsTab({ project, runs }: Pick<Detail, "project" | "runs">) {
   );
 }
 
-async function PullsTab({ projectId }: { projectId: string }) {
-  const pulls = await listProjectPulls(getDb(), getGitHub(), projectId);
+async function PullsTab({ projectId, filter }: { projectId: string; filter: PullFilter }) {
+  const pulls = await listProjectPulls(getDb(), getGitHub(), projectId, { state: filter });
+  const finished = (pr: PullItem) => !["queued", "running", "waiting"].includes(pr.runStatus);
   return (
     <Card>
       <CardHeader>
@@ -87,8 +90,13 @@ async function PullsTab({ projectId }: { projectId: string }) {
           {pulls.live ? "Live state from GitHub for PRs opened by this project's runs." : "Set GITHUB_TOKEN or a GitHub App for the dashboard to show live CI and review state."}
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <PullRequestList items={pulls.items} />
+      <CardContent className="flex flex-col gap-4">
+        <PullFilters active={filter} counts={pulls.counts} />
+        <PullRequestList
+          items={pulls.items}
+          emptyText={filter === "archived" ? "Nothing archived." : filter === "all" ? "No pull requests from handoff runs yet." : `No ${filter} pull requests.`}
+          actions={(pr) => (finished(pr) ? <ArchivePullButton runId={pr.runId} number={pr.number} archived={pr.archived ?? false} /> : null)}
+        />
       </CardContent>
     </Card>
   );
@@ -202,7 +210,7 @@ export default async function ProjectPage({
       </div>
       <ProjectTabs active={tab} counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length }}>
         {tab === "runs" && <RunsTab project={project} runs={runs} />}
-        {tab === "pulls" && <PullsTab projectId={project.id} />}
+        {tab === "pulls" && <PullsTab projectId={project.id} filter={parsePullFilter(query)} />}
         {tab === "settings" && <SettingsTab project={project} graphs={graphs} runCount={runs.length} />}
       </ProjectTabs>
     </main>

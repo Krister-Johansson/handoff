@@ -1,5 +1,6 @@
 import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon } from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { IssueLinks, type IssueLink } from "@/components/runs/issue-links";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,7 @@ export type PullItem = {
   /** The run's task and linked issues. */
   task?: string;
   issues?: IssueLink[];
+  archived?: boolean;
   state: "open" | "merged" | "closed" | "draft" | "unknown";
   ci: "success" | "failure" | "pending" | "unknown";
   review: "approved" | "changes_requested" | "none" | "unknown";
@@ -25,6 +27,9 @@ export type PullItem = {
 const CI_LABEL: Record<PullItem["ci"], string> = { success: "CI passing", failure: "CI failing", pending: "CI running", unknown: "CI unknown" };
 const CI_DOT: Record<PullItem["ci"], string> = { success: "bg-emerald-500", failure: "bg-destructive", pending: "bg-amber-500", unknown: "bg-muted-foreground/40" };
 
+/** handoff titles a PR with its task, cut at 72 characters with "..."; then the task adds nothing. */
+const titleShowsTask = (title: string | undefined, task: string) => title !== undefined && task.startsWith(title.replace(/\.\.\.$/, ""));
+
 function StateIcon({ state }: { state: PullItem["state"] }) {
   if (state === "merged") return <GitMergeIcon className="size-4 text-violet-500" aria-label="merged" />;
   if (state === "closed") return <GitPullRequestClosedIcon className="size-4 text-destructive" aria-label="closed" />;
@@ -33,8 +38,17 @@ function StateIcon({ state }: { state: PullItem["state"] }) {
 }
 
 /** One row per pull request, like a PR bar: state, number, repository, branch, diff size and CI. */
-export function PullRequestList({ items }: { items: PullItem[] }) {
-  if (items.length === 0) return <p className="text-sm text-muted-foreground">No pull requests from handoff runs yet.</p>;
+export function PullRequestList({
+  items,
+  actions,
+  emptyText = "No pull requests from handoff runs yet.",
+}: {
+  items: PullItem[];
+  /** Extra controls at the end of each row, such as archiving. */
+  actions?: (pr: PullItem) => ReactNode;
+  emptyText?: string;
+}) {
+  if (items.length === 0) return <p className="text-sm text-muted-foreground">{emptyText}</p>;
   return (
     <ul className="flex flex-col gap-2">
       {items.map((pr) => (
@@ -47,7 +61,7 @@ export function PullRequestList({ items }: { items: PullItem[] }) {
             <Link href={`/runs/${pr.runId}`} className="truncate text-sm hover:underline">
               {pr.title ?? pr.branch}
             </Link>
-            {pr.task && pr.task !== pr.title && <span className="truncate text-xs text-muted-foreground">{pr.task}</span>}
+            {pr.task && !titleShowsTask(pr.title, pr.task) && <span className="truncate text-xs text-muted-foreground">{pr.task}</span>}
             <span className="flex min-w-0 items-center gap-2">
               <IssueLinks issues={pr.issues ?? []} />
               <span className="truncate font-mono text-xs text-muted-foreground">{pr.branch}</span>
@@ -65,6 +79,7 @@ export function PullRequestList({ items }: { items: PullItem[] }) {
             <span className={cn("size-2 rounded-full", CI_DOT[pr.ci])} />
             CI
           </span>
+          {actions?.(pr)}
         </li>
       ))}
     </ul>

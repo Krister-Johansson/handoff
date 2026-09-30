@@ -44,3 +44,9 @@ test("a PR row shows the task and the issues its run is linked to", () => {
   expect(screen.getByText("Keep digits when slugifying")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "#12 Slugify drops digits" })).toHaveAttribute("href", "https://github.com/octo/sample/issues/12");
 });
+
+test("a task that the PR title already shows, even cut short, is not repeated", () => {
+  const task = "Add a Usage section to README.md for src/slugify.js with two short examples, and a test";
+  render(<PullRequestList items={[{ ...base, number: 8, title: `${task.slice(0, 69)}...`, task, state: "merged", ci: "success", review: "none" }]} />);
+  expect(screen.queryByText(task)).not.toBeInTheDocument();
+});

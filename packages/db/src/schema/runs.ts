@@ -27,6 +27,8 @@ export const runs = pgTable(
     /** GitHub issues the run works on; the bodies live in run state for the agents. */
     issues: jsonb("issues").$type<{ number: number; title: string; url: string }[]>().notNull().default([]),
     cancelRequestedAt: tstz("cancel_requested_at"),
+    /** Set when the user archives a finished run; hides its pull request from the dashboard's lists. */
+    archivedAt: tstz("archived_at"),
     startedAt: tstz("started_at"),
     finishedAt: tstz("finished_at"),
     createdAt: createdAt(),
