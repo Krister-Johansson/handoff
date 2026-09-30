@@ -2,6 +2,8 @@
 # Relays a repository's GitHub webhooks to the local dashboard through GitHub itself, so the
 # unauthenticated dashboard is never exposed publicly. Needs: gh extension install cli/gh-webhook
 # Usage: pnpm dev:webhooks owner/repo
+# Stop it with Ctrl-C so gh removes its temporary repository hook. gh only accepts the secret as a
+# flag, so it is visible in this machine's process list while the relay runs.
 set -eu
 repo="${1:?usage: pnpm dev:webhooks owner/repo}"
 secret="$(grep -E '^GITHUB_WEBHOOK_SECRET=' "$(dirname "$0")/../.env" | cut -d= -f2-)"
