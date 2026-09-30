@@ -70,6 +70,6 @@ test("Reviewer node is spawned with read-only allowed tools", async () => {
   );
   expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "reviewer")?.status).toBe("passed");
   const tools = cli.requests[0]!.allowedTools;
-  expect(tools).toEqual(["Read", "Glob", "Grep", "Bash(git diff *)", "Bash(git log *)", "Bash(git show *)"]);
+  expect(tools).toEqual(["Read", "Glob", "Grep", "Bash(git log *)", "Bash(git show *)", "Bash(git diff *)", "Bash(git status *)", "Bash(git ls-files *)"]);
   expect(tools.some((t) => t === "Edit" || t === "Write")).toBe(false);
 });
