@@ -52,7 +52,15 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
   }
   if (fromType === "coder" && typeof o.summary === "string") {
     const files = strings(o.filesChanged);
-    return { kind: "change", markdown: [o.summary.trim(), ...(files.length ? ["", "## Files changed", "", ...files.map((f) => `- \`${f}\``)] : [])].join("\n") };
+    const extra = (Array.isArray(o.extraPaths) ? o.extraPaths.map(obj) : []).map((e) => `- \`${String(e.path)}\`: ${String(e.reason ?? "")}`);
+    return {
+      kind: "change",
+      markdown: [
+        o.summary.trim(),
+        ...(extra.length ? ["", "## Files outside the plan", "", ...extra] : []),
+        ...(files.length ? ["", "## Files changed", "", ...files.map((f) => `- \`${f}\``)] : []),
+      ].join("\n"),
+    };
   }
   return { kind: "output", markdown: ["```json", JSON.stringify(output ?? null, null, 2), "```"].join("\n") };
 }

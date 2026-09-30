@@ -13,6 +13,8 @@ export const CoderOutputSchema = z
     question: z.object({ text: z.string().min(1), options: z.array(z.string()).optional() }).optional(),
     filesChanged: z.array(z.string()).optional(),
     commitSha: z.string().optional(),
+    /** Files outside the plan's owned paths that the change needed, each with the reason. */
+    extraPaths: z.array(z.object({ path: z.string().min(1), reason: z.string().min(1) })).optional(),
   })
   .refine((o) => o.status !== "needs_input" || o.question !== undefined, {
     message: "needs_input requires a question",

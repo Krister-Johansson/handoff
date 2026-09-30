@@ -98,7 +98,9 @@ export function renderContextPacket(packet: ContextPacket): string {
   out.push(
     "# Constraints",
     "",
-    `- Only change files under: ${packet.constraints.ownedPaths.length ? packet.constraints.ownedPaths.join(", ") : "(no restriction)"}`,
+    packet.constraints.ownedPaths.length
+      ? `- Only change files under: ${packet.constraints.ownedPaths.join(", ")}. If the change needs a file outside these, list it in extraPaths with the reason; any other file outside them fails the step.`
+      : "- Only change files under: (no restriction)",
     `- Tools available: ${packet.constraints.allowedTools.join(", ") || "(none)"}`,
     `- Turn budget: ${packet.constraints.maxTurns}`,
     "- Commit your changes with git before finishing. Do not push.",

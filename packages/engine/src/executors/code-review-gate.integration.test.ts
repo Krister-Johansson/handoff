@@ -149,3 +149,14 @@ test("approval after fixes routes like changes, approves the next pass, and is t
   expect(gates[1]!.output).toMatchObject({ option: "approve", approved: true, answer: "Approved after fixes.", answeredBy: "krister" });
   expect((run.state as { approvedAfterFixes?: Record<string, unknown> }).approvedAfterFixes).toEqual({});
 });
+
+test("files the coder changed outside the plan are listed with their reasons in the review", async () => {
+  const cli = new FakeCliExecutor([
+    { output: { status: "done", summary: "Scaffolded.", extraPaths: [{ path: "pnpm-workspace.yaml", reason: "pnpm 12 reads build approvals only here" }] } },
+  ]);
+  const { run } = await startRun(db, coderGraph, "Scaffold");
+  const agent = cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 });
+  await drain(engineDeps(db, { coder: agent, human_gate: humanGateExecutor({ db, branchDiff: async () => diff }) }));
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  expect(reviewIn(question!).markdown).toContain("## Files outside the plan\n\n- `pnpm-workspace.yaml`: pnpm 12 reads build approvals only here");
+});

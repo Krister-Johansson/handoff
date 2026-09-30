@@ -25,7 +25,7 @@ export async function validateContract(contract: Contract, output: unknown, ctx:
   const checks: CheckResult[] = [];
   for (const check of contract.checks) {
     try {
-      checks.push(await runCheck(check, ctx));
+      checks.push(await runCheck(check, { ...ctx, output: parsed.data }));
     } catch (error) {
       checks.push({ kind: check.kind, passed: false, detail: `check errored: ${(error as Error).message}` });
     }

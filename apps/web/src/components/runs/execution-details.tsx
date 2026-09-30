@@ -97,7 +97,7 @@ function PlannerView({ data: { plan, steps, ownedPaths } }: { data: PlannerOutpu
   );
 }
 
-function CoderView({ data: { summary, question, filesChanged, commitSha } }: { data: CoderOutput }) {
+function CoderView({ data: { summary, question, filesChanged, commitSha, extraPaths } }: { data: CoderOutput }) {
   return (
     <>
       {question && (
@@ -108,6 +108,18 @@ function CoderView({ data: { summary, question, filesChanged, commitSha } }: { d
       {summary && (
         <Section title="Summary">
           <p className="whitespace-pre-wrap">{summary}</p>
+        </Section>
+      )}
+      {extraPaths && extraPaths.length > 0 && (
+        <Section title="Files outside the plan">
+          <ul className="flex flex-col gap-1">
+            {extraPaths.map((extra) => (
+              <li key={extra.path} className="flex flex-col">
+                <span className="font-mono text-xs">{extra.path}</span>
+                <span className="text-muted-foreground">{extra.reason}</span>
+              </li>
+            ))}
+          </ul>
         </Section>
       )}
       {filesChanged && filesChanged.length > 0 && (
