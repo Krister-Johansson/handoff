@@ -125,6 +125,16 @@ describe("ClaudeCliExecutor", () => {
     expect(JSON.parse(argv[argv.indexOf("--json-schema") + 1]!)).toMatchObject({ type: "object", required: ["status", "summary"] });
   });
 
+  test("executor passes a draft-07 JSON Schema, which the Claude CLI accepts", async () => {
+    const { executor, request, fake, onEvent } = setup({ lines: [lines.init(), lines.result({ structured_output: { status: "done", summary: "" } })] });
+    await executor.run(request, { signal: new AbortController().signal, onEvent });
+    const argv = fake.invocations()[0]!.argv;
+    const schema = JSON.parse(argv[argv.indexOf("--json-schema") + 1]!) as Record<string, unknown>;
+    // claude 2.1.285 rejects "$schema": "https://json-schema.org/draft/2020-12/schema" (found on the first real run).
+    expect(schema.$schema === undefined || schema.$schema === "http://json-schema.org/draft-07/schema#").toBe(true);
+    expect(schema).toMatchObject({ type: "object", required: ["status", "summary"] });
+  });
+
   test("executor lets the fake binary edit files in the working directory", async () => {
     const { executor, request, onEvent } = setup({
       edits: [{ path: "hello.txt", content: "hi" }],
