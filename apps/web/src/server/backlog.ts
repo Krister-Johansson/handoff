@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { desc, eq, projects, runs, type Db } from "@handoff/db";
 import type { GitHubPort, IssueSummary } from "@handoff/github";
 
@@ -13,6 +14,9 @@ export const isTodo = (issue: BacklogIssue) => issue.run === null || issue.run.s
  * The repository's open issues, newest activity first, each with the latest run that links it. This
  * is the project's backlog: write issues on GitHub (by hand or with Claude Code), start runs here.
  */
+/** The backlog once per request, for the Issues tab and the count on its tab. */
+export const listBacklogOnce = cache((projectId: string, github: GitHubPort | undefined, db: Db) => listBacklog(db, github, projectId));
+
 export async function listBacklog(
   db: Db,
   github: GitHubPort | undefined,

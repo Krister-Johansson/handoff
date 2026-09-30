@@ -1,10 +1,11 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PencilIcon } from "lucide-react";
 import { GraphSettingsDialog, NewGraphDialog, StartRunDialog } from "@/components/projects/forms";
 import { Backlog } from "@/components/projects/backlog";
 import { ProjectSettingsActions } from "@/components/projects/project-card";
-import { ProjectTabs } from "@/components/projects/project-tabs";
+import { Count, ProjectTabs } from "@/components/projects/project-tabs";
 import { PullRequestList, type PullItem } from "@/components/pulls/pr-list";
 import { ArchivePullButton, PullFilters } from "@/components/pulls/pull-filters";
 import { IssueLinks } from "@/components/runs/issue-links";
@@ -21,7 +22,7 @@ import { parsePullFilter } from "@/lib/pull-filter";
 import { getProjectDetail, TEMPLATES } from "@/server/graphs";
 import { DefaultLibrary } from "@/components/projects/default-library";
 import { libraryChoices } from "@/server/library-choices";
-import { isTodo, listBacklog, type BacklogFilter } from "@/server/backlog";
+import { isTodo, listBacklogOnce, type BacklogFilter } from "@/server/backlog";
 import { listProjectPulls, type PullFilter } from "@/server/pulls";
 
 export const dynamic = "force-dynamic";
@@ -107,7 +108,7 @@ async function PullsTab({ projectId, filter }: { projectId: string; filter: Pull
 }
 
 async function IssuesTab({ project, graphs, graphName, filter }: { project: Detail["project"]; graphs: string[]; graphName: string | undefined; filter: BacklogFilter }) {
-  const backlog = await listBacklog(getDb(), getGitHub(), project.id);
+  const backlog = await listBacklogOnce(project.id, getGitHub(), getDb());
   if ("error" in backlog) {
     return (
       <Empty>
@@ -242,6 +243,12 @@ function SettingsTab({ project, graphs, runCount }: Pick<Detail, "project" | "gr
   );
 }
 
+/** The number of open issues for the Issues tab; nothing when GitHub cannot be asked. */
+async function IssueCount({ projectId }: { projectId: string }) {
+  const backlog = await listBacklogOnce(projectId, getGitHub(), getDb());
+  return "error" in backlog ? null : <Count n={backlog.counts.all} />;
+}
+
 export default async function ProjectPage({
   params,
   searchParams,
@@ -267,7 +274,17 @@ export default async function ProjectPage({
           <StartRunDialog projectId={project.id} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} label="New run" size="default" />
         )}
       </div>
-      <ProjectTabs active={tab} counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length }}>
+      <ProjectTabs
+        active={tab}
+        counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length }}
+        issueCount={
+          project.isDemo ? null : (
+            <Suspense fallback={null}>
+              <IssueCount projectId={project.id} />
+            </Suspense>
+          )
+        }
+      >
         {tab === "runs" && <RunsTab project={project} runs={runs} />}
         {tab === "issues" && (
           <IssuesTab project={project} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} filter={parseBacklogFilter(query)} />
