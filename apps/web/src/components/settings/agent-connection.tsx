@@ -60,7 +60,18 @@ function Instructions({ origin, checkout, token }: { origin: string; checkout: s
  * Connect Claude Code to handoff. Turning agent connections on creates a token in a file on this
  * machine; agents send it to /api/mcp. Turning them off deletes it.
  */
-export function AgentConnection({ origin, checkout, initialToken }: { origin: string; checkout: string; initialToken: string | undefined }) {
+export function AgentConnection({
+  origin,
+  checkout,
+  initialToken,
+  lastConnection,
+}: {
+  origin: string;
+  checkout: string;
+  initialToken: string | undefined;
+  /** Already worded on the server, as "Last connected: claude-code 2.1.285 at …". */
+  lastConnection?: string | undefined;
+}) {
   const [token, setToken] = useState(initialToken);
   const [pending, startTransition] = useTransition();
   const toggle = (on: boolean) =>
@@ -77,7 +88,7 @@ export function AgentConnection({ origin, checkout, initialToken }: { origin: st
       <div className="flex items-center justify-between gap-3">
         <div className="flex flex-col gap-0.5">
           <Label htmlFor="agent-connections">Enable agent connections</Label>
-          <span className="text-xs text-muted-foreground">{token ? "On. Agents with the token can use handoff's tools." : "Off"}</span>
+          <span className="text-xs text-muted-foreground">{token ? (lastConnection ?? "On. No agent has connected yet.") : "Off"}</span>
         </div>
         <Switch id="agent-connections" checked={Boolean(token)} disabled={pending} onCheckedChange={toggle} />
       </div>

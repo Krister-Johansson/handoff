@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { headers } from "next/headers";
 import { AgentConnection } from "@/components/settings/agent-connection";
 import { NotificationSettingsLoader } from "@/components/settings/notification-settings-loader";
+import { lastAgentConnection } from "@/server/agent-endpoint";
 import { AgentTokenStore, defaultAgentTokenFile } from "@/server/agent-token";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -12,6 +13,14 @@ export const dynamic = "force-dynamic";
 function checkoutRoot(from = process.cwd()): string {
   for (let dir = from; dir !== dirname(dir); dir = dirname(dir)) if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
   return from;
+}
+
+const time = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "medium" });
+
+/** "Last connected: claude-code 2.1.285 at Sep 30, 2026, 5:42:10 PM", from the last request to /api/mcp. */
+function connectionLine(): string | undefined {
+  const last = lastAgentConnection();
+  return last ? `Last connected: ${last.client} at ${time.format(last.at)}.` : undefined;
 }
 
 export default async function SettingsPage() {
@@ -30,7 +39,7 @@ export default async function SettingsPage() {
           <CardDescription>Let your Claude Code session see your projects and runs, start runs for issues and answer what runs ask.</CardDescription>
         </CardHeader>
         <CardContent>
-          <AgentConnection origin={origin} checkout={checkoutRoot()} initialToken={token} />
+          <AgentConnection origin={origin} checkout={checkoutRoot()} initialToken={token} lastConnection={connectionLine()} />
         </CardContent>
       </Card>
       <Card id="notifications" className="max-w-2xl scroll-mt-6">
