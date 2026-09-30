@@ -1,12 +1,14 @@
 "use client";
 
-import { useActionState } from "react";
-import { saveAgent, saveMcpServer, type FormState } from "@/app/library/actions";
+import { useActionState, useState, useTransition } from "react";
+import { PlugZapIcon } from "lucide-react";
+import { saveAgent, saveMcpServer, testMcpServerAction, type FormState, type McpTestState } from "@/app/library/actions";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Textarea } from "@/components/ui/textarea";
+import { McpCheckResult } from "./mcp-check-result";
 
 type Action = (state: FormState, form: FormData) => Promise<FormState>;
 
@@ -75,6 +77,9 @@ function NameField({ state, name, placeholder, description }: { state: FormState
 
 export function McpServerForm({ initial }: { initial?: McpServerValues }) {
   const [state, action, pending] = useForm(saveMcpServer);
+  const [tested, test, testing] = useActionState(testMcpServerAction, {} as McpTestState);
+  const [, startTest] = useTransition();
+  const [tools, setTools] = useState(state.values?.tools ?? initial?.tools.join(", ") ?? "");
   const transport = state.values?.transport ?? initial?.transport ?? "stdio";
   return (
     <form action={action}>
@@ -110,20 +115,32 @@ export function McpServerForm({ initial }: { initial?: McpServerValues }) {
           description="Name: value per line."
           defaultValue={initial ? pairLines(initial.headers, ": ") : undefined}
         />
-        <TextField
-          name="tools"
-          label="Allowed tools"
-          state={state}
-          placeholder="search, fetch"
-          description="Comma separated. Leave empty to allow every tool of this server."
-          defaultValue={initial?.tools.join(", ")}
-        />
+        <Field>
+          <FieldLabel htmlFor="field-tools">Allowed tools</FieldLabel>
+          <Input id="field-tools" name="tools" placeholder="search, fetch" value={tools} onChange={(e) => setTools(e.target.value)} />
+          <FieldDescription>Comma separated. Leave empty to allow every tool of this server. Test the server to pick from its tools.</FieldDescription>
+        </Field>
         <Field orientation="horizontal">
           <Button type="submit" disabled={pending}>
             Save server
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={testing}
+            onClick={(e) => {
+              // Not a form action: React resets a form after its action runs, which would clear the fields.
+              const data = new FormData(e.currentTarget.form ?? undefined);
+              startTest(() => test(data));
+            }}
+          >
+            <PlugZapIcon data-icon="inline-start" />
+            {testing ? "Testing" : "Test server"}
+          </Button>
           <Status state={state} />
         </Field>
+        {tested.errors && <FieldError>{Object.values(tested.errors).join(" ")}</FieldError>}
+        {tested.check && <McpCheckResult key={tested.check.checkedAt} check={tested.check} onAllow={(names) => setTools(names.join(", "))} />}
       </FieldGroup>
     </form>
   );

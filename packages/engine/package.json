@@ -7,13 +7,15 @@
     ".": "./src/index.ts",
     "./operations": "./src/operations.ts",
     "./runs": "./src/runs.ts",
-    "./library-import": "./src/library/import-repo.ts"
+    "./library-import": "./src/library/import-repo.ts",
+    "./mcp-check": "./src/library/mcp-check.ts"
   },
   "dependencies": {
     "@handoff/cli-adapter": "workspace:*",
     "@handoff/core": "workspace:*",
     "@handoff/db": "workspace:*",
     "@handoff/github": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "drizzle-orm": "1.0.0-rc.4",
     "zod": "4.6.5"
   }

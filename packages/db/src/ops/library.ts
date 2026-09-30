@@ -60,9 +60,14 @@ export async function upsertMcpServer(db: DbExecutor, input: McpServerInput): Pr
   const [row] = await db
     .insert(libraryMcpServers)
     .values(values)
-    .onConflictDoUpdate({ target: libraryMcpServers.name, set: { ...values, version: sql`${libraryMcpServers.version} + 1` } })
+    .onConflictDoUpdate({ target: libraryMcpServers.name, set: { ...values, lastCheck: null, version: sql`${libraryMcpServers.version} + 1` } })
     .returning();
   return row!;
+}
+
+/** Stores the result of checking an MCP server's saved configuration. */
+export async function recordMcpCheck(db: DbExecutor, name: string, check: Record<string, unknown>) {
+  await db.update(libraryMcpServers).set({ lastCheck: check }).where(eq(libraryMcpServers.name, name));
 }
 
 export async function upsertAgent(db: DbExecutor, input: AgentInput): Promise<AgentRow> {

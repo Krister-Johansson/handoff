@@ -1,0 +1,1 @@
+ALTER TABLE "library_mcp_servers" ADD COLUMN "last_check" jsonb;

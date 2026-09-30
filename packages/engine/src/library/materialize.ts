@@ -22,7 +22,8 @@ export type MaterializedLibrary = {
 
 const SECRET_REF = /\$\{secret:([A-Z0-9_]+)\}/g;
 
-function resolveSecrets(values: Record<string, string>, secrets: Record<string, string | undefined>, missing: Set<string>) {
+/** Replaces ${secret:NAME} with values from `secrets`; names without a value are added to `missing`. */
+export function resolveSecrets(values: Record<string, string>, secrets: Record<string, string | undefined>, missing: Set<string>) {
   return Object.fromEntries(
     Object.entries(values).map(([key, value]) => [
       key,
