@@ -140,3 +140,8 @@
 .dark .shiki-code span[style] {
   color: var(--shiki-dark);
 }
+
+/* React Flow canvases take the page background in both themes. */
+.react-flow {
+  --xy-background-color: var(--background);
+}
