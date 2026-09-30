@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BellIcon, BellRingIcon } from "lucide-react";
+import { BellIcon, BellRingIcon, XIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -17,17 +17,26 @@ const fetchAttention = async (): Promise<AttentionItem[]> => {
   return ((await res.json()) as { items: AttentionItem[] }).items;
 };
 
+const dismissItem = async (id: string) => {
+  await fetch("/api/attention/dismiss", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ itemId: id }) });
+};
+
 const label = (n: number) => (n === 0 ? "Nothing needs your attention" : `${n} ${n === 1 ? "thing needs" : "things need"} your attention`);
 
-function ItemList({ items }: { items: AttentionItem[] }) {
+function ItemList({ items, onDismiss }: { items: AttentionItem[]; onDismiss?: (item: AttentionItem) => void }) {
   return (
     <ul className="flex flex-col gap-1">
       {items.map((item) => (
-        <li key={item.id}>
-          <Link href={item.href} className="flex flex-col rounded-md px-2 py-1.5 hover:bg-muted">
+        <li key={item.id} className="flex items-start gap-1">
+          <Link href={item.href} className="flex min-w-0 flex-1 flex-col rounded-md px-2 py-1.5 hover:bg-muted">
             <span className="text-sm font-medium">{item.title}</span>
             <span className="truncate text-xs text-muted-foreground">{item.body}</span>
           </Link>
+          {onDismiss && (
+            <Button type="button" size="icon-xs" variant="ghost" className="mt-1.5" aria-label={`Dismiss ${item.title}`} onClick={() => onDismiss(item)}>
+              <XIcon />
+            </Button>
+          )}
         </li>
       ))}
     </ul>
@@ -38,7 +47,15 @@ function ItemList({ items }: { items: AttentionItem[] }) {
  * The header bell. It polls what needs a person, notifies each new item once (desktop notification
  * and a ping, as chosen on the settings page), and keeps the count in the tab title.
  */
-export function AttentionNotifier({ load = fetchAttention, intervalMs = 15_000 }: { load?: () => Promise<AttentionItem[]>; intervalMs?: number }) {
+export function AttentionNotifier({
+  load = fetchAttention,
+  dismiss = dismissItem,
+  intervalMs = 15_000,
+}: {
+  load?: () => Promise<AttentionItem[]>;
+  dismiss?: (id: string) => Promise<unknown>;
+  intervalMs?: number;
+}) {
   const [items, setItems] = useState<AttentionItem[]>([]);
   const pathname = usePathname();
 
@@ -89,7 +106,13 @@ export function AttentionNotifier({ load = fetchAttention, intervalMs = 15_000 }
         {done.length > 0 && (
           <section aria-label="Done" className="flex flex-col gap-1">
             <h3 className="px-2 text-xs font-medium text-muted-foreground">Done</h3>
-            <ItemList items={done} />
+            <ItemList
+              items={done}
+              onDismiss={(item) => {
+                setItems((list) => list.filter((i) => i.id !== item.id));
+                void dismiss(item.id);
+              }}
+            />
           </section>
         )}
         <Separator />

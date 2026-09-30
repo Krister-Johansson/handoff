@@ -1,4 +1,4 @@
-import { and, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
+import { and, appendEvents, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
 import type { AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";
 
@@ -18,15 +18,30 @@ async function waitingReviews(db: Db) {
   return rows.filter((r) => r.pr && r.pr.ci !== "pending" && r.pr.number !== undefined);
 }
 
-/** Runs that reached a Finish node with notify on in the last day. */
+/** Runs that reached a Finish node with notify on in the last day, and that nobody has dismissed. */
 async function finishedRuns(db: Db) {
+  const dismissed = sql`exists (select 1 from events d where d.run_id = ${runs.id} and d.type = 'attention.dismissed')`;
   return db
     .select({ runId: runs.id, task: runs.task, projectName: projects.name })
     .from(events)
     .innerJoin(runs, eq(runs.id, events.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
-    .where(and(eq(events.type, "run.finish"), sql`(${events.payload}->>'notify')::boolean`, sql`${events.createdAt} > now() - interval '1 day'`))
+    .where(and(eq(events.type, "run.finish"), sql`(${events.payload}->>'notify')::boolean`, sql`${events.createdAt} > now() - interval '1 day'`, sql`not ${dismissed}`))
     .orderBy(desc(events.createdAt));
+}
+
+const FINISHED = /^finished:([0-9a-f-]{36})$/i;
+
+/**
+ * Takes a finished run off what needs attention, as an event on that run. Only finished runs can be
+ * dismissed: questions, failures and reviews leave the list when someone acts on them.
+ */
+export async function dismissAttention(db: Db, itemId: string) {
+  const runId = FINISHED.exec(itemId)?.[1];
+  if (!runId) throw new Error("Only finished runs can be dismissed; the other items leave the list once someone acts on them.");
+  const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId));
+  if (!run) throw new Error(`There is no run ${runId}.`);
+  await db.transaction((tx) => appendEvents(tx, runId, [{ type: "attention.dismissed", payload: { itemId } }]));
 }
 
 /**

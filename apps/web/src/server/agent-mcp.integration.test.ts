@@ -2,7 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { and, eq, nodeExecutions, questions, runs } from "@handoff/db";
+import { and, appendEvents, eq, nodeExecutions, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
 import { createHandoffMcpServer } from "./agent-mcp";
@@ -40,7 +40,7 @@ test("the tools are listed, and read-only ones say so", async () => {
   const { tools } = await client.listTools();
   const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
   expect(Object.keys(byName).sort()).toEqual(
-    ["add_project", "answer_question", "cancel_run", "get_project", "get_run", "list_attention", "list_backlog", "list_library", "list_projects", "list_runs", "repair_run", "run_again", "start_run"].sort(),
+    ["add_project", "answer_question", "cancel_run", "dismiss_attention", "get_project", "get_run", "list_attention", "list_backlog", "list_library", "list_projects", "list_runs", "repair_run", "run_again", "start_run"].sort(),
   );
   expect(byName.list_backlog?.annotations?.readOnlyHint).toBe(true);
   expect(byName.cancel_run?.annotations?.destructiveHint).toBe(true);
@@ -108,4 +108,35 @@ test("add_project adds a repository the credential can reach, on its default bra
   expect(await call("add_project", { repo: "octo/widgets" })).toMatchObject({ name: "widgets", repo: "octo/widgets", default_branch: "trunk", url: expect.stringMatching(new RegExp(`^${BASE}/projects/`)) });
   expect((await call("list_projects")).map((p: { name: string }) => p.name)).toEqual(["sandbox", "widgets"]);
   expect(await call("add_project", { repo: "octo/widgets" })).toEqual({ error: expect.stringMatching(/already a project/) });
+});
+
+test("list_runs says which step each active run is on, and for how long", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  const started = new Date(Date.now() - 40 * 60_000);
+  await db.update(nodeExecutions).set({ status: "running", startedAt: started }).where(eq(nodeExecutions.runId, run_id));
+  const [listed] = await call("list_runs", { status: "active" });
+  expect(listed.current_step).toMatchObject({ node: "planner", attempt: 1, status: "running", since: started.toISOString() });
+  expect(listed.current_step.for_seconds).toBeGreaterThanOrEqual(40 * 60);
+  await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, run_id));
+  await db.update(nodeExecutions).set({ status: "passed", finishedAt: new Date() }).where(eq(nodeExecutions.runId, run_id));
+  expect((await call("list_runs"))[0].current_step).toBeNull();
+});
+
+test("get_run gives each step its start, end and duration, counting a running step up to now", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  await db.update(nodeExecutions).set({ status: "passed", startedAt: new Date("2026-10-01T10:00:00Z"), finishedAt: new Date("2026-10-01T10:04:00Z") }).where(eq(nodeExecutions.runId, run_id));
+  await seedExecution(db, run_id, { nodeKey: "coder", status: "running", startedAt: new Date(Date.now() - 90_000) });
+  const { steps } = await call("get_run", { run_id });
+  expect(steps[0]).toMatchObject({ node: "planner", started_at: "2026-10-01T10:00:00.000Z", finished_at: "2026-10-01T10:04:00.000Z", duration_seconds: 240 });
+  expect(steps[1]).toMatchObject({ node: "coder", status: "running", finished_at: null });
+  expect(steps[1].duration_seconds).toBeGreaterThanOrEqual(90);
+});
+
+test("a finished run can be dismissed from what needs attention; other items cannot", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  await db.transaction((tx) => appendEvents(tx, run_id, [{ type: "run.finish", payload: { notify: true } }]));
+  expect((await call("list_attention")).map((i: { id: string }) => i.id)).toEqual([`finished:${run_id}`]);
+  expect(await call("dismiss_attention", { item_id: `finished:${run_id}` })).toEqual({ dismissed: true });
+  expect(await call("list_attention")).toEqual([]);
+  expect(await call("dismiss_attention", { item_id: "question:abc" })).toEqual({ error: expect.stringMatching(/only finished runs/i) });
 });

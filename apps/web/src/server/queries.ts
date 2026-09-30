@@ -27,6 +27,26 @@ export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 5
     .limit(limit);
 }
 
+/** Each run's latest step still in progress (running, waiting or pending), for listing active runs. */
+export async function currentSteps(db: DbExecutor, runIds: string[]) {
+  if (runIds.length === 0) return new Map<string, { nodeKey: string; attempt: number; status: string; since: Date | null }>();
+  const rows = await db
+    .select({
+      runId: nodeExecutions.runId,
+      nodeKey: nodeExecutions.nodeKey,
+      attempt: nodeExecutions.attempt,
+      status: nodeExecutions.status,
+      startedAt: nodeExecutions.startedAt,
+      createdAt: nodeExecutions.createdAt,
+    })
+    .from(nodeExecutions)
+    .where(and(inArray(nodeExecutions.runId, runIds), inArray(nodeExecutions.status, ["running", "waiting", "pending"])))
+    .orderBy(desc(nodeExecutions.createdAt));
+  const steps = new Map<string, { nodeKey: string; attempt: number; status: string; since: Date | null }>();
+  for (const r of rows) if (!steps.has(r.runId)) steps.set(r.runId, { nodeKey: r.nodeKey, attempt: r.attempt, status: r.status, since: r.startedAt ?? r.createdAt });
+  return steps;
+}
+
 export async function getRunDetail(db: DbExecutor, runId: string) {
   const [run] = await db
     .select({ run: runs, project: projects })
