@@ -23,9 +23,10 @@ const json = (res: ServerResponse, status: number, value: unknown) => res.writeH
 /**
  * An MCP server behind its own OAuth authorization server, as Context7's /mcp/oauth is: protected
  * resource metadata, dynamic client registration, an /authorize endpoint that approves at once and
- * redirects back with a code, PKCE-checked code exchange and refresh.
+ * redirects back with a code, PKCE-checked code exchange and refresh. With `open` the MCP endpoint
+ * answers without a token.
  */
-export async function startOAuthMcpServer(opts: { accessTtlSeconds?: number } = {}): Promise<OAuthMcpServer> {
+export async function startOAuthMcpServer(opts: { accessTtlSeconds?: number; open?: boolean } = {}): Promise<OAuthMcpServer> {
   const clients = new Set<string>();
   const codes = new Map<string, { challenge: string; clientId: string }>();
   const accessTokens: string[] = [];
@@ -88,7 +89,7 @@ export async function startOAuthMcpServer(opts: { accessTtlSeconds?: number } = 
     }
     if (url.pathname === "/mcp") {
       const token = req.headers.authorization?.replace(/^Bearer /, "");
-      if (!token || !accessTokens.includes(token)) {
+      if (!opts.open && (!token || !accessTokens.includes(token))) {
         res.writeHead(401, { "content-type": "application/json", "www-authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp"` });
         return res.end(JSON.stringify({ error: "invalid_token" }));
       }

@@ -36,9 +36,16 @@ function pairs(value: string, separator: "=" | ":", errors: Record<string, strin
 /** Path segments the library's own pages use (/library/skills/new, /library/skills/browse). */
 const RESERVED = new Set(["new", "browse"]);
 
+/** Why a library entry cannot have this name, or undefined when it can. */
+export function nameProblem(name: string): string | undefined {
+  if (!NAME.test(name)) return "Use lowercase letters, digits and dashes, for example ci-triage.";
+  if (RESERVED.has(name)) return `${name} is the name of a library page; choose another.`;
+  return undefined;
+}
+
 function checkName(name: string, errors: Record<string, string>) {
-  if (!NAME.test(name)) errors.name = "Use lowercase letters, digits and dashes, for example ci-triage.";
-  else if (RESERVED.has(name)) errors.name = `${name} is the name of a library page; choose another.`;
+  const problem = nameProblem(name);
+  if (problem) errors.name = problem;
 }
 
 export function parseSkillForm(form: FormData): FormResult<SkillInput> {

@@ -1,11 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { deleteLibraryEntry, getLibraryByNames, recordMcpCheck, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
 import { checkMcpServer, type McpCheck } from "@handoff/engine/mcp-check";
 import { getDb } from "@/lib/db";
 import { getOAuthStore } from "@/lib/oauth-store";
+import { addMcpServerFromUrl } from "@/server/mcp-add";
 import { parseAgentForm, parseGroupForm, parseMcpForm, parseSkillForm, type FormResult } from "@/lib/library-forms";
 
 export type FormState = { ok?: boolean; message?: string; errors?: Record<string, string>; values?: Record<string, string> };
@@ -77,4 +79,19 @@ export async function deleteEntry(form: FormData): Promise<void> {
   await deleteLibraryEntry(getDb(), kind, name);
   revalidatePath("/library");
   redirect(`/library?tab=${SEGMENT[kind]}`);
+}
+
+export type AddFromUrlState = { error?: string; manual?: { name: string; url: string }; message?: string; values?: { url: string; name: string } };
+
+/** Adds an http MCP server from its URL; see addMcpServerFromUrl. Redirects when it is saved. */
+export async function addMcpFromUrlAction(_: AddFromUrlState, form: FormData): Promise<AddFromUrlState> {
+  const values = { url: String(form.get("url") ?? ""), name: String(form.get("name") ?? "") };
+  const h = await headers();
+  const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host") ?? "localhost:3000"}`;
+  const result = await addMcpServerFromUrl(getDb(), getOAuthStore(), values, origin);
+  if ("redirect" in result) {
+    revalidatePath("/library");
+    redirect(result.redirect);
+  }
+  return { ...result, values };
 }

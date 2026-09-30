@@ -1,4 +1,5 @@
-import { getLibraryByNames, type Db } from "@handoff/db";
+import { getLibraryByNames, recordMcpCheck, type Db } from "@handoff/db";
+import { checkMcpServer } from "@handoff/engine/mcp-check";
 import { abandonMcpSignIn, beginMcpSignIn, finishMcpSignIn, type McpOAuthStore } from "@handoff/engine/mcp-oauth";
 
 export const CALLBACK_PATH = "/api/mcp-oauth/callback";
@@ -21,8 +22,16 @@ export async function startSignIn(db: Db, store: McpOAuthStore, name: string, or
   }
 }
 
+/** Checks a freshly signed-in server so its page shows its tools; a failing check is recorded too. */
+async function checkSignedIn(db: Db, store: McpOAuthStore, name: string) {
+  const [server] = (await getLibraryByNames(db, { skills: [], mcp: [name], agents: [] })).mcp;
+  if (!server) return;
+  const check = await checkMcpServer({ ...server, auth: server.auth }, { secrets: process.env, oauth: store });
+  await recordMcpCheck(db, name, check);
+}
+
 /** Handles the authorization server's redirect back to the dashboard. */
-export async function completeSignIn(store: McpOAuthStore, params: URLSearchParams): Promise<{ redirect: string } | { error: string }> {
+export async function completeSignIn(db: Db, store: McpOAuthStore, params: URLSearchParams): Promise<{ redirect: string } | { error: string }> {
   const state = params.get("state") ?? "";
   const denied = params.get("error");
   if (denied) {
@@ -32,6 +41,7 @@ export async function completeSignIn(store: McpOAuthStore, params: URLSearchPara
   }
   try {
     const { name } = await finishMcpSignIn(store, { state, code: params.get("code") ?? "" });
+    await checkSignedIn(db, store, name);
     return { redirect: `${serverPage(name)}?signed_in=1` };
   } catch (error) {
     return { error: (error as Error).message };
