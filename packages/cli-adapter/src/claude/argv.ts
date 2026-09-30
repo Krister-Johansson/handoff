@@ -65,7 +65,8 @@ export function buildClaudeArgv(input: ClaudeArgvInput): string[] {
     "--append-system-prompt-file",
     input.systemPromptFile,
     "--settings",
-    JSON.stringify({ disableAllHooks: true, ...(input.claudeMdExcludes ? { claudeMdExcludes: input.claudeMdExcludes } : {}) }),
+    // Thinking summaries instead of redacted blocks, so the dashboard can show what an agent thought.
+    JSON.stringify({ disableAllHooks: true, showThinkingSummaries: true, ...(input.claudeMdExcludes ? { claudeMdExcludes: input.claudeMdExcludes } : {}) }),
     "--strict-mcp-config",
   ];
   if (input.mcpConfigPath) argv.push("--mcp-config", input.mcpConfigPath);

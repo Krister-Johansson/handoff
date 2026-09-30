@@ -57,12 +57,14 @@ test("an open execution reloads when its status changes", async () => {
   fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(detail("running", ""))));
   render(<RunLive {...common} initialStatus="running" initialExecutions={[{ ...executions[0]!, status: "running" }]} />);
   fireEvent.click(screen.getByRole("button", { name: /Plan/ }));
-  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+  // The drawer also loads the agent's activity; count only the loads of the execution itself.
+  const detailLoads = () => fetchMock.mock.calls.filter(([url]) => url === "/api/runs/r1/executions/e1").length;
+  await waitFor(() => expect(detailLoads()).toBe(1));
   act(() =>
     FakeEventSource.instances[0]!.emit({ seq: 1, type: "node.passed", payload: { nodeKey: "planner", attempt: 1 }, nodeExecutionId: "e1", createdAt: "2026-09-30T10:00:00Z" }),
   );
   expect(await screen.findByText("Add a module.")).toBeInTheDocument();
-  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(detailLoads()).toBe(2);
 });
 
 test("the page refreshes once when the run finishes, so the header shows the final state", () => {
