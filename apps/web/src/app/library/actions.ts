@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { deleteLibraryEntry, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
+import { deleteLibraryEntry, getLibraryByNames, recordMcpCheck, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "@handoff/db";
+import { checkMcpServer, type McpCheck } from "@handoff/engine/mcp-check";
 import { getDb } from "@/lib/db";
 import { parseAgentForm, parseGroupForm, parseMcpForm, parseSkillForm, type FormResult } from "@/lib/library-forms";
 
@@ -29,6 +30,33 @@ export async function saveSkill(_: FormState, form: FormData): Promise<FormState
 
 export async function saveMcpServer(_: FormState, form: FormData): Promise<FormState> {
   return save("mcp", form, parseMcpForm(form), (data) => upsertMcpServer(getDb(), data));
+}
+
+export type McpTestState = { check?: McpCheck; errors?: Record<string, string> };
+
+/**
+ * Checks an MCP server with the form's current values, secrets resolved from the dashboard's
+ * environment. The result is stored as the server's last check when it matches the saved configuration.
+ */
+export async function testMcpServerAction(_: McpTestState, form: FormData): Promise<McpTestState> {
+  const parsed = parseMcpForm(form);
+  if (!parsed.ok) return { errors: parsed.errors };
+  const d = parsed.data;
+  const config = { transport: d.transport, command: d.command ?? null, args: d.args ?? [], url: d.url ?? null, env: d.env ?? {}, headers: d.headers ?? {} };
+  const check = await checkMcpServer(config, { secrets: process.env });
+  if (!form.get("$new")) {
+    const [saved] = (await getLibraryByNames(getDb(), { skills: [], mcp: [parsed.data.name], agents: [] })).mcp;
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    if (
+      saved &&
+      saved.transport === config.transport &&
+      same([saved.command, saved.args, saved.url, saved.env, saved.headers], [config.command, config.args, config.url, config.env, config.headers])
+    ) {
+      await recordMcpCheck(getDb(), saved.name, check);
+      revalidatePath("/library");
+    }
+  }
+  return { check };
 }
 
 export async function saveAgent(_: FormState, form: FormData): Promise<FormState> {

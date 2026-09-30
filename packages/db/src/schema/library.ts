@@ -43,6 +43,8 @@ export const libraryMcpServers = pgTable("library_mcp_servers", {
   headers: jsonb("headers").$type<Record<string, string>>().notNull().default({}),
   /** Tool names to allow; empty means every tool of the server (mcp__<name>__*). */
   tools: jsonb("tools").$type<string[]>().notNull().default([]),
+  /** The latest connection check of this configuration; cleared when the server is saved again. */
+  lastCheck: jsonb("last_check").$type<Record<string, unknown>>(),
   version: integer("version").notNull().default(1),
   createdAt: createdAt(),
   updatedAt: updatedAt(),

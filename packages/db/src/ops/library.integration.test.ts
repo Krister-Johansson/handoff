@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { truncateAll } from "../testing/reset.ts";
 import { createTestDb } from "../testing/test-db.ts";
-import { deleteLibraryEntry, getLibraryByNames, listLibrary, listLibraryIndex, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "./library.ts";
+import { deleteLibraryEntry, getLibraryByNames, listLibrary, listLibraryIndex, recordMcpCheck, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "./library.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -71,4 +71,13 @@ test("listLibraryIndex describes every entry without file contents", async () =>
   const index = await listLibraryIndex(db);
   expect(index.skills).toEqual([{ name: "canvas", description: "Posters", version: 1, fileCount: 2, source: { registry: "github", id: "anthropics/skills/skills/canvas", hash: "t1" } }]);
   expect(index.groups.map((g) => g.name)).toEqual(["g"]);
+});
+
+test("an MCP server keeps its last check until it is saved again", async () => {
+  await upsertMcpServer(db, { name: "docs", transport: "http", url: "https://example.com/mcp" });
+  const check = { status: "ok", checkedAt: "2026-09-30T10:00:00Z", durationMs: 120, tools: [{ name: "search" }], resources: 0, prompts: 0 };
+  await recordMcpCheck(db, "docs", check);
+  expect((await listLibraryIndex(db)).mcp[0]!.lastCheck).toEqual(check);
+  await upsertMcpServer(db, { name: "docs", transport: "http", url: "https://example.com/mcp/v2" });
+  expect((await listLibraryIndex(db)).mcp[0]!.lastCheck).toBeNull();
 });

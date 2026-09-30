@@ -7,11 +7,22 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { McpCheck } from "@handoff/engine/mcp-check";
+import { CHECK_STATUS } from "@/lib/mcp-check-status";
+import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
-type Row = { name: string; detail: string; version: number; extra?: string | undefined; source?: string | undefined };
+type Row = { name: string; detail: string; version: number; extra?: string | undefined; source?: string | undefined; check?: McpCheck | null };
+
+/** The last check of an MCP server, as a colored badge; "Not tested" before the first one. */
+function CheckBadge({ check }: { check: McpCheck | null }) {
+  if (!check) return <Badge variant="outline">Not tested</Badge>;
+  const status = CHECK_STATUS[check.status];
+  const label = check.status === "ok" ? `${status.label}, ${check.tools.length} tools` : status.label;
+  return <StatusBadge status={status.tone} label={label} />;
+}
 
 function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; noun: string }) {
   if (rows.length === 0) {
@@ -50,8 +61,8 @@ function EntryTable({ segment, rows, noun }: { segment: string; rows: Row[]; nou
                 </Badge>
               )}
             </TableCell>
-            <TableCell className="text-right">
-              <Badge variant="outline">v{row.version}</Badge>
+            <TableCell className="text-right whitespace-nowrap">
+              {row.check !== undefined && <CheckBadge check={row.check} />} <Badge variant="outline">v{row.version}</Badge>
             </TableCell>
           </TableRow>
         ))}
@@ -79,7 +90,12 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
       label: "MCP servers",
       noun: "MCP server",
       description: "Written to a per-execution mcp.json and loaded with --strict-mcp-config.",
-      rows: mcp.map((s) => ({ name: s.name, detail: s.transport === "stdio" ? `${s.command} ${s.args.join(" ")}` : (s.url ?? ""), version: s.version })),
+      rows: mcp.map((s) => ({
+        name: s.name,
+        detail: s.transport === "stdio" ? `${s.command} ${s.args.join(" ")}` : (s.url ?? ""),
+        version: s.version,
+        check: (s.lastCheck as McpCheck | null) ?? null,
+      })),
     },
     {
       value: "agents",
