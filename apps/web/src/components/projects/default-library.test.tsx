@@ -8,8 +8,9 @@ beforeEach(() => actions.saveProjectLibraryAction.mockReset().mockResolvedValue(
 
 const available = {
   skills: [
-    { name: "tdd", detail: "Test first" },
-    { name: "grill-me", detail: "Interview the plan" },
+    { name: "tdd", detail: "Test first", source: "mattpocock/skills" },
+    { name: "grill-me", detail: "Interview the plan", source: "mattpocock/skills" },
+    { name: "ci-triage", detail: "Read CI logs", source: "Written here" },
   ],
   mcp: [{ name: "context7", detail: "https://mcp.context7.com/mcp/oauth" }],
   agents: [],
@@ -20,24 +21,36 @@ const none = { skills: [], mcp: [], agents: [], groups: [] };
 test("with no default, runs get only what each node enables", () => {
   render(<DefaultLibrary projectId="p1" available={available} initial={none} />);
   expect(screen.getByText(/only what each node enables/i)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Save default library" })).toBeDisabled();
 });
 
-test("entries picked from the library are saved as the project's default", async () => {
+test("the dialog picks entries per kind with checkboxes and saves them as the default", async () => {
   render(<DefaultLibrary projectId="p1" available={available} initial={none} />);
-  fireEvent.click(screen.getByRole("combobox", { name: "Add from the library" }));
-  fireEvent.click(await screen.findByRole("option", { name: /context7/ }));
-  fireEvent.click(screen.getByRole("option", { name: /^tdd/ }));
-  const chosen = screen.getByRole("list", { name: "Default library" });
-  expect(within(chosen).getByText("context7")).toBeInTheDocument();
-  expect(within(chosen).getByText("tdd")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Save default library" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose" }));
+  const dialog = await screen.findByRole("dialog", { name: "Default library" });
+  fireEvent.mouseDown(within(dialog).getByRole("tab", { name: /Skills/ }), { button: 0 });
+  expect(within(dialog).getByText("mattpocock/skills")).toBeInTheDocument();
+  expect(within(dialog).getByText("Written here")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "tdd" }));
+  fireEvent.mouseDown(within(dialog).getByRole("tab", { name: /MCP servers/ }), { button: 0 });
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: "context7" }));
+  expect(within(dialog).getByText("2 chosen")).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
   await waitFor(() => expect(actions.saveProjectLibraryAction).toHaveBeenCalledWith("p1", { skills: ["tdd"], mcp: ["context7"], agents: [], groups: [] }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });
 
-test("a default entry can be removed", async () => {
+test("search narrows the list to matching names and descriptions", async () => {
+  render(<DefaultLibrary projectId="p1" available={available} initial={none} />);
+  fireEvent.click(screen.getByRole("button", { name: "Choose" }));
+  const dialog = await screen.findByRole("dialog", { name: "Default library" });
+  fireEvent.mouseDown(within(dialog).getByRole("tab", { name: /Skills/ }), { button: 0 });
+  fireEvent.change(within(dialog).getByRole("searchbox", { name: "Search skills" }), { target: { value: "interview" } });
+  expect(within(dialog).getByRole("checkbox", { name: "grill-me" })).toBeInTheDocument();
+  expect(within(dialog).queryByRole("checkbox", { name: "tdd" })).not.toBeInTheDocument();
+});
+
+test("removing a chosen entry from the card saves at once", async () => {
   render(<DefaultLibrary projectId="p1" available={available} initial={{ ...none, skills: ["tdd"], groups: ["testing"] }} />);
   fireEvent.click(screen.getByRole("button", { name: "Remove skill tdd" }));
-  fireEvent.click(screen.getByRole("button", { name: "Save default library" }));
   await waitFor(() => expect(actions.saveProjectLibraryAction).toHaveBeenCalledWith("p1", { ...none, groups: ["testing"] }));
 });
