@@ -20,8 +20,10 @@ const renderSetting = () =>
 test("the theme follows the system until a person picks dark or light, which this browser keeps", () => {
   renderSetting();
   expect(screen.getByRole("radio", { name: "System" })).toBeChecked();
+  expect(screen.getByText("Follows your system's light or dark setting.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("radio", { name: "Dark" }));
   expect(document.documentElement).toHaveClass("dark");
+  expect(screen.getByText("Easier on the eyes in low light.")).toBeInTheDocument();
   expect(window.localStorage.getItem("theme")).toBe("dark");
   fireEvent.click(screen.getByRole("radio", { name: "Light" }));
   expect(document.documentElement).not.toHaveClass("dark");

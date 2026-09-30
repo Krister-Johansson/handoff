@@ -48,7 +48,7 @@ test("the bell lists what needs attention and the tab title shows how many", asy
   fireEvent.click(bell);
   expect(await screen.findByRole("link", { name: /gate asks a question/ })).toHaveAttribute("href", "/runs/r1");
   expect(screen.getByRole("link", { name: /run failed at coder/ })).toHaveAttribute("href", "/runs/r2");
-  expect(screen.getByRole("link", { name: "Notification settings" })).toHaveAttribute("href", "/settings#notifications");
+  expect(screen.getByRole("link", { name: "Notification settings" })).toHaveAttribute("href", "/settings?tab=notifications");
   expect(screen.queryByRole("switch")).not.toBeInTheDocument();
 });
 
