@@ -20,7 +20,7 @@ async function lockRun(tx: DbTx, runId: string) {
 const owned = (row: NodeExecutionRow, workerId: string) =>
   and(eq(nodeExecutions.id, row.id), eq(nodeExecutions.leaseOwner, workerId), eq(nodeExecutions.status, "running"));
 
-const releasedLease = { leaseOwner: null, leaseExpiresAt: null } as const;
+const releasedLease = { leaseOwner: null, leaseExpiresAt: null, childPid: null, childHost: null } as const;
 
 async function othersActive(tx: DbTx, runId: string, excludeId: string): Promise<number> {
   const [row] = await tx

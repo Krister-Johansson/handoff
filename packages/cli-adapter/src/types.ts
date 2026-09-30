@@ -52,6 +52,8 @@ export type CliRunOptions = {
   onEvent: (event: CliEvent) => void | Promise<void>;
   /** Called once with the session id as soon as a stream line carries it (normally system/init). */
   onSessionId?: (id: string) => void | Promise<void>;
+  /** Called with the child's pid (its process group) right after spawning. */
+  onSpawn?: (pid: number) => void | Promise<void>;
 };
 
 /** Runs one agent turn in a working directory. The Claude CLI implementation is the only one today. */

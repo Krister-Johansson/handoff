@@ -1,11 +1,17 @@
+import { execFile } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
+import { hostname } from "node:os";
+import { promisify } from "node:util";
 import { join } from "node:path";
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { RunStateSchema } from "@handoff/core";
 import {
   appendEvents,
   claimNext,
   heartbeat,
+  heartbeatWorker,
+  registerWorker,
+  stopWorker,
   nodeExecutions,
   projects,
   reapExpiredLeases,
@@ -57,8 +63,56 @@ export async function runOnce(deps: EngineDeps): Promise<boolean> {
 
 export type WorkerHandle = { stop(): Promise<void> };
 
+const ORPHAN_COMMAND = /claude|docker exec/;
+const run = promisify(execFile);
+
+/**
+ * Stops claude children that a previous worker on this host left running (it crashed, or was
+ * killed without a graceful stop). Their executions are reclaimed by lease expiry; killing the
+ * child first means two claude processes never work on the same session.
+ */
+export async function killOrphans(deps: EngineDeps): Promise<string[]> {
+  const rows = await deps.db
+    .select({ id: nodeExecutions.id, runId: nodeExecutions.runId, nodeKey: nodeExecutions.nodeKey, pid: nodeExecutions.childPid })
+    .from(nodeExecutions)
+    .where(
+      and(
+        eq(nodeExecutions.status, "running"),
+        isNotNull(nodeExecutions.childPid),
+        eq(nodeExecutions.childHost, hostname()),
+        ne(nodeExecutions.leaseOwner, deps.workerId),
+      ),
+    );
+  const killed: string[] = [];
+  for (const row of rows) {
+    const command = await run("ps", ["-o", "command=", "-p", String(row.pid)]).then(
+      (r) => r.stdout.trim(),
+      () => "",
+    );
+    if (command && ORPHAN_COMMAND.test(command)) {
+      try {
+        process.kill(-row.pid!, "SIGTERM");
+      } catch {
+        try {
+          process.kill(row.pid!, "SIGTERM");
+        } catch {
+          // already gone
+        }
+      }
+      killed.push(row.id);
+      await deps.db.transaction(async (tx) => {
+        await tx.update(nodeExecutions).set({ childPid: null, childHost: null }).where(eq(nodeExecutions.id, row.id));
+        await appendEvents(tx, row.runId, [{ type: "node.orphan_killed", payload: { nodeKey: row.nodeKey, pid: row.pid }, nodeExecutionId: row.id }]);
+      });
+    } else if (!command) {
+      await deps.db.update(nodeExecutions).set({ childPid: null, childHost: null }).where(eq(nodeExecutions.id, row.id));
+    }
+  }
+  return killed;
+}
+
 /** Long-running loop: keeps up to maxInFlight executions running, polling when idle. */
-export function startWorker(deps: EngineDeps, opts: { pollIntervalMs?: number; maxInFlight?: number } = {}): WorkerHandle {
+export function startWorker(deps: EngineDeps, opts: { pollIntervalMs?: number; maxInFlight?: number; heartbeatMs?: number } = {}): WorkerHandle {
   const poll = opts.pollIntervalMs ?? 1000;
   const maxInFlight = opts.maxInFlight ?? 4;
   const inFlight = new Set<Promise<void>>();
@@ -66,7 +120,14 @@ export function startWorker(deps: EngineDeps, opts: { pollIntervalMs?: number; m
   let stopping = false;
   let wake: (() => void) | undefined;
 
+  const beat = setInterval(() => void heartbeatWorker(deps.db, deps.workerId).catch(() => {}), opts.heartbeatMs ?? 15_000);
   const loop = (async () => {
+    await registerWorker(deps.db, { id: deps.workerId, hostname: hostname(), caps: deps.caps });
+    const orphans = await killOrphans(deps).catch((error) => {
+      deps.log?.("orphan cleanup failed", String(error));
+      return [];
+    });
+    if (orphans.length) deps.log?.(`stopped ${orphans.length} orphaned claude processes`);
     while (!stopping) {
       if (inFlight.size < maxInFlight) {
         try {
@@ -103,6 +164,8 @@ export function startWorker(deps: EngineDeps, opts: { pollIntervalMs?: number; m
       for (const controller of controllers) controller.abort();
       await loop;
       await Promise.allSettled([...inFlight]);
+      clearInterval(beat);
+      await stopWorker(deps.db, deps.workerId);
     },
   };
 }
@@ -231,6 +294,9 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         ...(library ? { library } : {}),
         signal: controller.signal,
         emit: (type, payload) => void buffer.push({ type, payload, nodeExecutionId: row.id }),
+        setChildPid: async (pid) => {
+          await db.update(nodeExecutions).set({ childPid: pid, childHost: hostname() }).where(eq(nodeExecutions.id, row.id));
+        },
         setSessionId: async (id) => {
           await db.update(nodeExecutions).set({ executorSessionId: id }).where(eq(nodeExecutions.id, row.id));
           row = { ...row, executorSessionId: id };

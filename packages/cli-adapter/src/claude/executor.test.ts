@@ -149,3 +149,33 @@ describe("ClaudeCliExecutor", () => {
 function realpath(p: string) {
   return execFileSync("realpath", [p]).toString().trim();
 }
+
+test("executor reports the child pid as soon as claude starts", async () => {
+  const fake = fakeClaude({ lines: [lines.init(), lines.result({ structured_output: { status: "done", summary: "" } })] });
+  const executor = new ClaudeCliExecutor({
+    command: { file: process.execPath, prefixArgs: [fakeClaudeBin] },
+    oauthToken: "t",
+    configDir: "/tmp/c",
+    baseEnv: { ...process.env, ...fake.env },
+    passthroughEnv: ["FAKE_CLAUDE_SCENARIO", "FAKE_CLAUDE_RECORD"],
+  });
+  const pids: number[] = [];
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-cwd-"));
+  await executor.run(
+    {
+      prompt: "go",
+      systemPrompt: "x",
+      cwd,
+      stagingDir: mkdtempSync(join(tmpdir(), "s-")),
+      allowedTools: [],
+      maxTurns: 1,
+      contract: Contract,
+      addDirs: [],
+      session: { mode: "new", id: SESSION_ID, name: "n" },
+      timeoutMs: 10_000,
+    },
+    { signal: new AbortController().signal, onEvent: () => {}, onSpawn: (pid) => void pids.push(pid) },
+  );
+  expect(pids).toHaveLength(1);
+  expect(pids[0]).toBeGreaterThan(0);
+});
