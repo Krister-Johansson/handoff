@@ -36,6 +36,8 @@ jobs:
       - run: docker pull node:22-alpine
       - name: GraphQL types are up to date
         run: pnpm --filter @handoff/github codegen && git diff --exit-code packages/github/src/gql
+      - name: The Claude Code plugin's bundled bridge is up to date
+        run: pnpm build:plugin && git diff --exit-code plugins/
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
