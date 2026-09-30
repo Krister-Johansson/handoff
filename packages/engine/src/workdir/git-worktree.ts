@@ -10,8 +10,8 @@ const run = promisify(execFile);
 export type GitWorktreeOptions = {
   /** HANDOFF_HOME: repos/ and worktrees/ live under it. */
   root: string;
-  /** Extra `git -c` config per remote, e.g. an http.extraheader with a GitHub installation token. */
-  gitConfig?: (remoteUrl: string) => Promise<string[]>;
+  /** GIT_CONFIG_* environment per remote, e.g. an http.extraheader with a GitHub token. Never argv. */
+  gitEnv?: (remoteUrl: string) => Promise<Record<string, string>>;
 };
 
 /** One clone per remote under repos/, one worktree per run under worktrees/, on the run's branch. */
@@ -32,12 +32,12 @@ export class GitWorktreeProvider implements WorkdirProvider {
     return this.serial(spec.remoteUrl, async () => {
       const mirror = this.mirrorPath(spec.remoteUrl);
       const path = this.worktreePath(spec.runId);
-      const auth = (await this.options.gitConfig?.(spec.remoteUrl)) ?? [];
+      const auth = (await this.options.gitEnv?.(spec.remoteUrl)) ?? {};
       if (!existsSync(mirror)) {
         mkdirSync(join(this.options.root, "repos"), { recursive: true });
-        await this.git(this.options.root, [...auth, "clone", "-q", "--no-checkout", spec.remoteUrl, mirror]);
+        await this.git(this.options.root, ["clone", "-q", "--no-checkout", spec.remoteUrl, mirror], auth);
       } else if (!existsSync(path)) {
-        await this.git(mirror, [...auth, "fetch", "-q", "--prune", "origin"]);
+        await this.git(mirror, ["fetch", "-q", "--prune", "origin"], auth);
       }
       const baseSha = await this.git(mirror, ["rev-parse", `origin/${spec.baseBranch}`]);
       if (existsSync(path)) return { path, baseSha };
@@ -62,8 +62,8 @@ export class GitWorktreeProvider implements WorkdirProvider {
     });
   }
 
-  private async git(cwd: string, args: string[]): Promise<string> {
-    const { stdout } = await run("git", args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+  private async git(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {
+    const { stdout } = await run("git", args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env } });
     return stdout.trim();
   }
 

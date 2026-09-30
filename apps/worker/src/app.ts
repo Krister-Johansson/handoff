@@ -39,9 +39,9 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
   const db = createDb(env.DATABASE_URL);
   const git = new GitWorktreeProvider({
     root: home,
-    gitConfig: async (remote) => {
+    gitEnv: async (remote) => {
       const repo = parseGitHubRemote(remote);
-      return repo ? github.gitAuthConfig(repo) : [];
+      return repo ? github.gitAuthEnv(repo) : {};
     },
   });
   return {

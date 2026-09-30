@@ -1,12 +1,27 @@
 import { execFile, spawn } from "node:child_process";
 import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
-import type { CheckResult, DeterministicCheck, RunState } from "@handoff/core";
+import { redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
 
 const execFileAsync = promisify(execFile);
 const TAIL_LINES = 200;
 
 export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined; container?: string | undefined };
+
+const COMMAND_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TERM"];
+
+/**
+ * Tester commands and command checks run code the agent wrote, so they get a minimal environment:
+ * never the worker's GITHUB_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, webhook secret or DATABASE_URL.
+ */
+export function commandEnv(base: Record<string, string | undefined> = process.env): Record<string, string> {
+  const env: Record<string, string> = { CI: "true" };
+  for (const key of COMMAND_ENV_KEYS) {
+    const value = base[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
 
 /** Runs a shell command in the worktree, or inside the run's container when one is given. */
 export async function shell(
@@ -17,15 +32,19 @@ export async function shell(
 ): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
   return new Promise((resolve) => {
     const child = container
-      ? spawn("docker", ["exec", "-w", cwd, container, "sh", "-c", command], { stdio: ["ignore", "pipe", "pipe"] })
-      : spawn("sh", ["-c", command], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+      ? spawn("docker", ["exec", "-e", "CI=true", "-w", cwd, container, "sh", "-c", command], { stdio: ["ignore", "pipe", "pipe"] })
+      : spawn("sh", ["-c", command], { cwd, env: commandEnv(), stdio: ["ignore", "pipe", "pipe"] });
     const lines: string[] = [];
-    const collect = (chunk: Buffer) => {
-      lines.push(...chunk.toString("utf8").split("\n"));
+    // One partial-line buffer per stream, so a chunk boundary never splits or blanks a line.
+    const partial = { stdout: "", stderr: "" };
+    const collect = (stream: keyof typeof partial) => (chunk: Buffer) => {
+      const parts = (partial[stream] + chunk.toString("utf8")).split("\n");
+      partial[stream] = parts.pop() ?? "";
+      lines.push(...parts);
       if (lines.length > TAIL_LINES * 2) lines.splice(0, lines.length - TAIL_LINES);
     };
-    child.stdout.on("data", collect);
-    child.stderr.on("data", collect);
+    child.stdout.on("data", collect("stdout"));
+    child.stderr.on("data", collect("stderr"));
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -33,7 +52,8 @@ export async function shell(
     }, timeoutMs);
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ exitCode: code, output: lines.slice(-TAIL_LINES).join("\n").trim(), timedOut });
+      for (const rest of [partial.stdout, partial.stderr]) if (rest) lines.push(rest);
+      resolve({ exitCode: code, output: redactSecrets(lines.slice(-TAIL_LINES).join("\n").trim()), timedOut });
     });
   });
 }

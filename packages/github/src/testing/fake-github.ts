@@ -65,8 +65,8 @@ export class FakeGitHub implements GitHubPort {
     return { merged: true, sha: `merge-${number}` };
   }
 
-  async gitAuthConfig() {
-    return [];
+  async gitAuthEnv(): Promise<Record<string, string>> {
+    return {};
   }
 
   /** Test helpers */

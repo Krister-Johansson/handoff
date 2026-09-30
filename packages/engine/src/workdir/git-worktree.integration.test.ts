@@ -37,3 +37,22 @@ test("release removes the worktree and keeps the branch", async () => {
   expect(existsSync(workdir.path)).toBe(false);
   expect(git(provider.mirrorPath(spec.remoteUrl), "branch", "--list", "handoff/run-1")).toContain("handoff/run-1");
 });
+
+test("GitWorktreeProvider hands the remote's git config to git through the environment", async () => {
+  const origin = createOriginRepo();
+  const provider = new GitWorktreeProvider({
+    root: mkdtempSync(join(tmpdir(), "handoff-home-")),
+    gitEnv: async () => ({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.file.allow", GIT_CONFIG_VALUE_0: "never" }),
+  });
+  await expect(provider.acquire({ runId: "run-1", remoteUrl: origin, baseBranch: "main", branchName: "handoff/run-1" })).rejects.toThrow(/not allowed/);
+});
+
+test("a failed clone does not reveal the auth header", async () => {
+  const provider = new GitWorktreeProvider({
+    root: mkdtempSync(join(tmpdir(), "handoff-home-")),
+    gitEnv: async () => ({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraheader", GIT_CONFIG_VALUE_0: "AUTHORIZATION: basic c2VjcmV0LXRva2Vu" }),
+  });
+  const failure = provider.acquire({ runId: "run-1", remoteUrl: join(tmpdir(), "no-such-repo"), baseBranch: "main", branchName: "handoff/run-1" });
+  await expect(failure).rejects.toThrow(/clone/);
+  await expect(failure).rejects.not.toThrow(/c2VjcmV0/);
+});
