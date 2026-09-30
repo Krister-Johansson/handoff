@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { listLibrary } from "@handoff/db";
+import { listLibraryIndex } from "@handoff/db";
 import { getDb } from "@/lib/db";
 import { importSkill, type ImportResult } from "@/server/skill-import";
 import { SkillsShClient, type SkillsShResult } from "@/server/skills-sh";
@@ -16,7 +16,7 @@ const client = new SkillsShClient();
 export async function searchSkillsShAction(query: string): Promise<{ results: SkillsShHit[] } | { error: string }> {
   if (!query.trim()) return { results: [] };
   try {
-    const [results, { skills }] = await Promise.all([client.search(query.trim()), listLibrary(getDb())]);
+    const [results, { skills }] = await Promise.all([client.search(query.trim()), listLibraryIndex(getDb())]);
     const byId = new Map(skills.filter((s) => s.source).map((s) => [s.source!.id, s.name]));
     return { results: results.map((r) => ({ ...r, inLibrary: byId.get(r.id) ?? null })) };
   } catch (error) {

@@ -1,4 +1,5 @@
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
@@ -36,6 +37,19 @@ test("project add without --name names the project after the repository", async 
   await runCli(["project", "add", "--repo", "octo/gqlPrune"], { db, out, github: null });
   const [project] = await db.select().from(projects);
   expect(project).toMatchObject({ name: "gqlprune", repoName: "gqlPrune" });
+});
+
+test("library import-repo imports a repository's skills as a group", async () => {
+  const { out, lines } = capture();
+  const repo = mkdtempSync(join(tmpdir(), "skills-repo-"));
+  mkdirSync(join(repo, "skills", "pdf"), { recursive: true });
+  writeFileSync(join(repo, "skills", "pdf", "SKILL.md"), "---\nname: pdf\ndescription: PDFs.\n---\n\nBody\n");
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@e", "commit", "-qm", "x"], { cwd: repo });
+  await runCli(["library", "import-repo", "anthropics/skills", "--group", "anthropic", "--url", repo], { db, out, github: null });
+  expect(lines.join("\n")).toMatch(/imported\s+pdf/);
+  expect(lines.at(-1)).toBe("group anthropic: 1 skills");
 });
 
 test("graph import stores a new version each time", async () => {

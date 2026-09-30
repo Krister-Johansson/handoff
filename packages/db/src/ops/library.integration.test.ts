@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { truncateAll } from "../testing/reset.ts";
 import { createTestDb } from "../testing/test-db.ts";
-import { deleteLibraryEntry, getLibraryByNames, listLibrary, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "./library.ts";
+import { deleteLibraryEntry, getLibraryByNames, listLibrary, listLibraryIndex, upsertAgent, upsertGroup, upsertMcpServer, upsertSkill } from "./library.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -57,4 +57,18 @@ test("getLibraryByNames expands groups into their entries, merged with names giv
 test("a missing group, or a group naming a missing entry, is reported", async () => {
   await upsertGroup(db, { name: "stale", description: "", skills: ["gone"], mcp: [], agents: [] });
   expect((await getLibraryByNames(db, { skills: [], mcp: [], agents: [], groups: ["stale", "nope"] })).missing).toEqual(["group nope", "skill gone"]);
+});
+
+test("listLibraryIndex describes every entry without file contents", async () => {
+  await upsertSkill(db, {
+    name: "canvas",
+    description: "Posters",
+    body: "b",
+    files: [{ path: "fonts/a.ttf", content: "AAEA", encoding: "base64" }, { path: "notes.md", content: "x" }],
+    source: { registry: "github", id: "anthropics/skills/skills/canvas", hash: "t1" },
+  });
+  await upsertGroup(db, { name: "g", description: "", skills: ["canvas"], mcp: [], agents: [] });
+  const index = await listLibraryIndex(db);
+  expect(index.skills).toEqual([{ name: "canvas", description: "Posters", version: 1, fileCount: 2, source: { registry: "github", id: "anthropics/skills/skills/canvas", hash: "t1" } }]);
+  expect(index.groups.map((g) => g.name)).toEqual(["g"]);
 });

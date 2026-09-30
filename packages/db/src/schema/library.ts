@@ -11,7 +11,7 @@ export const librarySkills = pgTable("library_skills", {
   body: text("body").notNull(),
   /** SKILL.md frontmatter keys other than name and description (license, allowed-tools, metadata). */
   frontmatter: jsonb("frontmatter").$type<Record<string, unknown>>().notNull().default({}),
-  files: jsonb("files").$type<{ path: string; content: string }[]>().notNull().default([]),
+  files: jsonb("files").$type<SkillFile[]>().notNull().default([]),
   /** Where an imported skill came from, with the content hash it was imported at; null for skills written here. */
   source: jsonb("source").$type<SkillSource>(),
   version: integer("version").notNull().default(1),
@@ -19,7 +19,14 @@ export const librarySkills = pgTable("library_skills", {
   updatedAt: updatedAt(),
 });
 
-export type SkillSource = { registry: "skills.sh"; id: string; hash: string };
+/** A supporting file; binary files (fonts, images) are stored base64 and staged as bytes. */
+export type SkillFile = { path: string; content: string; encoding?: "base64" };
+
+/**
+ * skills.sh: id is owner/repo/skill and hash is skills.sh's content hash. github: id is
+ * owner/repo/path-to-folder and hash is the folder's git tree hash.
+ */
+export type SkillSource = { registry: "skills.sh" | "github"; id: string; hash: string };
 
 /**
  * An MCP server nodes can enable by name. env and headers values may contain ${secret:NAME}; those

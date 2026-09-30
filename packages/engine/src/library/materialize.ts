@@ -81,7 +81,7 @@ export async function materializeLibrary(
         const target = normalize(join(dir, file.path));
         if (!target.startsWith(dir)) throw new LibraryUnavailableError(`skill ${skill.name} has a file outside its folder: ${file.path}`);
         mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, file.content);
+        writeFileSync(target, file.encoding === "base64" ? Buffer.from(file.content, "base64") : file.content);
       }
     }
     result.addDirs.push(root);

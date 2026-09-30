@@ -55,3 +55,13 @@ test("a new skill asks for a name and marks the form as new", async () => {
   fireEvent.change(screen.getByLabelText("SKILL.md"), { target: { value: "Read the failing job log first." } });
   expect(await submitted()).toMatchObject({ name: "ci-triage", description: "When CI fails", body: "Read the failing job log first.", $new: "1" });
 });
+
+test("a binary file is listed but not edited, and is saved unchanged", async () => {
+  actions.saveSkill.mockClear();
+  const font = { path: "fonts/Inter.ttf", content: "AAEA/w==", encoding: "base64" as const };
+  render(<SkillEditor skill={{ ...existing, files: [font] }} />);
+  fireEvent.click(screen.getByRole("button", { name: "fonts/Inter.ttf" }));
+  expect(screen.getByText(/binary file/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText("fonts/Inter.ttf")).not.toBeInTheDocument();
+  expect(JSON.parse((await submitted()).files!)).toEqual([font]);
+});

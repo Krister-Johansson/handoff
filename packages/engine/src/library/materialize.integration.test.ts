@@ -85,6 +85,22 @@ test("a node that enables a group gets the group's skills and agents", async () 
   expect(staged?.payload).toMatchObject({ groups: ["quality"], skills: [{ name: "tdd" }] });
 });
 
+test("a skill's binary files are staged as their original bytes", async () => {
+  const font = Buffer.from([0, 1, 0xff, 0xfe, 0x42]);
+  await upsertSkill(db, { name: "canvas", description: "d", body: "b", files: [{ path: "fonts/a.ttf", content: font.toString("base64"), encoding: "base64" }] });
+  const staged: Buffer[] = [];
+  const cli = new FakeCliExecutor([
+    async (request, options) => {
+      staged.push(readFileSync(join(request.addDirs[0]!, ".claude/skills/canvas/fonts/a.ttf")));
+      await options.onSessionId?.(request.session.id);
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, validated: outputs.coderDone, structuredOutput: outputs.coderDone };
+    },
+  ]);
+  await startRun(db, graphWithLibrary({ skills: ["canvas"] }));
+  await drain(engineDeps(db, registry(cli)));
+  expect(staged[0]).toEqual(font);
+});
+
 test("mcp.json resolves secrets from the engine environment and never from the database", async () => {
   await upsertMcpServer(db, { name: "docs", transport: "stdio", command: "npx", args: ["docs-mcp"], env: { API_KEY: "${secret:DOCS_KEY}", MODE: "fast" } });
   await upsertMcpServer(db, { name: "search", transport: "http", url: "https://mcp.example.com", headers: { Authorization: "Bearer ${secret:SEARCH_TOKEN}" }, tools: ["query"] });
