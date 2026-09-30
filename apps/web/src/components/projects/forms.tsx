@@ -1,14 +1,17 @@
 "use client";
 
-import { useActionState, type KeyboardEvent } from "react";
+import { useActionState, useState, useTransition, type KeyboardEvent } from "react";
+import type { IssueSummary } from "@handoff/github";
 import { MoreHorizontalIcon, PlayIcon, PlusIcon } from "lucide-react";
-import { createGraphAction, deleteGraphAction, renameGraphAction, startRunAction, type ActionState } from "@/app/projects/actions";
+import { createGraphAction, deleteGraphAction, renameGraphAction, startRunAction, listIssuesAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { IssuePicker } from "./issue-picker";
 
 export function NewGraphDialog({ projectId, templates }: { projectId: string; templates: { value: string; label: string }[] }) {
   const [state, action, pending] = useActionState(createGraphAction, {} as ActionState);
@@ -79,8 +82,14 @@ export function StartRunDialog({
   size?: "sm" | "default";
 }) {
   const [state, action, pending] = useActionState(startRunAction, {} as ActionState);
+  const [issues, setIssues] = useState<{ issues: IssueSummary[] } | { error: string }>();
+  const [linked, setLinked] = useState<IssueSummary[]>([]);
+  const [loadingIssues, startLoadingIssues] = useTransition();
+  const onOpenChange = (open: boolean) => {
+    if (open && !issues) startLoadingIssues(async () => setIssues(await listIssuesAction(projectId)));
+  };
   return (
-    <Dialog>
+    <Dialog onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button size={size} variant={graphs ? "default" : "outline"}>
           <PlayIcon data-icon="inline-start" />
@@ -116,6 +125,16 @@ export function StartRunDialog({
                 </NativeSelect>
               </Field>
             )}
+            <Field>
+              <FieldLabel htmlFor="run-issues">Issues</FieldLabel>
+              {loadingIssues || !issues ? (
+                <Skeleton className="h-9 w-full" />
+              ) : "issues" in issues ? (
+                <IssuePicker issues={issues.issues} value={linked} onChange={setLinked} />
+              ) : (
+                <FieldDescription>{issues.error}</FieldDescription>
+              )}
+            </Field>
             <Field data-invalid={state.error ? true : undefined}>
               <FieldLabel htmlFor="run-task">Task</FieldLabel>
               <Textarea
@@ -123,11 +142,13 @@ export function StartRunDialog({
                 name="task"
                 rows={5}
                 className="max-h-[40dvh]"
-                placeholder="Add a CHANGELOG.md with today's date"
+                placeholder={linked.length ? "Optional: what to do about the linked issues. Empty uses their titles." : "Add a CHANGELOG.md with today's date"}
                 defaultValue={state.values?.task}
                 onKeyDown={submitOnModEnter}
               />
-              <FieldDescription>The Planner reads this first; be as specific as you would with a colleague. Cmd or Ctrl+Enter starts the run.</FieldDescription>
+              <FieldDescription>
+                The Planner reads this and the linked issues first; be as specific as you would with a colleague. Cmd or Ctrl+Enter starts the run.
+              </FieldDescription>
               {state.error && <FieldError>{state.error}</FieldError>}
             </Field>
           </FieldGroup>

@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RunFilters } from "@/components/runs/run-filters";
+import { IssueLinks } from "@/components/runs/issue-links";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
 import { parseRunFilter } from "@/lib/run-filter";
@@ -48,10 +49,13 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
               <TableBody>
                 {rows.map((run) => (
                   <TableRow key={run.id}>
-                    <TableCell className="w-full max-w-0 truncate font-medium">
-                      <Link href={`/runs/${run.id}`} className="hover:underline">
-                        {run.task}
-                      </Link>
+                    <TableCell className="w-full max-w-0 font-medium">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Link href={`/runs/${run.id}`} className="truncate hover:underline">
+                          {run.task}
+                        </Link>
+                        <IssueLinks issues={run.issues} className="shrink-0" />
+                      </div>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {run.owner}/{run.repo}

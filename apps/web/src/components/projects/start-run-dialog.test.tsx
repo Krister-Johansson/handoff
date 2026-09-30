@@ -5,6 +5,7 @@ import { StartRunDialog } from "./forms";
 const startRunAction = vi.hoisted(() => vi.fn(async () => ({})));
 vi.mock("@/app/projects/actions", () => ({
   startRunAction,
+  listIssuesAction: vi.fn(async () => ({ issues: [] })),
   createGraphAction: vi.fn(),
   createProjectAction: vi.fn(),
   deleteGraphAction: vi.fn(),

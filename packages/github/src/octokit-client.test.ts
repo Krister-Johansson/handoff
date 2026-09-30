@@ -173,3 +173,41 @@ test("listRepos with a token lists the user's repositories, most recently pushed
   expect(url.searchParams.get("sort")).toBe("pushed");
   expect(url.searchParams.get("per_page")).toBe("100");
 });
+
+test("listIssues lists open issues, most recently updated first, without pull requests", async () => {
+  const { fetch, calls } = fakeFetch({
+    "GET /repos/octo/sample/issues": () => ({
+      json: [
+        { number: 12, title: "Slugify drops digits", html_url: "https://github.com/octo/sample/issues/12", labels: [{ name: "bug" }, "p1"], user: { login: "ann" }, updated_at: "2026-09-30T08:00:00Z" },
+        { number: 13, title: "A pull request", html_url: "https://github.com/octo/sample/pull/13", labels: [], user: { login: "bob" }, updated_at: "2026-09-30T07:00:00Z", pull_request: {} },
+      ],
+    }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.listIssues(repo)).toEqual([
+    { number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", labels: ["bug", "p1"], author: "ann", updatedAt: "2026-09-30T08:00:00Z" },
+  ]);
+  const url = new URL(calls[0]!.url);
+  expect(Object.fromEntries(url.searchParams)).toMatchObject({ state: "open", sort: "updated", per_page: "100" });
+});
+
+test("getIssue reads an issue with its body", async () => {
+  const { fetch } = fakeFetch({
+    "GET /repos/octo/sample/issues/12": () => ({ json: { number: 12, title: "Slugify drops digits", html_url: "https://github.com/octo/sample/issues/12", body: null, state: "open" } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.getIssue(repo, 12)).toEqual({ number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", body: "", state: "open" });
+});
+
+test("closeIssue comments on the issue and closes it as completed", async () => {
+  const { fetch, calls } = fakeFetch({
+    "POST /repos/octo/sample/issues/12/comments": () => ({ status: 201, json: { id: 1 } }),
+    "PATCH /repos/octo/sample/issues/12": () => ({ json: { number: 12, state: "closed" } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  await gh.closeIssue(repo, 12, "Fixed by #7.");
+  expect(calls.map((c) => [c.method, new URL(c.url).pathname, c.body])).toEqual([
+    ["POST", "/repos/octo/sample/issues/12/comments", { body: "Fixed by #7." }],
+    ["PATCH", "/repos/octo/sample/issues/12", { state: "closed", state_reason: "completed" }],
+  ]);
+});

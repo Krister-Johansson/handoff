@@ -72,6 +72,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     repoPaths: selector.repoPaths.length ? selector.repoPaths : ownedPaths,
     constraints: { ownedPaths, allowedTools, maxTurns },
     outputContract: node.contract.output,
+    ...(state.issues?.length ? { issues: state.issues } : {}),
   };
 
   const trigger = execution.trigger;

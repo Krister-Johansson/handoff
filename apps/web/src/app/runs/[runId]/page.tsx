@@ -4,6 +4,7 @@ import { ArrowLeftIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
+import { IssueLinks } from "@/components/runs/issue-links";
 import { RunAgainButton } from "@/components/runs/run-again-button";
 import { RunLive } from "@/components/runs/run-live";
 import { getDb } from "@/lib/db";
@@ -32,7 +33,9 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
       </div>
       <Card>
         <CardHeader>
-          <CardTitle className="text-xl">{run.task}</CardTitle>
+          <CardTitle className="text-xl whitespace-pre-line">{run.task}</CardTitle>
+          {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
+          <IssueLinks issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
           <CardDescription className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs">
             <span>
               {project.repoOwner}/{project.repoName}

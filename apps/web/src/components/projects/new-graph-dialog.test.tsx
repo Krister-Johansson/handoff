@@ -5,6 +5,7 @@ import { NewGraphDialog, StartRunDialog } from "./forms";
 const actions = vi.hoisted(() => ({
   createGraphAction: vi.fn(async () => ({})),
   startRunAction: vi.fn(async () => ({})),
+  listIssuesAction: vi.fn(async () => ({ issues: [] })),
   deleteGraphAction: vi.fn(),
   renameGraphAction: vi.fn(),
 }));

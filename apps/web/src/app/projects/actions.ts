@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
+import { eq, projects } from "@handoff/db";
+import type { IssueSummary } from "@handoff/github";
 import { getGitHub } from "@/lib/github";
 import { deleteProject, updateProject } from "@/server/project-admin";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
@@ -83,14 +85,27 @@ export async function startRunAction(_: ActionState, form: FormData): Promise<Ac
   const projectId = field(form, "projectId");
   const graphName = field(form, "graphName");
   const task = field(form, "task");
-  if (task.length < 5) return { ok: false, error: "Describe the task in a sentence.", values: { task, graphName } };
+  const issues = form.getAll("issue").map(Number).filter(Number.isInteger);
+  if (issues.length === 0 && task.length < 5) return { ok: false, error: "Describe the task in a sentence, or link an issue.", values: { task, graphName } };
   let id: string;
   try {
-    id = (await startRunFromGraph(getDb(), { projectId, graphName, task })).id;
+    id = (await startRunFromGraph(getDb(), { projectId, graphName, task, issues }, getGitHub())).id;
   } catch (error) {
     return { ok: false, error: (error as Error).message, values: { task, graphName } };
   }
   redirect(`/runs/${id}`);
+}
+
+export async function listIssuesAction(projectId: string): Promise<{ issues: IssueSummary[] } | { error: string }> {
+  const github = getGitHub();
+  if (!github) return { error: "GitHub is not configured (GITHUB_TOKEN or a GitHub App in .env), so issues cannot be linked." };
+  const [project] = await getDb().select().from(projects).where(eq(projects.id, projectId));
+  if (!project || project.isDemo) return { error: "This project has no GitHub issues to link." };
+  try {
+    return { issues: await github.listIssues({ owner: project.repoOwner, name: project.repoName }) };
+  } catch (error) {
+    return { error: `Could not list issues from GitHub: ${(error as Error).message}` };
+  }
 }
 
 export async function runAgainAction(_: ActionState, form: FormData): Promise<ActionState> {

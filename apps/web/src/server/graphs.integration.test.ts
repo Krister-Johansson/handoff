@@ -150,4 +150,26 @@ describe("renaming and deleting graphs", () => {
     await expect(startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "t" })).rejects.toThrow(/demo project/);
     expect(await db.select().from(runs)).toEqual([]);
   });
+
+  test("a run started with issues links them, and an empty task defaults to their titles", async () => {
+    const github = new FakeGitHub();
+    github.issues.set(12, { number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", body: "2nd becomes nd", state: "open" });
+    github.issues.set(14, { number: 14, title: "Document slugify", url: "https://github.com/octo/sample/issues/14", body: "", state: "open" });
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues: [12, 14] }, github);
+    expect(run.task).toBe("#12 Slugify drops digits\n#14 Document slugify");
+    expect(run.issues.map((i) => i.number)).toEqual([12, 14]);
+    expect((run.state as { issues: { body: string }[] }).issues[0]!.body).toBe("2nd becomes nd");
+
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+    const again = await runAgain(db, run.id);
+    expect(again.issues.map((i) => i.number)).toEqual([12, 14]);
+  });
+
+  test("a run needs a task or at least one issue", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    await expect(startRunFromGraph(db, { projectId: project.id, graphName: "g", task: " " })).rejects.toThrow(/task/);
+  });
 });

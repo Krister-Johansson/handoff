@@ -5,7 +5,7 @@ import type { PullItem } from "@/components/pulls/pr-list";
 /** PRs opened by a project's runs, enriched with live state from GitHub when a credential is configured. */
 export async function listProjectPulls(db: Db, github: GitHubPort | undefined, projectId: string): Promise<{ items: PullItem[]; live: boolean }> {
   const rows = await db
-    .select({ runId: runs.id, runStatus: runs.status, prNumber: runs.prNumber, branch: runs.branchName, owner: projects.repoOwner, name: projects.repoName, isDemo: projects.isDemo })
+    .select({ runId: runs.id, runStatus: runs.status, task: runs.task, issues: runs.issues, prNumber: runs.prNumber, branch: runs.branchName, owner: projects.repoOwner, name: projects.repoName, isDemo: projects.isDemo })
     .from(runs)
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .where(and(eq(runs.projectId, projectId), isNotNull(runs.prNumber)))
@@ -20,6 +20,8 @@ export async function listProjectPulls(db: Db, github: GitHubPort | undefined, p
         url: `https://github.com/${row.owner}/${row.name}/pull/${row.prNumber}`,
         runId: row.runId,
         runStatus: row.runStatus,
+        task: row.task,
+        issues: row.issues,
         state: "unknown",
         ci: "unknown",
         review: "unknown",

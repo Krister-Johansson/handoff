@@ -42,3 +42,20 @@ test("renderContextPacket adds the previous attempt with failed check tails and 
   expect(md).toContain("## Human answer");
   expect(md).toContain("## Operator note");
 });
+
+test("renderContextPacket lists linked issues after the task, with long bodies cut", () => {
+  const md = renderContextPacket({
+    ...packet,
+    issues: [
+      { number: 12, title: "Slugify drops digits", url: "https://github.com/o/r/issues/12", body: "Steps:\n1. slugify('2nd')" },
+      { number: 14, title: "Long one", url: "https://github.com/o/r/issues/14", body: "x".repeat(10_000) },
+    ],
+  });
+  const headings = md.split("\n").filter((l) => l.startsWith("# "));
+  expect(headings.slice(0, 2)).toEqual(["# Task", "# Linked issues"]);
+  expect(md).toContain("## #12 Slugify drops digits");
+  expect(md).toContain("https://github.com/o/r/issues/12");
+  expect(md).toContain("slugify('2nd')");
+  expect(md).toContain("(issue body cut at 4000 characters)");
+  expect(md.length).toBeLessThan(9_000);
+});

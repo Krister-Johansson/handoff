@@ -62,6 +62,7 @@ To look around without GitHub or Claude, `pnpm demo` seeds a demo run with simul
 
 ## How a run works
 
+- **Issues.** A run can link GitHub issues (New run, or `pnpm handoff run --issue 12`). The agents read their bodies, the pull request says `Closes #12`, and the Merge node closes them once the pull request merges.
 - **Graph.** Nodes and edges stored as graphology JSON. Each save is a new version, and a run keeps the version it started with.
 - **Nodes.** Planner, Coder and Reviewer run Claude. Tester runs a shell command with a minimal environment (`PATH`, `HOME`, locale and `CI=true`, never the worker's tokens or `DATABASE_URL`), because it runs code the agent wrote. List any other variables its tests need under **Environment variables** in the node's settings; the graph stores the names and the worker supplies the values. handoff's own secrets cannot be listed. The PR node pushes the branch, opens the pull request, posts the Reviewer's comments on it as one comment (updated on later attempts), and waits for CI and reviews. Merge squash-merges. A Human gate asks you something.
 - **Contracts.** Every node returns structured output that must match its schema, and can have deterministic checks such as "tests pass" or "changes stay within the paths the plan claimed". The engine runs the checks, not the model.

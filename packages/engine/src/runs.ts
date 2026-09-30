@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { initialRunState } from "@handoff/core";
+import { initialRunState, type LinkedIssue } from "@handoff/core";
 import { appendEvents, nodeExecutions, projects, runs, type Db } from "@handoff/db";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import type { RunRow } from "./types.ts";
@@ -14,7 +14,7 @@ const slug = (text: string) =>
 /** Creates a queued run pinned to a graph version, with a pending execution for the start node. */
 export async function createRun(
   db: Db,
-  input: { projectId: string; graphVersionId: string; task: string; baseBranch?: string; branchName?: string },
+  input: { projectId: string; graphVersionId: string; task: string; baseBranch?: string; branchName?: string; issues?: LinkedIssue[] },
 ): Promise<RunRow> {
   const graph = await loadCompiledGraph(db, input.graphVersionId);
   const [project] = await db.select().from(projects).where(eq(projects.id, input.projectId));
@@ -29,7 +29,8 @@ export async function createRun(
         graphVersionId: input.graphVersionId,
         status: "queued",
         task: input.task,
-        state: initialRunState(input.task),
+        state: initialRunState(input.task, input.issues),
+        issues: (input.issues ?? []).map(({ number, title, url }) => ({ number, title, url })),
         baseBranch: input.baseBranch ?? project.defaultBranch,
         branchName: input.branchName ?? `handoff/${slug(input.task)}-${id.slice(0, 8)}`,
       })
@@ -40,7 +41,10 @@ export async function createRun(
       .values({ runId: id, nodeKey: start.key, nodeType: start.type, executorKind: graph.executorKind(start.key), attempt: 1, trigger: { kind: "start" } })
       .returning();
     await appendEvents(tx, id, [
-      { type: "run.created", payload: { task: input.task, graphVersionId: input.graphVersionId, branchName: run!.branchName } },
+      {
+        type: "run.created",
+        payload: { task: input.task, graphVersionId: input.graphVersionId, branchName: run!.branchName, issues: (input.issues ?? []).map((i) => i.number) },
+      },
       { type: "node.created", payload: { nodeKey: start.key, attempt: 1 }, nodeExecutionId: execution!.id },
     ]);
     return run!;

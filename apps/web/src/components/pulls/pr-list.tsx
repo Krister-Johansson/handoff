@@ -1,5 +1,6 @@
 import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPullRequestIcon } from "lucide-react";
 import Link from "next/link";
+import { IssueLinks, type IssueLink } from "@/components/runs/issue-links";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +12,9 @@ export type PullItem = {
   url: string;
   runId: string;
   runStatus: string;
+  /** The run's task and linked issues. */
+  task?: string;
+  issues?: IssueLink[];
   state: "open" | "merged" | "closed" | "draft" | "unknown";
   ci: "success" | "failure" | "pending" | "unknown";
   review: "approved" | "changes_requested" | "none" | "unknown";
@@ -43,7 +47,11 @@ export function PullRequestList({ items }: { items: PullItem[] }) {
             <Link href={`/runs/${pr.runId}`} className="truncate text-sm hover:underline">
               {pr.title ?? pr.branch}
             </Link>
-            <span className="truncate font-mono text-xs text-muted-foreground">{pr.branch}</span>
+            {pr.task && pr.task !== pr.title && <span className="truncate text-xs text-muted-foreground">{pr.task}</span>}
+            <span className="flex min-w-0 items-center gap-2">
+              <IssueLinks issues={pr.issues ?? []} />
+              <span className="truncate font-mono text-xs text-muted-foreground">{pr.branch}</span>
+            </span>
           </div>
           {pr.review === "changes_requested" && <Badge variant="destructive">changes requested</Badge>}
           {pr.review === "approved" && <Badge variant="secondary">approved</Badge>}
