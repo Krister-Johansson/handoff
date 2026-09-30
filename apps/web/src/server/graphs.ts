@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
-import { compileGraph, type CompileError } from "@handoff/core";
+import { compileGraph, suggestProjectName, type CompileError } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
 import { createRun } from "@handoff/engine/runs";
 import type { GitHubPort } from "@handoff/github";
@@ -28,11 +28,15 @@ export async function listProjects(db: Db) {
     .orderBy(projects.name);
 }
 
-/** Adds a project; with a GitHub client it also checks the repository exists and stores its id. */
-export async function createProject(db: Db, input: { name: string; repo: string; defaultBranch: string }, github?: GitHubPort) {
+/**
+ * Adds a project; with a GitHub client it also checks the repository exists and stores its id.
+ * Without a name the project is named after the repository (lowercase, dashes, made unique).
+ */
+export async function createProject(db: Db, input: { name?: string; repo: string; defaultBranch: string }, github?: GitHubPort) {
   const [owner, name, extra] = input.repo.trim().split("/");
   if (!owner || !name || extra !== undefined) throw new Error("Repository must look like owner/name.");
-  if (!/^[a-z0-9][a-z0-9-]*$/.test(input.name)) throw new Error("Project name: lowercase letters, digits and dashes.");
+  const projectName = input.name?.trim() || suggestProjectName(name, (await db.select({ name: projects.name }).from(projects)).map((p) => p.name));
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(projectName)) throw new Error("Project name: lowercase letters, digits and dashes.");
   let repoId: number | null = null;
   if (github) {
     try {
@@ -43,7 +47,7 @@ export async function createProject(db: Db, input: { name: string; repo: string;
   }
   const [project] = await db
     .insert(projects)
-    .values({ name: input.name, repoOwner: owner, repoName: name, defaultBranch: input.defaultBranch || "main", repoId })
+    .values({ name: projectName, repoOwner: owner, repoName: name, defaultBranch: input.defaultBranch || "main", repoId })
     .returning();
   return project!;
 }

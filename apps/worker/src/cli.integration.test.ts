@@ -30,6 +30,13 @@ test("project add stores the repository", async () => {
   expect(lines.join("\n")).toContain("scratch");
 });
 
+test("project add without --name names the project after the repository", async () => {
+  const { out } = capture();
+  await runCli(["project", "add", "--repo", "octo/gqlPrune"], { db, out, github: null });
+  const [project] = await db.select().from(projects);
+  expect(project).toMatchObject({ name: "gqlprune", repoName: "gqlPrune" });
+});
+
 test("graph import stores a new version each time", async () => {
   const { out } = capture();
   await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });

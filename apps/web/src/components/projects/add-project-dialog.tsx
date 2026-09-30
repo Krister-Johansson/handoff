@@ -10,7 +10,6 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { suggestProjectName } from "@/lib/project-name";
 import { cn } from "@/lib/utils";
 import type { AvailableRepo } from "@/server/repos";
 
@@ -69,7 +68,6 @@ export function AddProjectDialog() {
   const [loaded, setLoaded] = useState<Loaded>();
   const [loading, startLoading] = useTransition();
   const [repo, setRepo] = useState<AvailableRepo>();
-  const [name, setName] = useState("");
   const [branch, setBranch] = useState("");
 
   const onOpenChange = (open: boolean) => {
@@ -77,7 +75,6 @@ export function AddProjectDialog() {
   };
   const choose = (next: AvailableRepo) => {
     setRepo(next);
-    setName(suggestProjectName(next.name, []));
     setBranch(next.defaultBranch);
   };
 
@@ -104,6 +101,7 @@ export function AddProjectDialog() {
                 <>
                   <RepoPicker repos={loaded.repos} value={repo} onChange={choose} />
                   <input type="hidden" name="repo" value={repo?.fullName ?? ""} />
+                  <FieldDescription>The project is named after the repository. You can rename it later from its menu.</FieldDescription>
                 </>
               ) : (
                 <>
@@ -111,10 +109,6 @@ export function AddProjectDialog() {
                   <FieldDescription>{loaded.error}</FieldDescription>
                 </>
               )}
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="project-name">Name</FieldLabel>
-              <Input id="project-name" name="name" placeholder="sandbox" value={name} onChange={(e) => setName(e.target.value)} />
             </Field>
             <Field>
               <FieldLabel htmlFor="project-branch">Default branch</FieldLabel>

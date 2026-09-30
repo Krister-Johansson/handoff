@@ -17,6 +17,12 @@ describe("projects and graphs", () => {
     expect(project).toMatchObject({ repoOwner: "octo", repoName: "sample" });
   });
 
+  test("createProject without a name takes it from the repository, made unique", async () => {
+    await createProject(db, { name: "gqlprune", repo: "someone/other", defaultBranch: "main" });
+    const project = await createProject(db, { repo: "octo/gqlPrune", defaultBranch: "main" });
+    expect(project.name).toBe("gqlprune-2");
+  });
+
   test("createProject stores the GitHub repository id when a GitHub client is available", async () => {
     const github = new FakeGitHub();
     github.repoId = 777;

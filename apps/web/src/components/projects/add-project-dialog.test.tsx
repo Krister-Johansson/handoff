@@ -36,7 +36,7 @@ async function openPicker() {
   return screen.findByPlaceholderText("Search repositories");
 }
 
-test("choosing a repository fills in the project name and its default branch", async () => {
+test("choosing a repository fills in its default branch and names the project after it", async () => {
   actions.listReposAction.mockResolvedValue({ repos: [repo("octo/sample"), repo("octo/Other_Repo", "trunk")] });
   const search = await openPicker();
   fireEvent.change(search, { target: { value: "other" } });
@@ -44,7 +44,7 @@ test("choosing a repository fills in the project name and its default branch", a
   expect(options.map((o) => o.textContent)).toEqual([expect.stringContaining("octo/Other_Repo")]);
   fireEvent.click(options[0]!);
   expect(screen.getByRole("combobox", { name: "GitHub repository" })).toHaveTextContent("octo/Other_Repo");
-  expect(screen.getByLabelText("Name")).toHaveValue("other-repo");
+  expect(screen.queryByLabelText("Name")).not.toBeInTheDocument();
   expect(screen.getByLabelText("Default branch")).toHaveValue("trunk");
 });
 
@@ -56,14 +56,14 @@ test("a repository that already is a project is shown with its project and canno
   expect(option).toHaveAttribute("aria-disabled", "true");
 });
 
-test("adding submits the chosen repository, name and branch", async () => {
+test("adding submits the chosen repository and branch", async () => {
   actions.listReposAction.mockResolvedValue({ repos: [repo("octo/sample")] });
   await openPicker();
   fireEvent.click(screen.getByRole("option"));
   fireEvent.click(screen.getByRole("button", { name: "Add project" }));
   await waitFor(() => expect(actions.createProjectAction).toHaveBeenCalledTimes(1));
   const form = (actions.createProjectAction.mock.calls[0] as unknown[])[1] as FormData;
-  expect(Object.fromEntries(form)).toEqual({ repo: "octo/sample", name: "sample", defaultBranch: "main" });
+  expect(Object.fromEntries(form)).toEqual({ repo: "octo/sample", defaultBranch: "main" });
 });
 
 test("without GitHub access the dialog asks for owner/name instead", async () => {
