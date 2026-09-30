@@ -58,6 +58,8 @@ export function NewGraphDialog({ projectId, templates }: { projectId: string; te
   );
 }
 
+const NO_ISSUES: IssueSummary[] = [];
+
 function submitOnModEnter(event: KeyboardEvent<HTMLTextAreaElement>) {
   if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
   event.preventDefault();
@@ -74,16 +76,21 @@ export function StartRunDialog({
   graphs,
   label = "Run",
   size = "sm",
+  variant,
+  initialIssues = NO_ISSUES,
 }: {
   projectId: string;
   graphName: string;
   graphs?: string[];
   label?: string;
   size?: "sm" | "default";
+  variant?: "default" | "outline";
+  /** Issues linked when the dialog opens, for starting a run from the backlog. */
+  initialIssues?: IssueSummary[];
 }) {
   const [state, action, pending] = useActionState(startRunAction, {} as ActionState);
   const [issues, setIssues] = useState<{ issues: IssueSummary[] } | { error: string }>();
-  const [linked, setLinked] = useState<IssueSummary[]>([]);
+  const [linked, setLinked] = useState<IssueSummary[]>(initialIssues);
   const [loadingIssues, startLoadingIssues] = useTransition();
   const onOpenChange = (open: boolean) => {
     if (open && !issues) startLoadingIssues(async () => setIssues(await listIssuesAction(projectId)));
@@ -91,7 +98,7 @@ export function StartRunDialog({
   return (
     <Dialog onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button size={size} variant={graphs ? "default" : "outline"}>
+        <Button size={size} variant={variant ?? (graphs ? "default" : "outline")}>
           <PlayIcon data-icon="inline-start" />
           {label}
         </Button>

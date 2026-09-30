@@ -16,6 +16,7 @@ export function ProjectTabs({ active, counts, children }: { active: ProjectTab; 
         <TabsTrigger value="runs">
           Runs <Count n={counts.runs} />
         </TabsTrigger>
+        <TabsTrigger value="issues">Issues</TabsTrigger>
         <TabsTrigger value="pulls">
           Pull requests <Count n={counts.pulls} />
         </TabsTrigger>
