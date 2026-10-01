@@ -244,6 +244,18 @@ export class OctokitGitHub implements GitHubPort {
     };
   }
 
+  async getFile(repo: RepoRef, path: string, ref: string): Promise<string | undefined> {
+    const octokit = await this.clientFor(repo);
+    try {
+      const { data } = await octokit.rest.repos.getContent({ owner: repo.owner, repo: repo.name, path, ref });
+      if (Array.isArray(data) || data.type !== "file" || !("content" in data)) return undefined;
+      return Buffer.from(data.content, "base64").toString("utf8");
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) return undefined;
+      throw error;
+    }
+  }
+
   async getJobLogTail(repo: RepoRef, jobId: number, lines = 120): Promise<string | undefined> {
     const octokit = await this.clientFor(repo);
     try {

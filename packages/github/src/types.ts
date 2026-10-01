@@ -55,6 +55,8 @@ export interface GitHubPort {
   /** Open issues of a repository (not pull requests), most recently updated first, up to 100. */
   listIssues(repo: RepoRef): Promise<IssueSummary[]>;
   getIssue(repo: RepoRef, number: number): Promise<IssueDetail>;
+  /** A file's text on a branch, or undefined when there is no such file. */
+  getFile(repo: RepoRef, path: string, ref: string): Promise<string | undefined>;
   /** The open issues GitHub records as blocking this one (its "blocked by" dependencies). */
   openBlockers(repo: RepoRef, number: number): Promise<number[]>;
   /** Records on GitHub that `issue` is blocked by `blocker`. */
