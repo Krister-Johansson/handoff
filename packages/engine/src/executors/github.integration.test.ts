@@ -173,12 +173,12 @@ describe("Merge node", () => {
   });
 });
 
-/** The linear graph with the edges that keep a run up with main: conflicts back to the coder, a refused merge back to the PR node. */
+/** The linear graph with the edges that keep a run up with main: fix (which takes conflicts) back to the coder, a refused merge back to the PR node. */
 const withSyncEdges = (document: typeof linear) => ({
   ...document,
   edges: [
     ...document.edges,
-    { key: "pr->coder:conflict", source: "pr", target: "coder", attributes: { port: "conflict", input: "feedback", loop: true, maxAttempts: 2 } },
+    { key: "pr->coder:fix", source: "pr", target: "coder", attributes: { port: "fix", input: "feedback", loop: true, maxAttempts: 2 } },
     { key: "merge->pr:update", source: "merge", target: "pr", attributes: { port: "update", input: "in", loop: true, maxAttempts: 2 } },
   ],
 });
@@ -226,7 +226,7 @@ describe("keeping up with main", () => {
     expect(events.find((e) => e.type === "github.synced")?.payload).toMatchObject({ merged: true });
   });
 
-  test("a conflict with main goes out the conflict port with the conflicting files, and nothing is pushed", async () => {
+  test("a conflict with main goes back on the fix edge with the conflicting files, and nothing is pushed", async () => {
     const seen: { conflict?: unknown } = {};
     const { origin, github, run, deps } = await syncSetup(withSyncEdges(linear), (o) => landOnMain(o, "CHANGELOG.md", "# Changelog from main\n"), seen);
     await drain(deps);
@@ -243,7 +243,7 @@ describe("keeping up with main", () => {
     expect(() => git(origin, "rev-parse", "--verify", "-q", row.branchName)).toThrow();
   });
 
-  test("without a conflict edge the PR node fails and names the conflicting files", async () => {
+  test("without a fix edge the PR node fails and names the conflicting files", async () => {
     const { run, deps } = await syncSetup(linear, (o) => landOnMain(o, "CHANGELOG.md", "# Changelog from main\n"));
     await drain(deps);
     const pr = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "pr")!;

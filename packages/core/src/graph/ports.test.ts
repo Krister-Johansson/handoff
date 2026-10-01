@@ -15,10 +15,9 @@ describe("ports", () => {
     expect(ids(portsOf("code_review", {}).outputs)).toEqual(["approve", "changes"]);
     expect(ids(portsOf("coder", {}).outputs)).toEqual(["done", "needs_input"]);
     expect(ids(portsOf("tester", {}).outputs)).toEqual(["pass", "fail"]);
-    expect(ids(portsOf("pr", {}).outputs)).toEqual(["ready", "fix", "conflict"]);
+    expect(ids(portsOf("pr", {}).outputs)).toEqual(["ready", "fix"]);
     expect(ids(portsOf("merge", {}).outputs)).toEqual(["merged", "update"]);
-    // A conflict with main goes back to an agent to resolve; a merge GitHub refuses loops back to the PR node to catch up.
-    expect(portsOf("pr", {}).outputs.find((p) => p.id === "conflict")?.kind).toBe("feedback");
+    // A merge GitHub refuses loops back to the PR node to catch up; a conflict with main goes back on fix, like failing CI.
     expect(portsOf("merge", {}).outputs.find((p) => p.id === "update")?.kind).toBe("continue");
     expect(ids(portsOf("planner", {}).inputs)).toEqual(["in"]);
     expect(ids(portsOf("reviewer", {}).inputs)).toEqual(["in"]);
@@ -112,7 +111,9 @@ describe("withPorts", () => {
         const b = after.graph.graph.getEdgeAttributes(edge);
         // A planner's done now excludes its questions; for outputs without a status it routes the same.
         const planner = before.graph.graph.source(edge) === "planner" && a.condition === undefined;
-        const expected = planner ? { neq: ["node.output.status", "needs_input"] } : (a.condition ?? null);
+        // A PR node's fix now also takes conflicts with main.
+        const prFix = before.graph.graph.source(edge) === "pr" && b.port === "fix";
+        const expected = planner ? { neq: ["node.output.status", "needs_input"] } : prFix ? portsOf("pr", {}).outputs.find((p) => p.id === "fix")!.condition : (a.condition ?? null);
         expect({ on: b.on, condition: b.condition ?? null, loop: b.loop }, edge).toEqual({ on: a.on, condition: expected, loop: a.loop });
       }
     }
