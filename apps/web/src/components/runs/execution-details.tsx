@@ -74,7 +74,7 @@ function unusualStart(trigger: ExecutionDetail["trigger"]): string | undefined {
   return undefined;
 }
 
-function PlannerView({ data: { status, question, plan, steps, ownedPaths } }: { data: PlannerOutput }) {
+function PlannerView({ data: { status, question, plan, steps, ownedPaths, acceptance } }: { data: PlannerOutput }) {
   if (status === "needs_input" && question)
     return (
       <Section title="Question">
@@ -93,6 +93,15 @@ function PlannerView({ data: { status, question, plan, steps, ownedPaths } }: { 
               <li key={step}>{step}</li>
             ))}
           </ol>
+        </Section>
+      )}
+      {acceptance && acceptance.length > 0 && (
+        <Section title="Acceptance criteria">
+          <ul className="flex list-disc flex-col gap-1 pl-[18px]">
+            {acceptance.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
         </Section>
       )}
       {ownedPaths.length > 0 && (

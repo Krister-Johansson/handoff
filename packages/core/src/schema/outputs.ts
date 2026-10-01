@@ -10,6 +10,8 @@ export const PlannerOutputSchema = z
     plan: z.string(),
     steps: z.array(z.string()),
     ownedPaths: z.array(z.string()),
+    /** What a person can check in the running app to see the task is done, when the issue lists none. */
+    acceptance: z.array(z.string().min(1)).optional(),
     question: z.object({ text: z.string().min(1), options: z.array(z.string()).optional() }).optional(),
   })
   .refine((o) => (o.status === "needs_input" ? o.question !== undefined : o.plan.trim().length > 0), {

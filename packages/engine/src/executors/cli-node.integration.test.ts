@@ -155,6 +155,7 @@ test("the planner is asked for a short plan, and the coder for a PR title and de
   await startRun(db, linear);
   await drain(engineDeps(db, registry(cli)));
   expect(cli.requests[0]!.prompt).toContain("Keep plan to a few sentences on the approach; put the ordered work in steps and do not repeat the steps in plan.");
+  expect(cli.requests[0]!.prompt).toContain("When the linked issues list no acceptance criteria, list in acceptance what a person can check in the running app");
   expect(cli.requests[1]!.prompt).toContain("fill pr with a title and a description of the change for a reviewer");
   expect(cli.requests[1]!.prompt).toContain("Do not restate the plan.");
 });
