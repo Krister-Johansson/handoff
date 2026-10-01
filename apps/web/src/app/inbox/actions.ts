@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { answerQuestion, cancelRun, repairNodeExecution } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, repairNodeExecution, resolveExhaustedLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
 import { markViewed } from "@/server/review";
 
@@ -92,5 +92,20 @@ export async function markViewedAction(input: z.input<typeof ViewedSchema>): Pro
   const parsed = ViewedSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That file cannot be marked." };
   await markViewed(getDb(), parsed.data);
+  return { ok: true };
+}
+
+const ResolveLoopSchema = z.object({ runId: z.string().uuid(), action: z.enum(["retry", "continue", "stop"]) });
+
+/** A person's decision for a run stuck on a loop that ran out: another round, go on as if approved, or stop. */
+export async function resolveLoopAction(input: z.input<typeof ResolveLoopSchema>): Promise<InboxActionState> {
+  const parsed = ResolveLoopSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That decision cannot be sent." };
+  try {
+    await resolveExhaustedLoop(getDb(), parsed.data.runId, parsed.data.action);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  refresh(parsed.data.runId);
   return { ok: true };
 }

@@ -1,5 +1,8 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
-import { appendEvents, nodeExecutions, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { appendEvents, events, nodeExecutions, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
+import type { RunState } from "@handoff/core";
+import { loadCompiledGraph } from "./graph-cache.ts";
+import { createExecution } from "./scheduler/complete.ts";
 
 /** Re-runs a failed node execution as a new attempt, keeping every upstream result in run state. */
 export async function repairNodeExecution(db: Db, executionId: string, opts: { note?: string }) {
@@ -90,5 +93,55 @@ export async function answerQuestion(
       },
     ]);
     return question;
+  });
+}
+
+export type StuckLoop = { nodeKey: string; edgeKey: string; attempts: number; executionId: string };
+
+/**
+ * Where a run stopped because a loop used all its attempts (a reviewer kept sending work back, say):
+ * the step that wanted another round and the loop edge. Undefined for any run not stopped that way.
+ */
+export async function stuckLoop(db: Db, runId: string): Promise<StuckLoop | undefined> {
+  const [run] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId));
+  if (run?.status !== "failed") return undefined;
+  const [failed] = await db.select({ payload: events.payload }).from(events).where(and(eq(events.runId, runId), eq(events.type, "run.failed"))).orderBy(desc(events.seq)).limit(1);
+  if ((failed?.payload as { reason?: string } | undefined)?.reason !== "loop_exhausted") return undefined;
+  const [exhausted] = await db
+    .select({ payload: events.payload, executionId: events.nodeExecutionId })
+    .from(events)
+    .where(and(eq(events.runId, runId), eq(events.type, "edge.exhausted")))
+    .orderBy(desc(events.seq))
+    .limit(1);
+  if (!exhausted?.executionId) return undefined;
+  const [execution] = await db.select({ nodeKey: nodeExecutions.nodeKey }).from(nodeExecutions).where(eq(nodeExecutions.id, exhausted.executionId));
+  const payload = exhausted.payload as { edgeKey: string; attempts: number };
+  return { nodeKey: execution!.nodeKey, edgeKey: payload.edgeKey, attempts: payload.attempts, executionId: exhausted.executionId };
+}
+
+/**
+ * A person's decision for a run stuck on a loop that ran out: another round (the loop starts over and
+ * the work goes back once more), go on as if the step approved (its forward edges are taken), or stop.
+ */
+export async function resolveExhaustedLoop(db: Db, runId: string, action: "retry" | "continue" | "stop") {
+  const stuck = await stuckLoop(db, runId);
+  if (!stuck) throw new Error("This run was not stopped by a loop that ran out of attempts.");
+  if (action === "stop") return cancelRun(db, runId, { reason: `stopped after ${stuck.edgeKey} ran out of attempts` });
+  await db.transaction(async (tx) => {
+    const [run] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
+    const graph = await loadCompiledGraph(tx, run!.graphVersionId);
+    const out = graph.outEdges(stuck.nodeKey);
+    const edges = action === "retry" ? out.filter((e) => e.key === stuck.edgeKey) : out.filter((e) => !e.loop);
+    if (edges.length === 0) throw new Error(action === "retry" ? `The graph no longer has ${stuck.edgeKey}.` : `${stuck.nodeKey} has no way forward other than its loops.`);
+    // Another round counts as the loop's first attempt again.
+    const current = run!.state as RunState;
+    const state = action === "retry" ? { ...current, loops: { ...current.loops, [stuck.edgeKey]: { attempts: 1 } } } : current;
+    const created = [];
+    for (const edge of edges) {
+      const exec = await createExecution(tx, graph, runId, edge.target, { kind: "edge", edgeKey: edge.key, from: stuck.nodeKey, fromExecutionId: stuck.executionId });
+      created.push({ type: "node.created", payload: { nodeKey: edge.target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
+    }
+    await tx.update(runs).set({ status: "running", finishedAt: null, state, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, runId));
+    await appendEvents(tx, runId, [{ type: "loop.resolved", payload: { action, edgeKey: stuck.edgeKey, nodeKey: stuck.nodeKey }, nodeExecutionId: stuck.executionId }, ...created]);
   });
 }

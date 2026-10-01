@@ -114,3 +114,19 @@ test("the constraints say how to change a file outside the owned paths", () => {
 test("the constraints keep agents to the repository's commit conventions, without invented trailers", () => {
   expect(renderContextPacket(packet)).toContain("- Follow the repository's commit conventions. Add no trailers, such as Co-Authored-By, unless the repository asks for them.");
 });
+
+test("a reviewer's second look shows its earlier comments, the coder's reply, and the commits to look at", () => {
+  const md = renderContextPacket({
+    ...packet,
+    previousReview: {
+      comments: [{ path: "src/env.ts", line: 5, body: "Only checks the scheme." }, { body: "Say how to run it." }],
+      reply: "Validated the host too, and added a README line.",
+      reviewedAt: "4ef4f22",
+    },
+  });
+  expect(md).toContain("# Your previous review");
+  expect(md).toContain("- src/env.ts:5: Only checks the scheme.");
+  expect(md).toContain("- Say how to run it.");
+  expect(md).toContain("Validated the host too, and added a README line.");
+  expect(md).toContain("git diff 4ef4f22..HEAD");
+});
