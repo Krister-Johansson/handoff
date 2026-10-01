@@ -12,6 +12,7 @@ import { createOriginRepo, git } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import type { ExecutorRegistry, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
+import { selectContext } from "../context.ts";
 import { mergeNodeExecutor, prNodeExecutor } from "./github.ts";
 
 const db = createTestDb();
@@ -192,7 +193,7 @@ function landOnMain(origin: string, path: string, content: string) {
   git(work, "push", "-q", "origin", "main");
 }
 
-async function syncSetup(document: unknown, onMain: (origin: string) => void) {
+async function syncSetup(document: unknown, onMain: (origin: string) => void, seen: { conflict?: unknown } = {}) {
   const origin = createOriginRepo();
   const github = new FakeGitHub();
   const { project, graphVersion } = await seedGraph(db, document, { localClonePath: origin });
@@ -202,6 +203,8 @@ async function syncSetup(document: unknown, onMain: (origin: string) => void) {
     needsWorkdir: true,
     execute: async (ctx) => {
       if (ctx.execution.attempt === 1) onMain(origin);
+      // What the coder would be told on this attempt.
+      else seen.conflict = selectContext(ctx.node, ctx.state, ctx.execution).conflict;
       return coder.execute(ctx);
     },
   };
@@ -224,9 +227,12 @@ describe("keeping up with main", () => {
   });
 
   test("a conflict with main goes out the conflict port with the conflicting files, and nothing is pushed", async () => {
-    const { origin, github, run, deps } = await syncSetup(withSyncEdges(linear), (o) => landOnMain(o, "CHANGELOG.md", "# Changelog from main\n"));
+    const seen: { conflict?: unknown } = {};
+    const { origin, github, run, deps } = await syncSetup(withSyncEdges(linear), (o) => landOnMain(o, "CHANGELOG.md", "# Changelog from main\n"), seen);
     await drain(deps);
     const { run: row, executions } = await inspect(db, run.id);
+    // The coder sent back learns what conflicts and with which commit of main.
+    expect(seen.conflict).toMatchObject({ base: "main", files: ["CHANGELOG.md"], baseSha: expect.stringMatching(/^[0-9a-f]{40}$/) });
     const pr = executions.find((e) => e.nodeKey === "pr" && e.attempt === 1)!;
     expect(pr.error).toBeNull();
     expect(pr.status).toBe("passed");

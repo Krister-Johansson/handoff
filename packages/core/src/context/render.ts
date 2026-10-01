@@ -36,7 +36,36 @@ export type ContextPacket = {
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
   repairNote?: string;
+  /** The base branch moved and now changes the same lines as this branch: the work is to merge it in. */
+  conflict?: { base: string; baseSha: string; files: string[] };
 };
+
+/** Lockfiles the package manager writes; merged by taking the base branch's and reinstalling. */
+const LOCKFILES = "`pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `bun.lock`, `Cargo.lock`, `poetry.lock`, `uv.lock`, `go.sum`";
+
+function renderConflict({ base, baseSha, files }: NonNullable<ContextPacket["conflict"]>): string[] {
+  return [
+    `# Merge conflict with ${base}`,
+    "",
+    `${base} moved while this run worked, and its latest commit (${baseSha.slice(0, 7)}) changes the same lines as this branch in:`,
+    "",
+    list(files, "- (no file list)"),
+    "",
+    "Your job this time is to bring the branch up to date and resolve the conflicts:",
+    "",
+    `1. Run \`git merge ${baseSha}\` in the worktree. It stops at the conflicting files.`,
+    `2. For each file, find out what ${base} changed and why: \`git log --oneline HEAD..${baseSha} -- <file>\` names the commits, usually a merged pull request each.`,
+    `3. Resolve each file so both changes survive: keep what ${base} added and what this run added. Do not drop either side to make the conflict go away.`,
+    `4. Lockfiles (${LOCKFILES}): never merge them by hand. Take ${base}'s version (\`git checkout --theirs <file>\`), then run the package manager's install so it matches the merged manifest.`,
+    "5. Docs, changelogs and READMEs: keep both sides' additions, in a sensible order.",
+    "6. Commit the merge with `git commit --no-edit`. Do not rebase and do not force-push; the pull request step pushes.",
+    "7. Run the tests and fix anything the merge broke.",
+    "8. List any file outside the plan's paths that you had to change to resolve a conflict in `extraPaths`, with the reason.",
+    "",
+    "If you cannot tell how two changes should combine, return status `needs_input` with a question that shows both sides, instead of guessing.",
+    "",
+  ];
+}
 
 const LOG_TAIL_LINES = 80;
 const ISSUE_BODY_CHARS = 4000;
@@ -127,6 +156,7 @@ export function renderContextPacket(packet: ContextPacket): string {
     "- If you start a server or a watcher, stop it before you finish. Do not use port 3000: the handoff dashboard runs there.",
     "",
   );
+  if (packet.conflict) out.push(...renderConflict(packet.conflict));
   out.push(
     "# Output contract",
     "",
