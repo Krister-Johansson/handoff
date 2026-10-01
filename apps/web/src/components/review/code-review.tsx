@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, HistoryIcon } from "lucide-react";
+import { BotIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, HistoryIcon } from "lucide-react";
 import type { DiffFile } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitl
 import { markViewedAction } from "@/app/inbox/actions";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { commentedAt, placeEarlier, type EarlierRound } from "@/lib/earlier";
+import { placeFindings, type Findings } from "@/lib/findings";
 import type { LineTokens } from "@/lib/highlight-types";
 import { numberOn, type LineComment, type LineSelection, type Side } from "@/lib/line-comments";
 import { useReviewDraft } from "@/lib/use-review-draft";
@@ -110,12 +111,49 @@ function LastRound({ round }: { round: EarlierRound }) {
           {round.comments.map((c) => (
             <li key={`${c.path}:${c.line}:${c.body}`} className="rounded-md border p-2">
               {c.path && <span className="block truncate font-mono text-xs text-muted-foreground">{`${c.path}${c.line ? `:${c.line}${c.endLine ? `-${c.endLine}` : ""}` : ""}`}</span>}
-              <span className="whitespace-pre-wrap">{c.body}</span>
+              <div className="prose prose-sm max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none prose-p:my-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.body}</ReactMarkdown>
+              </div>
             </li>
           ))}
         </ul>
       </PopoverContent>
     </Popover>
+  );
+}
+
+const VERDICTS: Record<Findings["verdict"], string> = { approve: "approve", request_changes: "request changes" };
+
+/**
+ * The code reviewing step's verdict, how many findings it left and how many of those the diff below
+ * shows, then in full only the findings on files the diff does not include.
+ */
+function FindingsSummary({ findings, by, files }: { findings: Findings; by: string; files: DiffFile[] }) {
+  const paths = new Set(files.map((f) => f.path));
+  const elsewhere = findings.comments.filter((c) => !paths.has(c.path));
+  const n = findings.comments.length;
+  return (
+    <section aria-label="Code review findings" className="flex flex-col gap-2 rounded-lg border p-4 text-sm">
+      <p className="flex flex-wrap items-center gap-2">
+        <BotIcon className="size-4 text-muted-foreground" />
+        <span className="font-medium">{`${by}: ${VERDICTS[findings.verdict]}`}</span>
+        <span className="text-muted-foreground">
+          {n === 0 ? "No findings." : `${n} finding${n === 1 ? "" : "s"}, ${n - elsewhere.length} shown in the diff`}
+        </span>
+      </p>
+      {elsewhere.length > 0 && (
+        <ul className="flex flex-col gap-1.5">
+          {elsewhere.map((c) => (
+            <li key={`${c.path}:${c.line}:${c.body}`} className="flex flex-col gap-0.5">
+              <span className="font-mono text-xs text-muted-foreground">{c.line !== undefined ? `${c.path}:${c.line}` : c.path}</span>
+              <div className="prose prose-sm max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none prose-p:my-0">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.body}</ReactMarkdown>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -129,6 +167,8 @@ type Props = {
   earlier: EarlierRound[];
   tokens?: Record<string, LineTokens> | undefined;
   answered?: LineComment[];
+  /** The code reviewing step's verdict and comments; they replace the summary text and sit on their lines. */
+  findings?: (Findings & { by: string }) | undefined;
 };
 
 /** Which files count as viewed: the saved marks, overridden by what the person clicks on this page. */
@@ -155,7 +195,7 @@ function useViewed(runId: string, files: DiffFile[], views: View[], earlier: Ear
  * number and shift-click another to comment on the lines between; mark files viewed as you go, and
  * finish with an overall comment and request changes, approve, or approve after fixes.
  */
-export function CodeReview({ questionId, runId, from, markdown, files, views, earlier, tokens, answered }: Props) {
+export function CodeReview({ questionId, runId, from, markdown, files, views, earlier, tokens, answered, findings }: Props) {
   const readOnly = answered !== undefined;
   const draft = useReviewDraft<LineComment>(questionId, !readOnly);
   const comments = readOnly ? answered : draft.comments;
@@ -191,9 +231,13 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
 
   return (
     <div className="flex flex-col gap-4">
-      <article className="prose prose-sm max-w-none rounded-lg border p-4 dark:prose-invert prose-code:before:content-none prose-code:after:content-none">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-      </article>
+      {findings ? (
+        <FindingsSummary findings={findings} by={findings.by} files={files} />
+      ) : (
+        <article className="prose prose-sm max-w-none rounded-lg border p-4 dark:prose-invert prose-code:before:content-none prose-code:after:content-none">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+        </article>
+      )}
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background/95 p-2 backdrop-blur">
         <FileMenu files={files} current={current} go={go} viewed={(f) => stateOf(f).viewed} />
         <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={(value) => value && setMode(value as Mode)} aria-label="Show">
@@ -258,6 +302,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
           selection={selection?.path === file.path ? selection : undefined}
           comments={comments.filter((c) => c.path === file.path)}
           earlier={placeEarlier(file, last?.comments ?? [])}
+          findings={findings && { by: findings.by, ...placeFindings(file, findings.comments) }}
           tokens={tokens?.[file.path]}
           onSelect={(side, n, extend) => select(file.path, side, n, extend)}
           onAdd={(body) => add(file, body)}

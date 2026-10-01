@@ -242,3 +242,24 @@ test("split view puts the old lines on the left and the new lines on the right",
   expect(within(row).getByRole("button", { name: "Select old line 10" })).toBeInTheDocument();
   expect(within(row).getByRole("button", { name: "Select line 10" })).toBeInTheDocument();
 });
+
+test("the code reviewer's findings sit on their lines, and the summary is only the verdict and where the rest are", () => {
+  const findings = {
+    verdict: "approve" as const,
+    by: "code_review-1",
+    comments: [
+      { path: "src/a.ts", line: 10, body: "Suggestion: name the constant." },
+      { path: "src/b.ts", line: 2, body: "Suggestion: export one thing." },
+      { path: "docs/notes.md", line: 3, body: "Suggestion: link the ADR." },
+    ],
+  };
+  render(<CodeReview {...props} markdown={"Verdict: approve\n\n- a wall of text"} findings={findings} from="coder-1" />);
+  const summary = screen.getByRole("region", { name: "Code review findings" });
+  expect(summary).toHaveTextContent("code_review-1: approve");
+  expect(summary).toHaveTextContent("3 findings, 2 shown in the diff");
+  expect(summary).toHaveTextContent("docs/notes.md:3");
+  expect(summary).toHaveTextContent("Suggestion: link the ADR.");
+  expect(screen.queryByText("a wall of text")).not.toBeInTheDocument();
+  const a = screen.getByRole("region", { name: "src/a.ts" });
+  expect(within(a).getByText("Suggestion: name the constant.")).toBeInTheDocument();
+});

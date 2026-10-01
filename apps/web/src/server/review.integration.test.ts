@@ -75,3 +75,20 @@ test("marking a file viewed again moves its time forward", async () => {
   expect(second.getTime()).toBeGreaterThanOrEqual(first.getTime());
   expect((await getReview(db, run.id, question.id))!.views).toHaveLength(1);
 });
+
+test("a code review comes with the findings of the step it reviews, from before the question", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Build a todo app" });
+  const comments = [{ path: "src/a.ts", line: 9, body: "Suggestion: name it." }];
+  await seedExecution(db, run.id, { nodeKey: "code_review-1", nodeType: "code_review", status: "passed", output: { verdict: "approve", comments } });
+  const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [question] = await db
+    .insert(questions)
+    .values({ runId: run.id, nodeExecutionId: gate.id, question: "Review the code from code_review-1", context: { reason: "approval", review: { from: "code_review-1", kind: "code", markdown: "Verdict: approve", files: [] } } })
+    .returning();
+  // A later round's review is not this question's.
+  await seedExecution(db, run.id, { nodeKey: "code_review-1", nodeType: "code_review", status: "passed", attempt: 2, output: { verdict: "request_changes", comments: [] } });
+
+  expect((await getReview(db, run.id, question!.id))!.findings).toEqual({ verdict: "approve", comments });
+});

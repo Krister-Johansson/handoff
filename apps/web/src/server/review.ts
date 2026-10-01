@@ -1,5 +1,5 @@
-import type { DiffFile } from "@handoff/core";
-import { and, asc, eq, isNotNull, lt, nodeExecutions, projects, questions, reviewViews, runs, sql, type Db } from "@handoff/db";
+import { ReviewerOutputSchema, type DiffFile } from "@handoff/core";
+import { and, asc, desc, eq, isNotNull, lt, nodeExecutions, projects, questions, reviewViews, runs, sql, type Db } from "@handoff/db";
 
 /** What the gate showed for review; a code review also carries the branch's changed files. */
 export type ReviewContext = { from: string; kind: string; markdown: string; files?: DiffFile[]; backTo?: string };
@@ -16,6 +16,22 @@ async function earlierRounds(db: Db, question: typeof questions.$inferSelect) {
     .orderBy(asc(questions.createdAt));
 }
 
+/**
+ * The verdict and comments of the code reviewing step a code review shows: its latest execution
+ * before the question was asked. Undefined when the gate reviews something else, such as a coder's work.
+ */
+async function findingsOf(db: Db, question: typeof questions.$inferSelect, review: ReviewContext) {
+  if (review.kind !== "code") return undefined;
+  const [step] = await db
+    .select({ output: nodeExecutions.output })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, question.runId), eq(nodeExecutions.nodeKey, review.from), lt(nodeExecutions.createdAt, question.createdAt)))
+    .orderBy(desc(nodeExecutions.createdAt))
+    .limit(1);
+  const parsed = ReviewerOutputSchema.safeParse(step?.output);
+  return parsed.success ? parsed.data : undefined;
+}
+
 /** A human gate's review question with its run, or undefined when there is none with that id on that run. */
 export async function getReview(db: Db, runId: string, questionId: string) {
   const [row] = await db
@@ -28,9 +44,10 @@ export async function getReview(db: Db, runId: string, questionId: string) {
   const review = (row.question.context as { review?: ReviewContext }).review;
   if (!review) return undefined;
   const q = row.question;
-  const [views, earlier] = await Promise.all([
+  const [views, earlier, findings] = await Promise.all([
     db.select({ path: reviewViews.path, blobSha: reviewViews.blobSha, viewedAt: reviewViews.viewedAt }).from(reviewViews).where(eq(reviewViews.runId, runId)),
     earlierRounds(db, q),
+    findingsOf(db, q, review),
   ]);
   return {
     id: q.id,
@@ -42,6 +59,7 @@ export async function getReview(db: Db, runId: string, questionId: string) {
     projectId: row.projectId,
     answered: q.answer === null ? null : { option: q.option, answer: q.answer, comments: q.comments, answeredBy: q.answeredBy, answeredAt: q.answeredAt },
     views,
+    findings,
     earlier: earlier.map((e) => ({ answer: e.answer!, option: e.option, comments: e.comments, answeredAt: e.answeredAt })),
   };
 }
