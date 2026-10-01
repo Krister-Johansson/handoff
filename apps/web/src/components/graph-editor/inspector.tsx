@@ -14,6 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { ChosenLibrary, LibraryChooser } from "@/components/library/library-chooser";
 import type { LibraryChoices } from "@/lib/library-choices";
+import { loops } from "./edge-geometry";
+import { InspectorSection } from "./inspector-section";
 import { PassEnvField } from "./pass-env-field";
 import type { EditorAction } from "./state";
 
@@ -44,10 +46,9 @@ function LibraryPicker({ node, library, dispatch }: { node: FlowNode; library: L
   };
   const set = (library: typeof selected) => dispatch({ type: "updateNode", id: node.id, patch: { library } });
   return (
-    <Field>
-      <FieldLabel>Library</FieldLabel>
-      <ChosenLibrary selection={selected} empty="Nothing enabled here." onRemove={(kind, name) => set({ ...selected, [kind]: selected[kind].filter((n) => n !== name) })} />
-      <div>
+    <InspectorSection
+      title="Library"
+      aside={
         <LibraryChooser
           available={library}
           initial={selected}
@@ -58,8 +59,11 @@ function LibraryPicker({ node, library, dispatch }: { node: FlowNode; library: L
             return true;
           }}
         />
-      </div>
-    </Field>
+      }
+    >
+      <ChosenLibrary selection={selected} empty="Nothing enabled here." onRemove={(kind, name) => set({ ...selected, [kind]: selected[kind].filter((n) => n !== name) })} />
+      <FieldDescription>On top of the project&apos;s default library.</FieldDescription>
+    </InspectorSection>
   );
 }
 
@@ -71,9 +75,8 @@ function ContractChecks({ node, dispatch }: { node: FlowNode; dispatch: Dispatch
   const write = (next: DeterministicCheck[]) => dispatch({ type: "updateNode", id: node.id, patch: { contract: { output, checks: next } } });
   const without = (kind: DeterministicCheck["kind"]) => checks.filter((c) => c.kind !== kind);
   return (
-    <FieldSet>
-      <FieldLegend variant="label">Checks before passing</FieldLegend>
-      <FieldGroup>
+    <InspectorSection title="Checks before passing">
+      <FieldGroup className="gap-4">
         <Field orientation="horizontal">
           <Checkbox id="check-diff" checked={diff} onCheckedChange={(on) => write(on === true ? [...without("diff_within_paths"), { kind: "diff_within_paths" }] : without("diff_within_paths"))} />
           <FieldContent>
@@ -103,7 +106,7 @@ function ContractChecks({ node, dispatch }: { node: FlowNode; dispatch: Dispatch
           <PassEnvField id="check-tests-env" value={tests.passEnv ?? []} onChange={(passEnv) => write([...without("tests_green"), { ...tests, passEnv }])} />
         )}
       </FieldGroup>
-    </FieldSet>
+    </InspectorSection>
   );
 }
 
@@ -167,65 +170,130 @@ function NodeInspector({
   };
   const gates = graph.nodes.filter((n) => n.data.nodeType === "human_gate");
   return (
-    <FieldGroup>
-      <Field>
-        <FieldLabel htmlFor="node-label">Label</FieldLabel>
-        <Input id="node-label" value={node.data.label} onChange={(e) => dispatch({ type: "updateNode", id: node.id, patch: { label: e.target.value } })} />
-        <FieldDescription className="font-mono text-xs">
-          {type} · runs on {nodeCatalog[type].executorKind}
-        </FieldDescription>
-      </Field>
-      <KeyField node={node} dispatch={dispatch} onSelect={onSelect} />
-      <MakeStart node={node} graph={graph} dispatch={dispatch} />
-
-      <FlowFields type={type} config={config} setConfig={setConfig} />
+    <>
+      <InspectorSection
+        title="Node"
+        aside={
+          <Badge variant="outline" className="font-mono">
+            {type}
+          </Badge>
+        }
+      >
+        <FieldGroup className="gap-4">
+          <Field>
+            <FieldLabel htmlFor="node-label">Label</FieldLabel>
+            <Input id="node-label" value={node.data.label} onChange={(e) => dispatch({ type: "updateNode", id: node.id, patch: { label: e.target.value } })} />
+            <FieldDescription className="font-mono text-[11px]">
+              {type} · runs on {nodeCatalog[type].executorKind}
+            </FieldDescription>
+          </Field>
+          <KeyField node={node} dispatch={dispatch} onSelect={onSelect} />
+          <MakeStart node={node} graph={graph} dispatch={dispatch} />
+          <FlowFields type={type} config={config} setConfig={setConfig} />
+        </FieldGroup>
+      </InspectorSection>
 
       {CLI_TYPES.has(type) && (
         <>
-          {type === "code_review" && (
-            <Field>
-              <FieldLabel htmlFor="review-level">Review level</FieldLabel>
-              <NativeSelect id="review-level" value={str(config.level) || DEFAULT_REVIEW_LEVEL} onChange={(e) => setConfig({ level: e.target.value })}>
-                {REVIEW_LEVELS.map((level) => (
-                  <NativeSelectOption key={level} value={level}>
-                    {level}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-              <FieldDescription>
-                Runs Claude Code&apos;s code-review skill on the run&apos;s branch. Higher levels look further and cost more; the cloud ultra review is not available here.
-              </FieldDescription>
-            </Field>
-          )}
-          <ModelFields config={config} setConfig={setConfig} clearConfig={clearConfig} />
-          <Field>
-            <FieldLabel htmlFor="node-turns">Max turns</FieldLabel>
-            <Input
-              id="node-turns"
-              type="number"
-              min={1}
-              value={num(config.maxTurns)}
-              placeholder="60"
-              onChange={(e) => (e.target.value ? setConfig({ maxTurns: Number(e.target.value) }) : clearConfig("maxTurns"))}
-            />
-          </Field>
-          <ToolsField type={type} config={config} setConfig={setConfig} clearConfig={clearConfig} />
-          <Field>
-            <FieldLabel htmlFor="node-instructions">Instructions</FieldLabel>
-            <Textarea
-              id="node-instructions"
-              rows={5}
-              placeholder={INSTRUCTION_HINTS[type]}
-              defaultValue={str(config.instructions)}
-              onBlur={(e) => (e.target.value.trim() ? setConfig({ instructions: e.target.value.trim() }) : clearConfig("instructions"))}
-            />
-            <FieldDescription>Markdown added to this step&apos;s built-in role. What reaches the feedback input comes along on its own.</FieldDescription>
-          </Field>
+          <InspectorSection title="Instructions">
+            <FieldGroup className="gap-4">
+              <Field>
+                <FieldLabel htmlFor="node-instructions" className="sr-only">
+                  Instructions
+                </FieldLabel>
+                <Textarea
+                  id="node-instructions"
+                  rows={4}
+                  placeholder={INSTRUCTION_HINTS[type]}
+                  defaultValue={str(config.instructions)}
+                  onBlur={(e) => (e.target.value.trim() ? setConfig({ instructions: e.target.value.trim() }) : clearConfig("instructions"))}
+                />
+                <FieldDescription>Markdown added to this step&apos;s built-in role. What reaches the feedback input comes along on its own.</FieldDescription>
+              </Field>
+              {type === "code_review" && (
+                <Field>
+                  <FieldLabel htmlFor="review-level">Review level</FieldLabel>
+                  <NativeSelect id="review-level" value={str(config.level) || DEFAULT_REVIEW_LEVEL} onChange={(e) => setConfig({ level: e.target.value })}>
+                    {REVIEW_LEVELS.map((level) => (
+                      <NativeSelectOption key={level} value={level}>
+                        {level}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                  <FieldDescription>
+                    Runs Claude Code&apos;s code-review skill on the run&apos;s branch. Higher levels look further and cost more; the cloud ultra review is not available here.
+                  </FieldDescription>
+                </Field>
+              )}
+              <ModelFields config={config} setConfig={setConfig} clearConfig={clearConfig} />
+              <Field>
+                <FieldLabel htmlFor="node-turns">Max turns</FieldLabel>
+                <Input
+                  id="node-turns"
+                  type="number"
+                  min={1}
+                  className="w-24 font-mono text-xs"
+                  value={num(config.maxTurns)}
+                  placeholder="60"
+                  onChange={(e) => (e.target.value ? setConfig({ maxTurns: Number(e.target.value) }) : clearConfig("maxTurns"))}
+                />
+              </Field>
+            </FieldGroup>
+          </InspectorSection>
           {type === "coder" && <ContractChecks node={node} dispatch={dispatch} />}
           <LibraryPicker node={node} library={library} dispatch={dispatch} />
+          <InspectorSection title="Allowed tools">
+            <FieldGroup className="gap-4">
+              <ToolsField type={type} config={config} setConfig={setConfig} clearConfig={clearConfig} />
+            </FieldGroup>
+          </InspectorSection>
+          {gates.length === 0 && (
+            <InspectorSection>
+              <FieldDescription>Tip: add a Human gate so a node can ask you questions with status needs_input.</FieldDescription>
+            </InspectorSection>
+          )}
         </>
       )}
 
+      {SETTINGS_TYPES.has(type) && (
+        <InspectorSection title="Settings">
+          <FieldGroup className="gap-4">
+            <TypeSettings node={node} graph={graph} dispatch={dispatch} setConfig={setConfig} clearConfig={clearConfig} />
+          </FieldGroup>
+        </InspectorSection>
+      )}
+
+      <NodeEdges node={node} graph={graph} />
+      <InspectorSection>
+        <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" onClick={() => dispatch({ type: "remove", ids: [node.id] })}>
+          <TrashIcon data-icon="inline-start" />
+          Delete node
+        </Button>
+      </InspectorSection>
+    </>
+  );
+}
+
+const SETTINGS_TYPES = new Set<NodeType>(["tester", "pr", "merge", "human_gate"]);
+
+/** What a Tester, Pull request, Merge or Human gate node is set up with. */
+function TypeSettings({
+  node,
+  graph,
+  dispatch,
+  setConfig,
+  clearConfig,
+}: {
+  node: FlowNode;
+  graph: FlowGraph;
+  dispatch: Dispatch<EditorAction>;
+  setConfig: (patch: Record<string, unknown>) => void;
+  clearConfig: (key: string) => void;
+}) {
+  const type = node.data.nodeType as NodeType;
+  const config = node.data.config;
+  return (
+    <>
       {type === "tester" && <TesterSettings config={config} setConfig={setConfig} />}
 
       {type === "pr" && <PrSettings config={config} setConfig={setConfig} clearConfig={clearConfig} />}
@@ -279,14 +347,36 @@ function NodeInspector({
           </Field>
         </>
       )}
-      {gates.length === 0 && CLI_TYPES.has(type) && (
-        <FieldDescription>Tip: add a Human gate so a node can ask you questions with status needs_input.</FieldDescription>
-      )}
-      <Button variant="destructive" size="sm" onClick={() => dispatch({ type: "remove", ids: [node.id] })}>
-        <TrashIcon data-icon="inline-start" />
-        Delete node
-      </Button>
-    </FieldGroup>
+    </>
+  );
+}
+
+/** The edges that reach a node, by input and source port, and those that leave it, by port and target. */
+function NodeEdges({ node, graph }: { node: FlowNode; graph: FlowGraph }) {
+  const incoming = graph.edges.filter((e) => e.target === node.id);
+  const outgoing = graph.edges.filter((e) => e.source === node.id);
+  if (incoming.length + outgoing.length === 0) return null;
+  const budget = (edge: FlowEdge) => (loops(edge.data) ? (edge.data.maxAttempts ?? (edge.data.input === "feedback" ? 3 : undefined)) : undefined);
+  const row = (edge: FlowEdge, near: string, arrow: string, far: string) => {
+    const max = budget(edge);
+    return (
+      <li key={edge.id} className="flex min-w-0 items-center gap-2">
+        <span className="font-mono text-muted-foreground">{near}</span>
+        <span aria-hidden className="text-muted-foreground">
+          {arrow}
+        </span>
+        <span className="truncate font-mono">{far}</span>
+        {max !== undefined && <Badge variant="outline">max {max}</Badge>}
+      </li>
+    );
+  };
+  return (
+    <InspectorSection title="Edges">
+      <ul aria-label="Edges" className="flex flex-col gap-1 text-xs">
+        {incoming.map((e) => row(e, e.data.input ?? "in", "←", `${e.source}.${e.data.port ?? "custom"}`))}
+        {outgoing.map((e) => row(e, e.data.port ?? "custom", "→", e.target))}
+      </ul>
+    </InspectorSection>
   );
 }
 
@@ -315,7 +405,9 @@ function ToolsField({
         </FieldContent>
       </Field>
       <Field>
-        <FieldLabel htmlFor="node-tools">Allowed tools</FieldLabel>
+        <FieldLabel htmlFor="node-tools" className="sr-only">
+          Allowed tools
+        </FieldLabel>
         <Textarea
           id="node-tools"
           rows={3}
@@ -495,52 +587,55 @@ function ModelFields({ config, setConfig, clearConfig }: { config: Record<string
   const [custom, setCustom] = useState(model !== "" && !isAlias(model));
   const choice = custom ? "custom" : model;
   return (
-    <>
-      <Field>
-        <FieldLabel htmlFor="node-model">Model</FieldLabel>
-        <NativeSelect
-          id="node-model"
-          value={choice}
-          onChange={(e) => {
-            const value = e.target.value;
-            setCustom(value === "custom");
-            if (value === "custom") return;
-            if (value) setConfig({ model: value });
-            else clearConfig("model");
-          }}
-        >
-          <NativeSelectOption value="">Worker default</NativeSelectOption>
-          {MODEL_ALIASES.map((m) => (
-            <NativeSelectOption key={m.alias} value={m.alias}>
-              {m.alias}: {m.label}
-            </NativeSelectOption>
-          ))}
-          <NativeSelectOption value="custom">A model id…</NativeSelectOption>
-        </NativeSelect>
-        {custom && (
-          <Input
-            aria-label="Model id"
-            className="font-mono text-xs"
-            placeholder="claude-opus-5-5"
-            defaultValue={isAlias(model) ? "" : model}
-            onBlur={(e) => (e.target.value.trim() ? setConfig({ model: e.target.value.trim() }) : clearConfig("model"))}
-          />
-        )}
-        <FieldDescription>Aliases follow the newest model of each family on your account.</FieldDescription>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor="node-effort">Effort</FieldLabel>
-        <NativeSelect id="node-effort" value={str(config.effort)} onChange={(e) => (e.target.value ? setConfig({ effort: e.target.value }) : clearConfig("effort"))}>
-          <NativeSelectOption value="">Worker or model default</NativeSelectOption>
-          {EFFORT_LEVELS.map((level) => (
-            <NativeSelectOption key={level} value={level}>
-              {level}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <FieldDescription>How much the model thinks. A model without a level uses the highest one it has below it.</FieldDescription>
-      </Field>
-    </>
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-2.5">
+        <Field>
+          <FieldLabel htmlFor="node-model">Model</FieldLabel>
+          <NativeSelect
+            id="node-model"
+            value={choice}
+            onChange={(e) => {
+              const value = e.target.value;
+              setCustom(value === "custom");
+              if (value === "custom") return;
+              if (value) setConfig({ model: value });
+              else clearConfig("model");
+            }}
+          >
+            <NativeSelectOption value="">Worker default</NativeSelectOption>
+            {MODEL_ALIASES.map((m) => (
+              <NativeSelectOption key={m.alias} value={m.alias}>
+                {m.alias}: {m.label}
+              </NativeSelectOption>
+            ))}
+            <NativeSelectOption value="custom">A model id…</NativeSelectOption>
+          </NativeSelect>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="node-effort">Effort</FieldLabel>
+          <NativeSelect id="node-effort" value={str(config.effort)} onChange={(e) => (e.target.value ? setConfig({ effort: e.target.value }) : clearConfig("effort"))}>
+            <NativeSelectOption value="">Worker or model default</NativeSelectOption>
+            {EFFORT_LEVELS.map((level) => (
+              <NativeSelectOption key={level} value={level}>
+                {level}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      </div>
+      {custom && (
+        <Input
+          aria-label="Model id"
+          className="font-mono text-xs"
+          placeholder="claude-opus-5-5"
+          defaultValue={isAlias(model) ? "" : model}
+          onBlur={(e) => (e.target.value.trim() ? setConfig({ model: e.target.value.trim() }) : clearConfig("model"))}
+        />
+      )}
+      <FieldDescription>
+        Aliases follow the newest model of each family on your account. Effort is how much the model thinks; a model without that level uses the highest one it has below it.
+      </FieldDescription>
+    </div>
   );
 }
 
@@ -673,32 +768,38 @@ function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowG
   const port = edge.data.port?.replace("_", " ");
   const input = edge.data.input ?? "in";
   return (
-    <FieldGroup>
-      <p className="text-sm">
-        {label(edge.source)}: {port ?? "custom condition"} → {label(edge.target)}: {input}
-      </p>
-      {input === "feedback" && (
-        <>
-          <FieldDescription>
-            {label(edge.source)} sends its output back to {label(edge.target)}, which tries again with it as feedback.
-          </FieldDescription>
-          <LoopFields edge={edge} gates={gates} dispatch={dispatch} />
-        </>
-      )}
-      <details className="flex flex-col gap-4" open={!edge.data.port}>
-        <summary className="cursor-pointer text-sm font-medium">Advanced</summary>
-        <FieldGroup className="pt-3">
-          <FieldDescription>
-            {edge.data.port ? `A condition here replaces the ${port} port's.` : "This edge has no port, so this condition decides when it is followed."}
-          </FieldDescription>
-          <AdvancedEdgeFields edge={edge} gates={gates} dispatch={dispatch} />
-        </FieldGroup>
-      </details>
-      <Button variant="destructive" size="sm" onClick={() => dispatch({ type: "remove", ids: [edge.id] })}>
-        <TrashIcon data-icon="inline-start" />
-        Delete edge
-      </Button>
-    </FieldGroup>
+    <>
+      <InspectorSection title="Edge">
+        <p className="text-sm">
+          {label(edge.source)}: {port ?? "custom condition"} → {label(edge.target)}: {input}
+        </p>
+        {input === "feedback" && (
+          <FieldGroup className="gap-4">
+            <FieldDescription>
+              {label(edge.source)} sends its output back to {label(edge.target)}, which tries again with it as feedback.
+            </FieldDescription>
+            <LoopFields edge={edge} gates={gates} dispatch={dispatch} />
+          </FieldGroup>
+        )}
+      </InspectorSection>
+      <InspectorSection>
+        <details className="flex flex-col gap-4" open={!edge.data.port}>
+          <summary className="cursor-pointer text-[11px] font-medium tracking-[0.05em] text-muted-foreground uppercase">Advanced</summary>
+          <FieldGroup className="gap-4 pt-3">
+            <FieldDescription>
+              {edge.data.port ? `A condition here replaces the ${port} port's.` : "This edge has no port, so this condition decides when it is followed."}
+            </FieldDescription>
+            <AdvancedEdgeFields edge={edge} gates={gates} dispatch={dispatch} />
+          </FieldGroup>
+        </details>
+      </InspectorSection>
+      <InspectorSection>
+        <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" onClick={() => dispatch({ type: "remove", ids: [edge.id] })}>
+          <TrashIcon data-icon="inline-start" />
+          Delete edge
+        </Button>
+      </InspectorSection>
+    </>
   );
 }
 
@@ -719,5 +820,9 @@ export function Inspector({
   const edge = selection.edgeId ? graph.edges.find((e) => e.id === selection.edgeId) : undefined;
   if (node) return <NodeInspector key={node.id} node={node} graph={graph} library={library} dispatch={dispatch} onSelect={onSelect} />;
   if (edge) return <EdgeInspector key={edge.id} edge={edge} graph={graph} dispatch={dispatch} />;
-  return <FieldDescription>Select a node or an edge to edit it. Drag from a node&apos;s right handle to another node to connect them. Press Backspace to delete the selection.</FieldDescription>;
+  return (
+    <InspectorSection title="Graph">
+      <FieldDescription>Select a node or an edge to edit it. Drag from a node&apos;s right handle to another node to connect them. Press Backspace to delete the selection.</FieldDescription>
+    </InspectorSection>
+  );
 }

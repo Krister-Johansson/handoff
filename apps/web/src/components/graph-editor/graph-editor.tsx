@@ -4,27 +4,37 @@ import { useFlowColorMode } from "@/lib/use-flow-color-mode";
 import { canConnect } from "@/lib/connect-rules";
 import { flowOf } from "@/lib/flow";
 import { InvalidEdgesContext } from "./edge-issues";
-import { Background, Controls, MiniMap, Panel, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes, type OnSelectionChangeParams } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useReducer, useState, useTransition } from "react";
-import { AlertTriangleIcon, CheckIcon, LayoutGridIcon, SaveIcon } from "lucide-react";
+import { Controls, Panel, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes, type OnSelectionChangeParams } from "@xyflow/react";
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useState, useTransition } from "react";
+import { AlertTriangleIcon, CheckIcon, LayoutGridIcon, MaximizeIcon } from "lucide-react";
 import { type FlowEdge, type FlowNode, type NodeType } from "@handoff/core";
 import { loadGraphVersionAction, saveGraphAction } from "@/app/projects/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { EdgeRoute, LayoutResult } from "@/lib/elk-layout";
+import { formatAgo } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { CanvasBackground, CanvasMiniMap } from "./canvas-chrome";
+import { CANVAS_STYLE, CONTROLS_CLASS, PANEL_CLASS } from "./canvas-style";
 import { EdgeRoutesContext, useElkLayout, useMeasuredSignature } from "./elk-routes";
 import { HandoffEdgeComponent } from "./handoff-edge";
 import { HandoffNodeComponent } from "./handoff-node";
 import type { LibraryChoices } from "@/lib/library-choices";
 import { Inspector } from "./inspector";
+import { InspectorSection } from "./inspector-section";
 import { NODE_ICONS } from "./node-icons";
 import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
 
 const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
 const edgeTypes: EdgeTypes = { handoff: HandoffEdgeComponent };
-const PALETTE = Object.keys(NODE_LABELS) as NodeType[];
+/** The palette in two groups: the steps that do or judge the work, then the ones that ship it and close the graph. */
+const PALETTE: NodeType[][] = [
+  ["start", "planner", "coder", "reviewer", "code_review", "tester", "human_gate"],
+  ["pr", "merge", "function", "finish"],
+];
 
 export type VersionItem = { version: number; createdAt: string; createdBy: string | null };
 type Props = {
@@ -34,10 +44,20 @@ type Props = {
   document: unknown;
   library: LibraryChoices;
   versions: VersionItem[];
+  /** The breadcrumbs, drawn above the canvas with when the shown version was saved. */
+  trail?: React.ReactNode;
   runSlot?: React.ReactNode;
 };
 
-function Editor({ projectId, graphName, version: initialVersion, document, library, versions: initialVersions, runSlot }: Props) {
+/** When and by whom the shown version was saved, or which earlier version is shown unsaved. */
+function savedLine(version: number, versions: VersionItem[], restoring: number | undefined): string {
+  if (restoring !== undefined) return `Showing v${restoring}, not saved yet`;
+  const shown = versions.find((v) => v.version === version);
+  if (!shown) return `v${version}`;
+  return `v${version} saved ${formatAgo(new Date(shown.createdAt))}${shown.createdBy ? ` by ${shown.createdBy}` : ""}`;
+}
+
+function Editor({ projectId, graphName, version: initialVersion, document, library, versions: initialVersions, trail, runSlot }: Props) {
   const [graph, dispatch] = useReducer(editorReducer, document, flowOf);
   const colorMode = useFlowColorMode();
   const [selection, setSelection] = useState<{ nodeId?: string; edgeId?: string }>({});
@@ -139,124 +159,148 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
       } else setSaveError(result.errors.map((e) => e.message).join("; "));
     });
 
+  const nextVersion = Math.max(version, ...versions.map((v) => v.version)) + 1;
+
   return (
     <EdgeRoutesContext.Provider value={routes}>
       <InvalidEdgesContext.Provider value={invalidEdges}>
-      <div className="grid h-full grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="relative min-w-0">
-          <ReactFlow<FlowNode, FlowEdge>
-            colorMode={colorMode}
-            nodes={nodes}
-            edges={graph.edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onNodesChange={(changes) => edit({ type: "nodesChange", changes })}
-            onEdgesChange={(changes) => edit({ type: "edgesChange", changes })}
-            onConnect={(c) => edit({ type: "connect", source: c.source, target: c.target, sourceHandle: c.sourceHandle, targetHandle: c.targetHandle })}
-            // Never a node into itself. A pair that already has an edge gets that edge re-wired (see the connect action).
-            isValidConnection={(c) => canConnect({ node: c.source, type: "source" }, { node: c.target, type: "target" })}
-            onSelectionChange={onSelectionChange}
-            fitView
-            minZoom={0.15}
-            deleteKeyCode={["Backspace", "Delete"]}
-          >
-            <Background />
-            <Controls />
-            <MiniMap pannable zoomable />
-            <Panel position="top-left" className="flex flex-col gap-1 rounded-lg border bg-background p-1 shadow-sm">
-              {PALETTE.map((type) => {
-                const Icon = NODE_ICONS[type];
-                return (
-                  <Tooltip key={type}>
+        <div className="flex h-full flex-col">
+          <div className="flex items-center gap-3 border-b px-4 py-2">
+            <div className="min-w-0">{trail}</div>
+            <p className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+              {/* The age is worked out on the server and again in the browser, which can differ by a minute. */}
+              <span suppressHydrationWarning>{savedLine(version, versions, restoring)}</span>
+              {!saved && restoring === undefined && <span>· edited, not saved</span>}
+            </p>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_22rem]">
+            <div className="relative min-w-0">
+              <ReactFlow<FlowNode, FlowEdge>
+                colorMode={colorMode}
+                style={CANVAS_STYLE}
+                nodes={nodes}
+                edges={graph.edges}
+                nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
+                onNodesChange={(changes) => edit({ type: "nodesChange", changes })}
+                onEdgesChange={(changes) => edit({ type: "edgesChange", changes })}
+                onConnect={(c) => edit({ type: "connect", source: c.source, target: c.target, sourceHandle: c.sourceHandle, targetHandle: c.targetHandle })}
+                // Never a node into itself. A pair that already has an edge gets that edge re-wired (see the connect action).
+                isValidConnection={(c) => canConnect({ node: c.source, type: "source" }, { node: c.target, type: "target" })}
+                onSelectionChange={onSelectionChange}
+                fitView
+                minZoom={0.15}
+                deleteKeyCode={["Backspace", "Delete"]}
+              >
+                <CanvasBackground />
+                <Controls className={CONTROLS_CLASS} />
+                <CanvasMiniMap />
+                <Panel position="top-left" aria-label="Add a node" className={cn(PANEL_CLASS, "flex flex-col gap-0.5 p-1")}>
+                  {PALETTE.map((group, i) => (
+                    <Fragment key={group[0]}>
+                      {i > 0 && <Separator className="mx-0.5 my-0.5 w-auto" />}
+                      {group.map((type) => {
+                        const Icon = NODE_ICONS[type];
+                        return (
+                          <Tooltip key={type}>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className="text-muted-foreground hover:text-foreground"
+                                aria-label={`Add ${NODE_LABELS[type]}`}
+                                // A graph has one Start.
+                                disabled={type === "start" && hasStart}
+                                onClick={() => addNode(type)}
+                              >
+                                <Icon />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="right">Add {NODE_LABELS[type]}</TooltipContent>
+                          </Tooltip>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </Panel>
+                <Panel position="top-center" role="toolbar" aria-label="Graph" className={cn(PANEL_CLASS, "flex items-center gap-2 py-1.5 pr-2 pl-3 whitespace-nowrap")}>
+                  <span className="font-mono text-[13px] font-medium">{graphName}</span>
+                  <Badge variant="outline" className="font-mono">
+                    v{version}
+                  </Badge>
+                  {issues.length === 0 ? (
+                    <Badge className="border-transparent bg-success-bg text-success">
+                      <CheckIcon data-icon="inline-start" />
+                      valid
+                    </Badge>
+                  ) : (
+                    <Badge className="border-transparent bg-danger-bg text-danger">
+                      <AlertTriangleIcon data-icon="inline-start" />
+                      {issues.length} {issues.length === 1 ? "issue" : "issues"}
+                    </Badge>
+                  )}
+                  <Separator orientation="vertical" className="mx-0.5 h-[18px] self-center" />
+                  <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Add ${NODE_LABELS[type]}`}
-                        // A graph has one Start.
-                        disabled={type === "start" && hasStart}
-                        onClick={() => addNode(type)}
-                      >
-                        <Icon />
+                      <Button size="icon-sm" variant="ghost" aria-label="Tidy layout" onClick={tidy}>
+                        <LayoutGridIcon />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="right">Add {NODE_LABELS[type]}</TooltipContent>
+                    <TooltipContent>Tidy layout</TooltipContent>
                   </Tooltip>
-                );
-              })}
-            </Panel>
-            <Panel position="top-center" className="flex items-center gap-2 rounded-lg border bg-background px-3 py-1.5 shadow-sm">
-              <span className="font-mono text-sm whitespace-nowrap">{graphName}</span>
-              <Badge variant="outline">v{version}</Badge>
-              {issues.length === 0 ? (
-                <Badge variant="secondary">
-                  <CheckIcon data-icon="inline-start" />
-                  valid
-                </Badge>
-              ) : (
-                <Badge variant="destructive">
-                  <AlertTriangleIcon data-icon="inline-start" />
-                  {issues.length} {issues.length === 1 ? "issue" : "issues"}
-                </Badge>
-              )}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    aria-label="Tidy layout"
-                    onClick={tidy}
-                  >
-                    <LayoutGridIcon />
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button size="icon-sm" variant="ghost" aria-label="Fit view" onClick={() => void fitView({ duration: 300 })}>
+                        <MaximizeIcon />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Fit view</TooltipContent>
+                  </Tooltip>
+                  <Separator orientation="vertical" className="mx-0.5 h-[18px] self-center" />
+                  <Button size="sm" onClick={save} disabled={pending || saved || issues.length > 0}>
+                    {!saved && <span aria-hidden className="size-[7px] rounded-full bg-primary-foreground/70" />}
+                    {saved ? "Saved" : `Save as v${nextVersion}`}
                   </Button>
-                </TooltipTrigger>
-                <TooltipContent>Tidy layout</TooltipContent>
-              </Tooltip>
-              <Button size="sm" onClick={save} disabled={pending || saved || issues.length > 0}>
-                <SaveIcon data-icon="inline-start" />
-                {saved ? "Saved" : "Save version"}
-              </Button>
-              {runSlot}
-            </Panel>
-          </ReactFlow>
-        </div>
-        <aside className="flex min-h-0 flex-col border-l">
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="flex flex-col gap-6 p-4">
-              <Inspector graph={graph} selection={selection} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
-              {!selection.nodeId && !selection.edgeId && (
-                <div className="flex flex-col gap-2">
-                  <h3 className="text-sm font-medium">History</h3>
-                  {restoring !== undefined && <p className="text-xs text-muted-foreground">Showing v{restoring}. Save to make it the latest version.</p>}
-                  <ul className="flex flex-col gap-1 text-sm">
-                    {versions.map((v) => (
-                      <li key={v.version} className="flex items-center justify-between gap-2">
-                        <span className="tabular-nums">
-                          v{v.version} <span className="text-xs text-muted-foreground">{v.createdAt.slice(0, 16).replace("T", " ")}</span>
-                        </span>
-                        <Button variant="ghost" size="sm" disabled={pending || v.version === version} onClick={() => restore(v.version)}>
-                          {v.version === version ? "current" : "Restore"}
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              {(issues.length > 0 || saveError) && (
-                <div className="flex flex-col gap-2">
-                  <h3 className="text-sm font-medium">Issues</h3>
-                  <ul className="flex flex-col gap-1 text-xs text-destructive">
-                    {issues.map((issue) => (
-                      <li key={`${issue.code}-${issue.nodeKey ?? ""}-${issue.edgeKey ?? ""}-${issue.message}`}>{issue.message}</li>
-                    ))}
-                    {saveError && <li>{saveError}</li>}
-                  </ul>
-                </div>
-              )}
+                  {runSlot}
+                </Panel>
+              </ReactFlow>
             </div>
-          </ScrollArea>
-        </aside>
-      </div>
+            <aside aria-label="Inspector" className="flex min-h-0 flex-col border-l bg-card">
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="flex flex-col">
+                  <Inspector graph={graph} selection={selection} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
+                  {!selection.nodeId && !selection.edgeId && (
+                    <InspectorSection title="History">
+                      {restoring !== undefined && <p className="text-xs text-muted-foreground">Showing v{restoring}. Save to make it the latest version.</p>}
+                      <ul className="flex flex-col gap-1 text-sm">
+                        {versions.map((v) => (
+                          <li key={v.version} className="flex items-center justify-between gap-2">
+                            <span className="tabular-nums">
+                              <span className="font-mono text-xs">v{v.version}</span> <span className="text-xs text-muted-foreground">{v.createdAt.slice(0, 16).replace("T", " ")}</span>
+                            </span>
+                            <Button variant="ghost" size="xs" disabled={pending || v.version === version} onClick={() => restore(v.version)}>
+                              {v.version === version ? "current" : "Restore"}
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </InspectorSection>
+                  )}
+                  {(issues.length > 0 || saveError) && (
+                    <InspectorSection title="Issues">
+                      <ul className="flex flex-col gap-1 text-xs text-danger">
+                        {issues.map((issue) => (
+                          <li key={`${issue.code}-${issue.nodeKey ?? ""}-${issue.edgeKey ?? ""}-${issue.message}`}>{issue.message}</li>
+                        ))}
+                        {saveError && <li>{saveError}</li>}
+                      </ul>
+                    </InspectorSection>
+                  )}
+                </div>
+              </ScrollArea>
+            </aside>
+          </div>
+        </div>
       </InvalidEdgesContext.Provider>
     </EdgeRoutesContext.Provider>
   );

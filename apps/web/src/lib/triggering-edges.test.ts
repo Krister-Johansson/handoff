@@ -15,6 +15,6 @@ test("the edge that started each node still at work is the one to show, from its
 });
 
 test("an edge that started a node at work stands out", () => {
-  expect(edgeStyle(undefined, false, false, true)).toMatchObject({ stroke: "var(--primary)", strokeWidth: 2.5 });
-  expect(edgeStyle(undefined, false, false, false)).toMatchObject({ stroke: "var(--muted-foreground)", strokeWidth: 1.5 });
+  expect(edgeStyle(undefined, false, false, true)).toMatchObject({ stroke: "var(--active-dot)", strokeWidth: 2 });
+  expect(edgeStyle(undefined, false, false, false)).toMatchObject({ stroke: "var(--input)", strokeWidth: 1.5 });
 });
