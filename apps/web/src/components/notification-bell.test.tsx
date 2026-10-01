@@ -17,6 +17,7 @@ const item = (id: string, kind: NotificationJson["kind"], title: string, created
   href: `/projects/p1/runs/${id}`,
   createdAt,
   unread,
+  done: false,
 });
 const started = item("e1", "started", "sandbox: run started", "2026-10-01T10:00:00.000Z");
 const failed = item("e2", "failed", "sandbox: run failed at coder", "2026-10-01T10:05:00.000Z");
@@ -99,4 +100,12 @@ test("a pull request ready to merge makes a toast that waits a while", async () 
   const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [ready], unread: 1 });
   render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
   await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(ready.title, expect.objectContaining({ duration: 10_000 })));
+});
+
+test("a new notification whose action is already done makes no toast", async () => {
+  const answered = { ...asked, done: true, unread: false };
+  const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [answered], unread: 0 });
+  render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
+  await waitFor(() => expect(load.mock.calls.length).toBeGreaterThan(2));
+  expect(toast.warning).not.toHaveBeenCalled();
 });

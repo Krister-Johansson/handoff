@@ -12,7 +12,9 @@ export type NotificationItem = {
   body: string;
   href: string;
   createdAt: Date;
-  /** Whether it came after the person last opened the feed. */
+  /** Whether the person has done what it asked: answered, asked for the merge, repaired the run. */
+  done: boolean;
+  /** Whether it came after the person last opened the feed and is not done. */
   unread: boolean;
 };
 

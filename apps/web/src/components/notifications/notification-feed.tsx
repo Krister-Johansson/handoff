@@ -4,7 +4,7 @@ import { formatAgo } from "@/lib/format";
 import type { NotificationFilter } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 import { NOTIFICATION_FILTERS, notificationsHref } from "./filters";
-import { KindTile, UnreadDot, type NotificationRow } from "./notification-list";
+import { DoneTag, KindTile, UnreadDot, type NotificationRow } from "./notification-list";
 
 /** Links that narrow the feed: everything, the unread items, or one kind. */
 export function NotificationFilters({ current, unread }: { current: NotificationFilter | undefined; unread: number }) {
@@ -29,7 +29,7 @@ function dayLabel(day: Date, now: Date) {
 
 const clock = (d: Date) => d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 
-/** Notifications newest first, under a heading per day, each with its kind's icon. The notifications page shows these. */
+/** Notifications newest first, under a heading per day, each with its kind's icon and done ones checked off. The notifications page shows these. */
 export function NotificationFeed({ items, now = new Date() }: { items: NotificationRow[]; now?: Date }) {
   const days: { label: string; items: (NotificationRow & { at: Date })[] }[] = [];
   for (const item of items) {
@@ -49,14 +49,15 @@ export function NotificationFeed({ items, now = new Date() }: { items: Notificat
               <li key={item.id} className="border-t">
                 <Link
                   href={item.href}
-                  className={cn("grid grid-cols-[8px_28px_minmax(0,1fr)_auto] items-center gap-3 px-5 py-2.5 hover:bg-muted", item.unread && "bg-active-bg/45 hover:bg-active-bg")}
+                  className={cn("grid grid-cols-[8px_28px_minmax(0,1fr)_auto_auto] items-center gap-3 px-5 py-2.5 hover:bg-muted", item.unread && "bg-active-bg/45 hover:bg-active-bg")}
                 >
                   <UnreadDot unread={item.unread} />
                   <KindTile kind={item.kind} />
                   <span className="flex min-w-0 flex-col">
-                    <span className="font-medium">{item.title}</span>
+                    <span className={cn("font-medium", item.done && "text-muted-foreground")}>{item.title}</span>
                     <span className="mt-px truncate text-xs text-muted-foreground">{item.body}</span>
                   </span>
+                  {item.done ? <DoneTag /> : <span aria-hidden />}
                   <span className="text-xs whitespace-nowrap text-muted-foreground" title={item.at.toISOString()}>
                     {day.label === "Today" ? formatAgo(item.at, now) : clock(item.at)}
                   </span>

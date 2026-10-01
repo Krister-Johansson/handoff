@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { CircleCheckIcon, CircleXIcon, GitMergeIcon, MessageCircleQuestionIcon, PlayIcon } from "lucide-react";
+import { CheckIcon, CircleCheckIcon, CircleXIcon, GitMergeIcon, MessageCircleQuestionIcon, PlayIcon } from "lucide-react";
+import { Tag } from "@/components/tag";
 import { formatAgo } from "@/lib/format";
 import type { NotificationKind } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
@@ -28,9 +29,22 @@ export function UnreadDot({ unread, className }: { unread: boolean; className?: 
   return unread ? <span aria-label="unread" className={cn("size-[7px] rounded-full bg-active-dot", className)} /> : <span aria-hidden className={cn("size-[7px]", className)} />;
 }
 
-export type NotificationRow = { id: string; kind: NotificationKind; title: string; body: string; href: string; createdAt: Date | string; unread: boolean };
+/** The mark on a notification whose action the person has done: answered, merged, repaired. */
+export function DoneTag() {
+  return (
+    <Tag tone="success">
+      <CheckIcon aria-hidden />
+      Done
+    </Tag>
+  );
+}
 
-/** Notifications newest first, each linking to its run or review, unread ones marked with a dot. The bell shows these. */
+export type NotificationRow = { id: string; kind: NotificationKind; title: string; body: string; href: string; createdAt: Date | string; unread: boolean; done: boolean };
+
+/**
+ * Notifications newest first, each linking to its run or review, unread ones marked with a dot and done
+ * ones checked off. The bell shows these.
+ */
 export function NotificationList({ items, now, onNavigate }: { items: NotificationRow[]; now?: Date; onNavigate?: () => void }) {
   return (
     <ul className="flex flex-col gap-px">
@@ -45,11 +59,14 @@ export function NotificationList({ items, now, onNavigate }: { items: Notificati
             >
               <UnreadDot unread={item.unread} className="mt-1.5" />
               <span className="flex min-w-0 flex-col">
-                <span className="text-[13px] font-medium">{item.title}</span>
+                <span className={cn("text-[13px] font-medium", item.done && "text-muted-foreground")}>{item.title}</span>
                 <span className="mt-px line-clamp-2 text-xs text-muted-foreground">{item.body}</span>
               </span>
-              <span className="mt-0.5 text-[11px] whitespace-nowrap text-muted-foreground" title={at.toISOString()}>
-                {formatAgo(at, now)}
+              <span className="mt-0.5 flex flex-col items-end gap-1">
+                <span className="text-[11px] whitespace-nowrap text-muted-foreground" title={at.toISOString()}>
+                  {formatAgo(at, now)}
+                </span>
+                {item.done && <DoneTag />}
               </span>
             </Link>
           </li>
