@@ -1,9 +1,11 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { InboxProjectFilter, InboxSections } from "./inbox-sections";
 import { narrowInbox, type InboxView } from "./inbox-view";
 
 vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), repairAction: vi.fn(), cancelAction: vi.fn(), resolveLoopAction: vi.fn() }));
+const projectActions = vi.hoisted(() => ({ requestMergeAction: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/app/projects/actions", () => projectActions);
 
 const todo = { projectId: "p1", projectName: "todooverkill" };
 const sandbox = { projectId: "p2", projectName: "sandbox" };
@@ -26,6 +28,7 @@ const view: InboxView = {
   failedRuns: [{ ...sandbox, runId: "r-f", task: "Broken", executionId: "x", nodeKey: "tester", attempt: 1, error: null, finishedAt: null }],
   stuckRuns: [],
   pullRequests: [{ ...todo, runId: "r-p", task: "Shell", executionId: "y", number: 61, url: null, ci: "success", branch: "handoff/4" }],
+  readyToMerge: [],
 };
 
 test("the inbox shows each kind of work under its own heading with a count, and leaves out empty ones", () => {
@@ -50,4 +53,12 @@ test("the inbox narrows to one project, and the filter counts each project's ite
   const narrowed = narrowInbox(view, "p2");
   expect([narrowed.reviews, narrowed.questions, narrowed.failedRuns, narrowed.pullRequests].map((g) => g.length)).toEqual([0, 1, 1, 0]);
   expect(narrowInbox(view, undefined)).toBe(view);
+});
+
+test("a pull request first in its project's merge queue can be merged from the inbox", async () => {
+  render(<InboxSections view={{ ...view, readyToMerge: [{ ...todo, runId: "r-m", task: "F06 Test harness", prNumber: 54, issues: [] }] }} />);
+  const group = screen.getByRole("region", { name: /Ready to merge/ });
+  expect(group).toHaveTextContent("#54 F06 Test harness");
+  fireEvent.click(within(group).getByRole("button", { name: "Merge" }));
+  await waitFor(() => expect(projectActions.requestMergeAction).toHaveBeenCalledWith({ runId: "r-m", projectId: "p1" }));
 });

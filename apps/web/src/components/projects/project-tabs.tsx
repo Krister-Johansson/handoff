@@ -18,7 +18,8 @@ export function ProjectTabs({
   children,
 }: {
   active: ProjectTab;
-  counts: { runs: number; pulls: number; graphs: number };
+  /** `ready`: pull requests in the merge queue. */
+  counts: { runs: number; pulls: number; graphs: number; ready?: number };
   /** The open issue count, which comes from GitHub and streams in after the page. */
   issueCount?: ReactNode;
   children: ReactNode;
@@ -33,6 +34,9 @@ export function ProjectTabs({
         <TabsTrigger value="issues">Issues {issueCount}</TabsTrigger>
         <TabsTrigger value="pulls">
           Pull requests <Count n={counts.pulls} />
+          {counts.ready ? (
+            <span className="inline-flex h-[17px] items-center rounded-full bg-success-bg px-1.5 text-[11px] font-semibold text-success tabular-nums">{counts.ready} ready</span>
+          ) : null}
         </TabsTrigger>
         <TabsTrigger value="graphs">
           Graphs <Count n={counts.graphs} />

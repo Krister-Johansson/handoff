@@ -126,3 +126,14 @@ test("the feed narrows to unread items, or to one kind", async () => {
   // The unread count is for the whole feed, whatever it is narrowed to.
   expect((await listNotifications(db, { limit: 8, filter: "failed" })).unread).toBe(1);
 });
+
+test("a pull request first in line and waiting for a person is a notification that needs you", async () => {
+  const { project, start, event, age } = await setUp();
+  const run = await start("Add a CHANGELOG.md");
+  await event(run.id, "run.started");
+  await age(5);
+  await event(run.id, "merge.ready", { number: 54 });
+  const { items } = await listNotifications(db, { limit: 8 });
+  expect(items[0]).toMatchObject({ kind: "ready", title: "sandbox: PR #54 is ready to merge", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${run.id}` });
+  expect((await listNotifications(db, { limit: 8, filter: "input" })).items.map((i) => i.kind)).toEqual(["ready"]);
+});

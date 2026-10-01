@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FailedRunCard, PullRequestCard, QuestionCard, StuckRunCard } from "./cards";
+import { FailedRunCard, PullRequestCard, QuestionCard, ReadyToMergeCard, StuckRunCard } from "./cards";
 import { FilterLinks } from "@/components/filter-links";
 import { inboxCount, inboxItems, type InboxView } from "./inbox-view";
 
@@ -55,6 +55,11 @@ export function InboxSections({ view }: { view: InboxView }) {
       <Group id="inbox-questions" title="Questions to answer" count={view.questions.length}>
         {view.questions.map((q) => (
           <QuestionCard key={q.id} item={q} />
+        ))}
+      </Group>
+      <Group id="inbox-ready" title="Ready to merge" count={view.readyToMerge.length}>
+        {view.readyToMerge.map((r) => (
+          <ReadyToMergeCard key={r.runId} item={r} />
         ))}
       </Group>
       <Group id="inbox-stopped" title="Runs that stopped" count={view.failedRuns.length + view.stuckRuns.length}>

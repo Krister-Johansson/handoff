@@ -166,10 +166,21 @@ export async function startRunFromGraph(
   if (project.isDemo) throw new Error("This is a demo project with simulated runs. Add a real repository to run a graph.");
   const latest = await getGraphForEdit(db, input.projectId, input.graphName);
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
-  const issues = await linkIssues(input.issues ?? [], { owner: project.repoOwner, name: project.repoName }, github);
+  const repo = { owner: project.repoOwner, name: project.repoName };
+  const issues = await linkIssues(input.issues ?? [], repo, github);
+  if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
   if (!task) throw new Error("Describe the task, or link at least one issue.");
   return createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues });
+}
+
+const andList = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+/** A run cannot start for an issue GitHub records as blocked by an open issue: it would build on work not merged yet. */
+async function refuseBlocked(github: GitHubPort, repo: { owner: string; name: string }, issues: LinkedIssue[]) {
+  const blocked = await Promise.all(issues.map(async (i) => ({ number: i.number, by: await github.openBlockers(repo, i.number) })));
+  const first = blocked.find((b) => b.by.length > 0);
+  if (first) throw new Error(`#${first.number} is blocked by ${andList(first.by.map((n) => `#${n}`))} on GitHub. A run can start once they are closed.`);
 }
 
 async function linkIssues(issues: number[] | LinkedIssue[], repo: { owner: string; name: string }, github?: GitHubPort): Promise<LinkedIssue[]> {

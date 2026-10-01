@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { useActionState, useState, useTransition, type ReactNode } from "react";
-import { CircleXIcon, ClipboardCheckIcon, ExternalLinkIcon, GitPullRequestIcon, MessageCircleQuestionIcon, RepeatIcon, SquareIcon, WrenchIcon, type LucideIcon } from "lucide-react";
+import { CircleXIcon, ClipboardCheckIcon, ExternalLinkIcon, GitMergeIcon, GitPullRequestIcon, MessageCircleQuestionIcon, RepeatIcon, SquareIcon, WrenchIcon, type LucideIcon } from "lucide-react";
 import { answerAction, cancelAction, repairAction, resolveLoopAction, type InboxActionState } from "@/app/inbox/actions";
 import { Button } from "@/components/ui/button";
+import { MergeButton } from "@/components/runs/merge-button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -266,6 +267,25 @@ export function StuckRunCard({ item }: { item: StuckRunItem }) {
         </Button>
       </CardActions>
       {error && <FieldError className="mt-2">{error}</FieldError>}
+    </InboxCard>
+  );
+}
+
+/** A pull request first in its project's merge queue, waiting for a person to merge it. */
+export type ReadyToMergeItem = RunRef & { prNumber: number | null; issues: { number: number; title: string; url: string }[] };
+
+export function ReadyToMergeCard({ item }: { item: ReadyToMergeItem }) {
+  return (
+    <InboxCard icon={GitMergeIcon} tone="success">
+      <CardContext tag="Ready to merge" item={item} compact={false} />
+      <CardTitle>
+        {item.prNumber !== null && <span className="font-mono text-[13px] font-medium text-muted-foreground">#{item.prNumber}</span>} {item.task}
+      </CardTitle>
+      <p className="mt-1.5 text-xs text-muted-foreground">First in the merge queue. It is brought up to date with main before it merges.</p>
+      <CardActions>
+        <MergeButton projectId={item.projectId} runId={item.runId} />
+        <OpenRun item={item} />
+      </CardActions>
     </InboxCard>
   );
 }

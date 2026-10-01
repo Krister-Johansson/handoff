@@ -6,6 +6,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { eq, runs, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
+import { wakeDependents } from "../dependencies.ts";
 import { mergeQueue, requestMerge, requestMergeAll } from "../operations.ts";
 import { createRun } from "../runs.ts";
 import { createOriginRepo, git } from "../testing/git.ts";
@@ -45,12 +46,12 @@ const graph = (mode: "manual" | "auto") => ({
   ],
 });
 
-/** Two runs of one project, each with its pull request open and CI green. */
-async function twoRuns(mode: "manual" | "auto") {
+/** Two runs of one project, each with its pull request open and CI green; the first works on `issues` when given. */
+async function twoRuns(mode: "manual" | "auto", issues?: { number: number; title: string; url: string; body: string }[]) {
   const origin = createOriginRepo();
   const github = new FakeGitHub();
   const { project, graphVersion } = await seedGraph(db, graph(mode), { localClonePath: origin });
-  const first = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "First" });
+  const first = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "First", ...(issues ? { issues } : {}) });
   const second = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Second" });
   const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github, db }), finish: finishExecutor() };
   const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
@@ -65,6 +66,8 @@ async function twoRuns(mode: "manual" | "auto") {
   };
   return { github, project, first, second, deps, ready, prOf };
 }
+
+const blockedIssue = { number: 7, title: "Board view", url: "https://github.com/octo/sample/issues/7", body: "" };
 
 const mergeStep = async (runId: string) => (await inspect(db, runId)).executions.findLast((e) => e.nodeKey === "merge");
 
@@ -81,6 +84,35 @@ describe("merge queue", () => {
     expect(github.merged).toEqual([await prOf(first.id)]);
     expect((await inspect(db, first.id)).run.status).toBe("succeeded");
     expect(await mergeQueue(db, project.id)).toEqual([]);
+  });
+
+  test("a pull request that reaches the front and waits for a person says so once", async () => {
+    const { project, first, second, deps, ready } = await twoRuns("manual");
+    await ready(first.id);
+    await ready(second.id);
+    // Queue changes wake every waiting run; only the first is ready, and only once.
+    await wakeByKey(db, `mq:${project.id}`, { reason: "merge_queue" });
+    await drain(deps);
+    const readyEvents = async (runId: string) => (await inspect(db, runId)).events.filter((e) => e.type === "merge.ready");
+    expect(await readyEvents(first.id)).toHaveLength(1);
+    expect((await readyEvents(first.id))[0]!.payload).toMatchObject({ number: expect.any(Number) });
+    expect(await readyEvents(second.id)).toHaveLength(0);
+  });
+
+  test("a pull request whose issue became blocked on GitHub stays out of the queue until the blocker closes", async () => {
+    const { github, project, first, deps, ready } = await twoRuns("manual", [blockedIssue]);
+    github.issues.set(5, { number: 5, title: "Theme tokens", url: "u5", body: "", state: "open" });
+    github.issues.set(7, { ...blockedIssue, state: "open", blockedBy: [5] });
+    await ready(first.id);
+    expect(await mergeStep(first.id)).toMatchObject({ status: "waiting", waitKey: `deps:${project.id}` });
+    expect(await mergeQueue(db, project.id)).toEqual([]);
+    expect((await inspect(db, first.id)).events.find((e) => e.type === "merge.blocked")?.payload).toEqual({ issue: 7, blockedBy: [5] });
+
+    github.issues.get(5)!.state = "closed";
+    await wakeDependents(db, project.id);
+    await drain(deps);
+    expect(await mergeStep(first.id)).toMatchObject({ status: "waiting", waitKey: `mq:${project.id}` });
+    expect((await mergeQueue(db, project.id)).map((e) => e.runId)).toEqual([first.id]);
   });
 
   test("pull requests merge in the order they became ready, even when a later one is asked for first", async () => {

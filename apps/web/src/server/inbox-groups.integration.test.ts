@@ -83,3 +83,22 @@ test("a run stopped by a loop is listed once, as needing a decision rather than 
   expect(groups.failedRuns).toEqual([]);
   expect(groups.count).toBe(1);
 });
+
+test("the first pull request in each project's merge queue, waiting for a person, is ready to merge", async () => {
+  const { project, start } = await setUp();
+  const first = await start("First");
+  const second = await start("Second");
+  const queued = async (runId: string, minutesAgo: number, pr: number) => {
+    await db.update(runs).set({ mergeQueuedAt: new Date(Date.now() - minutesAgo * 60_000), prNumber: pr, status: "waiting" }).where(eq(runs.id, runId));
+    await seedExecution(db, runId, { nodeKey: "merge", nodeType: "merge", executorKind: "github", status: "waiting", waitKind: "merge_queue", waitKey: `mq:${project.id}` });
+  };
+  await queued(first.id, 2, 54);
+  await queued(second.id, 1, 55);
+  const groups = await inboxGroups(db);
+  // Only the first can merge now; the second is behind it.
+  expect(groups.readyToMerge).toMatchObject([{ runId: first.id, projectId: project.id, projectName: "sandbox", task: "First", prNumber: 54 }]);
+  expect(groups.count).toBe(1);
+
+  await db.update(runs).set({ mergeRequestedAt: new Date() }).where(eq(runs.id, first.id));
+  expect((await inboxGroups(db)).readyToMerge).toEqual([]);
+});

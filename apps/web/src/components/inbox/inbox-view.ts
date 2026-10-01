@@ -1,4 +1,4 @@
-import type { FailedRunItem, PullRequestItem, QuestionItem, StuckRunItem } from "./cards";
+import type { FailedRunItem, PullRequestItem, QuestionItem, ReadyToMergeItem, StuckRunItem } from "./cards";
 
 /** What waits on a person, grouped by what they must do. */
 export type InboxView = {
@@ -7,10 +7,11 @@ export type InboxView = {
   failedRuns: FailedRunItem[];
   stuckRuns: StuckRunItem[];
   pullRequests: PullRequestItem[];
+  readyToMerge: ReadyToMergeItem[];
 };
 
 /** Every item in the inbox, in the order the groups show them. */
-export const inboxItems = (view: InboxView) => [...view.reviews, ...view.questions, ...view.failedRuns, ...view.stuckRuns, ...view.pullRequests];
+export const inboxItems = (view: InboxView) => [...view.reviews, ...view.questions, ...view.readyToMerge, ...view.failedRuns, ...view.stuckRuns, ...view.pullRequests];
 
 export const inboxCount = (view: InboxView) => inboxItems(view).length;
 
@@ -18,5 +19,12 @@ export const inboxCount = (view: InboxView) => inboxItems(view).length;
 export function narrowInbox(view: InboxView, projectId: string | undefined): InboxView {
   if (!projectId) return view;
   const mine = <T extends { projectId: string }>(items: T[]) => items.filter((i) => i.projectId === projectId);
-  return { reviews: mine(view.reviews), questions: mine(view.questions), failedRuns: mine(view.failedRuns), stuckRuns: mine(view.stuckRuns), pullRequests: mine(view.pullRequests) };
+  return {
+    reviews: mine(view.reviews),
+    questions: mine(view.questions),
+    readyToMerge: mine(view.readyToMerge),
+    failedRuns: mine(view.failedRuns),
+    stuckRuns: mine(view.stuckRuns),
+    pullRequests: mine(view.pullRequests),
+  };
 }

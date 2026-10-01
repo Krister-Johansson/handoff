@@ -22,6 +22,7 @@ import { parseBacklogFilter, parseProjectTab } from "@/lib/project-tab";
 import { parsePullFilter } from "@/lib/pull-filter";
 import { cn } from "@/lib/utils";
 import { projectMergeQueue } from "@/server/merge-queue";
+import { mergeQueue } from "@handoff/engine/operations";
 import { getProjectDetail, listProjectGraphs, TEMPLATES } from "@/server/graphs";
 import { DefaultLibrary } from "@/components/projects/default-library";
 import { libraryChoices } from "@/server/library-choices";
@@ -185,7 +186,7 @@ export default async function ProjectPage({
 }) {
   const [{ projectId }, query] = await Promise.all([params, searchParams]);
   const tab = parseProjectTab(query);
-  const detail = await getProjectDetail(getDb(), projectId);
+  const [detail, queue] = await Promise.all([getProjectDetail(getDb(), projectId), mergeQueue(getDb(), projectId)]);
   if (!detail) notFound();
   const { project, graphs, runs, defaultGraph } = detail;
   const crumbs = await projectCrumbs(getDb(), project);
@@ -226,7 +227,7 @@ export default async function ProjectPage({
       />
       <ProjectTabs
         active={tab}
-        counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length, graphs: graphs.length }}
+        counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length, graphs: graphs.length, ready: queue.length }}
         issueCount={
           project.isDemo ? null : (
             <Suspense fallback={null}>

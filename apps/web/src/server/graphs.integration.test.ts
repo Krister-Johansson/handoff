@@ -211,4 +211,16 @@ describe("renaming and deleting graphs", () => {
     ]);
     expect(list[0]!.savedAt).toBeInstanceOf(Date);
   });
+
+  test("a run cannot start for an issue GitHub says is blocked by an open issue", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const github = new FakeGitHub();
+    for (const n of [5, 6, 7]) github.issues.set(n, { number: n, title: `F0${n}`, url: `u${n}`, body: "", state: "open" });
+    github.issues.get(7)!.blockedBy = [5, 6];
+    await expect(startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues: [7] }, github)).rejects.toThrow("#7 is blocked by #5 and #6");
+    github.issues.get(5)!.state = "closed";
+    github.issues.get(6)!.state = "closed";
+    await expect(startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues: [7] }, github)).resolves.toMatchObject({ status: "queued" });
+  });
 });
