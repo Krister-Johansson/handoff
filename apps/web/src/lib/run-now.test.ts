@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { describeNow, type NowInput } from "./run-now";
 
-const base: NowInput = { status: "running", executions: [], labels: { coder: "Code", pr: "Pull request", gate: "Ask a person", merge: "Merge" }, prNumber: null, questions: 0 };
+const base: NowInput = { status: "running", executions: [], labels: { coder: "Code", pr: "Pull request", gate: "Ask a person", merge: "Merge" }, prNumber: null, questions: 0, reviews: 0 };
 const exec = (nodeKey: string, status: string, extra: Partial<NowInput["executions"][number]> = {}) => ({ nodeKey, attempt: 1, status, ...extra });
 
 test("a running node says who is working, with the attempt after the first", () => {
@@ -12,6 +12,7 @@ test("a running node says who is working, with the attempt after the first", () 
 test("waiting says what for: CI and reviews on the PR, or a person", () => {
   expect(describeNow({ ...base, status: "waiting", prNumber: 10, executions: [exec("pr", "waiting")] })).toEqual({ tone: "attention", text: "Waiting for CI and reviews on PR #10" });
   expect(describeNow({ ...base, status: "waiting", questions: 1, executions: [exec("gate", "waiting")] }).text).toBe("Waiting for your answer to Ask a person");
+  expect(describeNow({ ...base, status: "waiting", questions: 1, reviews: 1, executions: [exec("gate", "waiting")] }).text).toBe("Ask a person waits for your review");
 });
 
 test("a queued node says it is queued", () => {

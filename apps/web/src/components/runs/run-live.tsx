@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
 import { Card, CardContent } from "@/components/ui/card";
@@ -17,12 +18,16 @@ import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
 import { loopEdgeKeys } from "@/lib/sent-back";
 import { triggeringEdges } from "@/lib/triggering-edges";
 import { cn } from "@/lib/utils";
+import { QuestionCard, type QuestionItem } from "@/components/inbox/cards";
 import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
 import { StatusBadge } from "./status-badge";
 import { Steps, type StepView } from "./steps";
 
 export type ExecutionView = StepView;
+
+/** A question a gate waits on, with the execution that asked it. */
+export type OpenQuestion = QuestionItem & { nodeExecutionId: string };
 
 type Props = {
   runId: string;
@@ -33,8 +38,8 @@ type Props = {
   /** Node labels from the pinned graph, by node key. */
   labels: Record<string, string>;
   prNumber: number | null;
-  /** Open questions waiting for a person. */
-  questions: number;
+  /** Open questions waiting for a person, each with the execution that asked it. */
+  questions: OpenQuestion[];
 };
 
 type EventPayload = {
@@ -66,7 +71,11 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
       if (runStatus) setStatus(runStatus);
       // The server-rendered header (cost, duration, PR, Cancel or Run again) only changes when the run ends.
       if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
-      if (event.type === "node.waiting") setStatus((s) => (s === "running" ? "waiting" : s));
+      if (event.type === "node.waiting") {
+        setStatus((s) => (s === "running" ? "waiting" : s));
+        // A gate's question is read on the server; refreshing brings it to the banner and the drawer.
+        router.refresh();
+      }
       if (event.type === "node.claimed") setStatus("running");
       // A node that passed and then took a loop edge sent its work back.
       const edgeKey = (event.payload as { edgeKey?: unknown } | null)?.edgeKey;
@@ -115,7 +124,9 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
     return byNode;
   }, [executions]);
 
-  const now = describeNow({ status, executions, labels, prNumber, questions });
+  const review = questions.find((q) => q.context?.review);
+  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0 });
+  const selectedQuestion = questions.find((q) => q.nodeExecutionId === selected?.id);
   const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
   const filter = useMemo(
     () => ({ showCli, executionIds: nodeFilter ? new Set(executions.filter((e) => e.nodeKey === nodeFilter).map((e) => e.id)) : undefined }),
@@ -127,6 +138,11 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
       <div role="status" className={cn("flex items-center gap-3 rounded-lg border px-4 py-3", TONE_CLASS[now.tone])}>
         <StatusBadge status={status} />
         <span className="min-w-0 truncate text-sm font-medium">{now.text}</span>
+        {review && (
+          <Button size="sm" className="ml-auto shrink-0" asChild>
+            <Link href={`/runs/${runId}/review/${review.id}`}>Open the review</Link>
+          </Button>
+        )}
       </div>
       <Tabs defaultValue="steps" className="gap-4">
         <TabsList>
@@ -182,7 +198,8 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
                 </div>
                 <SheetDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</SheetDescription>
               </SheetHeader>
-              <div className="px-4 pb-6">
+              <div className="flex flex-col gap-4 px-4 pb-6">
+                {selectedQuestion && <QuestionCard compact item={selectedQuestion} />}
                 <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} />
               </div>
             </>
@@ -197,6 +214,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
                 <DialogTitle>{labels[selected.nodeKey] ?? selected.nodeKey}</DialogTitle>
                 <DialogDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</DialogDescription>
               </DialogHeader>
+              {selectedQuestion && <QuestionCard compact item={selectedQuestion} />}
               <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} wide />
             </>
           )}

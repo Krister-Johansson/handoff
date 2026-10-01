@@ -78,7 +78,7 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
       .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
       .where(eq(graphVersions.id, run.run.graphVersionId)),
     db
-      .select({ id: questions.id, question: questions.question, options: questions.options, context: questions.context, nodeKey: nodeExecutions.nodeKey })
+      .select({ id: questions.id, question: questions.question, options: questions.options, context: questions.context, nodeKey: nodeExecutions.nodeKey, nodeExecutionId: questions.nodeExecutionId })
       .from(questions)
       .innerJoin(nodeExecutions, eq(nodeExecutions.id, questions.nodeExecutionId))
       .where(and(eq(questions.runId, runId), isNull(questions.answer))),
