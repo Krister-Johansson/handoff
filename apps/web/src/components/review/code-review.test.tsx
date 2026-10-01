@@ -76,12 +76,22 @@ const props = {
 };
 const fileA = () => screen.getByRole("region", { name: "src/a.ts" });
 
-test("every file has a header with its counts, and a generated file says why its lines are hidden", () => {
+test("every file has a header with its counts, a new file says so, and a generated file says why its lines are hidden", () => {
   render(<CodeReview {...props} />);
   expect(screen.getByText("Added the scaffold.")).toBeInTheDocument();
   expect(within(fileA()).getByText("−1")).toBeInTheDocument();
   expect(within(fileA()).getByText("+1")).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByText("new file")).toBeInTheDocument();
   expect(within(screen.getByRole("region", { name: "pnpm-lock.yaml" })).getByText(/generated file/i)).toBeInTheDocument();
+});
+
+test("the toolbar counts the comments drafted so far", () => {
+  render(<CodeReview {...props} />);
+  expect(screen.queryByText(/drafted/)).not.toBeInTheDocument();
+  fireEvent.click(within(fileA()).getByRole("button", { name: "Select line 9" }));
+  fireEvent.change(within(fileA()).getByLabelText("Comment on src/a.ts line 9"), { target: { value: "One." } });
+  fireEvent.click(within(fileA()).getByRole("button", { name: "Add comment" }));
+  expect(screen.getByText("1 comment drafted")).toBeInTheDocument();
 });
 
 test("unchanged lines fold around the change, expand in place, and the whole file shows them all", () => {
@@ -150,17 +160,23 @@ test("approve after fixes needs something to fix, then sends fix", async () => {
   );
 });
 
-test("prev, next and the [ and ] keys move between files", () => {
+test("prev, next and the [ and ] keys move between files, and the file menu names the current one", () => {
   render(<CodeReview {...props} />);
-  expect(screen.getByRole("button", { name: /File 1 of 3/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "src/a.ts 1 of 3" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Next file" }));
-  expect(screen.getByRole("button", { name: /File 2 of 3/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "src/b.ts 2 of 3" })).toBeInTheDocument();
   fireEvent.keyDown(window, { key: "]" });
-  expect(screen.getByRole("button", { name: /File 3 of 3/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "pnpm-lock.yaml 3 of 3" })).toBeInTheDocument();
   fireEvent.keyDown(window, { key: "[" });
   fireEvent.click(screen.getByRole("button", { name: "Previous file" }));
-  expect(screen.getByRole("button", { name: /File 1 of 3/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "src/a.ts 1 of 3" })).toBeInTheDocument();
 });
+
+/** Opens the file menu and returns its text. */
+function fileMenuText() {
+  fireEvent.keyDown(screen.getByRole("button", { name: /of 3$/ }), { key: "Enter" });
+  return screen.getByRole("menu").textContent;
+}
 
 test("a file collapses and expands from its header", () => {
   render(<CodeReview {...props} />);
@@ -178,13 +194,15 @@ test("text typed in the comment box stays when the range is extended", () => {
   expect(within(fileA()).getByLabelText("Comment on src/a.ts lines 9–11")).toHaveValue("Half a thought");
 });
 
-test("mark viewed saves the mark, collapses the file and counts down the files left", async () => {
+test("ticking viewed saves the mark, collapses the file and counts it in the file menu", async () => {
   render(<CodeReview {...props} />);
-  expect(screen.getByRole("button", { name: /File 1 of 3 · 3 left/ })).toBeInTheDocument();
-  fireEvent.click(within(fileA()).getByRole("button", { name: "Mark src/a.ts viewed" }));
+  const viewed = within(fileA()).getByRole("checkbox", { name: "Viewed" });
+  expect(viewed).not.toBeChecked();
+  fireEvent.click(viewed);
   expect(actions.markViewedAction).toHaveBeenCalledWith({ runId: "r1", path: "src/a.ts", blobSha: "b1", viewed: true });
+  expect(within(fileA()).getByRole("checkbox", { name: "Viewed" })).toBeChecked();
   expect(within(fileA()).queryByText("new 10")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /File 1 of 3 · 2 left/ })).toBeInTheDocument();
+  expect(fileMenuText()).toContain("1 of 3 viewed");
 });
 
 test("files keep their marks from earlier rounds unless they changed or were commented on", () => {
@@ -194,9 +212,9 @@ test("files keep their marks from earlier rounds unless they changed or were com
     { path: "pnpm-lock.yaml", blobSha: "x", viewedAt: new Date("2026-10-01T09:00:00Z") },
   ];
   render(<CodeReview {...props} files={[...files.slice(0, 2), { ...files[2]!, blob: "x" }]} views={views} />);
-  expect(within(fileA()).getByRole("button", { name: "Mark src/a.ts not viewed" })).toBeInTheDocument();
+  expect(within(fileA()).getByRole("checkbox", { name: "Viewed" })).toBeChecked();
   expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByText("Changed since you viewed it")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /File 1 of 3 · 1 left/ })).toBeInTheDocument();
+  expect(fileMenuText()).toContain("2 of 3 viewed");
 });
 
 test("last round's comments show next to the code they were about, or as outdated when it is gone", () => {
@@ -216,7 +234,7 @@ test("last round's comments show next to the code they were about, or as outdate
   expect(within(fileA()).getByText("You commented on it last round")).toBeInTheDocument();
   expect(within(fileA()).getByText("Is this needed?")).toBeInTheDocument();
   expect(within(fileA()).getByText("This line was wrong.").closest("[data-outdated]")).not.toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Last round (2)" }));
+  fireEvent.click(screen.getByRole("button", { name: "Last round 2" }));
   expect(screen.getByText("Round one.")).toBeInTheDocument();
 });
 
@@ -243,7 +261,7 @@ test("split view puts the old lines on the left and the new lines on the right",
   expect(within(row).getByRole("button", { name: "Select line 10" })).toBeInTheDocument();
 });
 
-test("the code reviewer's findings sit on their lines, and the summary is only the verdict and where the rest are", () => {
+test("the code reviewer's findings sit on their lines, and the summary lists each one with where it is", () => {
   const findings = {
     verdict: "approve" as const,
     by: "code_review-1",
@@ -255,11 +273,20 @@ test("the code reviewer's findings sit on their lines, and the summary is only t
   };
   render(<CodeReview {...props} markdown={"Verdict: approve\n\n- a wall of text"} findings={findings} from="coder-1" />);
   const summary = screen.getByRole("region", { name: "Code review findings" });
-  expect(summary).toHaveTextContent("code_review-1: approve");
-  expect(summary).toHaveTextContent("3 findings, 2 shown in the diff");
+  expect(within(summary).getByRole("heading", { name: "Code review found 3 things" })).toBeInTheDocument();
+  expect(summary).toHaveTextContent("code_review-1 · approved · 2 in the diff");
+  // A finding on a file in the diff links to it; one on a file outside the diff is only a location.
+  expect(within(summary).getByRole("button", { name: "src/a.ts:10" })).toBeInTheDocument();
+  expect(within(summary).queryByRole("button", { name: "docs/notes.md:3" })).not.toBeInTheDocument();
   expect(summary).toHaveTextContent("docs/notes.md:3");
   expect(summary).toHaveTextContent("Suggestion: link the ADR.");
   expect(screen.queryByText("a wall of text")).not.toBeInTheDocument();
   const a = screen.getByRole("region", { name: "src/a.ts" });
   expect(within(a).getByText("Suggestion: name the constant.")).toBeInTheDocument();
+  expect(within(a).getByText("1 finding")).toBeInTheDocument();
+});
+
+test("a code review without findings says the reviewer found nothing", () => {
+  render(<CodeReview {...props} findings={{ verdict: "approve", by: "code_review-1", comments: [] }} />);
+  expect(screen.getByRole("heading", { name: "Code review found nothing" })).toBeInTheDocument();
 });

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { DiffFile, DiffLine } from "@handoff/core";
-import { diffRows } from "./diff-rows";
+import { diffRows, diffTotals } from "./diff-rows";
 
 /** A whole file of `n` lines where line `changed` was replaced. */
 function file(n: number, changed: number): DiffFile {
@@ -25,6 +25,11 @@ function file(n: number, changed: number): DiffFile {
     hunks: [{ oldStart: 1, newStart: 1, lines }],
   };
 }
+
+test("the totals of a change add up every file's lines and count the files", () => {
+  expect(diffTotals([file(20, 10), { ...file(5, 1), additions: 4, deletions: 0 }])).toEqual({ additions: 5, deletions: 1, files: 2 });
+  expect(diffTotals([])).toEqual({ additions: 0, deletions: 0, files: 0 });
+});
 
 const shape = (rows: ReturnType<typeof diffRows>) =>
   rows.map((r) => (r.kind === "fold" ? `fold ${r.lines.length}` : r.kind === "gap" ? "gap" : `${r.line.kind} ${r.line.newLine ?? r.line.oldLine}`));

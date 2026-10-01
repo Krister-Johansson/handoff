@@ -2,6 +2,11 @@ import type { DiffFile, DiffLine } from "@handoff/core";
 
 export type DiffRow = { kind: "line"; line: DiffLine } | { kind: "fold"; id: string; lines: DiffLine[] } | { kind: "gap"; id: string };
 
+/** How big a change is: lines added and deleted over every file, and how many files. */
+export function diffTotals(files: DiffFile[]) {
+  return files.reduce((t, f) => ({ additions: t.additions + f.additions, deletions: t.deletions + f.deletions, files: t.files + 1 }), { additions: 0, deletions: 0, files: 0 });
+}
+
 type Options = {
   mode: "changes" | "whole";
   expanded: ReadonlySet<string>;

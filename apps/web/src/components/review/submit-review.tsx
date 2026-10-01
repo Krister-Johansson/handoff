@@ -86,20 +86,26 @@ export function SubmitReview({ questionId, runId, target, comments, note, setNot
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <Field>
-        <FieldLabel htmlFor="review-note">Overall comment</FieldLabel>
-        <Textarea id="review-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional. Sent with your line comments." />
-        {comments.length > 0 && <FieldDescription>{`${comments.length} ${comments.length === 1 ? "comment" : "comments"} will be sent with it.`}</FieldDescription>}
+    <div className="flex flex-col gap-3">
+      <Field className="gap-1.5">
+        <FieldLabel htmlFor="review-note" className="text-[13px]">
+          Overall comment
+        </FieldLabel>
+        <Textarea id="review-note" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional. Sent with your comments." className="bg-subtle" />
+        {comments.length > 0 && <FieldDescription className="text-xs">{`${comments.length} ${comments.length === 1 ? "comment" : "comments"} will be sent with it.`}</FieldDescription>}
       </Field>
-      <RadioGroup value={option ?? ""} onValueChange={(value) => setOption(value as ReviewOption)} aria-label="Review result">
+      <RadioGroup value={option ?? ""} onValueChange={(value) => setOption(value as ReviewOption)} aria-label="Review result" className="gap-1.5">
         {CHOICES.map((choice) => (
-          <FieldLabel key={choice.value} htmlFor={`review-${choice.value}`}>
-            <Field orientation="horizontal">
+          <FieldLabel
+            key={choice.value}
+            htmlFor={`review-${choice.value}`}
+            className="has-data-checked:border-input has-data-checked:bg-muted *:data-[slot=field]:px-3 *:data-[slot=field]:py-2.5 dark:has-data-checked:border-input dark:has-data-checked:bg-muted"
+          >
+            <Field orientation="horizontal" className="gap-2.5">
               <RadioGroupItem value={choice.value} id={`review-${choice.value}`} />
               <FieldContent>
-                <FieldTitle>{choice.title}</FieldTitle>
-                <FieldDescription>{choice.describe(target)}</FieldDescription>
+                <FieldTitle className="text-[13px]">{choice.title}</FieldTitle>
+                <FieldDescription className="text-xs">{choice.describe(target)}</FieldDescription>
               </FieldContent>
             </Field>
           </FieldLabel>
