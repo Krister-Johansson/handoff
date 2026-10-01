@@ -266,7 +266,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     if (!executor) {
       outcome = { kind: "failed", error: { code: "no_executor", message: `no executor registered for node type ${node.type}` } };
     } else {
-      if (executor.needsWorkdir) {
+      if (typeof executor.needsWorkdir === "function" ? executor.needsWorkdir(node) : executor.needsWorkdir) {
         workdir = await deps.workdirs.acquire({
           runId: run.id,
           remoteUrl: (deps.remoteUrl ?? defaultRemote)(project),

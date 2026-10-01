@@ -328,12 +328,9 @@ function TypeSettings({
             <NativeSelect id="gate-mode" value={gateMode(config)} onChange={(e) => setConfig({ mode: e.target.value })}>
               <NativeSelectOption value="approval">Review and approve what reaches it</NativeSelectOption>
               <NativeSelectOption value="question">Answer a question a planner or coder asked</NativeSelectOption>
+              <NativeSelectOption value="try">Try the app against the acceptance criteria</NativeSelectOption>
             </NativeSelect>
-            <FieldDescription>
-              {gateMode(config) === "approval"
-                ? "You review the output that reaches in, comment on it, then approve or ask for changes."
-                : "The planner's or coder's question is asked; the answer goes back on answered."}
-            </FieldDescription>
+            <FieldDescription>{GATE_MODE_HELP[gateMode(config)]}</FieldDescription>
           </Field>
           {gateMode(config) === "approval" && (
             <Field>
@@ -446,6 +443,13 @@ function MakeStart({ node, graph, dispatch }: { node: FlowNode; graph: FlowGraph
 }
 
 /** Start's trigger and Finish's notification. */
+/** What each human gate mode does, under the Mode select. */
+const GATE_MODE_HELP: Record<ReturnType<typeof gateMode>, string> = {
+  approval: "You review the output that reaches in, comment on it, then approve or ask for changes.",
+  question: "The planner's or coder's question is asked; the answer goes back on answered.",
+  try: "The gate starts the run's app from .claude/launch.json. You open it, check each acceptance criterion, then approve or send back what does not work.",
+};
+
 /** Each notification kind's switch label and what it means. */
 const NOTIFY_COPY: Record<NotifyKind, { label: string; description: string }> = {
   started: { label: "Run started", description: "When a run starts here." },

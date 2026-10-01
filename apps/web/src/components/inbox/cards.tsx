@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState, useTransition, type ReactNode } from "react";
-import { CircleXIcon, ClipboardCheckIcon, ExternalLinkIcon, GitMergeIcon, GitPullRequestIcon, MessageCircleQuestionIcon, RepeatIcon, SquareIcon, WrenchIcon, type LucideIcon } from "lucide-react";
+import { CircleXIcon, ClipboardCheckIcon, ExternalLinkIcon, GitMergeIcon, GitPullRequestIcon, MessageCircleQuestionIcon, PlayIcon, RepeatIcon, SquareIcon, WrenchIcon, type LucideIcon } from "lucide-react";
 import { answerAction, cancelAction, repairAction, resolveLoopAction, type InboxActionState } from "@/app/inbox/actions";
 import { Button } from "@/components/ui/button";
 import { MergeButton } from "@/components/runs/merge-button";
@@ -17,6 +17,7 @@ const REASONS: Record<string, string> = {
   needs_input: "A node asked a question",
   loop_exhausted: "A retry loop ran out of attempts",
   approval: "Approval requested",
+  try: "Try the app",
 };
 
 type Tone = "neutral" | "active" | "attention" | "danger" | "success";
@@ -139,8 +140,24 @@ function ReviewLink({ item, compact }: { item: QuestionItem; compact: boolean })
   );
 }
 
+/** A Try it gate is answered on its run, where the app opens and the acceptance criteria are checked. */
+function TryItLink({ item, compact }: { item: QuestionItem; compact: boolean }) {
+  return (
+    <InboxCard icon={PlayIcon} tone="attention">
+      <CardContext tag={REASONS.try!} item={item} compact={compact} node={item.nodeKey} when={<When prefix="asked" at={item.createdAt} />} />
+      <CardTitle>{item.question}</CardTitle>
+      <CardActions>
+        <Button asChild>
+          <Link href={runPath(item.projectId, item.runId)}>Try it on the run</Link>
+        </Button>
+      </CardActions>
+    </InboxCard>
+  );
+}
+
 export function QuestionCard({ item, compact = false }: { item: QuestionItem; compact?: boolean }) {
   if (item.context?.review) return <ReviewLink item={item} compact={compact} />;
+  if (item.reason === "try") return <TryItLink item={item} compact={compact} />;
   return <AnswerCard item={item} compact={compact} />;
 }
 

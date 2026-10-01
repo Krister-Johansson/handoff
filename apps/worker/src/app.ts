@@ -45,9 +45,10 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       return repo ? github.gitAuthEnv(repo) : {};
     },
   });
+  const workerId = env.HANDOFF_WORKER_ID ?? `${hostname()}:${process.pid}`;
   return {
     db,
-    workerId: env.HANDOFF_WORKER_ID ?? `${hostname()}:${process.pid}`,
+    workerId,
     caps: env.caps,
     leaseMs: 60_000,
     stagingRoot: join(home, "staging"),
@@ -59,7 +60,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       start: startExecutor({ github }),
       finish: finishExecutor(),
       tester: testerExecutor(),
-      human_gate: humanGateExecutor({ db, branchDiff }),
+      human_gate: humanGateExecutor({ db, branchDiff, workerId }),
       pr: prNodeExecutor({ github, db, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }),
       merge: mergeNodeExecutor({ github, db }),
     },
