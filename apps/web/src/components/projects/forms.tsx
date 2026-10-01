@@ -70,6 +70,18 @@ function submitOnModEnter(event: KeyboardEvent<HTMLTextAreaElement>) {
  * Starts a run of one graph. With `graphs`, the dialog lets you pick which graph runs; `graphName`
  * is then the preselected one.
  */
+/** Start run, disabled, with why on hover; a disabled button shows no tooltip of its own, so the reason sits on a wrapper. */
+export function BlockedRunButton({ reason, label, size = "sm", variant = "outline" }: { reason: string; label: string; size?: "sm" | "default"; variant?: "default" | "outline" }) {
+  return (
+    <span title={reason} className="inline-flex">
+      <Button size={size} variant={variant} disabled>
+        <PlayIcon data-icon="inline-start" />
+        {label}
+      </Button>
+    </span>
+  );
+}
+
 export function StartRunDialog({
   projectId,
   graphName,

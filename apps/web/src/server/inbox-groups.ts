@@ -1,7 +1,23 @@
-import type { Db } from "@handoff/db";
+import { and, eq, inArray, isNotNull, projects, runs, type Db } from "@handoff/db";
 import { stuckLoop } from "@handoff/engine/operations";
 import { stuckRuns, waitingReviews } from "./attention";
 import { listInbox } from "./inbox";
+import { projectMergeQueue } from "./merge-queue";
+
+/** The first pull request of each project's merge queue, when it waits for a person to merge it. */
+async function readyToMerge(db: Db) {
+  const queued = await db
+    .selectDistinct({ projectId: runs.projectId, projectName: projects.name })
+    .from(runs)
+    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .where(and(isNotNull(runs.mergeQueuedAt), inArray(runs.status, ["queued", "running", "waiting"])));
+  const firsts = await Promise.all(queued.map(async (p) => ({ ...p, first: (await projectMergeQueue(db, p.projectId))[0] })));
+  return firsts.flatMap(({ projectId, projectName, first }) =>
+    first && first.waiting && first.mode === "manual" && !first.requested
+      ? [{ runId: first.runId, projectId, projectName, task: first.task, prNumber: first.prNumber, issues: first.issues }]
+      : [],
+  );
+}
 
 /**
  * What waits on a person, grouped by what they must do: reviews to open, questions to answer, runs
@@ -9,7 +25,7 @@ import { listInbox } from "./inbox";
  * GitHub. A run stuck on a loop is listed only as stuck, since it needs a decision rather than a repair.
  */
 export async function inboxGroups(db: Db) {
-  const [inbox, reviews, stuck] = await Promise.all([listInbox(db), waitingReviews(db), stuckRuns(db)]);
+  const [inbox, reviews, stuck, ready] = await Promise.all([listInbox(db), waitingReviews(db), stuckRuns(db), readyToMerge(db)]);
   const loops = await Promise.all(stuck.map(async (s) => ({ run: s, loop: await stuckLoop(db, s.runId) })));
   const stuckRunsList = loops.flatMap(({ run, loop }) =>
     loop
@@ -35,8 +51,9 @@ export async function inboxGroups(db: Db) {
       ci: r.pr!.ci ?? null,
     })),
   };
-  const count = groups.reviews.length + groups.questions.length + groups.failedRuns.length + groups.stuckRuns.length + groups.pullRequests.length;
-  return { ...groups, count };
+  const withReady = { ...groups, readyToMerge: ready };
+  const count = groups.reviews.length + groups.questions.length + groups.failedRuns.length + groups.stuckRuns.length + groups.pullRequests.length + ready.length;
+  return { ...withReady, count };
 }
 
 export type InboxGroups = Awaited<ReturnType<typeof inboxGroups>>;

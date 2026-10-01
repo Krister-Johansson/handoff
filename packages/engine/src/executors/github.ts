@@ -2,8 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { CoderOutputSchema, ReviewerOutputSchema, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
-import type { Db } from "@handoff/db";
-import { wakeDependents } from "../dependencies.ts";
+import { and, eq, events, type Db } from "@handoff/db";
+import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
@@ -218,6 +218,21 @@ async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo:
   if (closed.length) ctx.emit("github.issues_closed", { numbers: closed });
 }
 
+/** Whether this execution already recorded an event of this type, across its waits. */
+async function emittedBefore(db: Db, executionId: string, type: string) {
+  const [row] = await db.select({ id: events.id }).from(events).where(and(eq(events.nodeExecutionId, executionId), eq(events.type, type))).limit(1);
+  return row !== undefined;
+}
+
+/** The run's issues that GitHub records as blocked by open issues, with their blockers. */
+async function blockedIssues(github: GitHubPort, repo: RepoRef, issues: { number: number }[]) {
+  const all = await Promise.all(issues.map(async (i) => ({ issue: i.number, blockedBy: await github.openBlockers(repo, i.number) })));
+  return all.filter((b) => b.blockedBy.length > 0);
+}
+
+/** How long a blocked pull request waits before it asks GitHub again, should a wake be missed. */
+const BLOCKED_RECHECK_MS = 5 * 60_000;
+
 /** How long a run in the merge queue waits before it checks its turn again, should a wake be missed. */
 const QUEUE_RECHECK_MS = 60_000;
 
@@ -237,11 +252,25 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db }): NodeEx
       const { db } = deps;
       if (db) {
         const mode = ctx.node.config.mode === "auto" ? "auto" : "manual";
+        // An issue GitHub records as blocked by an open issue keeps the pull request out of the queue until that closes.
+        const blocked = await blockedIssues(deps.github, repo, ctx.state.issues ?? []);
+        if (blocked.length) {
+          // Only a run that had a place gives it up; leaving wakes every run in the queue.
+          if (ctx.run.mergeQueuedAt) await leaveQueue(db, ctx.run.id, ctx.project.id);
+          if (ctx.execution.wakeReason !== "timeout") for (const b of blocked) ctx.emit("merge.blocked", b);
+          const key = depsKey(ctx.project.id);
+          await ctx.registerWait(key);
+          return { kind: "waiting", wait: { kind: "timer", key, deadlineAt: new Date(Date.now() + BLOCKED_RECHECK_MS) } };
+        }
         await joinQueue(db, ctx.run.id);
         const turn = await queueTurn(db, ctx.run.id, ctx.project.id);
         if (turn.position > 1 || (mode === "manual" && !turn.requested)) {
           // Only on news, not on every periodic recheck.
           if (ctx.execution.wakeReason !== "timeout") ctx.emit("merge.queued", { number, position: turn.position, mode, requested: turn.requested });
+          // First in line and waiting for a person: say so once, so the dashboard can tell them.
+          if (turn.position === 1 && mode === "manual" && !turn.requested && !(await emittedBefore(db, ctx.execution.id, "merge.ready"))) {
+            ctx.emit("merge.ready", { number });
+          }
           const key = queueKey(ctx.project.id);
           await ctx.registerWait(key);
           return { kind: "waiting", wait: { kind: "merge_queue", key, deadlineAt: new Date(Date.now() + QUEUE_RECHECK_MS) } };

@@ -5,7 +5,7 @@ import { runPath } from "@/lib/paths";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { BacklogCounts, BacklogFilter, BacklogIssue } from "@/server/backlog";
-import { StartRunDialog } from "./forms";
+import { BlockedRunButton, StartRunDialog } from "./forms";
 import { ROW, ROWS, SectionCard } from "@/components/section-card";
 import { Tag } from "@/components/tag";
 import { FilterLinks } from "@/components/filter-links";
@@ -76,8 +76,8 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
                     <Tag key={label}>{label}</Tag>
                   ))}
                   {issue.blockedBy.length > 0 && (
-                    // GitHub's own dependency: a run started for this issue waits until these close.
-                    <Tag tone="attention" title="A run started for this issue waits until these are closed">
+                    // GitHub's own dependency: no run can start for this issue until these close.
+                    <Tag tone="attention" title="A run can start once these are closed">
                       <span>Blocked by</span>
                       {issue.blockedBy.map((n) => (
                         <a key={n} href={repoUrl ? `${repoUrl}/issues/${n}` : undefined} className="font-mono hover:underline">
@@ -105,14 +105,18 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
                   </Link>
                 </span>
               ) : (
-                <StartRunDialog
-                  projectId={projectId}
-                  graphs={graphs}
-                  graphName={graphName}
-                  label="Start run"
-                  variant="outline"
-                  initialIssues={[{ number: issue.number, title: issue.title, url: issue.url, labels: issue.labels, author: issue.author, updatedAt: issue.updatedAt, blockedBy: issue.blockedBy }]}
-                />
+                issue.blockedBy.length > 0 ? (
+                  <BlockedRunButton label="Start run" reason={`Blocked by ${issue.blockedBy.map((n) => `#${n}`).join(", ")} on GitHub; it can start once they are closed`} />
+                ) : (
+                  <StartRunDialog
+                    projectId={projectId}
+                    graphs={graphs}
+                    graphName={graphName}
+                    label="Start run"
+                    variant="outline"
+                    initialIssues={[{ number: issue.number, title: issue.title, url: issue.url, labels: issue.labels, author: issue.author, updatedAt: issue.updatedAt, blockedBy: issue.blockedBy }]}
+                  />
+                )
               )}
             </li>
           ))}

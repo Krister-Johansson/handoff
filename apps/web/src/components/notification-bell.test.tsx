@@ -93,3 +93,10 @@ test("many new notifications at once make one toast", async () => {
   await waitFor(() => expect(toast.info).toHaveBeenCalledWith("5 new notifications", expect.anything()));
   expect(toast).not.toHaveBeenCalled();
 });
+
+test("a pull request ready to merge makes a toast that waits a while", async () => {
+  const ready = item("e9", "ready", "sandbox: PR #54 is ready to merge", "2026-10-01T10:20:00.000Z");
+  const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [ready], unread: 1 });
+  render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
+  await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(ready.title, expect.objectContaining({ duration: 10_000 })));
+});

@@ -65,12 +65,13 @@ function RunAlerts({ detail, stuck }: { detail: Detail; stuck: StuckLoop | undef
   );
 }
 
-/** The issues GitHub said block the run, while it still waits for them at its start node. */
-function blockersOf({ run, executions, events, graph }: Detail): number[] | undefined {
-  const startNode = (graph?.document as { attributes?: { startNode?: string } } | undefined)?.attributes?.startNode;
-  const waitingAtStart = run.status === "waiting" && executions.some((e) => e.nodeKey === startNode && e.status === "waiting");
-  if (!waitingAtStart) return undefined;
-  const blockers = events.filter((e) => e.type === "run.blocked").flatMap((e) => (e.payload as { blockedBy?: number[] }).blockedBy ?? []);
+/** The issues GitHub said block the run, while the step that found them (its start or its merge) still waits. */
+function blockersOf({ run, executions, events }: Detail): number[] | undefined {
+  if (run.status !== "waiting") return undefined;
+  const waiting = new Set(executions.filter((e) => e.status === "waiting").map((e) => e.id));
+  const blockers = events
+    .filter((e) => (e.type === "run.blocked" || e.type === "merge.blocked") && e.nodeExecutionId !== null && waiting.has(e.nodeExecutionId))
+    .flatMap((e) => (e.payload as { blockedBy?: number[] }).blockedBy ?? []);
   return blockers.length ? [...new Set(blockers)] : undefined;
 }
 

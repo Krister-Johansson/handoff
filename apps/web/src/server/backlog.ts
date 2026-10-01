@@ -38,7 +38,9 @@ export async function listBacklog(
   for (const run of projectRuns) {
     for (const issue of run.issues) if (!latest.has(issue.number)) latest.set(issue.number, { id: run.id, status: run.status, prNumber: run.prNumber });
   }
-  const issues = open.map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null }));
+  // Issues that can start come first; blocked ones follow. Each part keeps GitHub's order (most recently updated first).
+  const startable = (i: IssueSummary) => i.blockedBy.length === 0;
+  const issues = [...open.filter(startable), ...open.filter((i) => !startable(i))].map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null }));
   const todo = issues.filter(isTodo).length;
   return { issues, counts: { todo, started: issues.length - todo, all: issues.length } };
 }

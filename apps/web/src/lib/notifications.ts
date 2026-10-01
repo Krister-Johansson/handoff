@@ -1,5 +1,5 @@
-/** What a notification is about: a run that started, finished or failed, or a gate that needs a person. */
-export type NotificationKind = "started" | "finished" | "failed" | "input";
+/** What a notification is about: a run that started, finished or failed, a gate that needs a person, or a pull request ready to merge. */
+export type NotificationKind = "started" | "finished" | "failed" | "input" | "ready";
 
 /** What the feed page can narrow to: the unread items, or one kind. */
 export type NotificationFilter = "unread" | NotificationKind;

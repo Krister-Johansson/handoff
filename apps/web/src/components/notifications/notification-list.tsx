@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CircleCheckIcon, CircleXIcon, MessageCircleQuestionIcon, PlayIcon } from "lucide-react";
+import { CircleCheckIcon, CircleXIcon, GitMergeIcon, MessageCircleQuestionIcon, PlayIcon } from "lucide-react";
 import { formatAgo } from "@/lib/format";
 import type { NotificationKind } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ const KIND_STYLE: Record<NotificationKind, { icon: typeof PlayIcon; tile: string
   finished: { icon: CircleCheckIcon, tile: "bg-success-bg text-success" },
   failed: { icon: CircleXIcon, tile: "bg-danger-bg text-danger" },
   input: { icon: MessageCircleQuestionIcon, tile: "bg-attention-bg text-attention" },
+  ready: { icon: GitMergeIcon, tile: "bg-attention-bg text-attention" },
 };
 
 /** A notification's icon on a small tile in its kind's tone. */

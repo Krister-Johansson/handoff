@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { LinkDependenciesButton } from "./link-dependencies-button";
 
@@ -19,6 +19,8 @@ test("with nothing to link it says so, and a failure shows the error", async () 
   render(<LinkDependenciesButton projectId="p1" />);
   fireEvent.click(screen.getByRole("button", { name: /Link Depends on lines on GitHub/ }));
   expect(await screen.findByText("Every Depends on line is already linked.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: /Link Depends on lines on GitHub/ }));
+  const button = screen.getByRole("button", { name: /Link Depends on lines on GitHub/ });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
   expect(await screen.findByText("Resource not accessible by integration")).toBeInTheDocument();
 });

@@ -37,10 +37,18 @@ export function IssuePicker({ issues, value, onChange }: { issues: IssueSummary[
               <CommandEmpty>{issues.length ? "No issue matches." : "No open issues."}</CommandEmpty>
               <CommandGroup>
                 {issues.map((issue) => (
-                  <CommandItem key={issue.number} value={label(issue)} keywords={issue.labels} onSelect={() => toggle(issue)}>
+                  <CommandItem
+                    key={issue.number}
+                    value={label(issue)}
+                    keywords={issue.labels}
+                    // A blocked issue cannot start a run until GitHub shows its blockers closed.
+                    disabled={issue.blockedBy.length > 0}
+                    onSelect={() => toggle(issue)}
+                  >
                     <CheckIcon className={cn(chosen.has(issue.number) ? "opacity-100" : "opacity-0")} />
                     <span className="font-mono text-xs text-muted-foreground">#{issue.number}</span>{" "}
                     <span className="min-w-0 flex-1 truncate">{issue.title}</span>
+                    {issue.blockedBy.length > 0 && <span className="shrink-0 text-xs text-attention">blocked by {issue.blockedBy.map((n) => `#${n}`).join(", ")}</span>}
                   </CommandItem>
                 ))}
               </CommandGroup>

@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 
 /** Everything that waits on a person, grouped by what they must do, optionally for one project. */
 export default async function InboxPage({ searchParams }: { searchParams: Promise<{ project?: string | string[] }> }) {
-  const [{ project }, { reviews, questions, failedRuns, stuckRuns, pullRequests }] = await Promise.all([searchParams, inboxGroups(getDb())]);
-  const view: InboxView = { reviews, questions, failedRuns: failedRuns.map((f) => ({ ...f, error: f.error ?? null })), stuckRuns, pullRequests };
+  const [{ project }, { reviews, questions, failedRuns, stuckRuns, pullRequests, readyToMerge }] = await Promise.all([searchParams, inboxGroups(getDb())]);
+  const view: InboxView = { reviews, questions, failedRuns: failedRuns.map((f) => ({ ...f, error: f.error ?? null })), stuckRuns, pullRequests, readyToMerge };
   const current = typeof project === "string" ? project : undefined;
   const shown = narrowInbox(view, current);
   const total = inboxCount(view);
@@ -20,7 +20,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
         crumbs={[{ label: "Inbox" }]}
         title="Inbox"
         titleExtra={total > 0 && <Count n={total} />}
-        description="Everything that waits on you: reviews to open, questions to answer, runs that stopped, and pull requests to review."
+        description="Everything that waits on you: reviews to open, questions to answer, pull requests ready to merge, runs that stopped, and pull requests to review."
         actions={total > 0 && <InboxProjectFilter view={view} current={current} />}
       />
       {inboxCount(shown) === 0 ? (

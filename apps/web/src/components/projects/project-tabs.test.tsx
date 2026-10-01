@@ -37,3 +37,12 @@ test("the Issues tab shows how many issues are open once the count arrives", () 
   );
   expect(screen.getByRole("tab", { name: /Issues 48/ })).toBeInTheDocument();
 });
+
+test("the Pull requests tab says how many are ready to merge", () => {
+  render(
+    <ProjectTabs active="runs" counts={{ runs: 6, pulls: 6, graphs: 1, ready: 2 }}>
+      <p>runs content</p>
+    </ProjectTabs>,
+  );
+  expect(screen.getByRole("tab", { name: /Pull requests 6/ })).toHaveTextContent("2 ready");
+});

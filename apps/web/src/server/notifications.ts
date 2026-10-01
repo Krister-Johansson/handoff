@@ -3,7 +3,10 @@ import { reviewPath, runPath } from "../lib/paths";
 import type { NotificationFilter, NotificationItem, NotificationKind } from "../lib/notifications";
 
 /** The run events that are news, and the kind each one is. */
-const EVENT_KINDS: Record<string, NotificationKind> = { "run.started": "started", "run.succeeded": "finished", "run.failed": "failed" };
+const EVENT_KINDS: Record<string, NotificationKind> = { "run.started": "started", "run.succeeded": "finished", "run.failed": "failed", "merge.ready": "ready" };
+
+/** The kinds a filter shows: "Needs you" covers questions and pull requests ready to merge. */
+const kindsOf = (filter: NotificationKind): NotificationKind[] => (filter === "input" ? ["input", "ready"] : [filter]);
 
 // Postgres keeps microseconds and a JS Date milliseconds; compare at milliseconds so a time read back marks its own item.
 const ms = (column: typeof events.createdAt | typeof questions.createdAt) => sql`date_trunc('milliseconds', ${column})`;
@@ -27,7 +30,8 @@ async function readUntil(db: Db) {
 export async function listNotifications(db: Db, { limit, before, filter }: { limit: number; before?: Date; filter?: NotificationFilter }) {
   const until = await readUntil(db);
   const visible = eq(projects.isDemo, false);
-  const eventTypes = Object.keys(EVENT_KINDS).filter((type) => !filter || filter === "unread" || EVENT_KINDS[type] === filter);
+  const kinds = filter && filter !== "unread" ? new Set(kindsOf(filter)) : undefined;
+  const eventTypes = Object.keys(EVENT_KINDS).filter((type) => !kinds || kinds.has(EVENT_KINDS[type]!));
   const withQuestions = !filter || filter === "unread" || filter === "input";
   const unreadOnly = (column: typeof events.createdAt | typeof questions.createdAt) => (filter === "unread" && until ? sql`${ms(column)} > ${until}` : undefined);
   const eventQuery = () =>
@@ -63,7 +67,12 @@ export async function listNotifications(db: Db, { limit, before, filter }: { lim
   const isUnread = (at: Date) => !until || at.getTime() > until.getTime();
   const fromEvents = eventRows.map((e): NotificationItem => {
     const kind = EVENT_KINDS[e.type]!;
-    const title = kind === "failed" ? failedTitle(e.projectName, e.payload) : `${e.projectName}: run ${kind}`;
+    const title =
+      kind === "failed"
+        ? failedTitle(e.projectName, e.payload)
+        : kind === "ready"
+          ? `${e.projectName}: PR #${(e.payload as { number?: number }).number} is ready to merge`
+          : `${e.projectName}: run ${kind}`;
     return { id: `event:${e.id}`, kind, title, body: e.task, href: runPath(e.projectId, e.runId), createdAt: e.createdAt, unread: isUnread(e.createdAt) };
   });
   const fromQuestions = questionRows.map((q): NotificationItem => {

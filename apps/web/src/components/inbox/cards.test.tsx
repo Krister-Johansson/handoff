@@ -9,6 +9,7 @@ const actions = vi.hoisted(() => ({
   resolveLoopAction: vi.fn(),
 }));
 vi.mock("@/app/inbox/actions", () => actions);
+vi.mock("@/app/projects/actions", () => ({ requestMergeAction: vi.fn() }));
 beforeEach(() => {
   for (const fn of Object.values(actions)) fn.mockReset().mockResolvedValue({ ok: true });
 });

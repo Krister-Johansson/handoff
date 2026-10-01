@@ -16,7 +16,7 @@ beforeEach(() => {
   actions.listIssuesAction.mockReset();
 });
 
-const issue = (number: number, title: string) => ({ number, title, url: `https://github.com/o/r/issues/${number}`, labels: [], author: "ann", updatedAt: "" });
+const issue = (number: number, title: string, blockedBy: number[] = []) => ({ number, title, url: `https://github.com/o/r/issues/${number}`, labels: [], author: "ann", updatedAt: "", blockedBy });
 
 async function openDialog() {
   render(<StartRunDialog projectId="p1" graphs={["loop"]} graphName="loop" label="New run" />);
@@ -52,4 +52,14 @@ test("without GitHub access the dialog says so and still starts a run from a tas
   fireEvent.click(screen.getByRole("button", { name: "New run" }));
   expect(await screen.findByText(/GitHub is not configured/)).toBeInTheDocument();
   expect(screen.queryByRole("combobox", { name: "Issues" })).not.toBeInTheDocument();
+});
+
+test("an issue blocked on GitHub cannot be linked, and says what blocks it", async () => {
+  actions.listIssuesAction.mockResolvedValue({ issues: [issue(7, "Board view", [5, 6])] });
+  fireEvent.click(await openDialog());
+  const option = await screen.findByRole("option", { name: /#7 Board view/ });
+  expect(option).toHaveAttribute("aria-disabled", "true");
+  expect(option).toHaveTextContent("blocked by #5, #6");
+  fireEvent.click(option);
+  expect(screen.queryByRole("list", { name: "Linked issues" })).not.toBeInTheDocument();
 });

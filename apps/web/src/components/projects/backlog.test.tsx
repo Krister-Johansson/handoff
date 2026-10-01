@@ -61,7 +61,7 @@ test("the filters link to To do, Started and All with counts", () => {
   expect(screen.getByText(/Nothing to do/)).toBeInTheDocument();
 });
 
-test("an issue GitHub says is blocked shows what blocks it, and can still be started to wait for it", () => {
+test("an issue GitHub says is blocked shows what blocks it, and cannot be started until they close", () => {
   render(
     <Backlog
       projectId="p1"
@@ -77,5 +77,5 @@ test("an issue GitHub says is blocked shows what blocks it, and can still be sta
   expect(within(row).getByText("Blocked by")).toBeInTheDocument();
   expect(within(row).getByRole("link", { name: "#5" })).toHaveAttribute("href", "https://github.com/o/r/issues/5");
   expect(within(row).getByRole("link", { name: "#6" })).toHaveAttribute("href", "https://github.com/o/r/issues/6");
-  expect(within(row).getByRole("button", { name: /Start run/ })).toBeInTheDocument();
+  expect(within(row).getByRole("button", { name: /Start run/ })).toBeDisabled();
 });

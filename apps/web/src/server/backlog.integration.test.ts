@@ -35,3 +35,17 @@ test("without GitHub access the backlog says so", async () => {
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
   expect(await listBacklog(db, undefined, project.id)).toMatchObject({ error: expect.stringContaining("GitHub") });
 });
+
+test("issues that can start come before blocked ones, each part keeping GitHub's order", async () => {
+  const github = new FakeGitHub();
+  const set = (number: number, hour: number, blockedBy: number[] = []) =>
+    github.issues.set(number, { number, title: `F${number}`, url: `u${number}`, body: "", state: "open", updatedAt: `2026-09-30T0${hour}:00:00Z`, blockedBy });
+  set(7, 9, [5, 6]);
+  set(6, 8);
+  set(13, 7, [10]);
+  set(5, 6);
+  set(10, 5);
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  const backlog = await listBacklog(db, github, project.id);
+  expect(backlog.issues.map((i) => i.number)).toEqual([6, 5, 10, 7, 13]);
+});
