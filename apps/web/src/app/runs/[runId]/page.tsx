@@ -8,7 +8,7 @@ import { IssueLinks } from "@/components/runs/issue-links";
 import { RunAgainButton } from "@/components/runs/run-again-button";
 import { PageHeader } from "@/components/page-header";
 import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
-import { projectCrumbs, projectTabCrumb, runCrumb } from "@/server/crumbs";
+import { projectCrumbs, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { StuckLoopCard } from "@/components/runs/stuck-loop-card";
 import { stuckLoop, type StuckLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
@@ -72,7 +72,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <PageHeader
-        crumbs={[...(await projectCrumbs(getDb(), project)), projectTabCrumb(project.id, "runs"), await runCrumb(getDb(), project.id, run)]}
+        crumbs={[...(await projectCrumbs(getDb(), project)), projectRunsCrumb(project.id), await runCrumb(getDb(), project.id, run)]}
         title={<span className="whitespace-pre-line">{run.task}</span>}
         description={
           <div className="flex flex-col gap-1.5">

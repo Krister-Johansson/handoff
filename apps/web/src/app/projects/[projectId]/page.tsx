@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { PageHeader } from "@/components/page-header";
-import { projectCrumbs, projectTabCrumb } from "@/server/crumbs";
+import { projectCrumbs } from "@/server/crumbs";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PencilIcon } from "lucide-react";
@@ -255,10 +255,10 @@ function SettingsTab({ project, graphs, runCount }: Pick<Detail, "project" | "gr
   );
 }
 
-/** The number of open issues for the Issues tab; nothing when GitHub cannot be asked. */
+/** The number of issues still to do, for the Issues tab, as its To do filter counts them; nothing when GitHub cannot be asked. */
 async function IssueCount({ projectId }: { projectId: string }) {
   const backlog = await listBacklogOnce(projectId, getGitHub(), getDb());
-  return "error" in backlog ? null : <Count n={backlog.counts.all} />;
+  return "error" in backlog ? null : <Count n={backlog.counts.todo} />;
 }
 
 export default async function ProjectPage({
@@ -273,7 +273,7 @@ export default async function ProjectPage({
   const detail = await getProjectDetail(getDb(), projectId);
   if (!detail) notFound();
   const { project, graphs, runs, defaultGraph } = detail;
-  const crumbs = [...(await projectCrumbs(getDb(), project)), projectTabCrumb(project.id, tab)];
+  const crumbs = await projectCrumbs(getDb(), project);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <PageHeader

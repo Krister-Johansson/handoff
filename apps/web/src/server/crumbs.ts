@@ -1,15 +1,6 @@
 import { and, desc, eq, graphs, projects, runs, type Db } from "@handoff/db";
 import type { Crumb, CrumbMenuItem } from "../components/page-header";
 
-const TABS = [
-  { tab: "runs", label: "Runs" },
-  { tab: "issues", label: "Issues" },
-  { tab: "pulls", label: "Pull requests" },
-  { tab: "settings", label: "Settings" },
-] as const;
-
-export type ProjectTabName = (typeof TABS)[number]["tab"];
-
 const short = (text: string, max = 60) => {
   const line = text.split("\n")[0]!.trim();
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
@@ -24,14 +15,9 @@ export async function projectCrumbs(db: Db, project: { id: string; name: string 
   ];
 }
 
-/** A project tab's crumb, opening the project's other tabs. */
-export function projectTabCrumb(projectId: string, tab: ProjectTabName): Crumb {
-  const current = TABS.find((t) => t.tab === tab)!;
-  return {
-    label: current.label,
-    href: `/projects/${projectId}?tab=${tab}`,
-    menu: TABS.map((t) => ({ label: t.label, href: `/projects/${projectId}?tab=${t.tab}`, current: t.tab === tab })),
-  };
+/** The project's Runs tab, the parent of a run. The tabs themselves sit under the page header. */
+export function projectRunsCrumb(projectId: string): Crumb {
+  return { label: "Runs", href: `/projects/${projectId}?tab=runs` };
 }
 
 /** A graph's crumb, opening the project's other graphs. */
