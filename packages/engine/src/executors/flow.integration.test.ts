@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { FakeGitHub } from "@handoff/github/testing";
+import { wakeDependents } from "../dependencies.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
 import { finishExecutor, startExecutor } from "./flow.ts";
@@ -44,4 +46,26 @@ test("a Finish node without notify still ends the run and records that it did no
   const { run: row, events } = await inspect(db, run.id);
   expect(row.status).toBe("succeeded");
   expect(events.find((e) => e.type === "run.finish")?.payload).toEqual({ notify: false });
+});
+
+test("a run whose issue GitHub says is blocked by an open issue waits at Start, and starts once the blocker is closed", async () => {
+  const github = new FakeGitHub();
+  github.issues.set(3, { number: 3, title: "F03 Prisma schema", url: "https://github.com/octo/sample/issues/3", body: "", state: "open" });
+  github.issues.set(5, { number: 5, title: "F05 Theme tokens", url: "https://github.com/octo/sample/issues/5", body: "", state: "open", blockedBy: [3] });
+  const issues = [{ number: 5, title: "F05 Theme tokens", url: "https://github.com/octo/sample/issues/5", body: "" }];
+  const { project, run } = await startRun(db, graph(true), "F05 Theme tokens", issues);
+  const deps = engineDeps(db, { ...registry, start: startExecutor({ github }) });
+  await drain(deps);
+  const waiting = await inspect(db, run.id);
+  expect(waiting.run.status).toBe("waiting");
+  expect(waiting.executions).toMatchObject([{ nodeKey: "start", status: "waiting", waitKey: `deps:${project.id}` }]);
+  expect(waiting.events.find((e) => e.type === "run.blocked")?.payload).toEqual({ issue: 5, blockedBy: [3] });
+
+  // #3's pull request merges and handoff closes the issue, which wakes the runs waiting on the project's dependencies.
+  github.issues.get(3)!.state = "closed";
+  await wakeDependents(db, project.id);
+  await drain(deps);
+  const started = await inspect(db, run.id);
+  expect(started.run.status).toBe("succeeded");
+  expect(started.executions[0]?.output).toMatchObject({ trigger: "run", issues: [{ number: 5 }] });
 });

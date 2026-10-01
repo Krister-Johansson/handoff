@@ -201,21 +201,62 @@ test("listRepos with a token lists the user's repositories, most recently pushed
   expect(url.searchParams.get("per_page")).toBe("100");
 });
 
-test("listIssues lists open issues, most recently updated first, without pull requests", async () => {
+test("listIssues lists open issues, most recently updated first, each with the open issues GitHub says block it", async () => {
   const { fetch, calls } = fakeFetch({
-    "GET /repos/octo/sample/issues": () => ({
-      json: [
-        { number: 12, title: "Slugify drops digits", html_url: "https://github.com/octo/sample/issues/12", labels: [{ name: "bug" }, "p1"], user: { login: "ann" }, updated_at: "2026-09-30T08:00:00Z" },
-        { number: 13, title: "A pull request", html_url: "https://github.com/octo/sample/pull/13", labels: [], user: { login: "bob" }, updated_at: "2026-09-30T07:00:00Z", pull_request: {} },
-      ],
+    "POST /graphql": () => ({
+      json: {
+        data: {
+          repository: {
+            issues: {
+              nodes: [
+                {
+                  number: 12,
+                  title: "Slugify drops digits",
+                  url: "https://github.com/octo/sample/issues/12",
+                  updatedAt: "2026-09-30T08:00:00Z",
+                  author: { login: "ann" },
+                  labels: { nodes: [{ name: "bug" }, { name: "p1" }] },
+                  blockedBy: { nodes: [{ number: 3, state: "CLOSED" }, { number: 5, state: "OPEN" }] },
+                },
+              ],
+            },
+          },
+        },
+      },
     }),
   });
   const gh = OctokitGitHub.withToken("t", { fetch });
   expect(await gh.listIssues(repo)).toEqual([
-    { number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", labels: ["bug", "p1"], author: "ann", updatedAt: "2026-09-30T08:00:00Z" },
+    { number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", labels: ["bug", "p1"], author: "ann", updatedAt: "2026-09-30T08:00:00Z", blockedBy: [5] },
   ]);
-  const url = new URL(calls[0]!.url);
-  expect(Object.fromEntries(url.searchParams)).toMatchObject({ state: "open", sort: "updated", per_page: "100" });
+  expect(calls[0]!.body).toMatchObject({ variables: { owner: "octo", name: "sample" } });
+  expect((calls[0]!.body as { query: string }).query).toContain("blockedBy");
+});
+
+test("openBlockers reads an issue's open blocked-by issues", async () => {
+  const { fetch, calls } = fakeFetch({
+    "POST /graphql": () => ({ json: { data: { repository: { issue: { blockedBy: { nodes: [{ number: 3, state: "OPEN" }, { number: 4, state: "CLOSED" }] } } } } } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.openBlockers(repo, 6)).toEqual([3]);
+  expect(calls[0]!.body).toMatchObject({ variables: { owner: "octo", name: "sample", number: 6 } });
+});
+
+test("addBlockedBy links the blocking issue by its id", async () => {
+  const { fetch, calls } = fakeFetch({
+    "GET /repos/octo/sample/issues/3": () => ({ json: { id: 9003, number: 3, title: "F03", html_url: "u", state: "open" } }),
+    "POST /repos/octo/sample/issues/6/dependencies/blocked_by": () => ({ status: 201, json: { id: 9003 } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  await gh.addBlockedBy(repo, 6, 3);
+  expect(calls.at(-1)).toMatchObject({ method: "POST", body: { issue_id: 9003 } });
+});
+
+test("behindBy counts the base branch's commits the head does not have", async () => {
+  const { fetch, calls } = fakeFetch({ "GET /repos/octo/sample/compare/.+": () => ({ json: { ahead_by: 2, behind_by: 0 } }) });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.behindBy(repo, "main", "abc123")).toBe(2);
+  expect(new URL(calls[0]!.url).pathname).toBe("/repos/octo/sample/compare/abc123...main");
 });
 
 test("getIssue reads an issue with its body", async () => {

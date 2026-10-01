@@ -9,6 +9,7 @@ import { StartRunDialog } from "./forms";
 import { ROW, ROWS, SectionCard } from "@/components/section-card";
 import { Tag } from "@/components/tag";
 import { FilterLinks } from "@/components/filter-links";
+import { LinkDependenciesButton } from "./link-dependencies-button";
 
 const FILTERS: { value: BacklogFilter; label: string }[] = [
   { value: "todo", label: "To do" },
@@ -44,10 +45,13 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
       title={BACKLOG_TITLE}
       description={BACKLOG_DESCRIPTION}
       action={
-        <FilterLinks
-          label="Issue state"
-          links={FILTERS.map((f) => ({ href: `?tab=issues&issues=${f.value}`, label: f.label, count: counts[f.value], current: f.value === filter }))}
-        />
+        <>
+          <LinkDependenciesButton projectId={projectId} />
+          <FilterLinks
+            label="Issue state"
+            links={FILTERS.map((f) => ({ href: `?tab=issues&issues=${f.value}`, label: f.label, count: counts[f.value], current: f.value === filter }))}
+          />
+        </>
       }
     >
       {issues.length === 0 ? (
@@ -71,6 +75,17 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
                   {issue.labels.map((label) => (
                     <Tag key={label}>{label}</Tag>
                   ))}
+                  {issue.blockedBy.length > 0 && (
+                    // GitHub's own dependency: a run started for this issue waits until these close.
+                    <Tag tone="attention" title="A run started for this issue waits until these are closed">
+                      <span>Blocked by</span>
+                      {issue.blockedBy.map((n) => (
+                        <a key={n} href={repoUrl ? `${repoUrl}/issues/${n}` : undefined} className="font-mono hover:underline">
+                          #{n}
+                        </a>
+                      ))}
+                    </Tag>
+                  )}
                   {issue.author && <span>by {issue.author}</span>}
                   <span>updated {issue.updatedAt.slice(0, 10)}</span>
                 </span>
@@ -96,7 +111,7 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
                   graphName={graphName}
                   label="Start run"
                   variant="outline"
-                  initialIssues={[{ number: issue.number, title: issue.title, url: issue.url, labels: issue.labels, author: issue.author, updatedAt: issue.updatedAt }]}
+                  initialIssues={[{ number: issue.number, title: issue.title, url: issue.url, labels: issue.labels, author: issue.author, updatedAt: issue.updatedAt, blockedBy: issue.blockedBy }]}
                 />
               )}
             </li>

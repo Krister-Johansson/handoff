@@ -19,6 +19,7 @@ const issue = (number: number, title: string, run: { id: string; status: string;
   labels: ["bug"],
   author: "ann",
   updatedAt: "2026-09-30T08:00:00Z",
+  blockedBy: [] as number[],
   run,
 });
 
@@ -58,4 +59,23 @@ test("the filters link to To do, Started and All with counts", () => {
   expect(screen.getByRole("link", { name: "To do 3" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByRole("link", { name: "Started 2" })).toHaveAttribute("href", "?tab=issues&issues=started");
   expect(screen.getByText(/Nothing to do/)).toBeInTheDocument();
+});
+
+test("an issue GitHub says is blocked shows what blocks it, and can still be started to wait for it", () => {
+  render(
+    <Backlog
+      projectId="p1"
+      graphs={["loop"]}
+      graphName="loop"
+      filter="todo"
+      counts={{ todo: 1, started: 0, all: 1 }}
+      repoUrl="https://github.com/o/r"
+      issues={[{ ...issue(7, "Board view"), blockedBy: [5, 6] }]}
+    />,
+  );
+  const row = screen.getAllByRole("listitem")[0]!;
+  expect(within(row).getByText("Blocked by")).toBeInTheDocument();
+  expect(within(row).getByRole("link", { name: "#5" })).toHaveAttribute("href", "https://github.com/o/r/issues/5");
+  expect(within(row).getByRole("link", { name: "#6" })).toHaveAttribute("href", "https://github.com/o/r/issues/6");
+  expect(within(row).getByRole("button", { name: /Start run/ })).toBeInTheDocument();
 });

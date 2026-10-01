@@ -12,6 +12,7 @@ import { getGitHub } from "@/lib/github";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { deleteProject, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
+import { linkDependencies } from "@/server/link-dependencies";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphVersion, renameGraph, runAgain, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
@@ -200,4 +201,21 @@ export async function requestMergeAllAction(input: { projectId: string }): Promi
   revalidatePath(`/projects/${parsed.data.projectId}`);
   revalidatePath("/projects/[projectId]/runs/[runId]", "page");
   return { ok: true };
+}
+
+/** Turns the project's issues' "Depends on" lines into GitHub blocked-by links; a person presses it. */
+export async function linkDependenciesAction(input: { projectId: string }): Promise<ActionState & { linked?: number }> {
+  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project cannot be linked from here." };
+  const github = getGitHub();
+  if (!github) return { ok: false, error: "Set GITHUB_TOKEN or a GitHub App for the dashboard to write to GitHub." };
+  const [project] = await getDb().select().from(projects).where(eq(projects.id, parsed.data.projectId));
+  if (!project) return { ok: false, error: "No such project." };
+  try {
+    const added = await linkDependencies(github, { owner: project.repoOwner, name: project.repoName });
+    revalidatePath(`/projects/${project.id}`);
+    return { ok: true, linked: added.length };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
 }
