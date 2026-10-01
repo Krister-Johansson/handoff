@@ -20,7 +20,11 @@ export default async function RunsPage({ searchParams }: { searchParams: Promise
   const filtered = filter.status !== undefined || filter.project !== undefined;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <PageHeader crumbs={[{ label: "Runs" }]} title="Runs" description="Runs across every project, newest first. The last 50 that match the filter." />
+      <PageHeader
+        crumbs={[{ label: "Overview", href: "/" }, { label: "All runs" }]}
+        title="All runs"
+        description="Runs across every project, newest first. The last 50 that match the filter."
+      />
       <Card>
         <CardContent className="flex flex-col gap-4">
           <RunFilters filter={filter} projects={projectRows.map((p) => p.name)} />

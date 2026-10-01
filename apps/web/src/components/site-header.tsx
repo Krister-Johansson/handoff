@@ -5,11 +5,6 @@ import { AttentionNotifier } from "@/components/attention-notifier";
 import { InboxLink } from "@/components/inbox-link";
 import { WorkerStatus } from "@/components/worker-status";
 
-const links = [
-  { href: "/projects", label: "Projects" },
-  { href: "/runs", label: "Runs" },
-  { href: "/library", label: "Library" },
-];
 
 export function SiteHeader() {
   return (
@@ -19,12 +14,14 @@ export function SiteHeader() {
           handoff
         </Link>
         <nav className="flex items-center gap-1">
-          {links.map((link) => (
-            <Button key={link.href} variant="ghost" size="sm" asChild>
-              <Link href={link.href}>{link.label}</Link>
-            </Button>
-          ))}
+          {/* Runs live under their project; the Overview links to all of them. */}
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/projects">Projects</Link>
+          </Button>
           <InboxLink />
+          <Button variant="ghost" size="sm" asChild>
+            <Link href="/library">Library</Link>
+          </Button>
         </nav>
         <div className="ml-auto flex items-center gap-3">
           <AttentionNotifier />
