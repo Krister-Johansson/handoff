@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, desc, eq, listLibraryIndex, nodeExecutions, projects, type Db } from "@handoff/db";
-import { answerQuestion, cancelRun, repairNodeExecution } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, repairNodeExecution, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort } from "@handoff/github";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
@@ -47,6 +47,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
+  const stuck = await stuckLoop(deps.db, run.id);
   return {
     id: run.id,
     project: project.name,
@@ -78,6 +79,8 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
       };
     }),
     failed: failed ? { node: failed.nodeKey, attempt: failed.attempt, error: errorMessage(failed.error) } : null,
+    // A loop that used all its attempts stops the run without a failed step; resolve_loop decides what next.
+    stuck: stuck ? { node: stuck.nodeKey, loop: stuck.edgeKey, attempts: stuck.attempts } : null,
   };
 }
 
@@ -238,6 +241,21 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     "list_attention",
     { description: "Everything waiting on a person (questions from Human gates, failed runs, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).", annotations: read },
     () => tool(async () => (await listAttention(db)).map(({ href, ...item }) => ({ ...item, url: `${baseUrl}${href}` }))),
+  );
+
+  server.registerTool(
+    "resolve_loop",
+    {
+      description:
+        "Decides for a run stuck because a loop used all its attempts (get_run shows stuck): retry sends the work back for another round, continue goes on as if the step approved, stop cancels the run. Only with the user's decision.",
+      inputSchema: { run_id: z.string(), action: z.enum(["retry", "continue", "stop"]) },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    ({ run_id, action }) =>
+      tool(async () => {
+        await resolveExhaustedLoop(db, run_id, action);
+        return { resolved: action, url: `${baseUrl}/runs/${run_id}` };
+      }),
   );
 
   server.registerTool(

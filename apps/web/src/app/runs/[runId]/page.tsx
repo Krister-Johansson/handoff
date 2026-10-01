@@ -8,6 +8,8 @@ import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox
 import { IssueLinks } from "@/components/runs/issue-links";
 import { RunAgainButton } from "@/components/runs/run-again-button";
 import { RunLive } from "@/components/runs/run-live";
+import { StuckLoopCard } from "@/components/runs/stuck-loop-card";
+import { stuckLoop, type StuckLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
 import { formatCost, formatDuration } from "@/lib/format";
 import { getRunDetail } from "@/server/queries";
@@ -21,11 +23,37 @@ function nodeLabels(document: unknown): Record<string, string> {
   return Object.fromEntries(parsed.data.nodes.map((n) => [n.key, n.attributes.label ?? n.key]));
 }
 
+type Detail = NonNullable<Awaited<ReturnType<typeof getRunDetail>>>;
+
+/** What the run needs from a person: its open questions, a decision for a loop that ran out, or a repair. */
+function RunAlerts({ detail, stuck }: { detail: Detail; stuck: StuckLoop | undefined }) {
+  const { run, project, graph, openQuestions, failed } = detail;
+  return (
+    <>
+      {openQuestions.map((q) => (
+        <QuestionCard
+          key={q.id}
+          compact
+          item={{ ...q, runId: run.id, task: run.task, projectName: project.name, reason: typeof q.context.reason === "string" ? q.context.reason : "approval" }}
+        />
+      ))}
+      {stuck && <StuckLoopCard runId={run.id} node={nodeLabels(graph?.document)[stuck.nodeKey] ?? stuck.nodeKey} loop={stuck.edgeKey} attempts={stuck.attempts} />}
+      {run.status === "failed" && failed && !stuck && (
+        <FailedRunCard
+          compact
+          item={{ runId: run.id, task: run.task, projectName: project.name, executionId: failed.id, nodeKey: failed.nodeKey, attempt: failed.attempt, error: failed.error ?? null }}
+        />
+      )}
+    </>
+  );
+}
+
 export default async function RunPage({ params }: { params: Promise<{ runId: string }> }) {
   const { runId } = await params;
   const detail = await getRunDetail(getDb(), runId);
   if (!detail) notFound();
-  const { run, project, executions, events, graph, openQuestions, failed } = detail;
+  const { run, project, executions, events, graph, openQuestions } = detail;
+  const stuck = run.status === "failed" ? await stuckLoop(getDb(), run.id) : undefined;
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   return (
@@ -75,19 +103,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
           </div>
         </CardHeader>
       </Card>
-      {openQuestions.map((q) => (
-        <QuestionCard
-          key={q.id}
-          compact
-          item={{ ...q, runId: run.id, task: run.task, projectName: project.name, reason: typeof q.context.reason === "string" ? q.context.reason : "approval" }}
-        />
-      ))}
-      {run.status === "failed" && failed && (
-        <FailedRunCard
-          compact
-          item={{ runId: run.id, task: run.task, projectName: project.name, executionId: failed.id, nodeKey: failed.nodeKey, attempt: failed.attempt, error: failed.error ?? null }}
-        />
-      )}
+      <RunAlerts detail={detail} stuck={stuck} />
       <RunLive
         runId={run.id}
         initialStatus={run.status}

@@ -40,7 +40,7 @@ test("the tools are listed, and read-only ones say so", async () => {
   const { tools } = await client.listTools();
   const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
   expect(Object.keys(byName).sort()).toEqual(
-    ["add_project", "answer_question", "cancel_run", "dismiss_attention", "get_project", "get_run", "list_attention", "list_backlog", "list_library", "list_projects", "list_runs", "repair_run", "run_again", "start_run"].sort(),
+    ["add_project", "answer_question", "cancel_run", "dismiss_attention", "get_project", "get_run", "list_attention", "list_backlog", "list_library", "list_projects", "list_runs", "repair_run", "resolve_loop", "run_again", "start_run"].sort(),
   );
   expect(byName.list_backlog?.annotations?.readOnlyHint).toBe(true);
   expect(byName.cancel_run?.annotations?.destructiveHint).toBe(true);
@@ -139,4 +139,25 @@ test("a finished run can be dismissed from what needs attention; other items can
   expect(await call("dismiss_attention", { item_id: `finished:${run_id}` })).toEqual({ dismissed: true });
   expect(await call("list_attention")).toEqual([]);
   expect(await call("dismiss_attention", { item_id: "question:abc" })).toEqual({ error: expect.stringMatching(/only finished runs/i) });
+});
+
+test("a run stopped by a loop that ran out says so, asks for a decision, and goes on when given one", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  const [planner] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, run_id));
+  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, planner!.id));
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
+  await db.transaction((tx) =>
+    appendEvents(tx, run_id, [
+      { type: "edge.exhausted", payload: { edgeKey: "planner->planner", attempts: 3 }, nodeExecutionId: planner!.id },
+      { type: "run.failed", payload: { reason: "loop_exhausted", nodeKey: "planner", awaiting: "repair" } },
+    ]),
+  );
+  expect(await call("list_attention")).toEqual([
+    expect.objectContaining({ id: `stuck:${run_id}`, kind: "failed", title: "sandbox: planner ran out of rounds", url: `${BASE}/runs/${run_id}` }),
+  ]);
+  expect((await call("get_run", { run_id })).stuck).toEqual({ node: "planner", loop: "planner->planner", attempts: 3 });
+  expect(await call("resolve_loop", { run_id, action: "continue" })).toMatchObject({ resolved: "continue" });
+  const steps = (await call("get_run", { run_id })).steps.map((s: { node: string }) => s.node);
+  expect(steps).toEqual(["planner", "coder"]);
+  expect((await call("get_run", { run_id })).stuck).toBeNull();
 });

@@ -34,7 +34,7 @@ type RouteResult = { events: NewEvent[]; created: number; arrived: number; exhau
 
 type Trigger = NonNullable<NodeExecutionRow["trigger"]>;
 
-async function createExecution(tx: DbTx, graph: CompiledGraph, runId: string, target: string, trigger: Trigger) {
+export async function createExecution(tx: DbTx, graph: CompiledGraph, runId: string, target: string, trigger: Trigger) {
   const [{ attempt } = { attempt: 0 }] = await tx
     .select({ attempt: sql<number>`coalesce(max(${nodeExecutions.attempt}), 0)::int` })
     .from(nodeExecutions)
