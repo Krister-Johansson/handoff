@@ -24,7 +24,7 @@ export function NotificationSettings() {
     update({ ...prefs, desktop: on });
   };
   const test = () =>
-    notify([{ id: `test:${Date.now()}`, kind: "question", title: "handoff notifications work", body: "You will see one like this when a run needs you.", href: window.location.pathname }]);
+    notify([{ id: `test:${Date.now()}`, title: "handoff notifications work", body: "You will see one like this when a run needs you.", href: window.location.pathname }]);
   return (
     <div className="flex max-w-md flex-col gap-4 text-sm">
       <div className="flex items-center justify-between gap-3">
