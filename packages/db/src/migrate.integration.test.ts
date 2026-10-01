@@ -26,6 +26,8 @@ describe("migrations", () => {
       "select table_name from information_schema.tables where table_schema = 'public' order by table_name",
     );
     expect(tables.rows.map((r) => r.table_name)).toEqual([
+      "assistant_conversations",
+      "assistant_messages",
       "edge_traversals",
       "events",
       "github_installations",

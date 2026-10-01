@@ -60,10 +60,48 @@ for (const bg of scenario.background ?? []) {
 
 for (const line of scenario.stderrLines ?? []) process.stderr.write(line + "\n");
 
+// A {"$mcp": {tool, arguments, approve}} line plays Claude Code calling a tool of the "handoff" MCP server
+// in --mcp-config over HTTP: for an approve step it first asks the --permission-prompt-tool, as Claude Code
+// does for a tool outside --allowedTools, then it calls the tool and writes the tool_use and tool_result lines.
+let mcpId = 0;
+async function rpc(method, params) {
+  const config = JSON.parse(readFileSync(argv[argv.indexOf("--mcp-config") + 1], "utf8"));
+  const server = config.mcpServers.handoff;
+  const response = await fetch(server.url, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(server.headers ?? {}) },
+    body: JSON.stringify({ jsonrpc: "2.0", id: ++mcpId, method, params }),
+  });
+  const body = await response.text();
+  if (!response.ok) return { error: `${response.status} ${body}` };
+  const json = JSON.parse(body);
+  return json.error ? { error: json.error.message } : { text: json.result.content?.[0]?.text ?? "", isError: json.result.isError === true };
+}
+async function mcpStep(step) {
+  const name = `mcp__handoff__${step.tool}`;
+  const id = `toolu_${mcpId + 1}`;
+  const emit = (line) => process.stdout.write(JSON.stringify({ session_id: sessionFromArgv, parent_tool_use_id: null, ...line }) + "\n");
+  emit({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input: step.arguments ?? {} }] } });
+  const result = (text, isError) => emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: [{ type: "text", text }], is_error: isError }] } });
+  if (step.approve) {
+    const prompt = argv[argv.indexOf("--permission-prompt-tool") + 1].replace("mcp__handoff__", "");
+    const asked = await rpc("tools/call", { name: prompt, arguments: { tool_name: name, input: step.arguments ?? {}, tool_use_id: id } });
+    if (asked.error) return result(asked.error, true);
+    const decision = JSON.parse(asked.text);
+    if (decision.behavior !== "allow") return result(decision.message ?? "denied", true);
+  }
+  const called = await rpc("tools/call", { name: step.tool, arguments: step.arguments ?? {} });
+  result(called.error ?? called.text, Boolean(called.error) || called.isError);
+}
+
 const lines = scenario.lines ?? [];
 for (let i = 0; i < lines.length; i++) {
   if (scenario.hangAfterLine !== undefined && i === scenario.hangAfterLine) {
     await new Promise(() => setInterval(() => {}, 1000));
+  }
+  if (lines[i] && typeof lines[i] === "object" && "$mcp" in lines[i]) {
+    await mcpStep(lines[i].$mcp);
+    continue;
   }
   const raw = typeof lines[i] === "string" ? lines[i] : JSON.stringify(lines[i]);
   if (scenario.chunkSplit && raw.length > 4) {
