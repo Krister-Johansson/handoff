@@ -28,6 +28,10 @@ test("a test run, a review, a pull request, a merge and an answer each get one l
     }),
   ).toBe("PR #10, CI passing, approved");
   expect(summarizeOutput({ merged: true, sha: "07dc1569861d" })).toBe("Merged as 07dc156");
+  expect(summarizeOutput({ sync: "conflict", conflict: { base: "main", baseSha: "abc", files: ["package.json", "README.md"] } })).toBe(
+    "Conflicts with main in 2 files: package.json, README.md",
+  );
+  expect(summarizeOutput({ merged: false, needsUpdate: true })).toBe("Conflicts with main, sent back to catch up");
   expect(summarizeOutput({ answer: "MIT", answeredBy: "cli", answeredAt: "" })).toBe("Answered: MIT");
 });
 

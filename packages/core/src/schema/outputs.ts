@@ -75,7 +75,17 @@ export const PrOutputSchema = z.object({
   feedback: FeedbackSchema,
 });
 
-export const MergeOutputSchema = z.object({ merged: z.boolean(), sha: z.string().optional() });
+/** The PR node found that the base branch changed the same lines as the run, before pushing. */
+export const PrConflictOutputSchema = z.object({
+  sync: z.literal("conflict"),
+  conflict: z.object({ base: z.string(), baseSha: z.string(), files: z.array(z.string()) }),
+});
+
+/** What the PR node returns: the pull request's state, or a conflict with the base branch. */
+export const PrNodeOutputSchema = z.union([PrOutputSchema.extend({ sync: z.literal("clean").optional() }), PrConflictOutputSchema]);
+
+/** `needsUpdate` when GitHub refused the merge because the branch conflicts with the base branch. */
+export const MergeOutputSchema = z.object({ merged: z.boolean(), sha: z.string().optional(), needsUpdate: z.boolean().optional() });
 
 /**
  * A person's comment on what they reviewed: on a quoted part of a plan, or on lines of a file in a
@@ -122,4 +132,5 @@ export type TesterOutput = z.infer<typeof TesterOutputSchema>;
 export type Feedback = z.infer<typeof FeedbackSchema>;
 export type PrOutput = z.infer<typeof PrOutputSchema>;
 export type MergeOutput = z.infer<typeof MergeOutputSchema>;
+export type PrConflictOutput = z.infer<typeof PrConflictOutputSchema>;
 export type HumanAnswer = z.infer<typeof HumanAnswerSchema>;

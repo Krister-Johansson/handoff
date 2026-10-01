@@ -3,6 +3,7 @@ import {
   HumanAnswerSchema,
   MergeOutputSchema,
   PlannerOutputSchema,
+  PrConflictOutputSchema,
   PrOutputSchema,
   ReviewerOutputSchema,
   TesterOutputSchema,
@@ -55,9 +56,17 @@ export function summarizeOutput(output: unknown): string | undefined {
     const reviewText = review.decision === "none" ? "" : `, ${review.decision.replace("_", " ")}`;
     return `PR #${pr.data.prNumber}, ${ciText}${reviewText}`;
   }
+  const conflict = PrConflictOutputSchema.safeParse(output);
+  if (conflict.success) {
+    const { base, files } = conflict.data.conflict;
+    return `Conflicts with ${base} in ${plural(files.length, "file")}: ${files.join(", ")}`;
+  }
   const answer = HumanAnswerSchema.safeParse(output);
   if (answer.success) return join(`Answered: ${answer.data.option ?? answer.data.answer}`);
   const merge = MergeOutputSchema.safeParse(output);
-  if (merge.success) return merge.data.merged ? (merge.data.sha ? `Merged as ${merge.data.sha.slice(0, 7)}` : "Merged") : "Not merged";
+  if (merge.success) {
+    if (merge.data.needsUpdate) return "Conflicts with main, sent back to catch up";
+    return merge.data.merged ? (merge.data.sha ? `Merged as ${merge.data.sha.slice(0, 7)}` : "Merged") : "Not merged";
+  }
   return undefined;
 }

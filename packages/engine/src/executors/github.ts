@@ -52,6 +52,37 @@ export function reviewerNotes(ctx: ExecutorContext): string | undefined {
   return [REVIEWER_NOTES_MARKER, "### Reviewer notes", "", ...sections, `Posted by handoff run \`${ctx.run.id}\`. Updated on each attempt.`].join("\n");
 }
 
+type Sync = { status: "up_to_date" | "merged"; baseSha: string } | { status: "conflict"; baseSha: string; files: string[] };
+
+/**
+ * Brings the run's branch up to date with the base branch before it is pushed: fetches the base and
+ * merges it in when the branch is behind. On a conflict the merge is undone, the worktree stays as the
+ * coder left it, and the conflicting files are reported. The merge commit uses the machine's git
+ * identity, or handoff's when none is set.
+ */
+async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv): Promise<Sync> {
+  const run = async (args: string[]) => (await execFileAsync("git", args, { cwd, env })).stdout.trim();
+  await run(["fetch", "-q", "origin", base]);
+  const baseSha = await run(["rev-parse", "FETCH_HEAD"]);
+  const behind = await run(["merge-base", "--is-ancestor", baseSha, "HEAD"]).then(
+    () => false,
+    () => true,
+  );
+  if (!behind) return { status: "up_to_date", baseSha };
+  const identity = (await run(["config", "user.email"]).catch(() => "")) ? [] : ["-c", "user.name=handoff", "-c", "user.email=handoff@localhost"];
+  try {
+    await run([...identity, "merge", "--no-edit", "-m", `Merge ${base} into this branch`, baseSha]);
+    return { status: "merged", baseSha };
+  } catch {
+    const files = (await run(["diff", "--name-only", "--diff-filter=U"]).catch(() => "")).split("\n").filter(Boolean);
+    await run(["merge", "--abort"]).catch(() => undefined);
+    return { status: "conflict", baseSha, files };
+  }
+}
+
+/** Whether the graph sends this node's `port` output anywhere. */
+const routes = (ctx: ExecutorContext, port: string) => ctx.graph.outEdges(ctx.node.key).some((e) => e.port === port);
+
 const title = (task: string) => (task.length > 72 ? `${task.slice(0, 69)}...` : task);
 
 /**
@@ -70,11 +101,18 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
       const pushing = !ctx.execution.wakeReason;
       if (pushing) {
         if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "PR node needs the run worktree to push" } };
-        const auth = await deps.github.gitAuthEnv(repo);
-        await execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], {
-          cwd: ctx.workdir.path,
-          env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...auth },
-        });
+        const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(await deps.github.gitAuthEnv(repo)) };
+        // Main may have moved since the run branched off it: catch up first, so the pull request is not born behind or in conflict.
+        const sync = await syncWithBase(ctx.workdir.path, ctx.run.baseBranch, env);
+        if (sync.status === "conflict") {
+          ctx.emit("github.conflict", { base: ctx.run.baseBranch, baseSha: sync.baseSha, files: sync.files });
+          if (!routes(ctx, "conflict")) {
+            return { kind: "failed", error: { code: "merge_conflict", message: `${ctx.run.baseBranch} changed the same lines as this run in ${sync.files.join(", ")}` } };
+          }
+          return { kind: "completed", output: { sync: "conflict", conflict: { base: ctx.run.baseBranch, baseSha: sync.baseSha, files: sync.files } } };
+        }
+        ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged" });
+        await execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd: ctx.workdir.path, env });
       }
 
       let number = ctx.state.prNumber;
@@ -144,7 +182,7 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
       const sendBack = settings.sendBack && external.findings.length > 0;
       const routed = sendBack ? withFindings(feedback, external.findings) : feedback;
       if (sendBack) ctx.emit("github.review_findings", { number, findings: external.findings.length });
-      const output = { prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha, feedback: routed };
+      const output = { sync: "clean", prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha, feedback: routed };
       const statePatch: Record<string, unknown> = { prNumber: number, feedback: routed };
       if (sendBack) statePatch.prHandledReviews = [...handled, ...external.findings.map((f) => f.id)];
       return { kind: "completed", output, statePatch };
@@ -183,6 +221,12 @@ export function mergeNodeExecutor(deps: { github: GitHubPort }): NodeExecutor {
       const repo = repoOf(ctx);
       const snapshot = await deps.github.getPrSnapshot(repo, number);
       if (snapshot.merged) return { kind: "completed", output: { merged: true } };
+      // Main moved under the pull request and now conflicts with it: send it back to catch up instead of failing.
+      const conflicting = () =>
+        routes(ctx, "update")
+          ? ({ kind: "completed", output: { merged: false, needsUpdate: true } } as const)
+          : ({ kind: "failed", error: { code: "merge_conflict", message: `PR #${number} conflicts with ${ctx.run.baseBranch}; add an update edge from this node back to the PR node to catch up` } } as const);
+      if (snapshot.mergeable === "CONFLICTING") return conflicting();
       const method = ctx.node.config.method === "merge" || ctx.node.config.method === "rebase" ? ctx.node.config.method : "squash";
       try {
         const result = await deps.github.mergePr(repo, number, method);

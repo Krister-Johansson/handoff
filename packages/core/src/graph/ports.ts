@@ -33,8 +33,14 @@ const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, Outp
   pr: [
     out("ready", "ready", { all: [{ eq: ["node.output.feedback.ci.status", "success"] }, { neq: ["node.output.feedback.review.decision", "changes_requested"] }] }),
     out("fix", "fix", { any: [{ eq: ["node.output.feedback.ci.status", "failure"] }, { eq: ["node.output.feedback.review.decision", "changes_requested"] }] }, "feedback"),
+    // Main changed the same lines as the run: back to an agent to merge main in and resolve.
+    out("conflict", "conflict", { eq: ["node.output.sync", "conflict"] }, "feedback"),
   ],
-  merge: [out("merged", "merged")],
+  merge: [
+    out("merged", "merged", { neq: ["node.output.needsUpdate", true] }),
+    // GitHub refused the merge for conflicts: back to the PR node to bring the branch up to date.
+    out("update", "update", { eq: ["node.output.needsUpdate", true] }),
+  ],
   function: [out("done", "done")],
 };
 
@@ -78,7 +84,9 @@ export function withPorts(document: GraphDocument): GraphDocument {
     const candidates = source.type === "human_gate" ? [...GATE_APPROVAL, ...GATE_QUESTION] : portsOf(source.type, source.config).outputs;
     // Before planners could ask, their done port had no condition, so an unconditioned planner edge is done.
     const plannerDone = source.type === "planner" && !edge.attributes.condition ? candidates.find((p) => p.id === "done") : undefined;
-    const port = plannerDone ?? candidates.find((p) => p.on === edge.attributes.on && same(p.condition, edge.attributes.condition));
+    // Likewise a merge edge from before merges could be sent back is the merged edge.
+    const merged = source.type === "merge" && !edge.attributes.condition ? candidates.find((p) => p.id === "merged") : undefined;
+    const port = plannerDone ?? merged ?? candidates.find((p) => p.on === edge.attributes.on && same(p.condition, edge.attributes.condition));
     if (!port) return edge;
     if (port.id === "answered") questionGates.add(edge.source);
     const feedback = port.kind === "feedback";

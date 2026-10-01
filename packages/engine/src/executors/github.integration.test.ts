@@ -167,7 +167,94 @@ describe("Merge node", () => {
     await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
     await drain(deps);
     const merge = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "merge")!;
-    expect(merge).toMatchObject({ status: "failed", error: { code: "merge_failed" } });
+    // Without an update edge there is nowhere to send it back to.
+    expect(merge).toMatchObject({ status: "failed", error: { code: "merge_conflict" } });
+  });
+});
+
+/** The linear graph with the edges that keep a run up with main: conflicts back to the coder, a refused merge back to the PR node. */
+const withSyncEdges = (document: typeof linear) => ({
+  ...document,
+  edges: [
+    ...document.edges,
+    { key: "pr->coder:conflict", source: "pr", target: "coder", attributes: { port: "conflict", input: "feedback", loop: true, maxAttempts: 2 } },
+    { key: "merge->pr:update", source: "merge", target: "pr", attributes: { port: "update", input: "in", loop: true, maxAttempts: 2 } },
+  ],
+});
+
+/** Lands a commit on origin's main, as another pull request merging while the run works. */
+function landOnMain(origin: string, path: string, content: string) {
+  const work = mkdtempSync(join(tmpdir(), "handoff-other-"));
+  git(work, "clone", "-q", origin, ".");
+  writeFileSync(join(work, path), content);
+  git(work, "add", "-A");
+  git(work, "commit", "-qm", `Change ${path} on main`);
+  git(work, "push", "-q", "origin", "main");
+}
+
+async function syncSetup(document: unknown, onMain: (origin: string) => void) {
+  const origin = createOriginRepo();
+  const github = new FakeGitHub();
+  const { project, graphVersion } = await seedGraph(db, document, { localClonePath: origin });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+  // Main moves after the run branched off it, while the coder works.
+  const movingCoder: NodeExecutor = {
+    needsWorkdir: true,
+    execute: async (ctx) => {
+      if (ctx.execution.attempt === 1) onMain(origin);
+      return coder.execute(ctx);
+    },
+  };
+  const executors: ExecutorRegistry = { planner, coder: movingCoder, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) };
+  const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+  return { origin, github, run, deps };
+}
+
+describe("keeping up with main", () => {
+  test("the PR node merges main into the branch before pushing, so the pull request starts up to date", async () => {
+    const { origin, run, deps } = await syncSetup(linear, (o) => landOnMain(o, "LICENSE", "MIT\n"));
+    await drain(deps);
+    const { run: row, executions, events } = await inspect(db, run.id);
+    expect(executions.find((e) => e.nodeKey === "pr")!.status).toBe("waiting");
+    // The pushed branch holds main's new commit and the run's own.
+    expect(git(origin, "show", `${row.branchName}:LICENSE`)).toBe("MIT");
+    expect(git(origin, "show", `${row.branchName}:CHANGELOG.md`)).toBe("# Changelog attempt 1");
+    expect(git(origin, "merge-base", "--is-ancestor", "main", row.branchName)).toBe("");
+    expect(events.find((e) => e.type === "github.synced")?.payload).toMatchObject({ merged: true });
+  });
+
+  test("a conflict with main goes out the conflict port with the conflicting files, and nothing is pushed", async () => {
+    const { origin, github, run, deps } = await syncSetup(withSyncEdges(linear), (o) => landOnMain(o, "CHANGELOG.md", "# Changelog from main\n"));
+    await drain(deps);
+    const { run: row, executions } = await inspect(db, run.id);
+    const pr = executions.find((e) => e.nodeKey === "pr" && e.attempt === 1)!;
+    expect(pr.error).toBeNull();
+    expect(pr.status).toBe("passed");
+    expect(pr.output).toMatchObject({ sync: "conflict", conflict: { files: ["CHANGELOG.md"] } });
+    // The coder is sent back to resolve it; the branch never reached GitHub.
+    expect(executions.some((e) => e.nodeKey === "coder" && e.attempt === 2)).toBe(true);
+    expect(github.prs.size).toBe(0);
+    expect(() => git(origin, "rev-parse", "--verify", "-q", row.branchName)).toThrow();
+  });
+
+  test("without a conflict edge the PR node fails and names the conflicting files", async () => {
+    const { run, deps } = await syncSetup(linear, (o) => landOnMain(o, "CHANGELOG.md", "# Changelog from main\n"));
+    await drain(deps);
+    const pr = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "pr")!;
+    expect(pr).toMatchObject({ status: "failed", error: { code: "merge_conflict" } });
+    expect(pr.error?.message).toContain("CHANGELOG.md");
+  });
+
+  test("a merge GitHub refuses for conflicts goes back to the PR node to catch up with main", async () => {
+    const { github, run, deps } = await syncSetup(withSyncEdges(linear), () => {});
+    await drain(deps);
+    github.setChecks(1, "SUCCESS");
+    github.prs.get(1)!.mergeable = "CONFLICTING";
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    const { executions } = await inspect(db, run.id);
+    expect(executions.find((e) => e.nodeKey === "merge")).toMatchObject({ status: "passed", output: { merged: false, needsUpdate: true } });
+    expect(executions.some((e) => e.nodeKey === "pr" && e.attempt === 2)).toBe(true);
   });
 });
 
