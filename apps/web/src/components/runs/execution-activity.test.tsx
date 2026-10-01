@@ -35,6 +35,11 @@ test("the drawer shows what the agent thought, said and ran, with each command's
   expect(fetch).toHaveBeenCalledWith("/api/runs/r1/executions/e1/events", expect.anything());
 });
 
+test("a step of tool calls counts its calls", async () => {
+  render(<ExecutionActivity runId="r1" executionId="e1" live={[]} />);
+  expect(await screen.findByText("1 tool")).toBeInTheDocument();
+});
+
 test("events that arrive while the node runs join the timeline", async () => {
   const { rerender } = render(<ExecutionActivity runId="r1" executionId="e1" live={[]} />);
   await screen.findByText("Reading the docs first.");

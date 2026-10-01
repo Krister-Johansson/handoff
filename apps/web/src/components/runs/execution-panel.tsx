@@ -28,7 +28,7 @@ export function ExecutionPanel({ runId, executionId, status, liveCli, wide = fal
   if (!loaded.detail) return <p className="text-sm text-muted-foreground">This execution could not be loaded.</p>;
   const agent = AGENT_TYPES.has(loaded.detail.nodeType);
   return (
-    <div className={cn("grid gap-6", wide && agent && "lg:grid-cols-2")}>
+    <div className={cn("grid gap-5", wide && agent && "lg:grid-cols-2 lg:gap-6")}>
       <div className="min-w-0">
         <ExecutionDetails detail={loaded.detail} />
       </div>

@@ -19,6 +19,11 @@ test("with titles shown, the title is part of the visible text", () => {
   expect(screen.getByRole("link", { name: "#14 Document slugify" })).toHaveTextContent("#14 Document slugify");
 });
 
+test("as page meta, a single issue reads as Issue and its number", () => {
+  render(<IssueLinks issues={[issues[0]!]} variant="meta" />);
+  expect(screen.getByRole("link", { name: "#12 Slugify drops digits" })).toHaveTextContent("Issue #12");
+});
+
 test("no issues renders nothing", () => {
   const { container } = render(<IssueLinks issues={[]} />);
   expect(container).toBeEmptyDOMElement();

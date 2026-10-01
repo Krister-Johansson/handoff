@@ -122,6 +122,12 @@ test("a failed execution shows its error and the failed checks with their logs",
   expect(screen.getByText("diff_within_paths")).toBeInTheDocument();
 });
 
+test("an execution a repair started says so; its status, time and cost sit in the drawer's header instead", () => {
+  render(<ExecutionDetails detail={{ ...base, trigger: { kind: "repair" }, costUsd: "0.12" }} />);
+  expect(screen.getByText("Started by a repair")).toBeInTheDocument();
+  expect(screen.queryByText("$0.12")).not.toBeInTheDocument();
+});
+
 test("output of an unknown shape is shown as JSON", () => {
   render(<ExecutionDetails detail={{ ...base, nodeType: "function", output: { answer: 42 } }} />);
   expect(screen.getByText(/"answer": 42/)).toBeInTheDocument();

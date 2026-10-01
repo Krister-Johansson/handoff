@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { GitPullRequestIcon } from "lucide-react";
+import { ClockIcon, CoinsIcon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, TimerIcon } from "lucide-react";
 import { GraphDocumentSchema, summarizeOutput } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
@@ -79,33 +79,58 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         crumbs={[...(await projectCrumbs(getDb(), project)), projectRunsCrumb(project.id), await runCrumb(getDb(), project.id, run)]}
         title={<span className="whitespace-pre-line">{run.task}</span>}
         description={
-          <div className="flex flex-col gap-1.5">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs [&_svg]:size-[13px] [&_svg]:shrink-0">
             {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
-            <IssueLinks issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-              {graph && (
-                <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="hover:underline">
+            <IssueLinks variant="meta" issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
+            {graph && (
+              <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
+                <GitForkIcon aria-hidden />
+                <span>
                   <span className="font-mono">{graph.name}</span> v{graph.version}
-                </Link>
-              )}
-              <span title={run.createdAt.toISOString()}>started {run.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC</span>
-              {run.startedAt && run.finishedAt && <span>took {formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}</span>}
-              {totalCost > 0 && <span title="Client-side estimate reported by the Claude CLI">{formatCost(totalCost)} est.</span>}
-              <a className="truncate font-mono hover:underline" href={`https://github.com/${project.repoOwner}/${project.repoName}/tree/${run.branchName}`}>
-                {run.branchName}
-              </a>
-            </div>
+                </span>
+              </Link>
+            )}
+            <span className="inline-flex items-center gap-[5px]" title={run.createdAt.toISOString()}>
+              <ClockIcon aria-hidden />
+              started {run.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC
+            </span>
+            {run.startedAt && run.finishedAt && (
+              <span className="inline-flex items-center gap-[5px]">
+                <TimerIcon aria-hidden />
+                took {formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}
+              </span>
+            )}
+            {totalCost > 0 && (
+              <span className="inline-flex items-center gap-[5px]" title="Client-side estimate reported by the Claude CLI">
+                <CoinsIcon aria-hidden />
+                {formatCost(totalCost)} est.
+              </span>
+            )}
+            <a
+              className="inline-flex min-w-0 items-center gap-[5px] font-mono hover:text-foreground hover:underline hover:underline-offset-3"
+              href={`https://github.com/${project.repoOwner}/${project.repoName}/tree/${run.branchName}`}
+            >
+              <GitBranchIcon aria-hidden />
+              <span className="truncate">{run.branchName}</span>
+            </a>
           </div>
         }
         actions={
           <>
-            {run.prNumber !== null && (
+            {run.prNumber !== null ? (
               <Button size="sm" variant="outline" asChild>
                 <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
                   <GitPullRequestIcon data-icon="inline-start" />
                   PR #{run.prNumber}
                 </a>
               </Button>
+            ) : (
+              active && (
+                <Button size="sm" variant="outline" disabled>
+                  <GitPullRequestIcon data-icon="inline-start" />
+                  No PR yet
+                </Button>
+              )
             )}
             {active ? <CancelRunButton runId={run.id} /> : !project.isDemo && <RunAgainButton runId={run.id} />}
           </>

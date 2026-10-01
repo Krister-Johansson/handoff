@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { summarizeEvent } from "@/lib/event-summary";
+import { cn } from "@/lib/utils";
 
 export type RunEvent = { seq: number; type: string; payload: unknown; nodeExecutionId: string | null; createdAt: string };
 
@@ -25,11 +25,13 @@ export function EventStream({
   initialEvents,
   onEvent,
   filter,
+  className,
 }: {
   runId: string;
   initialEvents: RunEvent[];
   onEvent?: (event: RunEvent) => void;
   filter?: EventFilter;
+  className?: string;
 }) {
   const [events, setEvents] = useState(initialEvents);
   const lastSeq = useRef(initialEvents.at(-1)?.seq ?? 0);
@@ -62,19 +64,27 @@ export function EventStream({
   }, [events.length, initialEvents.length]);
 
   return (
-    <ScrollArea className="h-[32rem] rounded-md border">
+    <ScrollArea className={cn("h-[32rem]", className)}>
       <ol className="flex flex-col font-mono text-xs">
         {events
           .filter((event) => visible(event, filter))
           .map((event) => (
-          <li key={event.seq} className="flex items-baseline gap-3 border-b px-3 py-1.5 last:border-b-0">
-            <span className="w-8 shrink-0 text-right text-muted-foreground tabular-nums">{event.seq}</span>
-            <span className="w-16 shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">{time(event.createdAt)}</span>
-            <Badge variant={family(event.type) === "cli" ? "outline" : "secondary"} className="shrink-0 font-mono">
-              {event.type}
-            </Badge>
-            <span className="min-w-0 truncate">{summarizeEvent(event)}</span>
-          </li>
+            <li
+              key={event.seq}
+              className="grid grid-cols-[28px_60px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 border-t px-3.5 py-1.5 first:border-t-0 sm:grid-cols-[36px_64px_150px_minmax(0,1fr)]"
+            >
+              <span className="text-right text-muted-foreground/70 tabular-nums">{event.seq}</span>
+              <span className="whitespace-nowrap text-muted-foreground tabular-nums">{time(event.createdAt)}</span>
+              <span
+                className={cn(
+                  "inline-flex h-[18px] w-fit max-w-full items-center truncate rounded px-1.5 text-[11px]",
+                  family(event.type) === "cli" ? "border text-muted-foreground" : "bg-secondary text-secondary-foreground",
+                )}
+              >
+                {event.type}
+              </span>
+              <span className="col-span-full min-w-0 truncate sm:col-span-1">{summarizeEvent(event)}</span>
+            </li>
           ))}
         <div ref={bottom} />
       </ol>

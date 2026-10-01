@@ -20,8 +20,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TerminalOutput } from "@/components/terminal-output";
 import { Badge } from "@/components/ui/badge";
-import { formatCost, formatDuration } from "@/lib/format";
-import { StatusBadge } from "./status-badge";
+import { formatDuration } from "@/lib/format";
 
 export type CheckResult = { kind: string; passed: boolean; detail?: string; logTail?: string; durationMs?: number };
 
@@ -44,7 +43,7 @@ export type ExecutionDetail = {
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{title}</h3>
+      <h3 className="text-[11px] font-medium tracking-[0.05em] text-muted-foreground uppercase">{title}</h3>
       {children}
     </section>
   );
@@ -66,12 +65,11 @@ function PathList({ paths }: { paths: string[] }) {
 
 const location = (path?: string, line?: number) => (path ? (line !== undefined ? `${path}:${line}` : path) : "");
 
-function triggerText(trigger: ExecutionDetail["trigger"]): string {
-  if (!trigger) return "";
-  if (trigger.kind === "start") return "start node";
-  if (trigger.kind === "repair") return "repair";
-  if (trigger.kind === "exhausted") return `loop ${trigger.edgeKey ?? ""} exhausted`;
-  return trigger.from ? `after ${trigger.from}` : "";
+/** Why the execution started, when neither the start node nor an edge did; the drawer's header names the edge. */
+function unusualStart(trigger: ExecutionDetail["trigger"]): string | undefined {
+  if (trigger?.kind === "repair") return "Started by a repair";
+  if (trigger?.kind === "exhausted") return `Started because loop ${trigger.edgeKey ?? ""} ran out of rounds`;
+  return undefined;
 }
 
 function PlannerView({ data: { status, question, plan, steps, ownedPaths } }: { data: PlannerOutput }) {
@@ -88,7 +86,7 @@ function PlannerView({ data: { status, question, plan, steps, ownedPaths } }: { 
       </Section>
       {steps.length > 0 && (
         <Section title="Steps">
-          <ol className="flex list-decimal flex-col gap-1 pl-5">
+          <ol className="flex list-decimal flex-col gap-1 pl-[18px]">
             {steps.map((step) => (
               <li key={step}>{step}</li>
             ))}
@@ -265,11 +263,11 @@ function Output({ output }: { output: unknown }) {
 function Checks({ checks }: { checks: CheckResult[] }) {
   return (
     <Section title="Checks">
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col">
         {checks.map((c) => (
-          <li key={`${c.kind} ${c.detail ?? ""}`} className="flex flex-col gap-1">
+          <li key={`${c.kind} ${c.detail ?? ""}`} className="flex flex-col gap-1 py-1">
             <div className="flex items-center gap-2 text-xs">
-              {c.passed ? <CheckIcon aria-label="passed" className="size-3.5 text-emerald-600" /> : <XIcon aria-label="failed" className="size-3.5 text-destructive" />}
+              {c.passed ? <CheckIcon aria-label="passed" className="size-3.5 shrink-0 text-success" /> : <XIcon aria-label="failed" className="size-3.5 shrink-0 text-danger" />}
               <span className="font-mono">{c.kind}</span>
               {c.detail && <span className="text-muted-foreground">{c.detail}</span>}
               {c.durationMs !== undefined && <span className="ml-auto text-muted-foreground tabular-nums">{formatDuration(c.durationMs)}</span>}
@@ -282,17 +280,12 @@ function Checks({ checks }: { checks: CheckResult[] }) {
   );
 }
 
+/** What one execution produced and the checks the engine ran on it; its status, time and cost head the drawer. */
 export function ExecutionDetails({ detail }: { detail: ExecutionDetail }) {
-  const duration = detail.startedAt && detail.finishedAt ? new Date(detail.finishedAt).getTime() - new Date(detail.startedAt).getTime() : null;
-  const meta = [`attempt ${detail.attempt}`, triggerText(detail.trigger), formatDuration(duration), formatCost(detail.costUsd)].filter(Boolean);
+  const started = unusualStart(detail.trigger);
   return (
-    <div className="flex flex-col gap-5 text-sm">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-        <StatusBadge status={detail.status} />
-        {meta.map((m) => (
-          <span key={m}>{m}</span>
-        ))}
-      </div>
+    <div className="flex flex-col gap-5 text-[13px]">
+      {started && <p className="text-xs text-muted-foreground">{started}</p>}
       {detail.repairNote && (
         <Section title="Repair note">
           <p className="whitespace-pre-wrap">{detail.repairNote}</p>
