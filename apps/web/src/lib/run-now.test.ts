@@ -28,3 +28,12 @@ test("a finished run says how it ended", () => {
   });
   expect(describeNow({ ...base, status: "cancelled" }).text).toBe("Cancelled.");
 });
+
+test("a run waiting in the merge queue says where it stands", () => {
+  const waitingToMerge = { ...base, status: "waiting", executions: [exec("merge", "waiting")] };
+  expect(describeNow({ ...waitingToMerge, queue: { position: 1, requested: false, mode: "manual" } }).text).toBe("Ready to merge");
+  expect(describeNow({ ...waitingToMerge, queue: { position: 1, requested: true, mode: "manual" } }).text).toBe("Merging next");
+  expect(describeNow({ ...waitingToMerge, queue: { position: 1, requested: false, mode: "auto" } }).text).toBe("Merging next");
+  expect(describeNow({ ...waitingToMerge, queue: { position: 2, requested: false, mode: "manual" } }).text).toBe("Ready to merge, 2nd in line");
+  expect(describeNow({ ...waitingToMerge, queue: { position: 3, requested: true, mode: "manual" } }).text).toBe("Merge requested, 3rd in line");
+});

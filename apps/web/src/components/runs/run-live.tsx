@@ -15,7 +15,8 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCost, formatDuration } from "@/lib/format";
 import { reviewPath } from "@/lib/paths";
-import { describeNow } from "@/lib/run-now";
+import { describeNow, type RunQueue } from "@/lib/run-now";
+import { MergeButton } from "./merge-button";
 import { runStatusFromEvent, statusFromEvent, type StatusTone } from "@/lib/status";
 import { loopEdgeKeys } from "@/lib/sent-back";
 import { triggeringEdges } from "@/lib/triggering-edges";
@@ -80,7 +81,40 @@ type Props = {
   prNumber: number | null;
   /** Open questions waiting for a person, each with the execution that asked it. */
   questions: OpenQuestion[];
+  /** Where the run stands in its project's merge queue, while it waits there. */
+  queue?: RunQueue | undefined;
 };
+
+/** What the run is doing now, with the one thing a person can do about it: open a waiting review, or merge. */
+function RunBanner({
+  projectId,
+  runId,
+  status,
+  now,
+  reviewId,
+  queue,
+}: {
+  projectId: string;
+  runId: string;
+  status: string;
+  now: ReturnType<typeof describeNow>;
+  reviewId: string | undefined;
+  queue: RunQueue | undefined;
+}) {
+  const canMerge = queue?.position === 1 && queue.mode === "manual" && !queue.requested;
+  return (
+    <div role="status" className={cn("flex items-center gap-3 rounded-lg border px-3.5 py-2.5", BANNER[now.tone])}>
+      <StatusBadge status={status} />
+      <span className="min-w-0 truncate text-sm font-medium">{now.text}</span>
+      {reviewId && (
+        <Button size="sm" className="ml-auto shrink-0" asChild>
+          <Link href={reviewPath(projectId, runId, reviewId)}>Open the review</Link>
+        </Button>
+      )}
+      {canMerge && <MergeButton projectId={projectId} runId={runId} />}
+    </div>
+  );
+}
 
 type EventPayload = {
   nodeKey?: string;
@@ -93,7 +127,7 @@ type EventPayload = {
 };
 
 /** What the run is doing now, its steps, its graph and its events, kept in step with the event stream. */
-export function RunLive({ projectId, runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions }: Props) {
+export function RunLive({ projectId, runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions, queue }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [prNumber, setPrNumber] = useState(initialPr);
   const [executions, setExecutions] = useState(initialExecutions);
@@ -167,7 +201,7 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
   }, [executions]);
 
   const review = questions.find((q) => q.context?.review);
-  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0 });
+  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue });
   const selectedQuestion = questions.find((q) => q.nodeExecutionId === selected?.id);
   const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
   const filter = useMemo(
@@ -179,15 +213,7 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
 
   return (
     <div className="flex flex-col gap-6">
-      <div role="status" className={cn("flex items-center gap-3 rounded-lg border px-3.5 py-2.5", BANNER[now.tone])}>
-        <StatusBadge status={status} />
-        <span className="min-w-0 truncate text-sm font-medium">{now.text}</span>
-        {review && (
-          <Button size="sm" className="ml-auto shrink-0" asChild>
-            <Link href={reviewPath(projectId, runId, review.id)}>Open the review</Link>
-          </Button>
-        )}
-      </div>
+      <RunBanner projectId={projectId} runId={runId} status={status} now={now} reviewId={review?.id} queue={queue} />
       <Tabs defaultValue="steps" className="gap-6">
         <TabsList variant="line">
           <TabsTrigger value="steps">Steps</TabsTrigger>

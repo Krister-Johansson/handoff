@@ -1,12 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { and, desc, eq, listLibraryIndex, nodeExecutions, projects, type Db } from "@handoff/db";
-import { answerQuestion, cancelRun, repairNodeExecution, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort } from "@handoff/github";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
 import { currentSteps, getRunDetail, listRuns } from "./queries";
+import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
 import { reviewPath, runPath } from "../lib/paths";
 
@@ -325,6 +326,52 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
         if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
         const retry = await repairNodeExecution(db, failed.id, note ? { note } : {});
         return { node: retry.nodeKey, attempt: retry.attempt, url: await urlOf(run_id) };
+      }),
+  );
+
+  server.registerTool(
+    "list_merge_queue",
+    {
+      description:
+        "A project's pull requests that are ready to merge, in the order they will merge. Each merges only when it is first, after catching up with main; a manual one also needs a person to ask (request_merge).",
+      inputSchema: { project: z.string().describe("Project name or id") },
+      annotations: read,
+    },
+    ({ project }) =>
+      tool(async () => {
+        const { id } = await findProject(db, project);
+        return (await projectMergeQueue(db, id)).map((e) => ({
+          position: e.position,
+          run_id: e.runId,
+          task: e.task,
+          pr: e.prNumber,
+          mode: e.mode,
+          requested: e.requested,
+          catching_up: !e.waiting,
+          url: `${baseUrl}${runPath(id, e.runId)}`,
+        }));
+      }),
+  );
+
+  server.registerTool(
+    "request_merge",
+    {
+      description:
+        "Asks to merge a run's pull request, or with project and all every one in the project's merge queue. They merge one at a time in queue order, each brought up to date with main first. Merging changes the repository: ask the user first.",
+      inputSchema: { run_id: z.string().optional(), project: z.string().describe("Project name or id").optional(), all: z.boolean().optional() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
+    },
+    ({ run_id, project, all }) =>
+      tool(async () => {
+        if (all) {
+          if (!project) throw new Error("Give the project to merge all of its queue.");
+          const { id } = await findProject(db, project);
+          await requestMergeAll(db, id);
+          return { requested: (await projectMergeQueue(db, id)).filter((e) => e.requested).map((e) => e.runId) };
+        }
+        if (!run_id) throw new Error("Give run_id, or project with all: true.");
+        await requestMerge(db, run_id);
+        return { requested: [run_id], url: await urlOf(run_id) };
       }),
   );
 

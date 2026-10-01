@@ -291,7 +291,7 @@ function summaryOf(output: unknown): { summary?: string } {
 
 export async function yieldWaiting(
   tx: DbTx,
-  input: { row: NodeExecutionRow; workerId: string; wait: { kind: "github_pr" | "human" | "timer"; key?: string | undefined; token?: string | undefined; deadlineAt?: Date | undefined } },
+  input: { row: NodeExecutionRow; workerId: string; wait: { kind: "github_pr" | "human" | "timer" | "merge_queue"; key?: string | undefined; token?: string | undefined; deadlineAt?: Date | undefined } },
 ) {
   const { row, wait } = input;
   await lockRun(tx, row.runId);

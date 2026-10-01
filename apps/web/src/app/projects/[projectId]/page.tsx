@@ -12,6 +12,7 @@ import { Count, ProjectTabs } from "@/components/projects/project-tabs";
 import { RunsTable } from "@/components/projects/runs-table";
 import { CARD_BODY, SectionCard } from "@/components/section-card";
 import { PullRequestList, type PullItem } from "@/components/pulls/pr-list";
+import { MergeQueue } from "@/components/pulls/merge-queue";
 import { ArchivePullButton, PullFilters } from "@/components/pulls/pull-filters";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -20,6 +21,7 @@ import { getGitHub } from "@/lib/github";
 import { parseBacklogFilter, parseProjectTab } from "@/lib/project-tab";
 import { parsePullFilter } from "@/lib/pull-filter";
 import { cn } from "@/lib/utils";
+import { projectMergeQueue } from "@/server/merge-queue";
 import { getProjectDetail, listProjectGraphs, TEMPLATES } from "@/server/graphs";
 import { DefaultLibrary } from "@/components/projects/default-library";
 import { libraryChoices } from "@/server/library-choices";
@@ -58,21 +60,24 @@ async function RunsTab({ project, runs }: Pick<Detail, "project" | "runs">) {
   );
 }
 
-async function PullsTab({ projectId, filter }: { projectId: string; filter: PullFilter }) {
-  const pulls = await listProjectPulls(getDb(), getGitHub(), projectId, { state: filter });
+async function PullsTab({ projectId, repoUrl, filter }: { projectId: string; repoUrl: string; filter: PullFilter }) {
+  const [pulls, queue] = await Promise.all([listProjectPulls(getDb(), getGitHub(), projectId, { state: filter }), projectMergeQueue(getDb(), projectId)]);
   const finished = (pr: PullItem) => !["queued", "running", "waiting"].includes(pr.runStatus);
   return (
-    <SectionCard
-      title="Pull requests"
-      description={pulls.live ? "Live state from GitHub for PRs opened by this project's runs." : "Set GITHUB_TOKEN or a GitHub App for the dashboard to show live CI and review state."}
-      action={<PullFilters active={filter} counts={pulls.counts} />}
-    >
-      <PullRequestList
-        items={pulls.items}
-        emptyText={filter === "archived" ? "Nothing archived." : filter === "all" ? "No pull requests from handoff runs yet." : `No ${filter} pull requests.`}
-        actions={(pr) => (finished(pr) ? <ArchivePullButton runId={pr.runId} number={pr.number} archived={pr.archived ?? false} /> : null)}
-      />
-    </SectionCard>
+    <div className="flex flex-col gap-4">
+      <MergeQueue projectId={projectId} repoUrl={repoUrl} rows={queue} />
+      <SectionCard
+        title="Pull requests"
+        description={pulls.live ? "Live state from GitHub for PRs opened by this project's runs." : "Set GITHUB_TOKEN or a GitHub App for the dashboard to show live CI and review state."}
+        action={<PullFilters active={filter} counts={pulls.counts} />}
+      >
+        <PullRequestList
+          items={pulls.items}
+          emptyText={filter === "archived" ? "Nothing archived." : filter === "all" ? "No pull requests from handoff runs yet." : `No ${filter} pull requests.`}
+          actions={(pr) => (finished(pr) ? <ArchivePullButton runId={pr.runId} number={pr.number} archived={pr.archived ?? false} /> : null)}
+        />
+      </SectionCard>
+    </div>
   );
 }
 
@@ -232,7 +237,7 @@ export default async function ProjectPage({
       >
         {tab === "runs" && <RunsTab project={project} runs={runs} />}
         {tab === "issues" && <IssuesTab project={project} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} filter={parseBacklogFilter(query)} />}
-        {tab === "pulls" && <PullsTab projectId={project.id} filter={parsePullFilter(query)} />}
+        {tab === "pulls" && <PullsTab projectId={project.id} repoUrl={`https://github.com/${project.repoOwner}/${project.repoName}`} filter={parsePullFilter(query)} />}
         {tab === "graphs" && <GraphsTab projectId={project.id} defaultGraph={defaultGraph} />}
         {tab === "settings" && <SettingsTab project={project} runCount={runs.length} defaultGraph={defaultGraph} />}
       </ProjectTabs>

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { runPath } from "@/lib/paths";
@@ -8,6 +9,7 @@ import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub } from "@/lib/github";
+import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { deleteProject, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
@@ -171,5 +173,31 @@ export async function saveProjectLibraryAction(projectId: string, selection: unk
   if (missing.length) return { error: `Not in the library: ${missing.join(", ")}` };
   if (!(await setProjectLibrary(getDb(), projectId, parsed.data))) return { error: "The project no longer exists." };
   revalidatePath(`/projects/${projectId}`);
+  return { ok: true };
+}
+
+const MergeRequestSchema = z.object({ runId: z.string().uuid(), projectId: z.string().uuid() });
+
+/** A person asks to merge a run's pull request; it lands when it is first in the project's merge queue. */
+export async function requestMergeAction(input: z.input<typeof MergeRequestSchema>): Promise<ActionState> {
+  const parsed = MergeRequestSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That pull request cannot be merged from here." };
+  try {
+    await requestMerge(getDb(), parsed.data.runId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(`/projects/${parsed.data.projectId}`);
+  revalidatePath("/projects/[projectId]/runs/[runId]", "page");
+  return { ok: true };
+}
+
+/** A person asks to merge every pull request in the project's queue; they land one at a time, in order. */
+export async function requestMergeAllAction(input: { projectId: string }): Promise<ActionState> {
+  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project cannot be merged from here." };
+  await requestMergeAll(getDb(), parsed.data.projectId);
+  revalidatePath(`/projects/${parsed.data.projectId}`);
+  revalidatePath("/projects/[projectId]/runs/[runId]", "page");
   return { ok: true };
 }

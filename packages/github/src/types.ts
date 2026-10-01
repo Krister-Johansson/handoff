@@ -68,6 +68,8 @@ export interface GitHubPort {
   expectsChecks(repo: RepoRef, branch: string): Promise<boolean>;
   getJobLogTail(repo: RepoRef, jobId: number, lines?: number): Promise<string | undefined>;
   mergePr(repo: RepoRef, number: number, method?: "squash" | "merge" | "rebase"): Promise<{ merged: boolean; sha?: string }>;
+  /** How many commits `base` has that `head` does not: 0 when the head is up to date with it. */
+  behindBy(repo: RepoRef, base: string, head: string): Promise<number>;
   /** Updates the PR comment whose body contains `marker`, or creates it. */
   upsertPrComment(repo: RepoRef, number: number, marker: string, body: string): Promise<{ id: number; created: boolean }>;
   /**

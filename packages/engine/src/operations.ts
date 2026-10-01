@@ -145,3 +145,5 @@ export async function resolveExhaustedLoop(db: Db, runId: string, action: "retry
     await appendEvents(tx, runId, [{ type: "loop.resolved", payload: { action, edgeKey: stuck.edgeKey, nodeKey: stuck.nodeKey }, nodeExecutionId: stuck.executionId }, ...created]);
   });
 }
+
+export { mergeQueue, requestMerge, requestMergeAll, type QueueEntry } from "./merge-queue.ts";

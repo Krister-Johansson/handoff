@@ -10,4 +10,4 @@ export const nodeExecutionStatus = pgEnum("node_execution_status", [
   "repaired",
 ]);
 export const executorKind = pgEnum("executor_kind", ["cli", "shell", "github", "human", "function"]);
-export const waitKind = pgEnum("wait_kind", ["github_pr", "human", "timer"]);
+export const waitKind = pgEnum("wait_kind", ["github_pr", "human", "timer", "merge_queue"]);

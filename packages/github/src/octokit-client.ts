@@ -217,6 +217,13 @@ export class OctokitGitHub implements GitHubPort {
     return { merged: data.merged, ...(data.sha ? { sha: data.sha } : {}) };
   }
 
+  async behindBy(repo: RepoRef, base: string, head: string) {
+    const octokit = await this.clientFor(repo);
+    // Compared from the head: the commits the base has on top are how far the head is behind.
+    const { data } = await octokit.rest.repos.compareCommitsWithBasehead({ owner: repo.owner, repo: repo.name, basehead: `${head}...${base}`, per_page: 1 });
+    return data.ahead_by;
+  }
+
   async upsertPrComment(repo: RepoRef, number: number, marker: string, body: string) {
     const octokit = await this.clientFor(repo);
     const comments = await octokit.paginate(octokit.rest.issues.listComments, { owner: repo.owner, repo: repo.name, issue_number: number, per_page: 100 });

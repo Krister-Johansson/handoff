@@ -40,7 +40,25 @@ test("the tools are listed, and read-only ones say so", async () => {
   const { tools } = await client.listTools();
   const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
   expect(Object.keys(byName).sort()).toEqual(
-    ["add_project", "answer_question", "cancel_run", "dismiss_attention", "get_project", "get_run", "list_attention", "list_backlog", "list_library", "list_projects", "list_runs", "repair_run", "resolve_loop", "run_again", "start_run"].sort(),
+    [
+      "add_project",
+      "answer_question",
+      "cancel_run",
+      "dismiss_attention",
+      "get_project",
+      "get_run",
+      "list_attention",
+      "list_backlog",
+      "list_library",
+      "list_merge_queue",
+      "list_projects",
+      "list_runs",
+      "repair_run",
+      "request_merge",
+      "resolve_loop",
+      "run_again",
+      "start_run",
+    ].sort(),
   );
   expect(byName.list_backlog?.annotations?.readOnlyHint).toBe(true);
   expect(byName.cancel_run?.annotations?.destructiveHint).toBe(true);
@@ -160,4 +178,19 @@ test("a run stopped by a loop that ran out says so, asks for a decision, and goe
   const steps = (await call("get_run", { run_id })).steps.map((s: { node: string }) => s.node);
   expect(steps).toEqual(["planner", "coder"]);
   expect((await call("get_run", { run_id })).stuck).toBeNull();
+});
+
+test("the merge queue lists ready pull requests in order, and a merge can be asked for one or all", async () => {
+  const first = (await call("start_run", { project: "sandbox", task: "First" })).run_id;
+  const second = (await call("start_run", { project: "sandbox", task: "Second" })).run_id;
+  await db.update(runs).set({ mergeQueuedAt: new Date("2026-10-01T10:00:00Z"), prNumber: 7 }).where(eq(runs.id, first));
+  await db.update(runs).set({ mergeQueuedAt: new Date("2026-10-01T10:05:00Z"), prNumber: 8 }).where(eq(runs.id, second));
+  expect(await call("list_merge_queue", { project: "sandbox" })).toMatchObject([
+    { position: 1, run_id: first, pr: 7, requested: false, mode: "manual" },
+    { position: 2, run_id: second, pr: 8, requested: false, mode: "manual" },
+  ]);
+  expect(await call("request_merge", { run_id: second })).toMatchObject({ requested: [second] });
+  expect(await call("request_merge", { project: "sandbox", all: true })).toMatchObject({ requested: [first, second] });
+  expect((await call("list_merge_queue", { project: "sandbox" })).map((e: { requested: boolean }) => e.requested)).toEqual([true, true]);
+  expect(await call("request_merge", {})).toMatchObject({ error: expect.stringContaining("run_id") });
 });

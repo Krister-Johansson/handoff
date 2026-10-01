@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { CoderOutputSchema, ReviewerOutputSchema, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
+import type { Db } from "@handoff/db";
+import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
 
@@ -90,7 +92,7 @@ const title = (task: string) => (task.length > 72 ? `${task.slice(0, 69)}...` : 
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
  */
-export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number }): NodeExecutor {
+export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number; db?: Db }): NodeExecutor {
   return {
     needsWorkdir: true,
     async execute(ctx): Promise<ExecutorOutcome> {
@@ -109,6 +111,8 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
           if (!routes(ctx, "conflict")) {
             return { kind: "failed", error: { code: "merge_conflict", message: `${ctx.run.baseBranch} changed the same lines as this run in ${sync.files.join(", ")}` } };
           }
+          // Going back to resolve: give up the place in the merge queue so the next pull request can land.
+          if (deps.db) await leaveQueue(deps.db, ctx.run.id, ctx.project.id);
           return { kind: "completed", output: { sync: "conflict", conflict: { base: ctx.run.baseBranch, baseSha: sync.baseSha, files: sync.files } } };
         }
         ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged" });
@@ -182,6 +186,8 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
       const sendBack = settings.sendBack && external.findings.length > 0;
       const routed = sendBack ? withFindings(feedback, external.findings) : feedback;
       if (sendBack) ctx.emit("github.review_findings", { number, findings: external.findings.length });
+      // Going back to fix CI or review: give up the place in the merge queue.
+      if (deps.db && (routed.ci.status === "failure" || routed.review.decision === "changes_requested")) await leaveQueue(deps.db, ctx.run.id, ctx.project.id);
       const output = { sync: "clean", prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha, feedback: routed };
       const statePatch: Record<string, unknown> = { prNumber: number, feedback: routed };
       if (sendBack) statePatch.prHandledReviews = [...handled, ...external.findings.map((f) => f.id)];
@@ -211,31 +217,61 @@ async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo:
   if (closed.length) ctx.emit("github.issues_closed", { numbers: closed });
 }
 
-/** Merges the run's pull request (squash by default). */
-export function mergeNodeExecutor(deps: { github: GitHubPort }): NodeExecutor {
+/** How long a run in the merge queue waits before it checks its turn again, should a wake be missed. */
+const QUEUE_RECHECK_MS = 60_000;
+
+/**
+ * Merges the run's pull request (squash by default). With the database, it first takes its place in
+ * the project's merge queue and waits for its turn: first in line, and, unless the node's mode is
+ * auto, asked to merge by a person. At its turn a pull request that conflicts with the base branch or
+ * is behind it goes back on the update edge to catch up, keeping its place. Merging wakes the queue.
+ */
+export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db }): NodeExecutor {
   return {
     needsWorkdir: false,
     async execute(ctx): Promise<ExecutorOutcome> {
       const number = ctx.state.prNumber;
       if (number === undefined) return { kind: "failed", error: { code: "no_pr", message: "no pull request recorded in run state" } };
       const repo = repoOf(ctx);
+      const { db } = deps;
+      if (db) {
+        const mode = ctx.node.config.mode === "auto" ? "auto" : "manual";
+        await joinQueue(db, ctx.run.id);
+        const turn = await queueTurn(db, ctx.run.id, ctx.project.id);
+        if (turn.position > 1 || (mode === "manual" && !turn.requested)) {
+          // Only on news, not on every periodic recheck.
+          if (ctx.execution.wakeReason !== "timeout") ctx.emit("merge.queued", { number, position: turn.position, mode, requested: turn.requested });
+          const key = queueKey(ctx.project.id);
+          await ctx.registerWait(key);
+          return { kind: "waiting", wait: { kind: "merge_queue", key, deadlineAt: new Date(Date.now() + QUEUE_RECHECK_MS) } };
+        }
+      }
+      const done = async (outcome: ExecutorOutcome) => {
+        if (db) await leaveQueue(db, ctx.run.id, ctx.project.id);
+        return outcome;
+      };
       const snapshot = await deps.github.getPrSnapshot(repo, number);
-      if (snapshot.merged) return { kind: "completed", output: { merged: true } };
-      // Main moved under the pull request and now conflicts with it: send it back to catch up instead of failing.
-      const conflicting = () =>
+      if (snapshot.merged) return done({ kind: "completed", output: { merged: true } });
+      // Main moved under the pull request: send it back to catch up, keeping its place in the queue.
+      const catchUp = (why: string) =>
         routes(ctx, "update")
           ? ({ kind: "completed", output: { merged: false, needsUpdate: true } } as const)
-          : ({ kind: "failed", error: { code: "merge_conflict", message: `PR #${number} conflicts with ${ctx.run.baseBranch}; add an update edge from this node back to the PR node to catch up` } } as const);
-      if (snapshot.mergeable === "CONFLICTING") return conflicting();
+          : ({ kind: "failed", error: { code: "merge_conflict", message: `PR #${number} ${why} ${ctx.run.baseBranch}; add an update edge from this node back to the PR node to catch up` } } as const);
+      if (snapshot.mergeable === "CONFLICTING") return catchUp("conflicts with");
+      // Behind but clean would merge, untested against what landed since: catch up first when the graph can.
+      if (routes(ctx, "update") && (await deps.github.behindBy(repo, ctx.run.baseBranch, snapshot.headSha)) > 0) {
+        ctx.emit("merge.behind", { number, base: ctx.run.baseBranch });
+        return catchUp("is behind");
+      }
       const method = ctx.node.config.method === "merge" || ctx.node.config.method === "rebase" ? ctx.node.config.method : "squash";
       try {
         const result = await deps.github.mergePr(repo, number, method);
-        if (!result.merged) return { kind: "failed", error: { code: "merge_failed", message: `GitHub did not merge PR #${number}` } };
+        if (!result.merged) return done({ kind: "failed", error: { code: "merge_failed", message: `GitHub did not merge PR #${number}` } });
         ctx.emit("github.merged", { number, sha: result.sha });
         await closeLinkedIssues(deps.github, ctx, repo, number);
-        return { kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } };
+        return done({ kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } });
       } catch (error) {
-        return { kind: "failed", error: { code: "merge_failed", message: (error as Error).message } };
+        return done({ kind: "failed", error: { code: "merge_failed", message: (error as Error).message } });
       }
     },
   };

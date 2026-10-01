@@ -12,6 +12,8 @@ import { projectCrumbs, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { StuckLoopCard } from "@/components/runs/stuck-loop-card";
 import { stuckLoop, type StuckLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
+import type { RunQueue } from "@/lib/run-now";
+import { projectMergeQueue } from "@/server/merge-queue";
 import { runPath } from "@/lib/paths";
 import { formatCost, formatDuration } from "@/lib/format";
 import { getRunDetail } from "@/server/queries";
@@ -63,6 +65,12 @@ function RunAlerts({ detail, stuck }: { detail: Detail; stuck: StuckLoop | undef
   );
 }
 
+/** Where the run stands in its project's merge queue, while its merge step waits there. */
+async function queuePlace(projectId: string, runId: string): Promise<RunQueue | undefined> {
+  const entry = (await projectMergeQueue(getDb(), projectId)).find((e) => e.runId === runId && e.waiting);
+  return entry && { position: entry.position, requested: entry.requested, mode: entry.mode };
+}
+
 export default async function RunPage({ params }: { params: Promise<{ projectId: string; runId: string }> }) {
   const { projectId, runId } = await params;
   const detail = await getRunDetail(getDb(), runId);
@@ -72,6 +80,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const { run, project, executions, events, graph } = detail;
   const stuck = run.status === "failed" ? await stuckLoop(getDb(), run.id) : undefined;
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
+  const queue = active ? await queuePlace(project.id, run.id) : undefined;
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
@@ -155,6 +164,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         labels={nodeLabels(graph?.document)}
         prNumber={run.prNumber}
         questions={questionItems(detail)}
+        queue={queue}
         initialEvents={events}
         graphDocument={graph?.document}
       />
