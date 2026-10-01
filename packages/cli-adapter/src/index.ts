@@ -2,6 +2,8 @@ export * from "./types.ts";
 export * from "./claude/argv.ts";
 export * from "./claude/env.ts";
 export * from "./claude/executor.ts";
+export * from "./claude/chat-argv.ts";
+export * from "./claude/chat-runner.ts";
 export * from "./stream-json/parser.ts";
 export * from "./events.ts";
 export * from "./processes.ts";
