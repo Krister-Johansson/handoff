@@ -6,7 +6,7 @@ import { McpServerForm } from "@/components/library/forms";
 import { McpSignIn } from "@/components/library/mcp-sign-in";
 import { McpToolsPanel } from "@/components/library/mcp-tools";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { EntryPage } from "@/components/library/entry-page";
+import { EntryPage, UsedByGroups } from "@/components/library/entry-page";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/lib/db";
 import { getOAuthStore } from "@/lib/oauth-store";
@@ -51,6 +51,7 @@ export default async function McpServerPage({ params, searchParams }: { params: 
           </Card>
         </TabsContent>
       </Tabs>
+      <UsedByGroups kind="mcp" name={server.name} />
     </EntryPage>
   );
 }

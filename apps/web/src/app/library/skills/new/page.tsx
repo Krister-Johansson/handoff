@@ -1,10 +1,12 @@
-import { EntryPage } from "@/components/library/entry-page";
+import { EntryMain } from "@/components/library/entry-page";
+import { entryHeader } from "@/lib/library-entry-header";
 import { SkillEditor } from "@/components/library/skill-editor";
 
-export default function NewSkillPage() {
+export default async function NewSkillPage() {
+  const header = await entryHeader({ tab: "skills", title: "New skill", subtitle: "A SKILL.md and its supporting files. Nodes enable it by name." });
   return (
-    <EntryPage tab="skills" kind="skill" title="New skill" subtitle="A SKILL.md and its supporting files. Nodes enable it by name.">
-      <SkillEditor />
-    </EntryPage>
+    <EntryMain>
+      <SkillEditor header={header} />
+    </EntryMain>
   );
 }

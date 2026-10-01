@@ -1,7 +1,6 @@
 import { listLibraryIndex } from "@handoff/db";
 import { EntryPage } from "@/components/library/entry-page";
 import { SkillsShRepoPicker } from "@/components/library/skills-sh-repo-picker";
-import { Card, CardContent } from "@/components/ui/card";
 import { FieldError } from "@/components/ui/field";
 import { getDb } from "@/lib/db";
 import { SkillsShClient } from "@/server/skills-sh";
@@ -31,7 +30,7 @@ export default async function SkillsShRepoPage({ params }: { params: Promise<{ o
       subtitle={
         <>
           {`Tick the skills you want in the library and apply. They are kept together in the group ${repoGroupName(repo)}. `}
-          <a href={`https://skills.sh/${repo}`} className="hover:underline">
+          <a href={`https://skills.sh/${repo}`} className="font-mono text-xs hover:underline hover:underline-offset-3">
             skills.sh/{repo}
           </a>
         </>
@@ -40,11 +39,7 @@ export default async function SkillsShRepoPage({ params }: { params: Promise<{ o
       {skills instanceof Error ? (
         <FieldError>{skills.message}</FieldError>
       ) : (
-        <Card>
-          <CardContent>
-            <SkillsShRepoPicker repo={repo} skills={skills} installed={installed} />
-          </CardContent>
-        </Card>
+        <SkillsShRepoPicker repo={repo} skills={skills} installed={installed} />
       )}
     </EntryPage>
   );

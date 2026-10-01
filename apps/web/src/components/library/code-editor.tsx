@@ -28,7 +28,7 @@ const Editor = dynamic(
           basicSetup={{ foldGutter: false, highlightActiveLine: false }}
           minHeight="24rem"
           aria-label={label}
-          className="overflow-hidden rounded-md border text-sm"
+          className="text-sm"
         />
       );
     };

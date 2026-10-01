@@ -20,6 +20,8 @@ test("searching lists skills with their repository and installs, and marks the o
   fireEvent.click(screen.getByRole("button", { name: "Search" }));
   await waitFor(() => expect(actions.searchSkillsShAction).toHaveBeenCalledWith("tdd"));
   const rows = await screen.findAllByRole("listitem");
+  expect(screen.getByText("2 results for")).toBeInTheDocument();
+  expect(screen.getByText("2 results for").nextSibling).toHaveTextContent("tdd");
   expect(within(rows[0]!).getByText("mattpocock/skills")).toBeInTheDocument();
   expect(within(rows[0]!).getByText("988K installs")).toBeInTheDocument();
   expect(within(rows[0]!).getByRole("link", { name: "In library" })).toHaveAttribute("href", "/library/skills/tdd");

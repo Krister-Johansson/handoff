@@ -5,8 +5,8 @@ import { SkillsShDetails } from "./skills-sh-details";
 export async function SkillsShDetailsSection({ id }: { id: string }) {
   const details = await new SkillsShClient().skillDetails(id).catch((error: Error) => error);
   return (
-    <section aria-label="On skills.sh" className="rounded-lg border p-4">
-      <h2 className="mb-3 text-sm font-medium">On skills.sh</h2>
+    <section aria-label="On skills.sh" className="rounded-xl bg-card px-5 py-4 ring-1 ring-border">
+      <h2 className="mb-3 text-sm font-semibold">On skills.sh</h2>
       {details instanceof Error ? <p className="text-sm text-muted-foreground">skills.sh did not answer: {details.message}</p> : <SkillsShDetails details={details} />}
     </section>
   );

@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { getLibraryByNames } from "@handoff/db";
 import { AgentForm } from "@/components/library/forms";
-import { EntryPage } from "@/components/library/entry-page";
+import { EntryPage, UsedByGroups } from "@/components/library/entry-page";
 import { Card, CardContent } from "@/components/ui/card";
 import { getDb } from "@/lib/db";
 
@@ -18,6 +18,7 @@ export default async function AgentPage({ params }: { params: Promise<{ name: st
           <AgentForm initial={agent} />
         </CardContent>
       </Card>
+      <UsedByGroups kind="agents" name={agent.name} />
     </EntryPage>
   );
 }
