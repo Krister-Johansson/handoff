@@ -1,3 +1,4 @@
+import { notifies } from "@handoff/core";
 import type { GitHubPort } from "@handoff/github";
 import { depsKey } from "../dependencies.ts";
 import type { ExecutorOutcome, NodeExecutor } from "../types.ts";
@@ -33,12 +34,12 @@ export function startExecutor(deps: { github?: GitHubPort } = {}): NodeExecutor 
   };
 }
 
-/** A Finish node: records the end of the run and whether to notify; the dashboard does the notifying. */
+/** A Finish node: records the end of the run and whether to notify; the run's end emits the notification. */
 export function finishExecutor(): NodeExecutor {
   return {
     needsWorkdir: false,
     async execute(ctx): Promise<ExecutorOutcome> {
-      const notify = ctx.node.config.notify !== false;
+      const notify = notifies(ctx.node, "finished");
       ctx.emit("run.finish", { notify });
       return { kind: "completed", output: { notified: notify } };
     },

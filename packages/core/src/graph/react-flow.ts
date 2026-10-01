@@ -9,6 +9,7 @@ export type FlowNodeData = {
   contract?: NodeAttributesInput["contract"];
   contextSelector?: NodeAttributesInput["contextSelector"];
   library?: NodeAttributesInput["library"];
+  notify?: NodeAttributesInput["notify"];
   /** An outgoing edge has no port (a custom condition), so the node shows a handle for it. */
   customOut?: boolean;
 };
@@ -47,6 +48,7 @@ export function toReactFlow(input: unknown): FlowGraph {
         ...(attributes.contract ? { contract: attributes.contract } : {}),
         ...(attributes.contextSelector ? { contextSelector: attributes.contextSelector } : {}),
         ...(attributes.library ? { library: attributes.library } : {}),
+        ...(attributes.notify ? { notify: attributes.notify } : {}),
         ...(customOut.has(key) ? { customOut: true } : {}),
       },
     })),
@@ -77,6 +79,7 @@ export function fromReactFlow(flow: FlowGraph): GraphDocument {
         ...(n.data.contract ? { contract: n.data.contract } : {}),
         ...(n.data.contextSelector ? { contextSelector: n.data.contextSelector } : {}),
         ...(n.data.library ? { library: n.data.library } : {}),
+        ...(n.data.notify ? { notify: n.data.notify } : {}),
         x: Math.round(n.position.x),
         y: Math.round(n.position.y),
       },

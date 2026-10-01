@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from "react";
 import { PlusIcon, TrashIcon, XIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
-import { ALL_TOOLS, ConditionSchema, DEFAULT_REVIEW_LEVEL, EFFORT_LEVELS, REVIEW_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { ALL_TOOLS, ConditionSchema, DEFAULT_REVIEW_LEVEL, EFFORT_LEVELS, REVIEW_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, notifies, notifyKindsOf, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType, type NotifyKind } from "@handoff/core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -263,6 +263,7 @@ function NodeInspector({
         </InspectorSection>
       )}
 
+      <NotificationSettings node={node} dispatch={dispatch} />
       <NodeEdges node={node} graph={graph} />
       <InspectorSection>
         <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" onClick={() => dispatch({ type: "remove", ids: [node.id] })}>
@@ -445,6 +446,47 @@ function MakeStart({ node, graph, dispatch }: { node: FlowNode; graph: FlowGraph
 }
 
 /** Start's trigger and Finish's notification. */
+/** Each notification kind's switch label and what it means. */
+const NOTIFY_COPY: Record<NotifyKind, { label: string; description: string }> = {
+  started: { label: "Run started", description: "When a run starts here." },
+  finished: { label: "Run finished", description: "When a run ends here." },
+  failed: { label: "Failed", description: "When this step fails the run." },
+  input: { label: "Waiting for you", description: "When this gate asks a question or waits for a review." },
+  ready: { label: "Ready to merge", description: "When the pull request is first in line and waits for you." },
+  merged: { label: "Merged", description: "When the pull request merges." },
+};
+
+/**
+ * What the node tells a person about, in the header bell, desktop notifications and Claude Code. A Finish
+ * node's earlier switch lived in its config; changing it moves it here.
+ */
+function NotificationSettings({ node, dispatch }: { node: FlowNode; dispatch: Dispatch<EditorAction> }) {
+  const type = node.data.nodeType as NodeType;
+  const set = (kind: NotifyKind, on: boolean) => {
+    if (kind === "finished" && "notify" in node.data.config) {
+      dispatch({ type: "replaceNodeConfig", id: node.id, config: Object.fromEntries(Object.entries(node.data.config).filter(([k]) => k !== "notify")) });
+    }
+    dispatch({ type: "updateNode", id: node.id, patch: { notify: { ...node.data.notify, [kind]: on } } });
+  };
+  return (
+    <InspectorSection title="Notifications">
+      <FieldGroup role="group" aria-label="Notifications" className="gap-4">
+        {notifyKindsOf(type).map((kind) => (
+          <Field key={kind} orientation="horizontal">
+            <Switch id={`notify-${kind}`} checked={notifies(node.data, kind)} onCheckedChange={(on) => set(kind, on)} />
+            <FieldContent>
+              <FieldLabel htmlFor={`notify-${kind}`} className="font-normal">
+                {NOTIFY_COPY[kind].label}
+              </FieldLabel>
+              <FieldDescription>{NOTIFY_COPY[kind].description}</FieldDescription>
+            </FieldContent>
+          </Field>
+        ))}
+      </FieldGroup>
+    </InspectorSection>
+  );
+}
+
 function FlowFields({ type, config, setConfig }: { type: NodeType; config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void }) {
   if (type === "start") {
     return (
@@ -454,19 +496,6 @@ function FlowFields({ type, config, setConfig }: { type: NodeType; config: Recor
           <NativeSelectOption value="run">Run</NativeSelectOption>
         </NativeSelect>
         <FieldDescription>Starts when you press Run or start a run for issues. The task and linked issues go on to the next step.</FieldDescription>
-      </Field>
-    );
-  }
-  if (type === "finish") {
-    return (
-      <Field orientation="horizontal">
-        <Switch id="finish-notify" checked={config.notify !== false} onCheckedChange={(on) => setConfig({ notify: on })} />
-        <FieldContent>
-          <FieldLabel htmlFor="finish-notify" className="font-normal">
-            Notify when done
-          </FieldLabel>
-          <FieldDescription>The header bell, a desktop notification and Claude Code say the run finished.</FieldDescription>
-        </FieldContent>
       </Field>
     );
   }

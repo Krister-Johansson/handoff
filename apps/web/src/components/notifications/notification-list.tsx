@@ -12,6 +12,7 @@ const KIND_STYLE: Record<NotificationKind, { icon: typeof PlayIcon; tile: string
   failed: { icon: CircleXIcon, tile: "bg-danger-bg text-danger" },
   input: { icon: MessageCircleQuestionIcon, tile: "bg-attention-bg text-attention" },
   ready: { icon: GitMergeIcon, tile: "bg-attention-bg text-attention" },
+  merged: { icon: GitMergeIcon, tile: "bg-success-bg text-success" },
 };
 
 /** A notification's icon on a small tile in its kind's tone. */

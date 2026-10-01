@@ -108,7 +108,7 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
       const count = state.nodes.filter((n) => n.data.nodeType === action.nodeType).length;
       const id = uniqueId(taken, action.nodeType, count + 1);
       const isStart = state.nodes.length === 0 || action.nodeType === "start";
-      const config = action.nodeType === "start" ? { trigger: "run" } : action.nodeType === "finish" ? { notify: true } : {};
+      const config = action.nodeType === "start" ? { trigger: "run" } : {};
       const node: FlowNode = {
         id,
         type: "handoff",

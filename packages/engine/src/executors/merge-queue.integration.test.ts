@@ -33,10 +33,12 @@ const coder: NodeExecutor = {
 };
 
 /** The linear graph with the merge node in `mode`, a Finish after it, and the edge that sends a stale pull request back to catch up. */
-const graph = (mode: "manual" | "auto") => ({
+const graph = (mode: "manual" | "auto", notify?: Record<string, boolean>) => ({
   ...linear,
   nodes: [
-    ...linear.nodes.map((n) => (n.key === "merge" ? { ...n, attributes: { ...n.attributes, config: { ...(n.attributes as { config?: object }).config, mode } } } : n)),
+    ...linear.nodes.map((n) =>
+      n.key === "merge" ? { ...n, attributes: { ...n.attributes, config: { ...(n.attributes as { config?: object }).config, mode }, ...(notify ? { notify } : {}) } } : n,
+    ),
     { key: "finish", attributes: { type: "finish", label: "Finish", config: {}, x: 1200, y: 0 } },
   ],
   edges: [
@@ -47,10 +49,10 @@ const graph = (mode: "manual" | "auto") => ({
 });
 
 /** Two runs of one project, each with its pull request open and CI green; the first works on `issues` when given. */
-async function twoRuns(mode: "manual" | "auto", issues?: { number: number; title: string; url: string; body: string }[]) {
+async function twoRuns(mode: "manual" | "auto", issues?: { number: number; title: string; url: string; body: string }[], notify?: Record<string, boolean>) {
   const origin = createOriginRepo();
   const github = new FakeGitHub();
-  const { project, graphVersion } = await seedGraph(db, graph(mode), { localClonePath: origin });
+  const { project, graphVersion } = await seedGraph(db, graph(mode, notify), { localClonePath: origin });
   const first = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "First", ...(issues ? { issues } : {}) });
   const second = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Second" });
   const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github, db }), finish: finishExecutor() };
@@ -97,6 +99,27 @@ describe("merge queue", () => {
     expect(await readyEvents(first.id)).toHaveLength(1);
     expect((await readyEvents(first.id))[0]!.payload).toMatchObject({ number: expect.any(Number) });
     expect(await readyEvents(second.id)).toHaveLength(0);
+  });
+
+  test("the merge node tells a person once that a pull request is ready, and that it merged only when turned on", async () => {
+    const notifications = async (runId: string) =>
+      (await inspect(db, runId)).events.filter((e) => e.type === "notify" && (e.payload as { kind: string }).kind !== "finished").map((e) => e.payload);
+    const quiet = await twoRuns("manual");
+    await quiet.ready(quiet.first.id);
+    await wakeByKey(db, `mq:${quiet.project.id}`, { reason: "merge_queue" });
+    await drain(quiet.deps);
+    const number = await quiet.prOf(quiet.first.id);
+    expect(await notifications(quiet.first.id)).toEqual([{ kind: "ready", nodeKey: "merge", number }]);
+    await requestMerge(db, quiet.first.id);
+    await drain(quiet.deps);
+    expect(await notifications(quiet.first.id)).toEqual([{ kind: "ready", nodeKey: "merge", number }]);
+
+    await truncateAll(db);
+    const told = await twoRuns("manual", undefined, { ready: false, merged: true });
+    await told.ready(told.first.id);
+    await requestMerge(db, told.first.id);
+    await drain(told.deps);
+    expect(await notifications(told.first.id)).toEqual([{ kind: "merged", nodeKey: "merge", number: await told.prOf(told.first.id) }]);
   });
 
   test("a pull request whose issue became blocked on GitHub stays out of the queue until the blocker closes", async () => {

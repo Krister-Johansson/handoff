@@ -12,6 +12,7 @@ import {
 import { passEnvProblem } from "../secrets/pass-env.ts";
 import { isNodeType, nodeCatalog } from "./catalog.ts";
 import { isEffortLevel, isModelName, isReviewLevel } from "./models.ts";
+import type { NotifySettings } from "./notify.ts";
 import { FEEDBACK_TARGETS, portsOf } from "./ports.ts";
 
 export type CompileErrorCode =
@@ -45,6 +46,7 @@ export type CompiledNode = {
   contract: Contract;
   contextSelector: ContextSelector;
   library: { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
+  notify?: NotifySettings;
   x: number;
   y: number;
 };
@@ -176,6 +178,7 @@ export function compileGraph(input: unknown): CompileResult {
         agents: attributes.library?.agents ?? [],
         groups: attributes.library?.groups ?? [],
       },
+      ...(attributes.notify ? { notify: attributes.notify } : {}),
       x: attributes.x,
       y: attributes.y,
     });
