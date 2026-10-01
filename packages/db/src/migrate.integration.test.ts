@@ -37,6 +37,7 @@ describe("migrations", () => {
       "library_skills",
       "node_executions",
       "notification_reads",
+      "previews",
       "projects",
       "questions",
       "review_views",
