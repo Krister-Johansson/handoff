@@ -16,7 +16,7 @@
       "runtimeExecutable": "sh",
       "runtimeArgs": [
         "-c",
-        "GITHUB_TOKEN=$(gh auth token) exec pnpm --filter @handoff/web dev"
+        "GITHUB_TOKEN=$(gh auth token --user Krister-Johansson) exec pnpm --filter @handoff/web dev"
       ],
       "port": 3000
     }
