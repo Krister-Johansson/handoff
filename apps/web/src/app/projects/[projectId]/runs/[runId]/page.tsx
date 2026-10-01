@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
 import { IssueLinks } from "@/components/runs/issue-links";
 import { RunAgainButton } from "@/components/runs/run-again-button";
-import { PageHeader } from "@/components/page-header";
 import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
 import { projectCrumbs, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { StuckLoopCard } from "@/components/runs/stuck-loop-card";
@@ -95,69 +94,68 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <PageHeader
-        crumbs={[...(await projectCrumbs(getDb(), project)), projectRunsCrumb(project.id), await runCrumb(getDb(), project.id, run)]}
-        title={<span className="whitespace-pre-line">{run.task}</span>}
-        description={
-          <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs [&_svg]:size-[13px] [&_svg]:shrink-0">
-            {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
-            <IssueLinks variant="meta" issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
-            {graph && (
-              <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
-                <GitForkIcon aria-hidden />
-                <span>
-                  <span className="font-mono">{graph.name}</span> v{graph.version}
-                </span>
-              </Link>
-            )}
-            <span className="inline-flex items-center gap-[5px]" title={run.createdAt.toISOString()}>
-              <ClockIcon aria-hidden />
-              started {run.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC
-            </span>
-            {run.startedAt && run.finishedAt && (
-              <span className="inline-flex items-center gap-[5px]">
-                <TimerIcon aria-hidden />
-                took {formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}
-              </span>
-            )}
-            {totalCost > 0 && (
-              <span className="inline-flex items-center gap-[5px]" title="Client-side estimate reported by the Claude CLI">
-                <CoinsIcon aria-hidden />
-                {formatCost(totalCost)} est.
-              </span>
-            )}
-            <a
-              className="inline-flex min-w-0 items-center gap-[5px] font-mono hover:text-foreground hover:underline hover:underline-offset-3"
-              href={`https://github.com/${project.repoOwner}/${project.repoName}/tree/${run.branchName}`}
-            >
-              <GitBranchIcon aria-hidden />
-              <span className="truncate">{run.branchName}</span>
-            </a>
-          </div>
-        }
-        actions={
-          <>
-            {run.prNumber !== null ? (
-              <Button size="sm" variant="outline" asChild>
-                <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
-                  <GitPullRequestIcon data-icon="inline-start" />
-                  PR #{run.prNumber}
-                </a>
-              </Button>
-            ) : (
-              active && (
-                <Button size="sm" variant="outline" disabled>
-                  <GitPullRequestIcon data-icon="inline-start" />
-                  No PR yet
-                </Button>
-              )
-            )}
-            {active ? <CancelRunButton runId={run.id} /> : !project.isDemo && <RunAgainButton runId={run.id} />}
-          </>
-        }
-      />
-      <RunAlerts detail={detail} stuck={stuck} />
       <RunLive
+        header={{
+          crumbs: [...(await projectCrumbs(getDb(), project)), projectRunsCrumb(project.id), await runCrumb(getDb(), project.id, run)],
+          title: <span className="whitespace-pre-line">{run.task}</span>,
+          meta: (
+            <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs [&_svg]:size-[13px] [&_svg]:shrink-0">
+              {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
+              <IssueLinks variant="meta" issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
+              {graph && (
+                <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
+                  <GitForkIcon aria-hidden />
+                  <span>
+                    <span className="font-mono">{graph.name}</span> v{graph.version}
+                  </span>
+                </Link>
+              )}
+              <span className="inline-flex items-center gap-[5px]" title={run.createdAt.toISOString()}>
+                <ClockIcon aria-hidden />
+                started {run.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC
+              </span>
+              {run.startedAt && run.finishedAt && (
+                <span className="inline-flex items-center gap-[5px]">
+                  <TimerIcon aria-hidden />
+                  took {formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}
+                </span>
+              )}
+              {totalCost > 0 && (
+                <span className="inline-flex items-center gap-[5px]" title="Client-side estimate reported by the Claude CLI">
+                  <CoinsIcon aria-hidden />
+                  {formatCost(totalCost)} est.
+                </span>
+              )}
+              <a
+                className="inline-flex min-w-0 items-center gap-[5px] font-mono hover:text-foreground hover:underline hover:underline-offset-3"
+                href={`https://github.com/${project.repoOwner}/${project.repoName}/tree/${run.branchName}`}
+              >
+                <GitBranchIcon aria-hidden />
+                <span className="truncate">{run.branchName}</span>
+              </a>
+            </div>
+          ),
+          actions: (
+            <>
+              {run.prNumber !== null ? (
+                <Button size="sm" variant="outline" asChild>
+                  <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
+                    <GitPullRequestIcon data-icon="inline-start" />
+                    PR #{run.prNumber}
+                  </a>
+                </Button>
+              ) : (
+                active && (
+                  <Button size="sm" variant="outline" disabled>
+                    <GitPullRequestIcon data-icon="inline-start" />
+                    No PR yet
+                  </Button>
+                )
+              )}
+              {active ? <CancelRunButton runId={run.id} /> : !project.isDemo && <RunAgainButton runId={run.id} />}
+            </>
+          ),
+        }}
         runId={run.id}
         projectId={project.id}
         initialStatus={run.status}
@@ -179,7 +177,9 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         blockedBy={blockedBy}
         initialEvents={events}
         graphDocument={graph?.document}
-      />
+      >
+        <RunAlerts detail={detail} stuck={stuck} />
+      </RunLive>
     </main>
   );
 }

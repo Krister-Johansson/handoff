@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ComponentProps } from "react";
+import { useCallback, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
+import { PageHeader, type Crumb } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -85,36 +86,34 @@ type Props = {
   queue?: RunQueue | undefined;
   /** Open issues GitHub says block this run's issues, while it waits for them at its start. */
   blockedBy?: number[] | undefined;
+  /** The page header the run's status sits in: its trail, title, facts and actions. */
+  header?: { crumbs: Crumb[]; title: ReactNode; meta: ReactNode; actions: ReactNode };
+  /** Cards between the header and the steps, such as a failed run's way to repair it. */
+  children?: ReactNode;
 };
 
-/** What the run is doing now, with the one thing a person can do about it: open a waiting review, or merge. */
-function RunBanner({
-  projectId,
-  runId,
-  status,
-  now,
-  reviewId,
-  queue,
-}: {
-  projectId: string;
-  runId: string;
-  status: string;
-  now: ReturnType<typeof describeNow>;
-  reviewId: string | undefined;
-  queue: RunQueue | undefined;
-}) {
+/** What the run is doing now, on a strip in its tone. */
+function RunNow({ status, now }: { status: string; now: ReturnType<typeof describeNow> }) {
+  return (
+    <div role="status" className={cn("flex h-8 min-w-0 items-center gap-2 rounded-md border pr-3 pl-1.5", BANNER[now.tone])}>
+      <StatusBadge size="sm" status={status} />
+      <span className="min-w-0 truncate text-[13px] font-medium">{now.text}</span>
+    </div>
+  );
+}
+
+/** The one thing a person can do about the run now: open a waiting review, or merge. */
+function RunNowAction({ projectId, runId, reviewId, queue }: { projectId: string; runId: string; reviewId: string | undefined; queue: RunQueue | undefined }) {
   const canMerge = queue?.position === 1 && queue.mode === "manual" && !queue.requested;
   return (
-    <div role="status" className={cn("flex items-center gap-3 rounded-lg border px-3.5 py-2.5", BANNER[now.tone])}>
-      <StatusBadge status={status} />
-      <span className="min-w-0 truncate text-sm font-medium">{now.text}</span>
+    <>
       {reviewId && (
-        <Button size="sm" className="ml-auto shrink-0" asChild>
+        <Button size="sm" className="shrink-0" asChild>
           <Link href={reviewPath(projectId, runId, reviewId)}>Open the review</Link>
         </Button>
       )}
       {canMerge && <MergeButton projectId={projectId} runId={runId} />}
-    </div>
+    </>
   );
 }
 
@@ -129,7 +128,21 @@ type EventPayload = {
 };
 
 /** What the run is doing now, its steps, its graph and its events, kept in step with the event stream. */
-export function RunLive({ projectId, runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions, queue, blockedBy }: Props) {
+export function RunLive({
+  projectId,
+  runId,
+  initialStatus,
+  initialExecutions,
+  initialEvents,
+  graphDocument,
+  labels,
+  prNumber: initialPr,
+  questions,
+  queue,
+  blockedBy,
+  header,
+  children,
+}: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [prNumber, setPrNumber] = useState(initialPr);
   const [executions, setExecutions] = useState(initialExecutions);
@@ -215,7 +228,26 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
 
   return (
     <div className="flex flex-col gap-6">
-      <RunBanner projectId={projectId} runId={runId} status={status} now={now} reviewId={review?.id} queue={queue} />
+      {header ? (
+        <PageHeader
+          crumbs={header.crumbs}
+          title={header.title}
+          description={header.meta}
+          actions={
+            <>
+              <RunNow status={status} now={now} />
+              <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} queue={queue} />
+              {header.actions}
+            </>
+          }
+        />
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <RunNow status={status} now={now} />
+          <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} queue={queue} />
+        </div>
+      )}
+      {children}
       <Tabs defaultValue="steps" className="gap-6">
         <TabsList variant="line">
           <TabsTrigger value="steps">Steps</TabsTrigger>
