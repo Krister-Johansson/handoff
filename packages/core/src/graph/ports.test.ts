@@ -15,7 +15,11 @@ describe("ports", () => {
     expect(ids(portsOf("code_review", {}).outputs)).toEqual(["approve", "changes"]);
     expect(ids(portsOf("coder", {}).outputs)).toEqual(["done", "needs_input"]);
     expect(ids(portsOf("tester", {}).outputs)).toEqual(["pass", "fail"]);
-    expect(ids(portsOf("pr", {}).outputs)).toEqual(["ready", "fix"]);
+    expect(ids(portsOf("pr", {}).outputs)).toEqual(["ready", "fix", "conflict"]);
+    expect(ids(portsOf("merge", {}).outputs)).toEqual(["merged", "update"]);
+    // A conflict with main goes back to an agent to resolve; a merge GitHub refuses loops back to the PR node to catch up.
+    expect(portsOf("pr", {}).outputs.find((p) => p.id === "conflict")?.kind).toBe("feedback");
+    expect(portsOf("merge", {}).outputs.find((p) => p.id === "update")?.kind).toBe("continue");
     expect(ids(portsOf("planner", {}).inputs)).toEqual(["in"]);
     expect(ids(portsOf("reviewer", {}).inputs)).toEqual(["in"]);
     expect(portsOf("tester", {}).outputs.map((p) => [p.id, p.kind])).toEqual([

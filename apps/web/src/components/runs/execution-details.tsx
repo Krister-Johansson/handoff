@@ -6,6 +6,7 @@ import {
   HumanAnswerSchema,
   MergeOutputSchema,
   PlannerOutputSchema,
+  PrConflictOutputSchema,
   PrOutputSchema,
   ReviewerOutputSchema,
   TesterOutputSchema,
@@ -13,6 +14,7 @@ import {
   type HumanAnswer,
   type MergeOutput,
   type PlannerOutput,
+  type PrConflictOutput,
   type PrOutput,
   type ReviewerOutput,
   type TesterOutput,
@@ -222,7 +224,29 @@ function AnswerView({ data }: { data: HumanAnswer }) {
   );
 }
 
+/** Main changed the same lines as the run; the files go back to be resolved. */
+function ConflictView({ data: { conflict } }: { data: PrConflictOutput }) {
+  return (
+    <Section title={`Conflicts with ${conflict.base}`}>
+      <p className="text-muted-foreground">
+        {conflict.base} at <span className="font-mono text-xs">{conflict.baseSha.slice(0, 7)}</span> changed the same lines as this run. Nothing was pushed.
+      </p>
+      <ul className="flex flex-col gap-0.5 font-mono text-xs">
+        {conflict.files.map((file) => (
+          <li key={file}>{file}</li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
 function MergeView({ data }: { data: MergeOutput }) {
+  if (data.needsUpdate)
+    return (
+      <Section title="Merge">
+        <p>GitHub refused the merge because the branch conflicts with main. The pull request went back to catch up.</p>
+      </Section>
+    );
   return (
     <Section title="Merge">
       <p>
@@ -242,6 +266,7 @@ const VIEWS = [
   entry(CoderOutputSchema, CoderView),
   entry(TesterOutputSchema, TesterView),
   entry(ReviewerOutputSchema, ReviewerView),
+  entry(PrConflictOutputSchema, ConflictView),
   entry(PrOutputSchema, PrView),
   entry(HumanAnswerSchema, AnswerView),
   entry(MergeOutputSchema, MergeView),

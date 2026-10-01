@@ -102,6 +102,18 @@ test("a PR node links the pull request and shows CI and review feedback", () => 
   expect(screen.getByText(/octocat/)).toBeInTheDocument();
 });
 
+test("a PR node that found a conflict with main lists the conflicting files", () => {
+  render(<ExecutionDetails detail={{ ...base, nodeType: "pr", output: { sync: "conflict", conflict: { base: "main", baseSha: "abc1234def", files: ["package.json", "README.md"] } } }} />);
+  expect(screen.getByText("Conflicts with main")).toBeInTheDocument();
+  expect(screen.getByText("package.json")).toBeInTheDocument();
+  expect(screen.getByText("README.md")).toBeInTheDocument();
+});
+
+test("a merge sent back to catch up with main says so", () => {
+  render(<ExecutionDetails detail={{ ...base, nodeType: "merge", output: { merged: false, needsUpdate: true } }} />);
+  expect(screen.getByText(/GitHub refused the merge because the branch conflicts with main/)).toBeInTheDocument();
+});
+
 test("a failed execution shows its error and the failed checks with their logs", () => {
   render(
     <ExecutionDetails
