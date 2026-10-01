@@ -38,13 +38,6 @@ const BANNER: Record<StatusTone, string> = {
   muted: "bg-card",
 };
 
-const LEGEND = [
-  { label: "passed", dot: "bg-success-dot" },
-  { label: "running", dot: "bg-active-dot" },
-  { label: "waiting", dot: "bg-attention-dot" },
-  { label: "failed", dot: "bg-danger-dot" },
-];
-
 /** A node's name in the drawer's title: its label, its key, and its attempt after the first. */
 function NodeName({ step, label }: { step: StepView; label: string }) {
   return (
@@ -215,17 +208,8 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
         </TabsContent>
         <TabsContent value="graph">
           {graphDocument !== undefined && (
-            <div className="relative">
-              <RunGraph document={graphDocument} statuses={statuses} activeEdges={activeEdges} onNodeClick={selectLatest} className="h-[500px] rounded-lg" />
-              <ul aria-label="Legend" className="absolute top-3 right-3 z-[5] flex gap-3 rounded-lg border border-input bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-xs">
-                {LEGEND.map((item) => (
-                  <li key={item.label} className="flex items-center gap-1.5">
-                    <span aria-hidden className={cn("size-[7px] rounded-full", item.dot)} />
-                    {item.label}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            // The run graph draws its own status legend.
+            <RunGraph document={graphDocument} statuses={statuses} activeEdges={activeEdges} onNodeClick={selectLatest} className="h-[500px] rounded-lg" />
           )}
         </TabsContent>
         {/* Always mounted: the stream also drives the steps and the banner. */}
