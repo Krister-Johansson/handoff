@@ -16,6 +16,7 @@ test("crumbs lead from Projects to a project, its runs, graph or run; a project,
   const run = await startRunFromGraph(db, { projectId: a.id, graphName: "master", task: "#2 F02 PostgreSQL in Docker and environment validation" });
 
   const [projectsCrumb, projectCrumb] = await projectCrumbs(db, a);
+  expect(projectCrumb).toMatchObject({ menuLabel: "projects" });
   expect(projectsCrumb).toEqual({ label: "Projects", href: "/projects" });
   expect(projectCrumb!.menu!.map((m) => [m.label, m.current])).toEqual([
     ["alpha", true],
@@ -29,5 +30,6 @@ test("crumbs lead from Projects to a project, its runs, graph or run; a project,
   ]);
   const crumb = await runCrumb(db, a.id, run);
   expect(crumb.href).toBe(`/projects/${a.id}/runs/${run.id}`);
-  expect(crumb.menu![0]).toMatchObject({ href: `/projects/${a.id}/runs/${run.id}`, current: true });
+  expect(crumb).toMatchObject({ menuLabel: "runs" });
+  expect(crumb.menu![0]).toMatchObject({ href: `/projects/${a.id}/runs/${run.id}`, current: true, status: "queued" });
 });

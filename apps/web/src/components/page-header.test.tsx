@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { PageHeader } from "./page-header";
+
+const push = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
 test("the header shows where you are as a trail of links, the page title, its description and actions", () => {
   render(
@@ -20,7 +23,7 @@ test("the header shows where you are as a trail of links, the page title, its de
   expect(screen.getByRole("button", { name: "New run" })).toBeInTheDocument();
 });
 
-test("a crumb with siblings opens a menu to switch to one of them", () => {
+test("a crumb with siblings opens a searchable list to switch to one of them", () => {
   render(
     <PageHeader
       crumbs={[
@@ -28,15 +31,33 @@ test("a crumb with siblings opens a menu to switch to one of them", () => {
         {
           label: "todooverkill",
           href: "/projects/p1",
+          menuLabel: "projects",
           menu: [
             { label: "todooverkill", href: "/projects/p1", current: true },
             { label: "sandbox", href: "/projects/p2" },
+            { label: "demo", href: "/projects/p3" },
           ],
         },
       ]}
       title="todooverkill"
     />,
   );
-  fireEvent.keyDown(screen.getByRole("button", { name: "Switch from todooverkill" }), { key: "Enter" });
-  expect(screen.getByRole("menuitem", { name: "sandbox" })).toHaveAttribute("href", "/projects/p2");
+  fireEvent.click(screen.getByRole("button", { name: "Switch from todooverkill" }));
+  const search = screen.getByPlaceholderText("Search projects");
+  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["todooverkill", "sandbox", "demo"]);
+  fireEvent.change(search, { target: { value: "sand" } });
+  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["sandbox"]);
+  fireEvent.click(screen.getByRole("option", { name: "sandbox" }));
+  expect(push).toHaveBeenCalledWith("/projects/p2");
+});
+
+test("a run in the list shows its status", () => {
+  render(
+    <PageHeader
+      crumbs={[{ label: "#3 F03 Prisma", href: "/projects/p1/runs/r3", menuLabel: "runs", menu: [{ label: "#3 F03 Prisma", href: "/projects/p1/runs/r3", current: true, status: "succeeded" }] }]}
+      title="#3 F03 Prisma"
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Switch from #3 F03 Prisma" }));
+  expect(within(screen.getByRole("option")).getByText("succeeded")).toBeInTheDocument();
 });

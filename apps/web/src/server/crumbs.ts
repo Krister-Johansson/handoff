@@ -12,7 +12,7 @@ export async function projectCrumbs(db: Db, project: { id: string; name: string 
   const all = await db.select({ id: projects.id, name: projects.name }).from(projects).orderBy(projects.name);
   return [
     { label: "Projects", href: "/projects" },
-    { label: project.name, href: `/projects/${project.id}`, menu: all.map((p) => ({ label: p.name, href: `/projects/${p.id}`, current: p.id === project.id })) },
+    { label: project.name, href: `/projects/${project.id}`, menuLabel: "projects", menu: all.map((p) => ({ label: p.name, href: `/projects/${p.id}`, current: p.id === project.id })) },
   ];
 }
 
@@ -27,6 +27,7 @@ export async function graphCrumb(db: Db, projectId: string, name: string): Promi
   return {
     label: name,
     href: `/projects/${projectId}/graphs/${encodeURIComponent(name)}`,
+    menuLabel: "graphs",
     menu: all.map((g) => ({ label: g.name, href: `/projects/${projectId}/graphs/${encodeURIComponent(g.name)}`, current: g.name === name, hint: `v${g.latestVersion}` })),
   };
 }
@@ -39,7 +40,7 @@ export async function runCrumb(db: Db, projectId: string, run: { id: string; tas
     .where(and(eq(runs.projectId, projectId)))
     .orderBy(desc(runs.createdAt))
     .limit(15);
-  const menu: CrumbMenuItem[] = recent.map((r) => ({ label: short(r.task), href: runPath(projectId, r.id), current: r.id === run.id, hint: r.status }));
+  const menu: CrumbMenuItem[] = recent.map((r) => ({ label: short(r.task), href: runPath(projectId, r.id), current: r.id === run.id, status: r.status }));
   if (!recent.some((r) => r.id === run.id)) menu.unshift({ label: short(run.task), href: runPath(projectId, run.id), current: true });
-  return { label: short(run.task, 48), href: runPath(projectId, run.id), menu };
+  return { label: short(run.task, 48), href: runPath(projectId, run.id), menuLabel: "runs", menu };
 }
