@@ -131,7 +131,7 @@ export function renderContextPacket(packet: ContextPacket): string {
       `The app this run builds is running at ${packet.app.url}. The playwright tools drive a headless browser that can only reach it.`,
       "",
       "Walk through each acceptance criterion in the app as a person would. For each one, take a screenshot that shows it with browser_take_screenshot, without a filename, and note the file name the tool reports. Take at most 12 screenshots.",
-      "In shots, give each screenshot's file name, a one-line caption a person reads under the image, the criterion it shows, and whether that criterion works. Do not edit files.",
+      "In shots, give each screenshot's file name, a one-line caption a person reads under the image, the criterion it shows, and whether that criterion works. For the criterion, copy the criterion word for word from the list, so the screenshot shows under it; leave it out for a screenshot that shows none. Do not edit files.",
       "",
     );
   }

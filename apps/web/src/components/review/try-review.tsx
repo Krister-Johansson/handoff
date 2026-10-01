@@ -77,7 +77,9 @@ function AppBar({ preview, readOnly, questionId, runId }: { preview: TryPreview;
   return (
     <section aria-label="The app" className={cn(CARD, "flex flex-col gap-3 px-5 py-4")}>
       <div className="flex flex-wrap items-center gap-2">
-        {preview.status === "running" && preview.url ? (
+        {readOnly ? (
+          <span className="text-sm text-muted-foreground">The app stopped when this was answered.</span>
+        ) : preview.status === "running" && preview.url ? (
           <Button asChild size="sm">
             <a href={preview.url} target="_blank" rel="noreferrer">
               <ExternalLinkIcon data-icon="inline-start" />
@@ -106,7 +108,7 @@ function AppBar({ preview, readOnly, questionId, runId }: { preview: TryPreview;
           </Button>
         )}
       </div>
-      {preview.status === "failed" && <TerminalOutput text={preview.error ?? "The app did not start."} />}
+      {!readOnly && preview.status === "failed" && <TerminalOutput text={preview.error ?? "The app did not start."} />}
       {error && <p className="text-sm text-danger">{error}</p>}
     </section>
   );

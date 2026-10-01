@@ -31,4 +31,5 @@ test("a step given the running app is told where it runs and how to take screens
   expect(md).toContain("# The running app");
   expect(md).toContain("http://localhost:41000");
   expect(md).toContain("browser_take_screenshot");
+  expect(md).toContain("copy the criterion word for word");
 });
