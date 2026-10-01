@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { IssueLinks, type IssueLink } from "@/components/runs/issue-links";
 import { runPath } from "@/lib/paths";
-import { Tag } from "@/components/projects/section-card";
+import { Tag } from "@/components/tag";
 import { cn } from "@/lib/utils";
 
 export type PullItem = {

@@ -10,7 +10,7 @@ import { ProjectSettingsActions } from "@/components/projects/project-card";
 import { GraphList } from "@/components/projects/graph-list";
 import { Count, ProjectTabs } from "@/components/projects/project-tabs";
 import { RunsTable } from "@/components/projects/runs-table";
-import { CARD_BODY, SectionCard } from "@/components/projects/section-card";
+import { CARD_BODY, SectionCard } from "@/components/section-card";
 import { PullRequestList, type PullItem } from "@/components/pulls/pr-list";
 import { ArchivePullButton, PullFilters } from "@/components/pulls/pull-filters";
 import { Button } from "@/components/ui/button";

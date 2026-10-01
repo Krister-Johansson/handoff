@@ -43,9 +43,9 @@ test("the inbox shows each kind of work under its own heading with a count, and 
 test("the inbox narrows to one project, and the filter counts each project's items", () => {
   render(<InboxProjectFilter view={view} current={undefined} />);
   expect(screen.getAllByRole("link").map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
-    ["All5", "/inbox"],
-    ["todooverkill3", "/inbox?project=p1"],
-    ["sandbox2", "/inbox?project=p2"],
+    ["All 5", "/inbox"],
+    ["todooverkill 3", "/inbox?project=p1"],
+    ["sandbox 2", "/inbox?project=p2"],
   ]);
   const narrowed = narrowInbox(view, "p2");
   expect([narrowed.reviews, narrowed.questions, narrowed.failedRuns, narrowed.pullRequests].map((g) => g.length)).toEqual([0, 1, 1, 0]);

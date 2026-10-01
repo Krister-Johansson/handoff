@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { entryHeader, type EntryHeaderInput, type Kind } from "@/lib/library-entry-header";
 import { libraryIndex } from "@/lib/library-index";
 import { DeleteEntryButton } from "./delete-entry-button";
-import { Tag } from "./tag";
+import { Tag } from "@/components/tag";
 
 export function EntryMain({ children }: { children: ReactNode }) {
   return <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">{children}</main>;

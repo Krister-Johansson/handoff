@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { BacklogCounts, BacklogFilter, BacklogIssue } from "@/server/backlog";
 import { StartRunDialog } from "./forms";
-import { FilterLinks, ROW, ROWS, SectionCard, Tag } from "./section-card";
+import { ROW, ROWS, SectionCard } from "@/components/section-card";
+import { Tag } from "@/components/tag";
+import { FilterLinks } from "@/components/filter-links";
 
 const FILTERS: { value: BacklogFilter; label: string }[] = [
   { value: "todo", label: "To do" },
@@ -44,7 +46,7 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
       action={
         <FilterLinks
           label="Issue state"
-          items={FILTERS.map((f) => ({ href: `?tab=issues&issues=${f.value}`, label: f.label, count: counts[f.value], current: f.value === filter }))}
+          links={FILTERS.map((f) => ({ href: `?tab=issues&issues=${f.value}`, label: f.label, count: counts[f.value], current: f.value === filter }))}
         />
       }
     >

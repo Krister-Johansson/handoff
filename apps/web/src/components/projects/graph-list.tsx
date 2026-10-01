@@ -6,7 +6,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { GraphSettingsDialog } from "./forms";
-import { TD, TH, Tag } from "./section-card";
+import { TD, TH } from "@/components/section-card";
+import { Tag } from "@/components/tag";
 
 export type GraphRow = { id: string; name: string; latestVersion: number; savedAt: Date; runs: number };
 

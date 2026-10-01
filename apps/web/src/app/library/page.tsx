@@ -6,7 +6,7 @@ import { listLibraryIndex } from "@handoff/db";
 import type { McpCheck } from "@handoff/engine/mcp-check";
 import { GroupEntries } from "@/components/library/group-entries";
 import { SearchField } from "@/components/library/search-field";
-import { Tag } from "@/components/library/tag";
+import { Tag } from "@/components/tag";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Button } from "@/components/ui/button";
@@ -107,7 +107,7 @@ function SkillsBySource({ groups }: { groups: SkillSourceGroup<SkillIndexRow>[] 
   return groups.map((group, i) => (
     <section key={`${group.registry}:${group.repo ?? ""}`} aria-label={group.repo ?? "Written here"} className={cn(i > 0 && "border-t")}>
       <h3 className="flex items-center gap-2 px-5 pt-3 pb-2 text-[13px] font-normal">
-        <Tag fill={group.registry !== "local"}>{REGISTRY_LABEL[group.registry]}</Tag>
+        <Tag tone={group.registry !== "local" ? "fill" : "outline"}>{REGISTRY_LABEL[group.registry]}</Tag>
         {group.repo && group.href && (
           <a href={group.href} className="font-mono text-xs hover:underline hover:underline-offset-3">
             {group.repo}

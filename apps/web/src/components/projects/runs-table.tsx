@@ -6,7 +6,7 @@ import { formatAgo, formatCost } from "@/lib/format";
 import { runPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 import type { RunLine } from "@/server/run-lines";
-import { TD, TH } from "./section-card";
+import { TD, TH } from "@/components/section-card";
 
 export type ProjectRun = {
   id: string;

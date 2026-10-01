@@ -8,7 +8,7 @@ export function WorkerStatusView({ live, queuedRuns }: { live: number; queuedRun
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted-foreground" title={hint}>
       <span className={cn("size-[7px] rounded-full", online ? "bg-success-dot" : queuedRuns > 0 ? "bg-danger-dot" : "bg-muted-foreground/40")} />
-      {label}
+      <span className="max-sm:sr-only">{label}</span>
     </span>
   );
 }

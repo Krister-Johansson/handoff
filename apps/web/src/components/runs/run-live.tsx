@@ -25,7 +25,7 @@ import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
 import { StatusBadge } from "./status-badge";
 import { Steps, type StepView } from "./steps";
-import { Tag } from "./tag";
+import { Tag } from "@/components/tag";
 
 /** The status banner's border and fill per tone; its text stays the page's foreground. */
 const BANNER: Record<StatusTone, string> = {

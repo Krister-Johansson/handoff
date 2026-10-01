@@ -3,7 +3,7 @@ import { formatCost, formatDuration } from "@/lib/format";
 import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./status-badge";
-import { Tag } from "./tag";
+import { Tag } from "@/components/tag";
 
 export type StepView = {
   id: string;
