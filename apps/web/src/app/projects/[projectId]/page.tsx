@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import { PageHeader } from "@/components/page-header";
+import { projectCrumbs, projectTabCrumb } from "@/server/crumbs";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { PencilIcon } from "lucide-react";
@@ -271,19 +273,22 @@ export default async function ProjectPage({
   const detail = await getProjectDetail(getDb(), projectId);
   if (!detail) notFound();
   const { project, graphs, runs, defaultGraph } = detail;
+  const crumbs = [...(await projectCrumbs(getDb(), project)), projectTabCrumb(project.id, tab)];
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">{project.name}</h1>
-          <a className="font-mono text-sm text-muted-foreground hover:underline" href={`https://github.com/${project.repoOwner}/${project.repoName}`}>
+      <PageHeader
+        crumbs={crumbs}
+        title={project.name}
+        description={
+          <a className="font-mono hover:underline" href={`https://github.com/${project.repoOwner}/${project.repoName}`}>
             {project.repoOwner}/{project.repoName}
           </a>
-        </div>
-        {!project.isDemo && defaultGraph && (
-          <StartRunDialog projectId={project.id} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} label="New run" size="default" />
-        )}
-      </div>
+        }
+        actions={
+          !project.isDemo &&
+          defaultGraph && <StartRunDialog projectId={project.id} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} label="New run" size="default" />
+        }
+      />
       <ProjectTabs
         active={tab}
         counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length }}

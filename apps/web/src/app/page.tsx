@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
 import { FolderGit2Icon, InboxIcon, PlayIcon } from "lucide-react";
 import { StatusBadge } from "@/components/runs/status-badge";
@@ -15,12 +16,7 @@ export default async function Home() {
   const [summary, inbox] = await Promise.all([homeSummary(db), listInbox(db)]);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight">handoff</h1>
-          <p className="text-muted-foreground">Graph runs for coding agents: plan, code, test, review, pull request, merge.</p>
-        </div>
-      </div>
+      <PageHeader crumbs={[{ label: "Overview" }]} title="Overview" description="Graph runs for coding agents: plan, code, test, review, pull request, merge." />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>

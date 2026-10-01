@@ -1,9 +1,9 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowLeftIcon } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
 import { CodeReview } from "@/components/review/code-review";
+import { projectCrumbs, projectTabCrumb, runCrumb } from "@/server/crumbs";
 import { PlanReview } from "@/components/review/plan-review";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
@@ -91,20 +91,22 @@ export default async function ReviewPage({ params }: { params: Promise<{ runId: 
   const tokens = review.review.kind === "code" && review.review.files ? await highlightFiles(review.review.files) : undefined;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <div className="flex flex-col gap-1">
-        <Link href={`/runs/${runId}`} className="flex items-center gap-1 text-sm text-muted-foreground hover:underline">
-          <ArrowLeftIcon className="size-3.5" />
-          {review.projectName}: {review.task}
-        </Link>
-        <h1 className="text-2xl font-semibold tracking-tight">{review.question}</h1>
-        <p className="text-muted-foreground">
-          {review.answered
+      <PageHeader
+        crumbs={[
+          ...(await projectCrumbs(getDb(), { id: review.projectId, name: review.projectName })),
+          projectTabCrumb(review.projectId, "runs"),
+          await runCrumb(getDb(), review.projectId, { id: runId, task: review.task }),
+          { label: review.review.kind === "code" ? "Code review" : "Review" },
+        ]}
+        title={review.question}
+        description={
+          review.answered
             ? "This review has been answered."
             : review.review.kind === "code"
               ? `Click a line number, or shift-click a second one for a range, to comment on those lines. Submit review sends your comments back to ${review.review.backTo ?? review.review.from} or lets the run go on.`
-              : `Select text to comment on it. Submit your review to send your comments back to ${review.review.backTo ?? review.review.from} or let the run go on.`}
-        </p>
-      </div>
+              : `Select text to comment on it. Submit your review to send your comments back to ${review.review.backTo ?? review.review.from} or let the run go on.`
+        }
+      />
       <ReviewBody review={review} runId={runId} tokens={tokens} />
     </main>
   );
