@@ -279,3 +279,17 @@ test("closeIssue comments on the issue and closes it as completed", async () => 
     ["PATCH", "/repos/octo/sample/issues/12", { state: "closed", state_reason: "completed" }],
   ]);
 });
+
+test("getFile reads a file's text on a branch, and is undefined when the file is not there", async () => {
+  const { fetch, calls } = fakeFetch({
+    // Octokit sends the path with its slash encoded, as GitHub accepts.
+    "GET /repos/octo/sample/contents/.claude%2Flaunch.json": () => ({ json: { type: "file", encoding: "base64", content: Buffer.from('{"version":"0.0.1"}').toString("base64") } }),
+    "GET /repos/octo/sample/contents/src": () => ({ json: [{ type: "file", name: "a.ts" }] }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.getFile(repo, ".claude/launch.json", "main")).toBe('{"version":"0.0.1"}');
+  expect(new URL(calls[0]!.url).searchParams.get("ref")).toBe("main");
+  expect(await gh.getFile(repo, "CLAUDE.md", "main")).toBeUndefined();
+  // A folder is not a file.
+  expect(await gh.getFile(repo, "src", "main")).toBeUndefined();
+});
