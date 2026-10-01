@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
+import { rmSync } from "node:fs";
+import { basename } from "node:path";
 import { promisify } from "node:util";
 import { CoderOutputSchema, notifies, ReviewerOutputSchema, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
-import { and, eq, events, type Db } from "@handoff/db";
+import { and, asc, desc, eq, events, screenshots, type Db } from "@handoff/db";
 import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
@@ -26,10 +28,73 @@ function coderOutput(ctx: ExecutorContext): CoderOutput | undefined {
   return undefined;
 }
 
-/** The PR text: the coder's own title and description when it wrote them, then the issues it closes. */
-function prText(ctx: ExecutorContext): { title: string; body: string } {
+/** The branch handoff keeps screenshots on, apart from the code, so pull requests can show them. */
+export const ASSETS_BRANCH = "handoff-assets";
+
+/** A screenshot on the assets branch: where it is under runs/<run>/, and what it shows. */
+type PrShot = { name: string; caption: string; criterion: string | null; works: boolean | null };
+
+/** The screenshots of the run's latest Demo step, in the order it took them. */
+async function latestScreenshots(db: Db, runId: string) {
+  const rows = await db.select().from(screenshots).where(eq(screenshots.runId, runId)).orderBy(desc(screenshots.createdAt), asc(screenshots.position));
+  const latest = rows[0]?.nodeExecutionId;
+  return rows.filter((r) => r.nodeExecutionId === latest).sort((a, b) => a.position - b.position);
+}
+
+/**
+ * Commits screenshots to the repository's assets branch under runs/<run>/, keeping what earlier runs
+ * put there, and pushes it. Git plumbing with a separate index builds the commit, so the run's worktree
+ * and branch are untouched. A push that loses a race with another run is tried once more.
+ */
+async function pushScreenshots(cwd: string, env: NodeJS.ProcessEnv, runId: string, files: string[]): Promise<string[]> {
+  const git = async (args: string[], extra: Record<string, string> = {}) => (await execFileAsync("git", args, { cwd, env: { ...env, ...extra } })).stdout.trim();
+  const index = await git(["rev-parse", "--git-path", "handoff-assets-index"]);
+  const identity = (await git(["config", "user.email"]).catch(() => ""))
+    ? {}
+    : { GIT_AUTHOR_NAME: "handoff", GIT_AUTHOR_EMAIL: "handoff@localhost", GIT_COMMITTER_NAME: "handoff", GIT_COMMITTER_EMAIL: "handoff@localhost" };
+  for (let attempt = 1; ; attempt++) {
+    const parent = await git(["fetch", "-q", "origin", `refs/heads/${ASSETS_BRANCH}`])
+      .then(() => git(["rev-parse", "FETCH_HEAD"]))
+      .catch(() => undefined);
+    rmSync(index, { force: true });
+    const separate = { GIT_INDEX_FILE: index };
+    await git(parent ? ["read-tree", parent] : ["read-tree", "--empty"], separate);
+    const names: string[] = [];
+    for (const file of files) {
+      const name = basename(file);
+      const blob = await git(["hash-object", "-w", file]);
+      await git(["update-index", "--add", "--cacheinfo", `100644,${blob},runs/${runId}/${name}`], separate);
+      names.push(name);
+    }
+    const tree = await git(["write-tree"], separate);
+    rmSync(index, { force: true });
+    const commit = await git(["commit-tree", tree, ...(parent ? ["-p", parent] : []), "-m", `Screenshots for handoff run ${runId}`], identity);
+    try {
+      await git(["push", "-q", "origin", `${commit}:refs/heads/${ASSETS_BRANCH}`]);
+      return names;
+    } catch (error) {
+      if (attempt >= 2) throw error;
+    }
+  }
+}
+
+/** The PR's Screenshots section: each image from the assets branch, its caption, and whether its criterion works. */
+function screenshotsSection(repo: RepoRef, runId: string, shots: PrShot[]): string[] {
+  if (shots.length === 0) return [];
+  const lines = ["## Screenshots", ""];
+  for (const shot of shots) {
+    const url = `https://github.com/${repo.owner}/${repo.name}/blob/${ASSETS_BRANCH}/runs/${runId}/${shot.name}?raw=true`;
+    lines.push(`![${shot.caption}](${url})`, "", `*${shot.caption}*`);
+    if (shot.criterion) lines.push("", `${shot.criterion}: ${shot.works === false ? "does not work" : "works"}`);
+    lines.push("");
+  }
+  return lines;
+}
+
+/** The PR text: the coder's own title and description when it wrote them, the demo's screenshots, then the issues it closes. */
+function prText(ctx: ExecutorContext, shots: PrShot[] = []): { title: string; body: string } {
   const coder = coderOutput(ctx);
-  const lines = [coder?.pr?.body ?? coder?.summary ?? `Task: ${ctx.state.task}`, ""];
+  const lines = [coder?.pr?.body ?? coder?.summary ?? `Task: ${ctx.state.task}`, "", ...screenshotsSection(repoOf(ctx), ctx.run.id, shots)];
   // GitHub closes these issues when the pull request merges into the default branch.
   if (ctx.state.issues?.length) lines.push(...ctx.state.issues.map((i) => `Closes #${i.number}`), "");
   lines.push(`Opened by handoff run \`${ctx.run.id}\`.`);
@@ -102,6 +167,7 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number;
       const requireApproval = flag(ctx.node.config, "requireApproval", false);
 
       const pushing = !ctx.execution.wakeReason;
+      let shots: PrShot[] = [];
       if (pushing) {
         if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "PR node needs the run worktree to push" } };
         const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(await deps.github.gitAuthEnv(repo)) };
@@ -118,16 +184,27 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number;
         }
         ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged" });
         await execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd: ctx.workdir.path, env });
+        // A Demo step's screenshots go to the assets branch so the description can show them; failing that, the PR opens without them.
+        const taken = deps.db ? await latestScreenshots(deps.db, ctx.run.id) : [];
+        if (taken.length) {
+          try {
+            const names = await pushScreenshots(ctx.workdir.path, env, ctx.run.id, taken.map((t) => t.path));
+            shots = taken.map((t, i) => ({ name: names[i]!, caption: t.caption, criterion: t.criterion, works: t.works }));
+            ctx.emit("github.screenshots", { branch: ASSETS_BRANCH, count: shots.length });
+          } catch (error) {
+            ctx.emit("github.screenshots_failed", { message: (error as Error).message });
+          }
+        }
       }
 
       let number = ctx.state.prNumber;
       if (number === undefined) {
-        const pr = (await deps.github.findPrByHead(repo, ctx.run.branchName)) ?? (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, ...prText(ctx) }));
+        const pr = (await deps.github.findPrByHead(repo, ctx.run.branchName)) ?? (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, ...prText(ctx, shots) }));
         number = pr.number;
         await ctx.recordPrNumber(number);
-      } else if (pushing && coderOutput(ctx)?.pr) {
-        // A later round rewrote the description of the change; the pull request follows it.
-        await deps.github.updatePr(repo, number, prText(ctx));
+      } else if (pushing && (coderOutput(ctx)?.pr || shots.length)) {
+        // A later round rewrote the description of the change or took new screenshots; the pull request follows it.
+        await deps.github.updatePr(repo, number, prText(ctx, shots));
       }
       let repoId = ctx.project.repoId;
       if (repoId === null) {
