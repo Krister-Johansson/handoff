@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, HistoryIcon, MessageSquareIcon, MessageSquarePlusIcon, UnfoldVerticalIcon, XIcon } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { BotIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, HistoryIcon, MessageSquareIcon, MessageSquarePlusIcon, UnfoldVerticalIcon, XIcon } from "lucide-react";
 import type { DiffFile, DiffLine } from "@handoff/core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +11,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { diffRows, type DiffRow } from "@/lib/diff-rows";
 import type { EarlierComment } from "@/lib/earlier";
+import type { Finding } from "@/lib/findings";
 import { numberOn, rangeLabel, type LineComment, type LineSelection, type Side } from "@/lib/line-comments";
 import type { LineTokens } from "@/lib/highlight-types";
 import { cn } from "@/lib/utils";
@@ -124,6 +127,24 @@ function EarlierNote({ comment, outdated }: { comment: EarlierComment; outdated?
   );
 }
 
+/** A comment from the code reviewing agent, set apart from the person's own comments. */
+function FindingNote({ finding, by, loose }: { finding: Finding; by: string; loose?: boolean }) {
+  return (
+    <div className="m-2 flex items-start gap-2 rounded-md border bg-sky-50/60 p-2 font-sans text-sm dark:bg-sky-950/30">
+      <BotIcon className="mt-0.5 size-4 shrink-0 text-sky-700 dark:text-sky-300" />
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="font-mono text-xs text-muted-foreground">{`${by}${loose && finding.line !== undefined ? ` · line ${finding.line}, outside the diff` : ""}`}</span>
+        <div className="prose prose-sm max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none prose-p:my-1">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{finding.body}</ReactMarkdown>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The code reviewing agent's findings on one file: on their lines, or loose at the top of the file. */
+export type PlacedFindings = { by: string; anchored: { line: number; finding: Finding }[]; loose: Finding[] };
+
 type DiffProps = {
   file: DiffFile;
   mode: "changes" | "whole";
@@ -131,6 +152,7 @@ type DiffProps = {
   selection: LineSelection | undefined;
   comments: LineComment[];
   earlier: { anchored: { line: number; comment: EarlierComment }[]; outdated: EarlierComment[] };
+  findings?: PlacedFindings | undefined;
   tokens?: LineTokens | undefined;
   onSelect: (side: Side, n: number, extend: boolean) => void;
   onAdd: (body: string) => void;
@@ -164,7 +186,7 @@ function pairs(rows: DiffRow[]): (DiffRow | { kind: "pair"; pair: Pair })[] {
   return out;
 }
 
-function DiffTable({ file, mode, layout, selection, comments, earlier, tokens, onSelect, onAdd, onCancel, onDraft, onRemove }: DiffProps) {
+function DiffTable({ file, mode, layout, selection, comments, earlier, findings, tokens, onSelect, onAdd, onCancel, onDraft, onRemove }: DiffProps) {
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const span = layout === "split" ? 6 : 4;
   const inSelection = (line: DiffLine | undefined, side: Side) => {
@@ -182,6 +204,14 @@ function DiffTable({ file, mode, layout, selection, comments, earlier, tokens, o
         <tr key={`comment:${comment.side}:${comment.line}:${comment.body}`}>
           <td colSpan={span}>
             <InlineComment comment={comment} onRemove={onRemove && (() => onRemove(comment))} />
+          </td>
+        </tr>,
+      );
+    for (const note of findings?.anchored.filter((f) => at("new", f.line)) ?? [])
+      rows.push(
+        <tr key={`finding:${note.line}:${note.finding.body}`}>
+          <td colSpan={span}>
+            <FindingNote finding={note.finding} by={findings!.by} />
           </td>
         </tr>,
       );
@@ -324,7 +354,7 @@ function ViewedButton({ path, viewed, onViewed }: { path: string; viewed: boolea
 
 /** One changed file: a header with its counts, comments and viewed mark, and its diff unless it is collapsed. */
 export function FileDiff({ index, open, onToggle, view, onViewed, ...diff }: FileDiffProps) {
-  const { file, comments, earlier } = diff;
+  const { file, comments, earlier, findings } = diff;
   const Chevron = open ? ChevronDownIcon : ChevronRightIcon;
   return (
     <section id={`review-file-${index}`} aria-label={file.path} className="scroll-mt-20 overflow-hidden rounded-lg border">
@@ -351,6 +381,7 @@ export function FileDiff({ index, open, onToggle, view, onViewed, ...diff }: Fil
         </span>
         {onViewed && file.blob && <ViewedButton path={file.path} viewed={view.viewed} onViewed={onViewed} />}
       </header>
+      {open && findings?.loose.map((finding) => <FindingNote key={`loose:${finding.line}:${finding.body}`} finding={finding} by={findings.by} loose />)}
       {open && earlier.outdated.map((comment) => <EarlierNote key={`outdated:${comment.line}:${comment.body}`} comment={comment} outdated />)}
       {open &&
         (file.collapsed ? (
