@@ -1,6 +1,9 @@
 /** What a notification is about: a run that started, finished or failed, or a gate that needs a person. */
 export type NotificationKind = "started" | "finished" | "failed" | "input";
 
+/** What the feed page can narrow to: the unread items, or one kind. */
+export type NotificationFilter = "unread" | NotificationKind;
+
 /** One entry of the notification feed. */
 export type NotificationItem = {
   id: string;

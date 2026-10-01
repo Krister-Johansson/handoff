@@ -3,6 +3,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import { appendEvents, eq, projects, questions, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
+import type { NotificationFilter } from "../lib/notifications";
 import { listNotifications, markNotificationsRead } from "./notifications";
 
 const db = createTestDb();
@@ -100,4 +101,28 @@ test("older notifications page back from a time", async () => {
   const [newest] = (await listNotifications(db, { limit: 1 })).items;
   const older = await listNotifications(db, { limit: 8, before: newest!.createdAt });
   expect(older.items.map((i) => i.kind)).toEqual(["failed", "started"]);
+});
+
+test("the feed narrows to unread items, or to one kind", async () => {
+  const { start, event, age } = await setUp();
+  const run = await start("Add a CHANGELOG.md");
+  await event(run.id, "run.started");
+  await age(30);
+  await event(run.id, "run.failed", { nodeKey: "coder", reason: "node_failed" });
+  await age(20);
+  const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId: run.id, nodeExecutionId: gate.id, question: "Which license?" });
+  await db.execute(sql`update questions set created_at = now() - interval '10 minutes'`);
+  const all = await listNotifications(db, { limit: 8 });
+  await markNotificationsRead(db, all.items[0]!.createdAt);
+  await event(run.id, "run.succeeded");
+
+  const kinds = async (filter?: NotificationFilter) => (await listNotifications(db, { limit: 8, ...(filter ? { filter } : {}) })).items.map((i) => i.kind);
+  expect(await kinds()).toEqual(["finished", "input", "failed", "started"]);
+  expect(await kinds("unread")).toEqual(["finished"]);
+  expect(await kinds("input")).toEqual(["input"]);
+  expect(await kinds("failed")).toEqual(["failed"]);
+  expect(await kinds("finished")).toEqual(["finished"]);
+  // The unread count is for the whole feed, whatever it is narrowed to.
+  expect((await listNotifications(db, { limit: 8, filter: "failed" })).unread).toBe(1);
 });
