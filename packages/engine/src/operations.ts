@@ -57,6 +57,13 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string }
   await stopRunPreviews(db, runId);
 }
 
+/** Wakes a Try it gate that still waits for its answer, so it starts the run's app again if it stopped. */
+export async function restartTryIt(db: Db, questionId: string) {
+  const [question] = await db.select().from(questions).where(eq(questions.id, questionId));
+  if (!question || question.answer !== null) throw new Error(`question ${questionId} is not waiting`);
+  await wakeByToken(db, questionId, { reason: "preview" });
+}
+
 /** Records a person's answer and wakes the Human gate waiting on it. */
 export async function answerQuestion(
   db: Db,

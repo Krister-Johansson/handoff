@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { answerQuestion, cancelRun, repairNodeExecution, resolveExhaustedLoop } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, repairNodeExecution, resolveExhaustedLoop, restartTryIt } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
 import { runPathOf } from "@/server/run-path";
 import { markViewed } from "@/server/review";
@@ -105,6 +105,21 @@ export async function resolveLoopAction(input: z.input<typeof ResolveLoopSchema>
   if (!parsed.success) return { ok: false, error: "That decision cannot be sent." };
   try {
     await resolveExhaustedLoop(getDb(), parsed.data.runId, parsed.data.action);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  refresh(parsed.data.runId);
+  return { ok: true };
+}
+
+const RestartSchema = z.object({ questionId: z.string().uuid(), runId: z.string().uuid() });
+
+/** Starts a Try it gate's app again, when it stopped or did not start. */
+export async function restartTryItAction(input: z.input<typeof RestartSchema>): Promise<InboxActionState> {
+  const parsed = RestartSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That app cannot be restarted." };
+  try {
+    await restartTryIt(getDb(), parsed.data.questionId);
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

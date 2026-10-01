@@ -44,6 +44,16 @@ test("a human gate either reviews what reaches it or answers a question", () => 
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "gate", patch: { config: { mode: "question" } } });
 });
 
+test("a human gate can start the run's app for a person to try", () => {
+  const dispatch = vi.fn();
+  render(<Inspector graph={graph} selection={{ nodeId: "gate" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "try" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "gate", patch: { config: { mode: "try" } } });
+  const tried = { ...graph, nodes: graph.nodes.map((n) => (n.id === "gate" ? { ...n, data: { ...n.data, config: { mode: "try" } } } : n)) };
+  render(<Inspector graph={tried} selection={{ nodeId: "gate" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByText(/starts the run's app from .claude\/launch.json/)).toBeInTheDocument();
+});
+
 test("a merge node waits for a person to merge by default, or merges on its own in turn", () => {
   const dispatch = vi.fn();
   const withMerge: FlowGraph = {

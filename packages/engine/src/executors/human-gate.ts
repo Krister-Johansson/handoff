@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { limitDiff, notifies, type DiffFile } from "@handoff/core";
-import { questions, type Db } from "@handoff/db";
+import { acceptanceOf, gateMode, limitDiff, notifies, type DiffFile } from "@handoff/core";
+import { previews, questions, type Db } from "@handoff/db";
+import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
 /** Answers the review page fills in when the person wrote no note; not decisions in themselves. */
@@ -126,10 +127,49 @@ async function compose(ctx: ExecutorContext, branchDiff: BranchDiff | undefined)
  * Asks a person. The first run stores a question and waits on its id; answering wakes the gate,
  * which records the answer in run state. Retrying an exhausted loop resets that loop's counter.
  */
-export function humanGateExecutor(deps: { db: Db; branchDiff?: BranchDiff }): NodeExecutor {
+type GateDeps = { db: Db; branchDiff?: BranchDiff; workerId?: string; docker?: DockerExec };
+
+/** What a Try it question shows about the run's app: its address while it runs, or why it did not start. */
+type PreviewState = { id: string; url: string; status: "running" } | { status: "failed"; error: string };
+
+/**
+ * Starts the run's app for a Try it gate, or keeps the one this gate already has running. An app that
+ * cannot start does not fail the gate: the person sees why and can send the work back.
+ */
+async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<PreviewState> {
+  const [running] = await deps.db.select().from(previews).where(and(eq(previews.nodeExecutionId, ctx.execution.id), eq(previews.status, "running")));
+  if (running) return { id: running.id, url: running.url, status: "running" };
+  if (!ctx.workdir) return { status: "failed", error: "The gate has no worktree to start the app from." };
+  try {
+    const row = await startPreview(
+      { db: deps.db, workerId: deps.workerId ?? "worker" },
+      { runId: ctx.run.id, projectId: ctx.project.id, workdir: ctx.workdir, nodeExecutionId: ctx.execution.id, signal: ctx.signal, ...(deps.docker ? { docker: deps.docker } : {}) },
+    );
+    ctx.emit("preview.started", { id: row.id, url: row.url, configuration: row.configuration });
+    return { id: row.id, url: row.url, status: "running" };
+  } catch (error) {
+    if (!(error instanceof PreviewError)) throw error;
+    ctx.emit("preview.failed", { error: error.message });
+    return { status: "failed", error: error.message };
+  }
+}
+
+/** A Try it gate's question: try the running app against the run's acceptance criteria. */
+async function composeTry(ctx: ExecutorContext, deps: GateDeps): Promise<Ask> {
+  const acceptance = acceptanceOf(ctx.state)?.items ?? [];
   return {
-    needsWorkdir: false,
+    question: acceptance.length ? "Try the app and check each acceptance criterion." : "Try the app, then approve it or send it back with what is wrong.",
+    options: ["approve", "changes"],
+    context: { reason: "try", acceptance, preview: await ensurePreview(ctx, deps) },
+  };
+}
+
+export function humanGateExecutor(deps: GateDeps): NodeExecutor {
+  return {
+    // A Try it gate starts the app from the run's worktree; other gates only read what reached them.
+    needsWorkdir: (node) => gateMode(node.config) === "try",
     async execute(ctx): Promise<ExecutorOutcome> {
+      const tryIt = gateMode(ctx.node.config) === "try";
       let [question] = await deps.db.select().from(questions).where(eq(questions.nodeExecutionId, ctx.execution.id));
       const approvedAfterFixes = obj(ctx.state.approvedAfterFixes);
       const preApproved = approvedAfterFixes[ctx.node.key];
@@ -142,7 +182,7 @@ export function humanGateExecutor(deps: { db: Db; branchDiff?: BranchDiff }): No
         return { kind: "completed", output: answer, statePatch: { human: { ...ctx.state.human, [ctx.node.key]: answer }, approvedAfterFixes: rest } };
       }
       if (!question) {
-        const ask = await compose(ctx, deps.branchDiff);
+        const ask = tryIt ? await composeTry(ctx, deps) : await compose(ctx, deps.branchDiff);
         [question] = await deps.db
           .insert(questions)
           .values({ runId: ctx.run.id, nodeExecutionId: ctx.execution.id, ...ask })
@@ -151,8 +191,16 @@ export function humanGateExecutor(deps: { db: Db; branchDiff?: BranchDiff }): No
         question ??= (await deps.db.select().from(questions).where(and(eq(questions.nodeExecutionId, ctx.execution.id))))[0]!;
         ctx.emit("human.asked", { questionId: question.id, question: question.question, options: question.options });
         if (notifies(ctx.node, "input")) ctx.emit("notify", { kind: "input", nodeKey: ctx.node.key, questionId: question.id });
+      } else if (tryIt && question.answer === null) {
+        // Woken without an answer (Restart app): start the app again if it stopped.
+        const preview = await ensurePreview(ctx, deps);
+        if (JSON.stringify(preview) !== JSON.stringify(question.context.preview)) {
+          const [updated] = await deps.db.update(questions).set({ context: { ...question.context, preview } }).where(eq(questions.id, question.id)).returning();
+          question = updated ?? question;
+        }
       }
       if (question.answer === null) return { kind: "waiting", wait: { kind: "human", token: question.id } };
+      if (tryIt) await stopStepPreviews(deps.db, ctx.execution.id);
 
       // "Approve after fixes" routes like changes; the gate remembers to let the fixed work through.
       const afterFixes = question.option === "fix";

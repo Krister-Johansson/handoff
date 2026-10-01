@@ -49,7 +49,8 @@ export type ExecutorOutcome =
   | { kind: "interrupted" };
 
 export interface NodeExecutor {
-  needsWorkdir: boolean;
+  /** Whether the step runs in the run's worktree; a function decides by the node, as a Try it gate needs one and other gates do not. */
+  needsWorkdir: boolean | ((node: CompiledNode) => boolean);
   execute(ctx: ExecutorContext): Promise<ExecutorOutcome>;
 }
 

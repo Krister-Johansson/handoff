@@ -38,7 +38,7 @@ function uniqueId(taken: Set<string>, base: string, first: number): string {
 }
 
 /** A human gate's output that stands for "go on" in each mode. */
-const GO_ON = { approval: "approve", question: "answered" } as const;
+const GO_ON = { approval: "approve", question: "answered", try: "approve" } as const;
 
 /**
  * When a human gate switches mode its outputs change, so edges leaving its old "go on" port move to

@@ -51,8 +51,11 @@ const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, Outp
 const GATE_APPROVAL = [out("approve", "approve", { eq: ["node.output.option", "approve"] }), out("changes", "changes", { in: ["node.output.option", ["changes", "reject"]] }, "feedback")];
 const GATE_QUESTION = [out("answered", "answered", { neq: ["node.output.option", "abort"] }, "feedback")];
 
-/** Whether a human gate reviews what reaches it (approval) or answers a question a coder asked. */
-export const gateMode = (config: Record<string, unknown>) => (config.mode === "question" ? "question" : "approval");
+/**
+ * Whether a human gate reviews what reaches it (approval), answers a question a coder asked, or starts
+ * the run's app for a person to try against the acceptance criteria (try), which routes like approval.
+ */
+export const gateMode = (config: Record<string, unknown>) => (config.mode === "question" ? "question" : config.mode === "try" ? "try" : "approval");
 
 /** Whether an edge leaving `port` of a node sends feedback back or continues the work. */
 export function portKind(type: string, config: Record<string, unknown>, port: string | undefined): OutputPort["kind"] | undefined {
