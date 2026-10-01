@@ -300,9 +300,10 @@ describe("external reviewers", () => {
 });
 
 describe("repositories without CI", () => {
-  async function run(prConfig: Record<string, unknown>) {
+  async function run(prConfig: Record<string, unknown>, opts: { ci?: boolean } = {}) {
     const origin = createOriginRepo();
     const github = new FakeGitHub();
+    github.ciConfigured = opts.ci ?? true;
     const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
     doc.nodes.find((n) => n.key === "pr")!.attributes.config = prConfig;
     const { project, graphVersion } = await seedGraph(db, doc, { localClonePath: origin });
@@ -323,6 +324,12 @@ describe("repositories without CI", () => {
     const { github, run: created } = await run({ noChecksAfterMinutes: 0 });
     expect(github.merged).toEqual([1]);
     expect((await inspect(db, created.id)).types).toContain("github.no_checks");
+  });
+
+  test("a repository with no CI at all goes on at once, without waiting for the limit", async () => {
+    const { github, run: created } = await run({}, { ci: false });
+    expect(github.merged).toEqual([1]);
+    expect((await inspect(db, created.id)).events.find((e) => e.type === "github.no_checks")?.payload).toMatchObject({ reason: "no_ci" });
   });
 
   test("before the limit a PR with no checks yet keeps waiting, since CI may still be starting", async () => {

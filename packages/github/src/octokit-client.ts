@@ -131,6 +131,19 @@ export class OctokitGitHub implements GitHubPort {
     await octokit.rest.pulls.update({ owner: repo.owner, repo: repo.name, pull_number: number, ...input });
   }
 
+  async expectsChecks(repo: RepoRef, branch: string): Promise<boolean> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.actions.listRepoWorkflows({ owner: repo.owner, repo: repo.name, per_page: 100 });
+    if (data.workflows.some((w) => w.state === "active")) return true;
+    try {
+      const rules = await octokit.request("GET /repos/{owner}/{repo}/rules/branches/{branch}", { owner: repo.owner, repo: repo.name, branch });
+      return (rules.data as { type: string }[]).some((r) => r.type === "required_status_checks");
+    } catch {
+      // Rules need a newer plan or permission on some repositories; without them, workflows decide.
+      return false;
+    }
+  }
+
   async getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot> {
     const octokit = await this.clientFor(repo);
     const { repository } = await octokit.graphql<PullRequestSnapshotQuery>(PullRequestSnapshotDocument.toString(), {

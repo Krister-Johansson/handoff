@@ -112,8 +112,10 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number 
       const sincePush = Date.now() - (ctx.execution.startedAt ?? new Date()).getTime();
       const noChecksMs = (typeof ctx.node.config.noChecksAfterMinutes === "number" ? ctx.node.config.noChecksAfterMinutes : 10) * 60_000;
       const noChecks = requireChecks && snapshot.checks === null && snapshot.state === "open";
-      if (noChecks && sincePush >= noChecksMs) {
-        ctx.emit("github.no_checks", { number, afterMinutes: noChecksMs / 60_000 });
+      // A repository with no workflows and no required checks will never get one: there is nothing to wait for.
+      const noCi = noChecks && !(await deps.github.expectsChecks(repo, ctx.run.baseBranch).catch(() => true));
+      if (noChecks && (noCi || sincePush >= noChecksMs)) {
+        ctx.emit("github.no_checks", noCi ? { number, reason: "no_ci" } : { number, afterMinutes: noChecksMs / 60_000 });
         feedback = { ...feedback, ci: { ...feedback.ci, status: "success" } };
       }
       ctx.emit("github.pr", { number, url: snapshot.url, headSha: snapshot.headSha, ci: feedback.ci.status, review: feedback.review.decision });
