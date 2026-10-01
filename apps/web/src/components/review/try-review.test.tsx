@@ -91,4 +91,7 @@ test("an answered review shows each criterion's result and asks nothing more", (
   expect(within(section("A user can create a new project")).getByText("Works")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Submit" })).not.toBeInTheDocument();
   expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  // The app stopped when the gate was answered.
+  expect(screen.queryByRole("link", { name: /Open the app/ })).not.toBeInTheDocument();
+  expect(screen.getByText("The app stopped when this was answered.")).toBeInTheDocument();
 });
