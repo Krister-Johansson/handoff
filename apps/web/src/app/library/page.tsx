@@ -157,7 +157,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
         description="Skills, MCP servers, subagents and groups of them that graph nodes enable by name."
       />
       <UrlTabs value={active} className="gap-4">
-        <TabsList>
+        <TabsList variant="line">
           {sections.map((s) => (
             <TabsTrigger key={s.value} value={s.value}>
               {s.label}

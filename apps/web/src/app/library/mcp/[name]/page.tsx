@@ -36,7 +36,7 @@ export default async function McpServerPage({ params, searchParams }: { params: 
         />
       )}
       <Tabs defaultValue={query.tab === "settings" ? "settings" : "tools"}>
-        <TabsList>
+        <TabsList variant="line">
           <TabsTrigger value="tools">Tools</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
         </TabsList>

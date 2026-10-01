@@ -147,7 +147,7 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
         )}
       </div>
       <Tabs defaultValue="steps" className="gap-4">
-        <TabsList>
+        <TabsList variant="line">
           <TabsTrigger value="steps">Steps</TabsTrigger>
           <TabsTrigger value="graph">Graph</TabsTrigger>
           <TabsTrigger value="events">Events</TabsTrigger>

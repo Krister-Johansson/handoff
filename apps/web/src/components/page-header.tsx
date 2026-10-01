@@ -86,7 +86,7 @@ function CrumbLabel({ crumb, last }: { crumb: Crumb; last: boolean }) {
 /** The breadcrumb trail on its own, for pages such as the graph editor that keep the whole height for their canvas. */
 export function PageTrail({ crumbs }: { crumbs: Crumb[] }) {
   return (
-    <Breadcrumb>
+    <Breadcrumb className="text-[13px]">
       <BreadcrumbList>
         {crumbs.map((crumb, i) => {
           const last = i === crumbs.length - 1;
@@ -131,15 +131,15 @@ export function PageHeader({
   className?: string;
 }) {
   return (
-    <header className={cn("flex flex-col gap-3", className)}>
+    <header className={cn("flex flex-col gap-2.5", className)}>
       <PageTrail crumbs={crumbs} />
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
-          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight break-words">
+          <h1 className="flex flex-wrap items-center gap-2.5 text-[22px] leading-tight font-semibold tracking-[-0.015em] break-words">
             {title}
             {titleExtra}
           </h1>
-          {description && <div className="text-sm text-muted-foreground">{description}</div>}
+          {description && <div className="text-[13px] text-muted-foreground">{description}</div>}
         </div>
         {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
       </div>
