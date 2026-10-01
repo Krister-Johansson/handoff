@@ -133,3 +133,19 @@ test("cancelling a run stops its app", async () => {
   await expect.poll(() => alive(row.pid!)).toBe(false);
   expect((await db.select().from(previews))[0]!.status).toBe("stopped");
 });
+
+test("services whose ports another stack already holds are taken as running, and the app goes on", async () => {
+  const workdir = worktree({ "docker-compose.yml": "services: {}\n" });
+  const notes: string[] = [];
+  await expect(
+    ensureServices(
+      workdir.path,
+      "p1",
+      async (args) => (args[0] === "info" ? { exitCode: 0, output: "" } : { exitCode: 1, output: "Error response from daemon: Bind for 127.0.0.1:5434 failed: port is already allocated" }),
+      (note) => notes.push(note),
+    ),
+  ).resolves.toBeUndefined();
+  expect(notes).toEqual([expect.stringMatching(/already in use.*another Docker stack/s)]);
+  // Any other failure still stops the preview.
+  await expect(ensureServices(workdir.path, "p1", async (args) => (args[0] === "info" ? { exitCode: 0, output: "" } : { exitCode: 1, output: "no such image" }))).rejects.toThrow(/did not start/);
+});
