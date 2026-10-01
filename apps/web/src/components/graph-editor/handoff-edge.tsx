@@ -4,11 +4,18 @@ import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps }
 import { memo } from "react";
 import type { EdgeAttributes } from "@handoff/core";
 import { cn } from "@/lib/utils";
-import { loops, edgeLabel, edgeStyle, loopPath, roundedPath, routeFor } from "./edge-geometry";
+import { loops, edgeLabel, edgeStyle, edgeTone, loopPath, roundedPath, routeFor, type EdgeTone } from "./edge-geometry";
 import { useEdgeInvalid } from "./edge-issues";
 import { useEdgeRoute } from "./elk-routes";
 
 export type HandoffEdge = Edge<EdgeAttributes & { taken?: boolean; active?: boolean }, "handoff">;
+
+const LABEL_TONE: Record<EdgeTone, string | undefined> = {
+  active: "border-active-dot/40 text-active",
+  selected: "border-primary text-foreground",
+  loop: "border-danger-dot/35 text-danger",
+  plain: undefined,
+};
 
 function HandoffEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd }: EdgeProps<HandoffEdge>) {
   const route = useEdgeRoute(id);
@@ -34,9 +41,9 @@ function HandoffEdgeView({ id, sourceX, sourceY, targetX, targetY, sourcePositio
         <EdgeLabelRenderer>
           <div
             className={cn(
-              "nodrag nopan pointer-events-auto absolute truncate rounded border bg-background px-1.5 py-0.5 text-center font-mono text-[10px] text-muted-foreground",
+              "nodrag nopan pointer-events-auto absolute truncate rounded-[4px] border bg-background px-1.5 py-px text-center font-mono text-[10px] text-muted-foreground",
               label.width === undefined && "max-w-56",
-              (selected || data?.active) && "border-primary text-foreground",
+              LABEL_TONE[edgeTone(data, selected, data?.active)],
             )}
             style={{ transform: `translate(-50%, -50%) translate(${label.x}px, ${label.y}px)`, ...(label.width ? { width: label.width } : {}) }}
           >

@@ -9,7 +9,7 @@ export const loops = (data: EdgeAttributes | undefined) => Boolean(data?.loop ||
 export function edgeLabel(data: EdgeAttributes | undefined): string {
   const port = data?.port?.replace("_", " ");
   const condition = port ? (data?.condition ? `${port} (custom)` : port) : describeCondition(data?.condition);
-  const loop = loops(data) ? `loop ×${data?.maxAttempts ?? (data?.input === "feedback" ? 3 : "?")}` : "";
+  const loop = loops(data) ? `max ${data?.maxAttempts ?? (data?.input === "feedback" ? 3 : "?")}` : "";
   const on = !port && data?.on && data.on !== "passed" ? `on ${data.on}` : "";
   const label = [on, condition, loop].filter(Boolean).join(" · ");
   return label.length > MAX_LABEL_CHARS ? `${label.slice(0, MAX_LABEL_CHARS - 1)}…` : label;
@@ -22,14 +22,30 @@ export function loopPath(sx: number, sy: number, tx: number, ty: number): [strin
   return [path, (sx + tx) / 2, (sy + ty) / 2 + 0.75 * dy];
 }
 
-/** Loop edges are dashed; failure edges are red; the label shows the condition and loop budget. */
-/** How an edge is drawn: red when invalid, highlighted when selected, strongest when it started a node at work. */
+/**
+ * How an edge is drawn: in the destructive colour when invalid, highlighted when selected, active and
+ * dashed (React Flow animates the dash) when it started a node at work. Loops are red and dashed,
+ * failure edges red, and the rest in the strong border colour.
+ */
 export function edgeStyle(data: EdgeAttributes | undefined, selected: boolean | undefined, invalid = false, active = false) {
+  const loop = loops(data);
+  const red = loop || data?.on === "failed";
+  const stroke = invalid ? "var(--destructive)" : active ? "var(--active-dot)" : selected ? "var(--primary)" : red ? "var(--danger-dot)" : "var(--input)";
   return {
-    strokeDasharray: loops(data) && !active ? "6 4" : undefined,
-    stroke: invalid || data?.on === "failed" ? "var(--destructive)" : selected || active ? "var(--primary)" : "var(--muted-foreground)",
-    strokeWidth: active ? 2.5 : invalid || selected ? 2 : 1.5,
+    strokeDasharray: active ? "6 4" : loop ? "4 3" : undefined,
+    stroke,
+    strokeWidth: active || invalid || selected ? 2 : 1.5,
+    ...(red && !active && !invalid && !selected ? { opacity: 0.8 } : {}),
   };
+}
+
+export type EdgeTone = "active" | "selected" | "loop" | "plain";
+
+/** The tone of an edge's label, matching how the edge is drawn. */
+export function edgeTone(data: EdgeAttributes | undefined, selected: boolean | undefined, active: boolean | undefined): EdgeTone {
+  if (active) return "active";
+  if (selected) return "selected";
+  return loops(data) || data?.on === "failed" ? "loop" : "plain";
 }
 
 type Point = { x: number; y: number };

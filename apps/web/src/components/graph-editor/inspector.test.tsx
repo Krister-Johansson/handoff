@@ -144,6 +144,19 @@ test("Start says what starts the run, and with a Start no other node can be made
   expect(screen.queryByRole("button", { name: "Make this the start node" })).not.toBeInTheDocument();
 });
 
+test("a node lists the edges that reach it and leave it, with each loop's budget", () => {
+  const linked: FlowGraph = {
+    ...graph,
+    edges: [
+      ...graph.edges,
+      { id: "planner->reviewer", source: "planner", target: "reviewer", sourceHandle: "passed", targetHandle: "in", type: "handoff", data: { on: "passed", loop: false, priority: 0, port: "passed", input: "in" } },
+    ],
+  };
+  render(<Inspector graph={linked} selection={{ nodeId: "planner" }} library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  const items = within(screen.getByRole("list", { name: "Edges" })).getAllByRole("listitem");
+  expect(items.map((li) => li.textContent)).toEqual(["feedback←reviewer.changesmax 3", "passed→reviewer"]);
+});
+
 test("Finish can stop notifying", () => {
   const dispatch = vi.fn();
   const withFinish: FlowGraph = { ...graph, nodes: [...graph.nodes, { id: "finish", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "finish", label: "Finish", isStart: false, config: { notify: true } } }] };

@@ -29,7 +29,7 @@ test("routeFor gives up when a node moved since the layout", () => {
 });
 
 test("edgeLabel joins the trigger, the condition and the loop budget, capped for the layout", () => {
-  expect(edgeLabel({ on: "passed", loop: true, maxAttempts: 3, priority: 0, condition: { eq: ["node.output.passed", false] } })).toBe("passed = false · loop ×3");
+  expect(edgeLabel({ on: "passed", loop: true, maxAttempts: 3, priority: 0, condition: { eq: ["node.output.passed", false] } })).toBe("passed = false · max 3");
   expect(edgeLabel({ on: "failed", loop: false, priority: 0 })).toBe("on failed");
   const long = edgeLabel({ on: "passed", loop: true, maxAttempts: 3, priority: 0, condition: { any: [{ eq: ["node.output.feedback.ci.status", "failure"] }, { eq: ["node.output.feedback.review.decision", "changes_requested"] }] } });
   expect(long.length).toBeLessThanOrEqual(MAX_LABEL_CHARS);

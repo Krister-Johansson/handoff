@@ -1,6 +1,6 @@
 "use client";
 
-import { Background, ControlButton, Controls, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes } from "@xyflow/react";
+import { ControlButton, Controls, Panel, ReactFlow, ReactFlowProvider, useReactFlow, type EdgeTypes, type NodeTypes } from "@xyflow/react";
 import { LocateFixedIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { flowOf } from "@/lib/flow";
@@ -8,12 +8,22 @@ import { useFlowColorMode } from "@/lib/use-flow-color-mode";
 import { followTargets, useFollow } from "@/lib/use-follow";
 import type { EdgeRoute, LayoutResult } from "@/lib/elk-layout";
 import { cn } from "@/lib/utils";
+import { CanvasBackground } from "./canvas-chrome";
+import { CANVAS_STYLE, CONTROLS_CLASS, PANEL_CLASS } from "./canvas-style";
 import { EdgeRoutesContext, useElkLayout, useMeasuredSignature } from "./elk-routes";
 import { HandoffEdgeComponent } from "./handoff-edge";
 import { HandoffNodeComponent } from "./handoff-node";
 
 const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
 const edgeTypes: EdgeTypes = { handoff: HandoffEdgeComponent };
+
+/** What a node's frame colour means. */
+const LEGEND = [
+  ["passed", "bg-success-dot"],
+  ["running", "bg-active-dot animate-pulse"],
+  ["waiting", "bg-attention-dot"],
+  ["failed", "bg-danger-dot"],
+] as const;
 
 const NO_ROUTES: Record<string, EdgeRoute> = {};
 
@@ -88,9 +98,10 @@ function LaidOutRunGraph({ document, statuses, onNodeClick, activeEdges, classNa
   );
   return (
     <EdgeRoutesContext.Provider value={layout?.routes ?? NO_ROUTES}>
-      <div className={cn("h-80 overflow-hidden rounded-md border transition-opacity", layout ? "opacity-100" : "opacity-0", className)}>
+      <div className={cn("h-80 overflow-hidden rounded-lg border bg-background transition-opacity", layout ? "opacity-100" : "opacity-0", className)}>
         <ReactFlow
           colorMode={colorMode}
+          style={CANVAS_STYLE}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -103,8 +114,8 @@ function LaidOutRunGraph({ document, statuses, onNodeClick, activeEdges, classNa
           onMoveStart={follow.onMoveStart}
           proOptions={{ hideAttribution: false }}
         >
-          <Background />
-          <Controls showInteractive={false}>
+          <CanvasBackground />
+          <Controls showInteractive={false} className={CONTROLS_CLASS}>
             {/* Keeps the running or waiting nodes in view; moving the view yourself turns it off. */}
             <ControlButton
               onClick={follow.toggle}
@@ -116,6 +127,14 @@ function LaidOutRunGraph({ document, statuses, onNodeClick, activeEdges, classNa
               <LocateFixedIcon />
             </ControlButton>
           </Controls>
+          <Panel position="top-right" aria-label="Legend" className={cn(PANEL_CLASS, "flex gap-3 px-2.5 py-1.5 text-[11px] text-muted-foreground")}>
+            {LEGEND.map(([label, dot]) => (
+              <span key={label} className="flex items-center gap-1.5">
+                <span aria-hidden className={cn("size-[7px] rounded-full", dot)} />
+                {label}
+              </span>
+            ))}
+          </Panel>
         </ReactFlow>
       </div>
     </EdgeRoutesContext.Provider>

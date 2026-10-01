@@ -18,21 +18,17 @@ export default async function GraphEditorPage({ params }: { params: Promise<{ pr
   const [project] = await db.select({ id: projects.id, name: projects.name }).from(projects).where(eq(projects.id, projectId));
   const crumbs = [...(await projectCrumbs(db, project!)), { label: "Graphs", href: `/projects/${projectId}?tab=graphs` }, await graphCrumb(db, projectId, name)];
   return (
-    <div className="flex h-[calc(100svh-3.5rem)] flex-col">
-      <div className="border-b px-4 py-2">
-        <PageTrail crumbs={crumbs} />
-      </div>
-      <div className="min-h-0 flex-1">
-        <GraphEditor
-          projectId={projectId}
-          graphName={name}
-          version={graph.version}
-          document={graph.document}
-          library={library}
-          versions={versions.map((v) => ({ version: v.version, createdAt: v.createdAt.toISOString(), createdBy: v.createdBy }))}
-          runSlot={<StartRunDialog key="start-run" projectId={projectId} graphName={name} />}
-        />
-      </div>
+    <div className="h-[calc(100svh-53px)]">
+      <GraphEditor
+        projectId={projectId}
+        graphName={name}
+        version={graph.version}
+        document={graph.document}
+        library={library}
+        versions={versions.map((v) => ({ version: v.version, createdAt: v.createdAt.toISOString(), createdBy: v.createdBy }))}
+        trail={<PageTrail crumbs={crumbs} />}
+        runSlot={<StartRunDialog key="start-run" projectId={projectId} graphName={name} label="Start run" variant="outline" />}
+      />
     </div>
   );
 }
