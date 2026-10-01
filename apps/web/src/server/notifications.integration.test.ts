@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, projects, questions, sql } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, projects, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
 import type { NotificationFilter } from "../lib/notifications";
@@ -14,7 +14,12 @@ async function setUp() {
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
   await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
   const start = (task: string) => startRunFromGraph(db, { projectId: project.id, graphName: "g", task });
-  const event = (runId: string, type: string, payload: Record<string, unknown> = {}) => db.transaction((tx) => appendEvents(tx, runId, [{ type, payload }]));
+  // A run that says it failed is failed, as the engine leaves it.
+  const event = (runId: string, type: string, payload: Record<string, unknown> = {}) =>
+    db.transaction(async (tx) => {
+      await appendEvents(tx, runId, [{ type, payload }]);
+      if (type === "run.failed") await tx.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
+    });
   // Spread the rows out in time, oldest first, so the order does not depend on one transaction's clock.
   const age = (minutes: number) => db.execute(sql`update events set created_at = now() - make_interval(mins => ${minutes}) where created_at > now() - interval '1 second'`);
   return { project, start, event, age };
@@ -110,8 +115,9 @@ test("the feed narrows to unread items, or to one kind", async () => {
   await age(30);
   await event(run.id, "run.failed", { nodeKey: "coder", reason: "node_failed" });
   await age(20);
-  const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  await db.insert(questions).values({ runId: run.id, nodeExecutionId: gate.id, question: "Which license?" });
+  const asking = await start("Build a todo app");
+  const gate = await seedExecution(db, asking.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId: asking.id, nodeExecutionId: gate.id, question: "Which license?" });
   await db.execute(sql`update questions set created_at = now() - interval '10 minutes'`);
   const all = await listNotifications(db, { limit: 8 });
   await markNotificationsRead(db, all.items[0]!.createdAt);
@@ -136,4 +142,61 @@ test("a pull request first in line and waiting for a person is a notification th
   const { items } = await listNotifications(db, { limit: 8 });
   expect(items[0]).toMatchObject({ kind: "ready", title: "sandbox: PR #54 is ready to merge", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${run.id}` });
   expect((await listNotifications(db, { limit: 8, filter: "input" })).items.map((i) => i.kind)).toEqual(["ready"]);
+});
+
+test("a notification whose action is done says so, stops counting as unread and leaves Needs you", async () => {
+  const { start, event, age } = await setUp();
+  const asking = await start("Build a todo app");
+  const gate = await seedExecution(db, asking.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [review] = await db
+    .insert(questions)
+    .values({ runId: asking.id, nodeExecutionId: gate.id, question: "Review the plan from planner", context: { reason: "approval", review: { from: "planner", kind: "plan", markdown: "Plan" } } })
+    .returning();
+  const merging = await start("Add a CHANGELOG.md");
+  const merge = await seedExecution(db, merging.id, { nodeKey: "merge-1", nodeType: "merge", executorKind: "github", status: "waiting" });
+  await db.transaction((tx) => appendEvents(tx, merging.id, [{ type: "merge.ready", payload: { number: 54 }, nodeExecutionId: merge.id }]));
+  await age(10);
+  const broken = await start("Add usage docs");
+  await event(broken.id, "run.failed", { nodeKey: "coder", reason: "node_failed" });
+
+  const before = await listNotifications(db, { limit: 8 });
+  expect(before.items.map((i) => [i.kind, i.done])).toEqual([
+    ["failed", false],
+    ["input", false],
+    ["ready", false],
+  ]);
+  expect(before.unread).toBe(3);
+
+  // The person answers the review, asks for the merge, and repairs the failed run.
+  await db.update(questions).set({ answer: "approve", answeredAt: new Date() }).where(eq(questions.id, review!.id));
+  await db.update(runs).set({ mergeQueuedAt: new Date(), mergeRequestedAt: new Date() }).where(eq(runs.id, merging.id));
+  await db.update(runs).set({ status: "running" }).where(eq(runs.id, broken.id));
+
+  const after = await listNotifications(db, { limit: 8 });
+  expect(after.items.map((i) => [i.kind, i.done, i.unread])).toEqual([
+    ["failed", true, false],
+    ["input", true, false],
+    ["ready", true, false],
+  ]);
+  expect(after.unread).toBe(0);
+  expect((await listNotifications(db, { limit: 8, filter: "input" })).items).toEqual([]);
+  expect((await listNotifications(db, { limit: 8, filter: "unread" })).items).toEqual([]);
+});
+
+test("a ready pull request is done once its merge step stops waiting, and a question once its run ends", async () => {
+  const { start } = await setUp();
+  const merging = await start("Add a CHANGELOG.md");
+  const merge = await seedExecution(db, merging.id, { nodeKey: "merge-1", nodeType: "merge", executorKind: "github", status: "waiting" });
+  await db.transaction((tx) => appendEvents(tx, merging.id, [{ type: "merge.ready", payload: { number: 54 }, nodeExecutionId: merge.id }]));
+  const asking = await start("Build a todo app");
+  const gate = await seedExecution(db, asking.id, { nodeKey: "ask", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId: asking.id, nodeExecutionId: gate.id, question: "Which license?" });
+  expect((await listNotifications(db, { limit: 8 })).items.every((i) => !i.done)).toBe(true);
+
+  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, merge.id));
+  await db.update(runs).set({ status: "cancelled" }).where(eq(runs.id, asking.id));
+  expect((await listNotifications(db, { limit: 8 })).items.map((i) => [i.kind, i.done])).toEqual([
+    ["input", true],
+    ["ready", true],
+  ]);
 });
