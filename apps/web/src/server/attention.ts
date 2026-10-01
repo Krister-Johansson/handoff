@@ -4,14 +4,22 @@ import type { AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";
 
 /** Pull requests whose PR node still waits after CI finished, which only happens when it needs an approving review. */
-async function waitingReviews(db: Db) {
-  const latestPr = sql<{ number?: number; ci?: string } | null>`(
+export async function waitingReviews(db: Db) {
+  const latestPr = sql<{ number?: number; url?: string; ci?: string } | null>`(
     select e.payload from events e
     where e.node_execution_id = ${nodeExecutions.id} and e.type = 'github.pr'
     order by e.seq desc limit 1
   )`;
   const rows = await db
-    .select({ executionId: nodeExecutions.id, runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name, pr: latestPr })
+    .select({
+      executionId: nodeExecutions.id,
+      runId: runs.id,
+      projectId: runs.projectId,
+      task: runs.task,
+      projectName: projects.name,
+      branch: runs.branchName,
+      pr: latestPr,
+    })
     .from(nodeExecutions)
     .innerJoin(runs, eq(runs.id, nodeExecutions.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
@@ -32,12 +40,12 @@ async function finishedRuns(db: Db) {
 }
 
 /** Runs stopped because a loop used all its attempts: no step failed, so they need a decision rather than a repair. */
-async function stuckRuns(db: Db) {
+export async function stuckRuns(db: Db) {
   const lastFailure = sql<{ reason?: string; nodeKey?: string } | null>`(
     select e.payload from events e where e.run_id = ${runs.id} and e.type = 'run.failed' order by e.seq desc limit 1
   )`;
   const rows = await db
-    .select({ runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name, failure: lastFailure })
+    .select({ runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name, finishedAt: runs.finishedAt, failure: lastFailure })
     .from(runs)
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .where(eq(runs.status, "failed"));

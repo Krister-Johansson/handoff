@@ -1,6 +1,6 @@
 import { and, desc, eq, events, inArray, nodeExecutions, notificationReads, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { reviewPath, runPath } from "../lib/paths";
-import type { NotificationItem, NotificationKind } from "../lib/notifications";
+import type { NotificationFilter, NotificationItem, NotificationKind } from "../lib/notifications";
 
 /** The run events that are news, and the kind each one is. */
 const EVENT_KINDS: Record<string, NotificationKind> = { "run.started": "started", "run.succeeded": "finished", "run.failed": "failed" };
@@ -22,20 +22,24 @@ async function readUntil(db: Db) {
 /**
  * The notification feed, newest first: runs that started, finished or failed, and questions a gate
  * asked a person. Each item says whether it came after the person last opened the feed. Demo runs
- * stay out. `before` pages back from a time.
+ * stay out. `before` pages back from a time, and `filter` narrows to the unread items or to one kind.
  */
-export async function listNotifications(db: Db, { limit, before }: { limit: number; before?: Date }) {
+export async function listNotifications(db: Db, { limit, before, filter }: { limit: number; before?: Date; filter?: NotificationFilter }) {
   const until = await readUntil(db);
   const visible = eq(projects.isDemo, false);
-  const [eventRows, questionRows] = await Promise.all([
+  const eventTypes = Object.keys(EVENT_KINDS).filter((type) => !filter || filter === "unread" || EVENT_KINDS[type] === filter);
+  const withQuestions = !filter || filter === "unread" || filter === "input";
+  const unreadOnly = (column: typeof events.createdAt | typeof questions.createdAt) => (filter === "unread" && until ? sql`${ms(column)} > ${until}` : undefined);
+  const eventQuery = () =>
     db
       .select({ id: events.id, type: events.type, payload: events.payload, createdAt: events.createdAt, runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name })
       .from(events)
       .innerJoin(runs, eq(runs.id, events.runId))
       .innerJoin(projects, eq(projects.id, runs.projectId))
-      .where(and(inArray(events.type, Object.keys(EVENT_KINDS)), visible, before ? sql`${ms(events.createdAt)} < ${before}` : undefined))
+      .where(and(inArray(events.type, eventTypes), visible, before ? sql`${ms(events.createdAt)} < ${before}` : undefined, unreadOnly(events.createdAt)))
       .orderBy(desc(events.createdAt))
-      .limit(limit),
+      .limit(limit);
+  const questionQuery = () =>
     db
       .select({
         id: questions.id,
@@ -52,10 +56,10 @@ export async function listNotifications(db: Db, { limit, before }: { limit: numb
       .innerJoin(runs, eq(runs.id, questions.runId))
       .innerJoin(projects, eq(projects.id, runs.projectId))
       .innerJoin(nodeExecutions, eq(nodeExecutions.id, questions.nodeExecutionId))
-      .where(and(visible, before ? sql`${ms(questions.createdAt)} < ${before}` : undefined))
+      .where(and(visible, before ? sql`${ms(questions.createdAt)} < ${before}` : undefined, unreadOnly(questions.createdAt)))
       .orderBy(desc(questions.createdAt))
-      .limit(limit),
-  ]);
+      .limit(limit);
+  const [eventRows, questionRows] = await Promise.all([eventTypes.length ? eventQuery() : [], withQuestions ? questionQuery() : []]);
   const isUnread = (at: Date) => !until || at.getTime() > until.getTime();
   const fromEvents = eventRows.map((e): NotificationItem => {
     const kind = EVENT_KINDS[e.type]!;

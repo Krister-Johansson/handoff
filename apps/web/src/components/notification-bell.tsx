@@ -5,10 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BellIcon, BellRingIcon } from "lucide-react";
 import { toast } from "sonner";
-import { NotificationList } from "@/components/notifications/notification-list";
+import { KindTile, NotificationList } from "@/components/notifications/notification-list";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Separator } from "@/components/ui/separator";
 import { titleWithCount } from "@/lib/attention";
 import type { NotificationJson } from "@/lib/notifications";
 import { notify } from "@/lib/notify";
@@ -30,9 +29,12 @@ const label = (n: number) => (n === 0 ? "No unread notifications" : `${n} unread
 /** More new notifications than this at once make one toast instead of one each. */
 const TOAST_LIMIT = 3;
 
+/** A toast's icon is its kind's tile, which needs more room than sonner's 16px icon slot. */
+const TOAST_CLASSES = { icon: "size-7! mr-1! ml-0! self-start", description: "text-muted-foreground!", actionButton: "self-start" };
+
 /** Shows one new notification as a toast: a start quietly, a question or a failure for longer. */
 function toastFor(item: NotificationJson, open: (href: string) => void) {
-  const options = { description: item.body, action: { label: "Open", onClick: () => open(item.href) } };
+  const options = { description: item.body, icon: <KindTile kind={item.kind} />, classNames: TOAST_CLASSES, action: { label: "Open", onClick: () => open(item.href) } };
   if (item.kind === "finished") toast.success(item.title, options);
   else if (item.kind === "failed") toast.error(item.title, { ...options, duration: 10_000 });
   else if (item.kind === "input") toast.warning(item.title, { ...options, duration: 10_000 });
@@ -112,17 +114,20 @@ export function NotificationBell({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="flex w-96 flex-col gap-2 p-2">
-        <h2 className="px-2 pt-1 text-sm font-medium">Notifications</h2>
-        {feed.items.length === 0 ? (
-          <p className="px-2 py-3 text-sm text-muted-foreground">No notifications yet. Runs that start, finish, fail or need you show up here.</p>
-        ) : (
-          <NotificationList items={feed.items} onNavigate={() => setOpen(false)} />
-        )}
-        <Separator />
-        <Link href="/notifications" onClick={() => setOpen(false)} className="px-2 pb-1 text-xs text-muted-foreground hover:underline">
-          All notifications
-        </Link>
+      <PopoverContent align="end" className="flex w-[min(380px,calc(100vw-2rem))] flex-col gap-0 p-0">
+        <h2 className="px-3.5 pt-3 pb-2 text-[13px] font-semibold">Notifications</h2>
+        <div className="max-h-[min(28rem,70vh)] overflow-y-auto px-1.5 pb-1.5">
+          {feed.items.length === 0 ? (
+            <p className="px-2 py-3 text-sm text-muted-foreground">No notifications yet. Runs that start, finish, fail or need you show up here.</p>
+          ) : (
+            <NotificationList items={feed.items} onNavigate={() => setOpen(false)} />
+          )}
+        </div>
+        <div className="flex border-t px-3.5 pt-2 pb-2.5 text-xs text-muted-foreground">
+          <Link href="/notifications" onClick={() => setOpen(false)} className="hover:text-foreground hover:underline hover:underline-offset-3">
+            All notifications
+          </Link>
+        </div>
       </PopoverContent>
     </Popover>
   );
