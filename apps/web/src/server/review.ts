@@ -19,7 +19,7 @@ async function earlierRounds(db: Db, question: typeof questions.$inferSelect) {
 /** A human gate's review question with its run, or undefined when there is none with that id on that run. */
 export async function getReview(db: Db, runId: string, questionId: string) {
   const [row] = await db
-    .select({ question: questions, task: runs.task, runStatus: runs.status, projectName: projects.name })
+    .select({ question: questions, task: runs.task, runStatus: runs.status, projectName: projects.name, projectId: projects.id })
     .from(questions)
     .innerJoin(runs, eq(runs.id, questions.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
@@ -39,6 +39,7 @@ export async function getReview(db: Db, runId: string, questionId: string) {
     task: row.task,
     runStatus: row.runStatus,
     projectName: row.projectName,
+    projectId: row.projectId,
     answered: q.answer === null ? null : { option: q.option, answer: q.answer, comments: q.comments, answeredBy: q.answeredBy, answeredAt: q.answeredAt },
     views,
     earlier: earlier.map((e) => ({ answer: e.answer!, option: e.option, comments: e.comments, answeredAt: e.answeredAt })),

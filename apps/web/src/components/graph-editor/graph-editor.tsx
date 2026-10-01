@@ -142,7 +142,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   return (
     <EdgeRoutesContext.Provider value={routes}>
       <InvalidEdgesContext.Provider value={invalidEdges}>
-      <div className="grid h-[calc(100svh-3.5rem)] grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid h-full grid-cols-[minmax(0,1fr)_22rem]">
         <div className="relative min-w-0">
           <ReactFlow<FlowNode, FlowEdge>
             colorMode={colorMode}

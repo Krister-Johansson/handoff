@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { UrlTabs } from "@/components/url-tabs";
+import { PageHeader } from "@/components/page-header";
 import { PlusIcon, SearchIcon } from "lucide-react";
 import { listLibraryIndex } from "@handoff/db";
 import { Badge } from "@/components/ui/badge";
@@ -6,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { McpCheck } from "@handoff/engine/mcp-check";
 import { CHECK_STATUS } from "@/lib/mcp-check-status";
 import { StatusBadge } from "@/components/runs/status-badge";
@@ -149,11 +151,15 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
   ];
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
-        <p className="text-muted-foreground">Skills, MCP servers, subagents and groups of them that graph nodes enable by name.</p>
-      </div>
-      <Tabs defaultValue={active} className="gap-4">
+      <PageHeader
+        crumbs={[
+          { label: "Library", href: "/library" },
+          { label: sections.find((s) => s.value === active)?.label ?? "Skills", menu: sections.map((s) => ({ label: s.label, href: `/library?tab=${s.value}`, current: s.value === active })) },
+        ]}
+        title="Library"
+        description="Skills, MCP servers, subagents and groups of them that graph nodes enable by name."
+      />
+      <UrlTabs value={active} className="gap-4">
         <TabsList>
           {sections.map((s) => (
             <TabsTrigger key={s.value} value={s.value}>
@@ -191,7 +197,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
             </Card>
           </TabsContent>
         ))}
-      </Tabs>
+      </UrlTabs>
     </main>
   );
 }

@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { listLibraryIndex } from "@handoff/db";
 import { EntryPage } from "@/components/library/entry-page";
 import { SkillsShRepoPicker } from "@/components/library/skills-sh-repo-picker";
@@ -25,17 +24,19 @@ export default async function SkillsShRepoPage({ params }: { params: Promise<{ o
       tab="skills"
       kind="skill"
       title={repo}
-      subtitle={`Tick the skills you want in the library and apply. They are kept together in the group ${repoGroupName(repo)}.`}
+      parents={[
+        { label: "Add skills", href: "/library/skills/browse" },
+        { label: owner, href: `/library/skills-sh/${owner}` },
+      ]}
+      subtitle={
+        <>
+          {`Tick the skills you want in the library and apply. They are kept together in the group ${repoGroupName(repo)}. `}
+          <a href={`https://skills.sh/${repo}`} className="hover:underline">
+            skills.sh/{repo}
+          </a>
+        </>
+      }
     >
-      <p className="-mt-4 text-sm text-muted-foreground">
-        <Link href={`/library/skills-sh/${owner}`} className="hover:underline">
-          All of {owner}&apos;s repositories
-        </Link>
-        {" · "}
-        <a href={`https://skills.sh/${repo}`} className="hover:underline">
-          skills.sh/{repo}
-        </a>
-      </p>
       {skills instanceof Error ? (
         <FieldError>{skills.message}</FieldError>
       ) : (

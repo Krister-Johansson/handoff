@@ -17,7 +17,7 @@ export default async function SkillsShOwnerPage({ params }: { params: Promise<{ 
   ]);
   const inLibrary = (repo: string) => index.skills.filter((s) => s.source?.registry === "skills.sh" && s.source.id.startsWith(`${repo}/`)).length;
   return (
-    <EntryPage tab="skills" kind="skill" title={owner} subtitle="Repositories this owner publishes on skills.sh. Open one to choose its skills.">
+    <EntryPage tab="skills" kind="skill" title={owner} parents={[{ label: "Add skills", href: "/library/skills/browse" }]} subtitle="Repositories this owner publishes on skills.sh. Open one to choose its skills.">
       {repos instanceof Error ? (
         <FieldError>{repos.message}</FieldError>
       ) : (
