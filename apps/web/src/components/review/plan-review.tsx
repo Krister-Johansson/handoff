@@ -16,6 +16,13 @@ type Comment = { quote: string; body: string };
 
 const HIGHLIGHT = "review-comment";
 
+/**
+ * The highlight's colour. It lives here rather than in globals.css because Next's CSS pipeline
+ * (Lightning CSS) does not know the ::highlight() pseudo-element and warns on every build; React
+ * hoists this tag into the head once, unprocessed.
+ */
+const HIGHLIGHT_CSS = `::highlight(${HIGHLIGHT}) { background-color: color-mix(in oklab, var(--color-amber-300) 55%, transparent); }`;
+
 /** Marks each commented passage with the CSS Custom Highlight API, where the browser has it. */
 function useQuoteHighlights(root: React.RefObject<HTMLElement | null>, quotes: string[]) {
   useEffect(() => {
@@ -159,6 +166,9 @@ export function PlanReview({ questionId, runId, from, markdown }: { questionId: 
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <style href="review-comment-highlight" precedence="default">
+        {HIGHLIGHT_CSS}
+      </style>
       <div className="relative">
         <article ref={article} className={`${CARD} ${PROSE} px-8 py-7`}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
