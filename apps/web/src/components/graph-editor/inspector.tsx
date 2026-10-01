@@ -300,6 +300,17 @@ function TypeSettings({
 
       {type === "merge" && (
         <Field>
+          <FieldLabel htmlFor="merge-mode">When to merge</FieldLabel>
+          <NativeSelect id="merge-mode" value={config.mode === "auto" ? "auto" : "manual"} onChange={(e) => setConfig({ mode: e.target.value })}>
+            <NativeSelectOption value="manual">When a person merges it from the project&apos;s pull requests</NativeSelectOption>
+            <NativeSelectOption value="auto">On its own, when it is first in the merge queue</NativeSelectOption>
+          </NativeSelect>
+          <FieldDescription>Either way pull requests merge one at a time, in the order they became ready, each brought up to date with main first.</FieldDescription>
+        </Field>
+      )}
+
+      {type === "merge" && (
+        <Field>
           <FieldLabel htmlFor="merge-method">Merge method</FieldLabel>
           <NativeSelect id="merge-method" value={str(config.method) || "squash"} onChange={(e) => setConfig({ method: e.target.value })}>
             <NativeSelectOption value="squash">Squash</NativeSelectOption>

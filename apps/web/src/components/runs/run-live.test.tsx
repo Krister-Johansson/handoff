@@ -5,6 +5,8 @@ import { RunLive } from "./run-live";
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), cancelAction: vi.fn(), repairAction: vi.fn() }));
+const projectActions = vi.hoisted(() => ({ requestMergeAction: vi.fn(async () => ({ ok: true })) }));
+vi.mock("@/app/projects/actions", () => projectActions);
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -254,4 +256,20 @@ test("the event list says it is live while the run goes on, and not once it ende
   unmount();
   render(<RunLive {...common} initialStatus="succeeded" initialExecutions={executions} />);
   expect(screen.queryByText("live")).not.toBeInTheDocument();
+});
+
+test("a run first in the merge queue can be merged from its banner", async () => {
+  const merge = { id: "e9", nodeKey: "merge", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
+  render(<RunLive {...common} labels={{ merge: "Merge" }} initialStatus="waiting" initialExecutions={[merge]} queue={{ position: 1, requested: false, mode: "manual" }} />);
+  const banner = screen.getByRole("status");
+  expect(banner).toHaveTextContent("Ready to merge");
+  fireEvent.click(within(banner).getByRole("button", { name: "Merge" }));
+  await waitFor(() => expect(projectActions.requestMergeAction).toHaveBeenCalledWith({ runId: "r1", projectId: "p1" }));
+});
+
+test("a run further back in the queue has no merge button", () => {
+  const merge = { id: "e9", nodeKey: "merge", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
+  render(<RunLive {...common} initialStatus="waiting" initialExecutions={[merge]} queue={{ position: 2, requested: false, mode: "manual" }} />);
+  expect(screen.getByRole("status")).toHaveTextContent("Ready to merge, 2nd in line");
+  expect(within(screen.getByRole("status")).queryByRole("button", { name: "Merge" })).not.toBeInTheDocument();
 });

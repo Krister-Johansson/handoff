@@ -8,6 +8,8 @@ export class FakeGitHub implements GitHubPort {
   readonly prs = new Map<number, FakePr>();
   readonly jobLogs = new Map<number, string>();
   readonly merged: number[] = [];
+  /** How far a pull request (by number) is behind its base, reported once: the next compare finds it caught up. */
+  readonly behind = new Map<number, number>();
   repoId = 42;
   repos: RepoSummary[] = [];
   readonly closedIssues: { number: number; comment: string }[] = [];
@@ -65,7 +67,7 @@ export class FakeGitHub implements GitHubPort {
       changedFiles: 1,
       updatedAt: new Date().toISOString(),
       url: `https://github.com/octo/sample/pull/${number}`,
-      headSha: "sha-1",
+      headSha: `sha-${number}`,
       headRef: input.head,
       base: input.base,
       body: input.body,
@@ -107,6 +109,14 @@ export class FakeGitHub implements GitHubPort {
 
   async getJobLogTail(_repo: RepoRef, jobId: number) {
     return this.jobLogs.get(jobId);
+  }
+
+  async behindBy(_repo: RepoRef, _base: string, head: string) {
+    const pr = [...this.prs.values()].find((p) => p.headSha === head);
+    if (!pr) return 0;
+    const n = this.behind.get(pr.number) ?? 0;
+    this.behind.delete(pr.number);
+    return n;
   }
 
   async mergePr(_repo: RepoRef, number: number) {

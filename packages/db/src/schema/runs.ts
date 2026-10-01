@@ -27,6 +27,10 @@ export const runs = pgTable(
     /** GitHub issues the run works on; the bodies live in run state for the agents. */
     issues: jsonb("issues").$type<{ number: number; title: string; url: string }[]>().notNull().default([]),
     cancelRequestedAt: tstz("cancel_requested_at"),
+    /** When the run's pull request joined its project's merge queue; the queue merges in this order. */
+    mergeQueuedAt: tstz("merge_queued_at"),
+    /** When a person asked to merge it (manual merging); auto merging needs no request. */
+    mergeRequestedAt: tstz("merge_requested_at"),
     /** Set when the user archives a finished run; hides its pull request from the dashboard's lists. */
     archivedAt: tstz("archived_at"),
     startedAt: tstz("started_at"),

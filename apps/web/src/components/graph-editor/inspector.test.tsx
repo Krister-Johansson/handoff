@@ -44,6 +44,18 @@ test("a human gate either reviews what reaches it or answers a question", () => 
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "gate", patch: { config: { mode: "question" } } });
 });
 
+test("a merge node waits for a person to merge by default, or merges on its own in turn", () => {
+  const dispatch = vi.fn();
+  const withMerge: FlowGraph = {
+    ...graph,
+    nodes: [...graph.nodes, { id: "merge", type: "handoff", position: { x: 900, y: 0 }, data: { nodeType: "merge", label: "Merge", isStart: false, config: {} } }],
+  };
+  render(<Inspector graph={withMerge} selection={{ nodeId: "merge" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("When to merge")).toHaveValue("manual");
+  fireEvent.change(screen.getByLabelText("When to merge"), { target: { value: "auto" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "merge", patch: { config: { mode: "auto" } } });
+});
+
 test("a node's library is shown as badges and chosen in a dialog", async () => {
   const dispatch = vi.fn();
   const choices = { ...library, skills: [{ name: "tdd", detail: "Test first", source: "mattpocock/skills" }, { name: "unslop", detail: "Plain prose", source: "Written here" }] };
