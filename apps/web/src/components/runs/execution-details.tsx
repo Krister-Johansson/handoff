@@ -3,6 +3,7 @@ import { CheckIcon, XIcon } from "lucide-react";
 import type { ZodType } from "zod";
 import {
   CoderOutputSchema,
+  DemoOutputSchema,
   HumanAnswerSchema,
   MergeOutputSchema,
   PlannerOutputSchema,
@@ -11,6 +12,7 @@ import {
   ReviewerOutputSchema,
   TesterOutputSchema,
   type CoderOutput,
+  type DemoOutput,
   type HumanAnswer,
   type MergeOutput,
   type PlannerOutput,
@@ -21,6 +23,7 @@ import {
 } from "@handoff/core";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { TerminalOutput } from "@/components/terminal-output";
+import { Screenshot } from "./screenshot";
 import { Badge } from "@/components/ui/badge";
 import { formatDuration } from "@/lib/format";
 
@@ -249,6 +252,25 @@ function ConflictView({ data: { conflict } }: { data: PrConflictOutput }) {
   );
 }
 
+function DemoView({ data: { summary, shots } }: { data: DemoOutput }) {
+  return (
+    <>
+      <Section title="Demo">
+        <p className="whitespace-pre-wrap">{summary}</p>
+      </Section>
+      {shots.length > 0 && (
+        <Section title="Screenshots">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {shots.map((shot) =>
+              shot.artifactId ? <Screenshot key={shot.artifactId} shot={{ id: shot.artifactId, caption: shot.caption, criterion: shot.criterion, works: shot.works }} /> : null,
+            )}
+          </div>
+        </Section>
+      )}
+    </>
+  );
+}
+
 function MergeView({ data }: { data: MergeOutput }) {
   if (data.needsUpdate)
     return (
@@ -272,6 +294,7 @@ const entry = <T,>(schema: ZodType<T>, View: ComponentType<{ data: T }>) => ({ s
 /** Tried in order; the first output contract that parses renders. */
 const VIEWS = [
   entry(PlannerOutputSchema, PlannerView),
+  entry(DemoOutputSchema, DemoView),
   entry(CoderOutputSchema, CoderView),
   entry(TesterOutputSchema, TesterView),
   entry(ReviewerOutputSchema, ReviewerView),

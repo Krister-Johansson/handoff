@@ -8,6 +8,7 @@ export const NODE_LABELS: Record<NodeType, string> = {
   reviewer: "Reviewer",
   code_review: "Code review",
   tester: "Tester",
+  demo: "Demo",
   pr: "Pull request",
   merge: "Merge",
   human_gate: "Human gate",

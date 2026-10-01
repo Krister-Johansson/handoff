@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   CoderOutputSchema,
+  DemoOutputSchema,
   FinishOutputSchema,
   FunctionOutputSchema,
   HumanAnswerSchema,
@@ -18,6 +19,7 @@ export const contractRegistry = {
   coder_output: CoderOutputSchema,
   reviewer_output: ReviewerOutputSchema,
   tester_output: TesterOutputSchema,
+  demo_output: DemoOutputSchema,
   pr_output: PrNodeOutputSchema,
   merge_output: MergeOutputSchema,
   human_answer: HumanAnswerSchema,

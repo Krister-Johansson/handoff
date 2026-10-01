@@ -34,6 +34,8 @@ export const nodeCatalog: Record<NodeType, CatalogEntry> = {
     allowedTools: [...readOnlyTools, "Skill", "Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git merge-base *)", "Bash(git rev-parse *)"],
   },
   tester: { executorKind: "shell", contract: "tester_output", allowedTools: [] },
+  // Walks through the running app in a headless browser (the Playwright MCP server) and takes screenshots.
+  demo: { executorKind: "cli", contract: "demo_output", allowedTools: [...readOnlyTools, "mcp__playwright"] },
   pr: { executorKind: "github", contract: "pr_output", allowedTools: [] },
   merge: { executorKind: "github", contract: "merge_output", allowedTools: [] },
   human_gate: { executorKind: "human", contract: "human_answer", allowedTools: [] },

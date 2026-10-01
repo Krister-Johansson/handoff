@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { acceptanceOf, gateMode, limitDiff, notifies, type DiffFile } from "@handoff/core";
+import { acceptanceOf, DemoOutputSchema, gateMode, limitDiff, notifies, type DiffFile } from "@handoff/core";
 import { previews, questions, type Db } from "@handoff/db";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
@@ -154,13 +154,23 @@ async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<Prev
   }
 }
 
-/** A Try it gate's question: try the running app against the run's acceptance criteria. */
+/** The screenshots of the run's latest Demo step, for a person to see before trying the app. */
+function demoShotsOf(ctx: ExecutorContext) {
+  const demos = Object.entries(ctx.state.nodes).filter(([key]) => ctx.graph.graph.hasNode(key) && ctx.graph.node(key).type === "demo");
+  const latest = demos.sort(([, a], [, b]) => b.attempt - a.attempt).at(0)?.[1].output;
+  const parsed = DemoOutputSchema.safeParse(latest);
+  if (!parsed.success) return [];
+  return parsed.data.shots.flatMap((s) => (s.artifactId ? [{ id: s.artifactId, caption: s.caption, works: s.works, ...(s.criterion ? { criterion: s.criterion } : {}) }] : []));
+}
+
+/** A Try it gate's question: try the running app against the run's acceptance criteria, with the demo's screenshots. */
 async function composeTry(ctx: ExecutorContext, deps: GateDeps): Promise<Ask> {
   const acceptance = acceptanceOf(ctx.state)?.items ?? [];
+  const shots = demoShotsOf(ctx);
   return {
     question: acceptance.length ? "Try the app and check each acceptance criterion." : "Try the app, then approve it or send it back with what is wrong.",
     options: ["approve", "changes"],
-    context: { reason: "try", acceptance, preview: await ensurePreview(ctx, deps) },
+    context: { reason: "try", acceptance, preview: await ensurePreview(ctx, deps), ...(shots.length ? { shots } : {}) },
   };
 }
 

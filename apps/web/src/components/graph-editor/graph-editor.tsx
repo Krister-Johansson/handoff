@@ -32,7 +32,7 @@ const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
 const edgeTypes: EdgeTypes = { handoff: HandoffEdgeComponent };
 /** The palette in two groups: the steps that do or judge the work, then the ones that ship it and close the graph. */
 const PALETTE: NodeType[][] = [
-  ["start", "planner", "coder", "reviewer", "code_review", "tester", "human_gate"],
+  ["start", "planner", "coder", "reviewer", "code_review", "tester", "demo", "human_gate"],
   ["pr", "merge", "function", "finish"],
 ];
 

@@ -13,3 +13,4 @@ export * from "./library.ts";
 export * from "./review-views.ts";
 export * from "./notification-reads.ts";
 export * from "./previews.ts";
+export * from "./screenshots.ts";

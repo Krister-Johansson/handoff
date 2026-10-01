@@ -42,6 +42,7 @@ describe("migrations", () => {
       "questions",
       "review_views",
       "runs",
+      "screenshots",
       "webhook_deliveries",
       "workers",
     ]);

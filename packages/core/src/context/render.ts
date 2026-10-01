@@ -31,6 +31,8 @@ export type ContextPacket = {
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
   suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
   issues?: { number: number; title: string; url: string; body: string }[];
+  /** The run's app, started from its worktree for this step to walk through in a browser. */
+  app?: { url: string };
   /** What a person will check in the running app to see the task is done. */
   acceptance?: { source: "issue" | "planner"; items: string[] };
   /** A reviewer's own last review of this work, when it runs again: what it asked for and what came back. */
@@ -121,6 +123,17 @@ export function renderContextPacket(packet: ContextPacket): string {
   if (packet.acceptance?.items.length) {
     const from = packet.acceptance.source === "issue" ? "The linked issues list these" : "The planner wrote these, and a person approved them with the plan";
     out.push("# Acceptance criteria", "", `${from}. A person checks each one in the running app before the work ships.`, "", ...packet.acceptance.items.map((item) => `- ${item}`), "");
+  }
+  if (packet.app) {
+    out.push(
+      "# The running app",
+      "",
+      `The app this run builds is running at ${packet.app.url}. The playwright tools drive a headless browser that can only reach it.`,
+      "",
+      "Walk through each acceptance criterion in the app as a person would. For each one, take a screenshot that shows it with browser_take_screenshot, without a filename, and note the file name the tool reports. Take at most 12 screenshots.",
+      "In shots, give each screenshot's file name, a one-line caption a person reads under the image, the criterion it shows, and whether that criterion works. Do not edit files.",
+      "",
+    );
   }
   if (packet.previousReview) {
     const { comments, reply, reviewedAt } = packet.previousReview;

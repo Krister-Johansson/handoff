@@ -20,7 +20,7 @@ import { PassEnvField } from "./pass-env-field";
 import type { EditorAction } from "./state";
 
 
-const CLI_TYPES = new Set<NodeType>(["planner", "coder", "reviewer", "code_review"]);
+const CLI_TYPES = new Set<NodeType>(["planner", "coder", "reviewer", "code_review", "demo"]);
 
 const INSTRUCTION_HINTS: Partial<Record<NodeType, string>> = {
   planner: "Plan in small steps; name the files each step touches.",

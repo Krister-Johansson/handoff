@@ -3,7 +3,7 @@ import { ConditionSchema } from "../conditions/schema.ts";
 import { ContextSelectorSchema, ContractSchema } from "./contracts.ts";
 import { NotifySettingsSchema } from "../graph/notify.ts";
 
-export const NodeTypeSchema = z.enum(["start", "planner", "coder", "reviewer", "code_review", "tester", "pr", "merge", "human_gate", "finish", "function"]);
+export const NodeTypeSchema = z.enum(["start", "planner", "coder", "reviewer", "code_review", "tester", "demo", "pr", "merge", "human_gate", "finish", "function"]);
 export type NodeType = z.infer<typeof NodeTypeSchema>;
 
 export const ExecutorKindSchema = z.enum(["cli", "shell", "github", "human", "function"]);

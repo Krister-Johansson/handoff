@@ -64,3 +64,12 @@ test("an app that did not start says why and can be started again", async () => 
   // Without criteria, the person approves or sends back with a note.
   await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeEnabled());
 });
+
+test("the demo's screenshots show under the criterion they show", () => {
+  const item = question({ id: "p1", url: "http://localhost:41000", status: "running" });
+  item.context = { ...item.context, shots: [{ id: "a1", caption: "The new task in the list", criterion: "A user can create a new task", works: true }] } as typeof item.context;
+  render(<TryItCard item={item} />);
+  const [first, second] = screen.getAllByRole("listitem");
+  expect(within(first!).getByRole("img", { name: "The new task in the list" })).toHaveAttribute("src", "/api/screenshots/a1");
+  expect(within(second!).queryByRole("img")).not.toBeInTheDocument();
+});
