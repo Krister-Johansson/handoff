@@ -2,11 +2,11 @@ import Link from "next/link";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { runPath } from "@/lib/paths";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { BacklogCounts, BacklogFilter, BacklogIssue } from "@/server/backlog";
 import { StartRunDialog } from "./forms";
+import { FilterLinks, ROW, ROWS, SectionCard, Tag } from "./section-card";
 
 const FILTERS: { value: BacklogFilter; label: string }[] = [
   { value: "todo", label: "To do" },
@@ -31,40 +31,43 @@ type Props = {
   repoUrl?: string;
 };
 
+/** Title and description of the Issues tab's card, which the page also uses when it has no issues to show. */
+export const BACKLOG_TITLE = "Open issues on GitHub";
+export const BACKLOG_DESCRIPTION = "Write them there, by hand or with Claude Code, and start a run for one when you want it worked on.";
+
 /** The repository's open issues: which have a run and which are waiting for one, with Start run for the latter. */
 export function Backlog({ projectId, graphs, graphName, filter, counts, issues, repoUrl }: Props) {
   return (
-    <div className="flex flex-col gap-4">
-      <nav aria-label="Issue state" className="flex flex-wrap gap-1">
-        {FILTERS.map((f) => (
-          <Button key={f.value} asChild size="sm" variant={f.value === filter ? "secondary" : "ghost"}>
-            <Link href={`?tab=issues&issues=${f.value}`} scroll={false} aria-current={f.value === filter ? "page" : undefined}>
-              {f.label} <span className="text-muted-foreground tabular-nums">{counts[f.value]}</span>
-            </Link>
-          </Button>
-        ))}
-      </nav>
+    <SectionCard
+      title={BACKLOG_TITLE}
+      description={BACKLOG_DESCRIPTION}
+      action={
+        <FilterLinks
+          label="Issue state"
+          items={FILTERS.map((f) => ({ href: `?tab=issues&issues=${f.value}`, label: f.label, count: counts[f.value], current: f.value === filter }))}
+        />
+      }
+    >
       {issues.length === 0 ? (
-        <Empty>
+        <Empty className="pt-2 pb-9">
           <EmptyHeader>
             <EmptyTitle>{EMPTY[filter].title}</EmptyTitle>
             <EmptyDescription>{EMPTY[filter].text}</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
-        <ul className="flex flex-col gap-2">
+        <ul className={ROWS}>
           {issues.map((issue) => (
-            <li key={issue.number} className="flex items-center gap-3 rounded-lg border bg-card px-3 py-2">
-              <CircleDotIcon aria-hidden className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <li key={issue.number} className={ROW}>
+              <CircleDotIcon aria-hidden className="size-4 shrink-0 text-success-dot" />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <a href={issue.url} className="truncate text-sm hover:underline">
-                  <span className="font-mono text-muted-foreground">#{issue.number}</span> {issue.title}
+                <a href={issue.url} className="truncate hover:underline hover:underline-offset-3">
+                  <span className="mr-1 font-mono text-xs text-muted-foreground">#{issue.number}</span>
+                  {issue.title}
                 </a>
-                <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                   {issue.labels.map((label) => (
-                    <Badge key={label} variant="outline">
-                      {label}
-                    </Badge>
+                    <Tag key={label}>{label}</Tag>
                   ))}
                   {issue.author && <span>by {issue.author}</span>}
                   <span>updated {issue.updatedAt.slice(0, 10)}</span>
@@ -98,6 +101,6 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
           ))}
         </ul>
       )}
-    </div>
+    </SectionCard>
   );
 }

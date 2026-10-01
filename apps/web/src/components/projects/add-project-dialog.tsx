@@ -62,8 +62,11 @@ function RepoPicker({ repos, value, onChange }: { repos: AvailableRepo[]; value:
   );
 }
 
-/** Add project button and dialog: pick a repository from GitHub, or type owner/name without GitHub access. */
-export function AddProjectDialog() {
+/**
+ * Add project button and dialog: pick a repository from GitHub, or type owner/name without GitHub access.
+ * As a `card`, the trigger is the dashed tile at the end of the projects grid.
+ */
+export function AddProjectDialog({ variant = "button" }: { variant?: "button" | "card" }) {
   const [state, action, pending] = useActionState(createProjectAction, {} as ActionState);
   const [loaded, setLoaded] = useState<Loaded>();
   const [loading, startLoading] = useTransition();
@@ -81,10 +84,21 @@ export function AddProjectDialog() {
   return (
     <Dialog onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button>
-          <PlusIcon data-icon="inline-start" />
-          Add project
-        </Button>
+        {variant === "card" ? (
+          <button
+            type="button"
+            className="flex min-h-[150px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <PlusIcon aria-hidden className="size-4" />
+            <span className="font-medium">Add a repository</span>
+            <span className="text-xs">owner/name on GitHub</span>
+          </button>
+        ) : (
+          <Button>
+            <PlusIcon data-icon="inline-start" />
+            Add project
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form action={action} className="contents">

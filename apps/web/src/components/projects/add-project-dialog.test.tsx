@@ -65,6 +65,13 @@ test("without GitHub access the dialog asks for owner/name instead", async () =>
   expect(screen.getByPlaceholderText("owner/name")).toBeInTheDocument();
 });
 
+test("the dashed card on the projects grid opens the same dialog", async () => {
+  actions.listReposAction.mockResolvedValue({ repos: [repo("octo/sample")] });
+  render(<AddProjectDialog variant="card" />);
+  fireEvent.click(screen.getByRole("button", { name: /Add a repository/ }));
+  expect(await screen.findByRole("dialog", { name: "Add a project" })).toBeInTheDocument();
+});
+
 test("search matches repositories whose name or description contains the text", async () => {
   actions.listReposAction.mockResolvedValue({
     repos: [repo("octo/prisma-timescaledb"), repo("octo/the-important-message-scale"), { ...repo("octo/tools"), description: "TimescaleDB helpers" }],

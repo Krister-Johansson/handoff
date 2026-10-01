@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { PencilIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatAgo } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { GraphSettingsDialog } from "./forms";
+import { TD, TH, Tag } from "./section-card";
 
 export type GraphRow = { id: string; name: string; latestVersion: number; savedAt: Date; runs: number };
 
@@ -13,7 +14,7 @@ export type GraphRow = { id: string; name: string; latestVersion: number; savedA
 export function GraphList({ projectId, graphs, defaultGraph, now = new Date() }: { projectId: string; graphs: GraphRow[]; defaultGraph: string | undefined; now?: Date }) {
   if (graphs.length === 0) {
     return (
-      <Empty>
+      <Empty className="pt-2 pb-9">
         <EmptyHeader>
           <EmptyTitle>No graphs yet</EmptyTitle>
           <EmptyDescription>Create one from a template with New graph.</EmptyDescription>
@@ -24,12 +25,12 @@ export function GraphList({ projectId, graphs, defaultGraph, now = new Date() }:
   return (
     <Table>
       <TableHeader>
-        <TableRow>
-          <TableHead>Graph</TableHead>
-          <TableHead>Version</TableHead>
-          <TableHead>Saved</TableHead>
-          <TableHead>Runs</TableHead>
-          <TableHead>
+        <TableRow className="hover:bg-transparent">
+          <TableHead className={TH}>Graph</TableHead>
+          <TableHead className={TH}>Version</TableHead>
+          <TableHead className={TH}>Saved</TableHead>
+          <TableHead className={TH}>Runs</TableHead>
+          <TableHead className={TH}>
             <span className="sr-only">Actions</span>
           </TableHead>
         </TableRow>
@@ -38,27 +39,27 @@ export function GraphList({ projectId, graphs, defaultGraph, now = new Date() }:
         {graphs.map((g) => {
           const href = `/projects/${projectId}/graphs/${encodeURIComponent(g.name)}`;
           return (
-            <TableRow key={g.id}>
-              <TableCell>
+            <TableRow key={g.id} className="hover:bg-muted">
+              <TableCell className={TD}>
                 <div className="flex items-center gap-2">
-                  <Link href={href} className="font-mono hover:underline">
+                  <Link href={href} className="font-mono text-xs font-medium hover:underline hover:underline-offset-3">
                     {g.name}
                   </Link>
                   {g.name === defaultGraph && (
-                    <Badge variant="secondary" title="New runs use this graph unless you pick another">
+                    <Tag tone="fill" title="New runs use this graph unless you pick another">
                       default
-                    </Badge>
+                    </Tag>
                   )}
                 </div>
               </TableCell>
-              <TableCell>
-                <Badge variant="outline">v{g.latestVersion}</Badge>
+              <TableCell className={TD}>
+                <Tag mono>v{g.latestVersion}</Tag>
               </TableCell>
-              <TableCell className="text-muted-foreground" title={g.savedAt.toISOString()}>
+              <TableCell className={cn(TD, "text-muted-foreground")} title={g.savedAt.toISOString()}>
                 saved {formatAgo(g.savedAt, now)}
               </TableCell>
-              <TableCell className="text-muted-foreground tabular-nums">{g.runs === 0 ? "no runs" : `${g.runs} run${g.runs === 1 ? "" : "s"}`}</TableCell>
-              <TableCell>
+              <TableCell className={cn(TD, "text-muted-foreground tabular-nums")}>{g.runs === 0 ? "no runs" : `${g.runs} run${g.runs === 1 ? "" : "s"}`}</TableCell>
+              <TableCell className={TD}>
                 <div className="flex justify-end gap-2">
                   <Button size="sm" variant="ghost" asChild>
                     <Link href={href}>

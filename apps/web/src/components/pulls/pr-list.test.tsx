@@ -10,13 +10,13 @@ test("a PR row shows number, branch, diff size and CI state", () => {
   expect(screen.getByText("handoff/x")).toBeInTheDocument();
   expect(screen.getByText("+12")).toBeInTheDocument();
   expect(screen.getByText("-3")).toBeInTheDocument();
-  expect(screen.getByLabelText("CI failing")).toBeInTheDocument();
+  expect(screen.getByText("CI failing")).toBeInTheDocument();
 });
 
 test("a PR without live GitHub data still lists what handoff knows", () => {
   render(<PullRequestList items={[{ ...base, number: 8, state: "unknown", ci: "unknown", review: "unknown" }]} />);
   expect(screen.getByText("#8")).toBeInTheDocument();
-  expect(screen.getByLabelText("CI unknown")).toBeInTheDocument();
+  expect(screen.getByText("CI unknown")).toBeInTheDocument();
 });
 
 test("an empty list says so", () => {
