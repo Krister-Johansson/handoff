@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { buildClaudeArgv, ClaudeCliExecutor } from "@handoff/cli-adapter";
 import { createDb } from "@handoff/db";
 import { runMigrations } from "@handoff/db/migrate";
-import { branchDiff, cliNodeExecutor, finishExecutor, startExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
+import { branchDiff, cliNodeExecutor, demoExecutor, finishExecutor, startExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
 import { OctokitGitHub, type GitHubPort } from "@handoff/github";
 import { checkClaudeVersion } from "./claude-version.ts";
 import type { WorkerEnv } from "./env.ts";
@@ -29,14 +29,15 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     configDir,
     ...(env.HANDOFF_CLAUDE_PASSTHROUGH_ENV ? { passthroughEnv: env.HANDOFF_CLAUDE_PASSTHROUGH_ENV.split(",").map((k) => k.trim()) } : {}),
   });
-  const agent = cliNodeExecutor({
+  const cliOptions = {
     cli,
     maxTurns: env.HANDOFF_MAX_TURNS,
     timeoutMs: env.HANDOFF_CLI_TIMEOUT_MS,
     idleTimeoutMs: 10 * 60_000,
     ...(env.HANDOFF_MODEL ? { model: env.HANDOFF_MODEL } : {}),
     ...(env.HANDOFF_EFFORT ? { effort: env.HANDOFF_EFFORT } : {}),
-  });
+  };
+  const agent = cliNodeExecutor(cliOptions);
   const db = createDb(env.DATABASE_URL);
   const git = new GitWorktreeProvider({
     root: home,
@@ -60,6 +61,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       start: startExecutor({ github }),
       finish: finishExecutor(),
       tester: testerExecutor(),
+      demo: demoExecutor({ ...cliOptions, db, workerId, artifactsRoot: join(home, "artifacts") }),
       human_gate: humanGateExecutor({ db, branchDiff, workerId }),
       pr: prNodeExecutor({ github, db, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }),
       merge: mergeNodeExecutor({ github, db }),

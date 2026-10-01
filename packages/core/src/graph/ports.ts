@@ -29,6 +29,7 @@ const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, Outp
   coder: [out("done", "done", { eq: ["node.output.status", "done"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
   reviewer: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "feedback")],
   code_review: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "feedback")],
+  demo: [out("done", "done")],
   tester: [out("pass", "pass", { eq: ["node.output.passed", true] }), out("fail", "fail", { eq: ["node.output.passed", false] }, "feedback")],
   pr: [
     out("ready", "ready", { all: [{ eq: ["node.output.feedback.ci.status", "success"] }, { neq: ["node.output.feedback.review.decision", "changes_requested"] }] }),

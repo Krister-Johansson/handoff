@@ -10,6 +10,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { Screenshot, type Shot } from "./screenshot";
 
 /** What a Try it question shows about the run's app: its address while it runs, or why it did not start. */
 type Preview = { id?: string; url?: string; status: "running" | "failed"; error?: string };
@@ -19,7 +20,7 @@ export type TryItQuestion = { id: string; runId: string; question: string; conte
 type Check = { works?: boolean; note: string };
 
 /** One acceptance criterion with Works and Doesn't work, and what is wrong when it does not. */
-function CriterionRow({ item, index, check, onChange }: { item: string; index: number; check: Check; onChange: (next: Check) => void }) {
+function CriterionRow({ item, index, check, shots, onChange }: { item: string; index: number; check: Check; shots: Shot[]; onChange: (next: Check) => void }) {
   return (
     <li className="flex flex-col gap-2 py-2.5">
       <div className="flex flex-wrap items-center gap-3">
@@ -40,6 +41,13 @@ function CriterionRow({ item, index, check, onChange }: { item: string; index: n
           </Button>
         </div>
       </div>
+      {shots.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {shots.map((shot) => (
+            <Screenshot key={shot.id} shot={shot} showCriterion={false} />
+          ))}
+        </div>
+      )}
       {check.works === false && (
         <Field>
           <FieldLabel htmlFor={`criterion-${index}`} className="sr-only">
@@ -83,6 +91,7 @@ function AppStatus({ preview, pending, onRestart }: { preview: Preview; pending:
 export function TryItCard({ item }: { item: TryItQuestion }) {
   const acceptance = Array.isArray(item.context?.acceptance) ? (item.context.acceptance as string[]) : [];
   const preview = (item.context?.preview ?? { status: "failed", error: "The app has not started yet." }) as Preview;
+  const shots = Array.isArray(item.context?.shots) ? (item.context.shots as Shot[]) : [];
   const [checks, setChecks] = useState<Check[]>(() => acceptance.map(() => ({ note: "" })));
   const [note, setNote] = useState("");
   const [error, setError] = useState<string>();
@@ -109,7 +118,7 @@ export function TryItCard({ item }: { item: TryItQuestion }) {
         {acceptance.length > 0 && (
           <ul aria-label="Acceptance criteria" className="flex flex-col divide-y border-y">
             {acceptance.map((criterion, i) => (
-              <CriterionRow key={criterion} item={criterion} index={i} check={checks[i]!} onChange={(next) => setChecks((all) => all.map((c, j) => (j === i ? next : c)))} />
+              <CriterionRow key={criterion} item={criterion} index={i} check={checks[i]!} shots={shots.filter((s) => s.criterion === criterion)} onChange={(next) => setChecks((all) => all.map((c, j) => (j === i ? next : c)))} />
             ))}
           </ul>
         )}

@@ -48,6 +48,25 @@ export const TesterOutputSchema = z.object({
   tail: z.string(),
 });
 
+/**
+ * A Demo node's walk through the running app: screenshots, each with a caption and, when it shows an
+ * acceptance criterion, whether that criterion works. `file` is the screenshot's name in the browser's
+ * output folder; the engine stores the file and adds `artifactId`.
+ */
+export const DemoOutputSchema = z.object({
+  summary: z.string(),
+  shots: z.array(
+    z.object({
+      file: z.string().min(1),
+      caption: z.string().min(1),
+      criterion: z.string().optional(),
+      works: z.boolean(),
+      artifactId: z.string().optional(),
+    }),
+  ),
+});
+export type DemoOutput = z.infer<typeof DemoOutputSchema>;
+
 export const FeedbackSchema = z.object({
   ci: z.object({
     status: z.enum(["pending", "success", "failure"]),
