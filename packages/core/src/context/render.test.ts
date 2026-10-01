@@ -130,3 +130,15 @@ test("a reviewer's second look shows its earlier comments, the coder's reply, an
   expect(md).toContain("Validated the host too, and added a README line.");
   expect(md).toContain("git diff 4ef4f22..HEAD");
 });
+
+test("a conflict with main asks the coder to merge it in, keep both changes and leave lockfiles to the package manager", () => {
+  const md = renderContextPacket({ ...packet, conflict: { base: "main", baseSha: "abc1234def", files: ["package.json", "pnpm-lock.yaml"] } });
+  expect(md).toContain("# Merge conflict with main");
+  expect(md).toContain("- package.json\n- pnpm-lock.yaml");
+  expect(md).toContain("`git merge abc1234def`");
+  expect(md).toContain("Lockfiles");
+  expect(md).toContain("`git commit --no-edit`");
+  expect(md).toContain("`extraPaths`");
+  // It comes before the output contract, so it reads as the job, not an afterthought.
+  expect(md.indexOf("# Merge conflict with main")).toBeLessThan(md.indexOf("# Output contract"));
+});

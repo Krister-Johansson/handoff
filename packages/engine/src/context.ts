@@ -1,4 +1,4 @@
-import { ALL_TOOLS, nodeCatalog, type CheckResult, type CompiledNode, type ContextPacket, type ReviewComment, type RunState } from "@handoff/core";
+import { ALL_TOOLS, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
 import type { NodeExecutionRow } from "@handoff/db";
 
 export const DEFAULT_MAX_TURNS = 60;
@@ -148,6 +148,9 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     const answer = state.human[trigger.from];
     if (answer) packet.humanAnswer = answer.option ? `${answer.option}: ${answer.answer}` : answer.answer;
     const { failedChecks, reviewComments } = feedbackFrom(from?.output);
+    // Sent back by a pull request that conflicts with the base branch: the work is the merge.
+    const conflict = PrConflictOutputSchema.safeParse(from?.output);
+    if (conflict.success) packet.conflict = conflict.data.conflict;
     if (failedChecks.length || reviewComments.length || answer) {
       packet.priorAttempt = { summary: `Sent back by ${trigger.from} via ${trigger.edgeKey}.`, failedChecks, reviewComments };
     }
