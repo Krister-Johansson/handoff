@@ -38,16 +38,23 @@ const tail = (text: string, lines = 20) => text.trimEnd().split("\n").slice(-lin
 /**
  * Starts the backing services in the repository's compose file, once per project: every run's app
  * shares them. Services already up are kept as they are (--no-recreate), so a run from another worktree
- * does not recreate a database another run is using. Without a compose file there is nothing to do.
+ * does not recreate a database another run is using. When another stack already holds the services'
+ * ports, such as the person's own `docker compose up`, the services are taken as running and `note`
+ * says so. Without a compose file there is nothing to do.
  */
-export async function ensureServices(root: string, projectId: string, exec: DockerExec = docker): Promise<void> {
+export async function ensureServices(root: string, projectId: string, exec: DockerExec = docker, note?: (message: string) => void): Promise<void> {
   const file = COMPOSE_FILES.find((name) => existsSync(join(root, name)));
   if (!file) return;
   if ((await exec(["info"], root)).exitCode !== 0) {
     throw new PreviewError(`Docker is not running, and this repository's ${file} needs it for the app's services. Start Docker and try again.`);
   }
   const up = await exec(["compose", "-p", `handoff-${projectId.slice(0, 8)}`, "-f", file, "up", "-d", "--wait", "--no-recreate"], root);
-  if (up.exitCode !== 0) throw new PreviewError(`The services in ${file} did not start:\n${tail(up.output)}`);
+  if (up.exitCode === 0) return;
+  if (/port is already allocated|address already in use/i.test(up.output)) {
+    note?.(`A port the services in ${file} need is already in use, most likely by another Docker stack of this repository, so handoff uses the services running there.`);
+    return;
+  }
+  throw new PreviewError(`The services in ${file} did not start:\n${tail(up.output)}`);
 }
 
 /** A free port from the system, or `wanted` when the app must have it and it is free. */
@@ -117,6 +124,8 @@ export type StartPreviewOptions = {
   readyTimeoutMs?: number;
   signal?: AbortSignal;
   docker?: DockerExec;
+  /** Told about something worth knowing that did not stop the app, such as services already running elsewhere. */
+  note?: (message: string) => void;
 };
 
 /**
@@ -141,7 +150,7 @@ export async function startPreview(deps: { db: Db; workerId: string }, opts: Sta
   const config = opts.configuration ? launch.configurations.find((c) => c.name === opts.configuration) : launch.configurations[0];
   if (!config) throw new PreviewError(`${LAUNCH_FILE} has no configuration named ${opts.configuration}.`);
 
-  await ensureServices(opts.workdir.path, opts.projectId, opts.docker);
+  await ensureServices(opts.workdir.path, opts.projectId, opts.docker, opts.note);
   const port = await portFor(config.port, config.autoPort === false);
   const cmd = previewCommand(config, { root: opts.workdir.path, port });
   const id = randomUUID();
