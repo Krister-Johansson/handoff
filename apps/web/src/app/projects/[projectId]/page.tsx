@@ -169,7 +169,16 @@ function SettingsTab({ project, graphs, runCount }: Pick<Detail, "project" | "gr
       <Card>
         <CardHeader>
           <CardTitle>Project</CardTitle>
-          <CardDescription>The CLI refers to the project by its name. Runs branch off the default branch.</CardDescription>
+          <CardDescription>
+            The CLI refers to the project by its name. Runs branch off the default branch
+            {project.setupCommand ? (
+              <>
+                {" "}and run <code className="font-mono text-xs">{project.setupCommand}</code> in their worktree first.
+              </>
+            ) : (
+              "."
+            )}
+          </CardDescription>
           <CardAction>
             <ProjectSettingsActions
               project={{
@@ -180,6 +189,7 @@ function SettingsTab({ project, graphs, runCount }: Pick<Detail, "project" | "gr
                 defaultBranch: project.defaultBranch,
                 isDemo: project.isDemo,
                 runCount,
+                setupCommand: project.setupCommand,
               }}
             />
           </CardAction>

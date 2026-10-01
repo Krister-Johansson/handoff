@@ -3,14 +3,16 @@ import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const ACTIVE = ["queued", "running", "waiting"] as const;
 
-export async function updateProject(db: Db, projectId: string, input: { name: string; defaultBranch: string }) {
+export async function updateProject(db: Db, projectId: string, input: { name: string; defaultBranch: string; setupCommand?: string }) {
   const name = input.name.trim();
   const defaultBranch = input.defaultBranch.trim();
   if (!PROJECT_NAME.test(name)) throw new Error("Project name: lowercase letters, digits and dashes.");
   if (!defaultBranch) throw new Error("Give the default branch runs start from.");
   const [taken] = await db.select({ id: projects.id }).from(projects).where(eq(projects.name, name));
   if (taken && taken.id !== projectId) throw new Error(`A project named ${name} already exists.`);
-  await db.update(projects).set({ name, defaultBranch, updatedAt: new Date() }).where(eq(projects.id, projectId));
+  const setupCommand = input.setupCommand?.trim() || null;
+  if (setupCommand && setupCommand.length > 2_000) throw new Error("Keep the setup command under 2000 characters.");
+  await db.update(projects).set({ name, defaultBranch, ...(input.setupCommand !== undefined ? { setupCommand } : {}), updatedAt: new Date() }).where(eq(projects.id, projectId));
 }
 
 /**

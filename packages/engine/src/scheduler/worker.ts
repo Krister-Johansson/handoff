@@ -24,6 +24,7 @@ import {
 } from "@handoff/db";
 import { validateContract } from "../contract/validate.ts";
 import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary } from "../library/materialize.ts";
+import { SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
 import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
@@ -267,6 +268,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
           branchName: run.branchName,
         });
         if (run.worktreePath !== workdir.path) await db.update(runs).set({ worktreePath: workdir.path }).where(eq(runs.id, run.id));
+        if (project.setupCommand) await setUpWorkdir(workdir, project.setupCommand, (type, payload) => void buffer.push({ type, payload, nodeExecutionId: row.id }), controller.signal);
       }
       let library: MaterializedLibrary | undefined;
       if (graph.executorKind(node.key) === "cli") {
@@ -320,6 +322,8 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     outcome =
       error instanceof LibraryUnavailableError
         ? { kind: "failed", error: { code: "library_unavailable", message: error.message } }
+        : error instanceof SetupFailedError
+          ? { kind: "failed", error: { code: "setup_failed", message: redactSecrets(error.message) } }
         : { kind: "failed", error: { code: "executor_crashed", message: redactSecrets((error as Error).message) } };
   } finally {
     clearInterval(beat);
