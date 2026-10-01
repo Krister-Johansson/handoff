@@ -21,3 +21,10 @@ test("the plugin starts the bundled bridge with its settings and declares it a c
   expect(existsSync(root("plugins/handoff/server/handoff-mcp.mjs"))).toBe(true);
   expect(readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8")).toMatch(/^---\nname: handoff\ndescription: /);
 });
+
+test("the plugin ships a setup skill that walks through setup_project", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
+  expect(skill).toMatch(/^---\nname: handoff-setup\ndescription: /);
+  expect(skill).toContain("setup_project");
+  expect(skill).toContain(".claude/launch.json");
+});

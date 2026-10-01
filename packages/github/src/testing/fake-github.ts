@@ -14,7 +14,13 @@ export class FakeGitHub implements GitHubPort {
   repos: RepoSummary[] = [];
   readonly closedIssues: { number: number; comment: string }[] = [];
   readonly issues = new Map<number, IssueDetail & Partial<IssueSummary>>();
+  /** Files on the default branch, by path. */
+  readonly files = new Map<string, string>();
   private next = 1;
+
+  async getFile(_repo: RepoRef, path: string, _ref: string): Promise<string | undefined> {
+    return this.files.get(path);
+  }
 
   async listIssues(_repo: RepoRef): Promise<IssueSummary[]> {
     return [...this.issues.values()]

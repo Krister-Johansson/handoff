@@ -57,11 +57,25 @@ test("the tools are listed, and read-only ones say so", async () => {
       "request_merge",
       "resolve_loop",
       "run_again",
+      "setup_project",
       "start_run",
     ].sort(),
   );
   expect(byName.list_backlog?.annotations?.readOnlyHint).toBe(true);
   expect(byName.cancel_run?.annotations?.destructiveHint).toBe(true);
+  expect(byName.setup_project?.annotations?.readOnlyHint).toBe(true);
+});
+
+test("setup_project says what the project still needs to work well with handoff, and how to fix it", async () => {
+  github.files.set("CLAUDE.md", "# sample");
+  const result = await call("setup_project", { project: "sandbox" });
+  expect(result).toMatchObject({ project: { name: "sandbox", repo: "octo/sample" }, ready: false });
+  const byId = Object.fromEntries((result.checks as { id: string; status: string; fix?: string }[]).map((c) => [c.id, c]));
+  expect(byId.graph).toMatchObject({ status: "ok" });
+  expect(byId.claude_md).toMatchObject({ status: "ok" });
+  expect(byId.worker).toMatchObject({ status: "todo", fix: expect.stringContaining("pnpm dev:worker") });
+  expect(byId.launch).toMatchObject({ status: "todo", fix: expect.stringContaining("PORT") });
+  expect(result.guide).toContain("handoff-setup");
 });
 
 test("projects and the backlog are listed, and an issue leaves the backlog once a run works on it", async () => {

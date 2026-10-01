@@ -9,7 +9,7 @@ handoff turns GitHub issues into pull requests. A project is a repository. A gra
 
 ## The project is the folder you are in
 
-In a folder whose git origin is a GitHub repository, handoff's tools use that repository's project when you name none: `current_project` says which. Only ask the user for a project when the folder has no GitHub remote or they mean another one. If the repository is not a handoff project yet, `add_project` adds it (it defaults to this repository). A new project needs a graph before it can run, which the user creates on the project's Settings tab in the dashboard.
+In a folder whose git origin is a GitHub repository, handoff's tools use that repository's project when you name none: `current_project` says which. Only ask the user for a project when the folder has no GitHub remote or they mean another one. If the repository is not a handoff project yet, `add_project` adds it (it defaults to this repository). A new project needs a graph before it can run, which the user creates on the project's Settings tab in the dashboard. `setup_project` checks everything a project needs to work well, and the `handoff-setup` skill walks through fixing it.
 
 ## Plan work as issues, then hand it off
 

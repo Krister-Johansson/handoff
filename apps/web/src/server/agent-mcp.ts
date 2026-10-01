@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, desc, eq, listLibraryIndex, nodeExecutions, projects, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort } from "@handoff/github";
+import { projectReadiness } from "./readiness";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
@@ -148,6 +149,21 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
           recent_runs: detail.runs.slice(0, 10).map((r) => ({ id: r.id, task: r.task, status: r.status, url: `${baseUrl}${runPath(detail.project.id, r.id)}` })),
         };
       }),
+  );
+
+  server.registerTool(
+    "setup_project",
+    {
+      description:
+        "Checks whether a project is set up to work well with handoff: a graph, a running worker, a setup command, CLAUDE.md, an app that starts from .claude/launch.json for Demo and Try it, CI, acceptance criteria in issues, issue dependencies and webhooks. Each item says what was found and how to fix it.",
+      inputSchema: { project: z.string().describe("Project name or id") },
+      annotations: read,
+    },
+    ({ project }) =>
+      tool(async () => ({
+        ...(await projectReadiness(db, github, (await findProject(db, project)).id)),
+        guide: "Follow the handoff-setup skill to fix the items marked todo, one at a time, asking the user before changing their repository.",
+      })),
   );
 
   server.registerTool(
