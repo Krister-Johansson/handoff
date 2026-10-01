@@ -16,7 +16,7 @@ export default async function GraphEditorPage({ params }: { params: Promise<{ pr
   const [graph, library, versions] = await Promise.all([getGraphForEdit(db, projectId, name), libraryChoices(db), listGraphVersions(db, projectId, name)]);
   if (!graph) notFound();
   const [project] = await db.select({ id: projects.id, name: projects.name }).from(projects).where(eq(projects.id, projectId));
-  const crumbs = [...(await projectCrumbs(db, project!)), { label: "Graphs", href: `/projects/${projectId}?tab=settings` }, await graphCrumb(db, projectId, name)];
+  const crumbs = [...(await projectCrumbs(db, project!)), { label: "Graphs", href: `/projects/${projectId}?tab=graphs` }, await graphCrumb(db, projectId, name)];
   return (
     <div className="flex h-[calc(100svh-3.5rem)] flex-col">
       <div className="border-b px-4 py-2">

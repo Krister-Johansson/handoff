@@ -1,4 +1,4 @@
-export const PROJECT_TABS = ["runs", "issues", "pulls", "settings"] as const;
+export const PROJECT_TABS = ["runs", "issues", "pulls", "graphs", "settings"] as const;
 export type ProjectTab = (typeof PROJECT_TABS)[number];
 
 /** The project page tab from its search params; runs unless another known tab is asked for. */

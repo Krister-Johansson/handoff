@@ -7,7 +7,7 @@ import type { ProjectTab } from "@/lib/project-tab";
 
 export const Count = ({ n }: { n: number }) => <span className="ml-1 rounded-full bg-muted px-1.5 text-xs text-muted-foreground tabular-nums">{n}</span>;
 
-/** Runs, Pull requests and Settings; the server renders only the active tab, chosen by ?tab=. */
+/** Runs, Issues, Pull requests, Graphs and Settings; the server renders only the active tab, chosen by ?tab=. */
 export function ProjectTabs({
   active,
   counts,
@@ -15,7 +15,7 @@ export function ProjectTabs({
   children,
 }: {
   active: ProjectTab;
-  counts: { runs: number; pulls: number };
+  counts: { runs: number; pulls: number; graphs: number };
   /** The open issue count, which comes from GitHub and streams in after the page. */
   issueCount?: ReactNode;
   children: ReactNode;
@@ -30,6 +30,9 @@ export function ProjectTabs({
         <TabsTrigger value="issues">Issues {issueCount}</TabsTrigger>
         <TabsTrigger value="pulls">
           Pull requests <Count n={counts.pulls} />
+        </TabsTrigger>
+        <TabsTrigger value="graphs">
+          Graphs <Count n={counts.graphs} />
         </TabsTrigger>
         <TabsTrigger value="settings">Settings</TabsTrigger>
       </TabsList>
