@@ -3,17 +3,15 @@ import { PageHeader } from "@/components/page-header";
 import { projectCrumbs } from "@/server/crumbs";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { PencilIcon } from "lucide-react";
-import { GraphSettingsDialog, NewGraphDialog, StartRunDialog } from "@/components/projects/forms";
+import { NewGraphDialog, StartRunDialog } from "@/components/projects/forms";
 import { Backlog } from "@/components/projects/backlog";
 import { ProjectSettingsActions } from "@/components/projects/project-card";
+import { GraphList } from "@/components/projects/graph-list";
 import { Count, ProjectTabs } from "@/components/projects/project-tabs";
 import { PullRequestList, type PullItem } from "@/components/pulls/pr-list";
 import { ArchivePullButton, PullFilters } from "@/components/pulls/pull-filters";
 import { IssueLinks } from "@/components/runs/issue-links";
 import { StatusBadge } from "@/components/runs/status-badge";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -21,7 +19,7 @@ import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
 import { parseBacklogFilter, parseProjectTab } from "@/lib/project-tab";
 import { parsePullFilter } from "@/lib/pull-filter";
-import { getProjectDetail, TEMPLATES } from "@/server/graphs";
+import { getProjectDetail, listProjectGraphs, TEMPLATES } from "@/server/graphs";
 import { DefaultLibrary } from "@/components/projects/default-library";
 import { libraryChoices } from "@/server/library-choices";
 import { isTodo, listBacklogOnce, type BacklogFilter } from "@/server/backlog";
@@ -164,8 +162,26 @@ async function DefaultLibraryCard({ project }: { project: Detail["project"] }) {
   );
 }
 
-function SettingsTab({ project, graphs, runCount }: Pick<Detail, "project" | "graphs"> & { runCount: number }) {
+/** The project's graphs, with New graph to start one from a template. */
+async function GraphsTab({ projectId, defaultGraph }: { projectId: string; defaultGraph: string | undefined }) {
   const templates = Object.entries(TEMPLATES).map(([value, t]) => ({ value, label: t.label }));
+  const graphs = await listProjectGraphs(getDb(), projectId);
+  return (
+    <Card>
+      <CardHeader>
+        <CardDescription>Each save is a new version. Runs keep the version they started with.</CardDescription>
+        <CardAction>
+          <NewGraphDialog projectId={projectId} templates={templates} />
+        </CardAction>
+      </CardHeader>
+      <CardContent>
+        <GraphList projectId={projectId} graphs={graphs} defaultGraph={defaultGraph} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function SettingsTab({ project, runCount }: Pick<Detail, "project"> & { runCount: number }) {
   return (
     <div className="flex flex-col gap-6">
       <Card>
@@ -210,47 +226,6 @@ function SettingsTab({ project, graphs, runCount }: Pick<Detail, "project" | "gr
         </CardContent>
       </Card>
       <DefaultLibraryCard project={project} />
-      <Card>
-        <CardHeader>
-          <CardTitle>Graphs</CardTitle>
-          <CardDescription>Each save is a new version. Runs keep the version they started with.</CardDescription>
-          <CardAction>
-            <NewGraphDialog projectId={project.id} templates={templates} />
-          </CardAction>
-        </CardHeader>
-        <CardContent>
-          {graphs.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>No graphs yet</EmptyTitle>
-                <EmptyDescription>Create one from a template with New graph.</EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            <Table>
-              <TableBody>
-                {graphs.map((g) => (
-                  <TableRow key={g.id}>
-                    <TableCell className="font-mono">{g.name}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">v{g.latestVersion}</Badge>
-                    </TableCell>
-                    <TableCell className="flex justify-end gap-2">
-                      <Button size="sm" variant="ghost" asChild>
-                        <Link href={`/projects/${project.id}/graphs/${g.name}`}>
-                          <PencilIcon data-icon="inline-start" />
-                          Edit
-                        </Link>
-                      </Button>
-                      <GraphSettingsDialog projectId={project.id} graphName={g.name} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
@@ -291,7 +266,7 @@ export default async function ProjectPage({
       />
       <ProjectTabs
         active={tab}
-        counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length }}
+        counts={{ runs: runs.length, pulls: runs.filter((r) => r.prNumber !== null).length, graphs: graphs.length }}
         issueCount={
           project.isDemo ? null : (
             <Suspense fallback={null}>
@@ -305,7 +280,8 @@ export default async function ProjectPage({
           <IssuesTab project={project} graphs={graphs.map((g) => g.name)} graphName={defaultGraph} filter={parseBacklogFilter(query)} />
         )}
         {tab === "pulls" && <PullsTab projectId={project.id} filter={parsePullFilter(query)} />}
-        {tab === "settings" && <SettingsTab project={project} graphs={graphs} runCount={runs.length} />}
+        {tab === "graphs" && <GraphsTab projectId={project.id} defaultGraph={defaultGraph} />}
+        {tab === "settings" && <SettingsTab project={project} runCount={runs.length} />}
       </ProjectTabs>
     </main>
   );

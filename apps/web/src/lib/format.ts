@@ -15,3 +15,17 @@ export function formatCost(usd: number | string | null | undefined): string {
   if (n > 0 && n < 0.01) return "<$0.01";
   return `$${n.toFixed(2)}`;
 }
+
+/** How long ago a moment was, in the largest whole unit: "just now", "5 minutes ago", "3 days ago". */
+export function formatAgo(when: Date, now: Date = new Date()): string {
+  const s = Math.max(0, Math.floor((now.getTime() - when.getTime()) / 1000));
+  if (s < 60) return "just now";
+  const units: [string, number][] = [
+    ["day", 86_400],
+    ["hour", 3_600],
+    ["minute", 60],
+  ];
+  const [unit, size] = units.find(([, size]) => s >= size)!;
+  const n = Math.floor(s / size);
+  return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+}
