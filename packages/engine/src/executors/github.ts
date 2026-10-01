@@ -109,7 +109,7 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number;
         const sync = await syncWithBase(ctx.workdir.path, ctx.run.baseBranch, env);
         if (sync.status === "conflict") {
           ctx.emit("github.conflict", { base: ctx.run.baseBranch, baseSha: sync.baseSha, files: sync.files });
-          if (!routes(ctx, "conflict")) {
+          if (!routes(ctx, "fix")) {
             return { kind: "failed", error: { code: "merge_conflict", message: `${ctx.run.baseBranch} changed the same lines as this run in ${sync.files.join(", ")}` } };
           }
           // Going back to resolve: give up the place in the merge queue so the next pull request can land.
