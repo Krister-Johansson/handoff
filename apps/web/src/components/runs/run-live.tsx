@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { reviewPath } from "@/lib/paths";
 import { describeNow } from "@/lib/run-now";
 import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
 import { loopEdgeKeys } from "@/lib/sent-back";
@@ -30,6 +31,7 @@ export type ExecutionView = StepView;
 export type OpenQuestion = QuestionItem & { nodeExecutionId: string };
 
 type Props = {
+  projectId: string;
   runId: string;
   graphDocument?: unknown;
   initialStatus: string;
@@ -53,7 +55,7 @@ type EventPayload = {
 };
 
 /** What the run is doing now, its steps, its graph and its events, kept in step with the event stream. */
-export function RunLive({ runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions }: Props) {
+export function RunLive({ projectId, runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [prNumber, setPrNumber] = useState(initialPr);
   const [executions, setExecutions] = useState(initialExecutions);
@@ -140,7 +142,7 @@ export function RunLive({ runId, initialStatus, initialExecutions, initialEvents
         <span className="min-w-0 truncate text-sm font-medium">{now.text}</span>
         {review && (
           <Button size="sm" className="ml-auto shrink-0" asChild>
-            <Link href={`/runs/${runId}/review/${review.id}`}>Open the review</Link>
+            <Link href={reviewPath(projectId, runId, review.id)}>Open the review</Link>
           </Button>
         )}
       </div>

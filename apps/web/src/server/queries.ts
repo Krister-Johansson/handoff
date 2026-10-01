@@ -1,15 +1,18 @@
 import { and, asc, desc, edgeTraversals, eq, graphs, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
-import type { RunFilter } from "../lib/run-filter.ts";
 import { loopEdgeKeys } from "../lib/sent-back.ts";
 import type { StreamedEvent } from "./events-stream";
 
 /** Newest first, optionally narrowed to a status ("active" covers queued, running and waiting) and a project name. */
+export type RunStatusFilter = "active" | "succeeded" | "failed" | "cancelled";
+export type RunFilter = { status?: RunStatusFilter; project?: string };
+
 export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 50) {
   const status =
     filter.status === "active" ? inArray(runs.status, ["queued", "running", "waiting"]) : filter.status ? eq(runs.status, filter.status) : undefined;
   return db
     .select({
       id: runs.id,
+      projectId: runs.projectId,
       task: runs.task,
       issues: runs.issues,
       status: runs.status,

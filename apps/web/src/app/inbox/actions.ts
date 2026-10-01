@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { answerQuestion, cancelRun, repairNodeExecution, resolveExhaustedLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
+import { runPathOf } from "@/server/run-path";
 import { markViewed } from "@/server/review";
 
 export type InboxActionState = { ok?: boolean; error?: string };
@@ -13,7 +14,8 @@ const field = (form: FormData, key: string) => String(form.get(key) ?? "").trim(
 
 function refresh(runId: string) {
   revalidatePath("/inbox");
-  if (runId) revalidatePath(`/runs/${runId}`);
+  // Run pages sit under their project; revalidate the route rather than look the project up.
+  if (runId) revalidatePath("/projects/[projectId]/runs/[runId]", "page");
 }
 
 export async function answerAction(_: InboxActionState, form: FormData): Promise<InboxActionState> {
@@ -82,7 +84,7 @@ export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchem
     return { ok: false, error: (error as Error).message };
   }
   refresh(runId);
-  redirect(`/runs/${runId}`);
+  redirect((await runPathOf(getDb(), runId)) ?? "/inbox");
 }
 
 const ViewedSchema = z.object({ runId: z.string().uuid(), path: z.string().min(1).max(1_000), blobSha: z.string().min(1).max(100), viewed: z.boolean() });

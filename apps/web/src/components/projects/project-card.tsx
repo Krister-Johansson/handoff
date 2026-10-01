@@ -21,7 +21,6 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { runFilterHref } from "@/lib/run-filter";
 import { cn } from "@/lib/utils";
 import type { ProjectAttention } from "@/server/project-admin";
 
@@ -215,7 +214,7 @@ export function ProjectCard({ project, attention }: { project: ProjectSummary; a
               </Link>
             )}
             {attention.failed > 0 && (
-              <Link href={runFilterHref({}, { status: "failed", project: project.name })} className={ATTENTION_LINK}>
+              <Link href="/inbox" className={ATTENTION_LINK}>
                 {plural(attention.failed, "failed run")}
               </Link>
             )}

@@ -1,5 +1,6 @@
 import { and, desc, eq, graphs, projects, runs, type Db } from "@handoff/db";
 import type { Crumb, CrumbMenuItem } from "../components/page-header";
+import { runPath } from "../lib/paths";
 
 const short = (text: string, max = 60) => {
   const line = text.split("\n")[0]!.trim();
@@ -38,7 +39,7 @@ export async function runCrumb(db: Db, projectId: string, run: { id: string; tas
     .where(and(eq(runs.projectId, projectId)))
     .orderBy(desc(runs.createdAt))
     .limit(15);
-  const menu: CrumbMenuItem[] = recent.map((r) => ({ label: short(r.task), href: `/runs/${r.id}`, current: r.id === run.id, hint: r.status }));
-  if (!recent.some((r) => r.id === run.id)) menu.unshift({ label: short(run.task), href: `/runs/${run.id}`, current: true });
-  return { label: short(run.task, 48), href: `/runs/${run.id}`, menu };
+  const menu: CrumbMenuItem[] = recent.map((r) => ({ label: short(r.task), href: runPath(projectId, r.id), current: r.id === run.id, hint: r.status }));
+  if (!recent.some((r) => r.id === run.id)) menu.unshift({ label: short(run.task), href: runPath(projectId, run.id), current: true });
+  return { label: short(run.task, 48), href: runPath(projectId, run.id), menu };
 }

@@ -48,7 +48,7 @@ test("an issue with a run shows the run's status and links to it and its PR", ()
     />,
   );
   const row = screen.getByRole("listitem");
-  expect(within(row).getByRole("link", { name: /waiting/ })).toHaveAttribute("href", "/runs/r9");
+  expect(within(row).getByRole("link", { name: /waiting/ })).toHaveAttribute("href", "/projects/p1/runs/r9");
   expect(within(row).getByRole("link", { name: "PR #21" })).toHaveAttribute("href", "https://github.com/o/r/pull/21");
   expect(within(row).queryByRole("button", { name: "Start run" })).not.toBeInTheDocument();
 });

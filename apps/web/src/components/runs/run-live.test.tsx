@@ -45,7 +45,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const executions = [{ id: "e1", nodeKey: "planner", attempt: 1, status: "passed", costUsd: null, durationMs: null }];
-const common = { runId: "r1", initialEvents: [], labels: { planner: "Plan", coder: "Code" }, prNumber: null, questions: [] };
+const common = { projectId: "p1", runId: "r1", initialEvents: [], labels: { planner: "Plan", coder: "Code" }, prNumber: null, questions: [] };
 
 test("selecting a step opens what it produced", async () => {
   render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
@@ -160,6 +160,7 @@ const question = (review: boolean) => ({
   question: "Review the plan from Planner",
   options: ["approve", "changes"],
   runId: "r1",
+  projectId: "p1",
   task: "Add a module",
   nodeKey: "gate",
   projectName: "demo",
@@ -171,7 +172,7 @@ test("a review waiting on a person puts the way to it in the banner", () => {
   render(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(true)]} />);
   const banner = screen.getByRole("status");
   expect(banner).toHaveTextContent("Approve the plan waits for your review");
-  expect(within(banner).getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/runs/r1/review/q1");
+  expect(within(banner).getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/projects/p1/runs/r1/review/q1");
 });
 
 test("a gate that starts waiting while the page is open refreshes it, so its question arrives", () => {
@@ -186,7 +187,7 @@ test("a waiting gate's drawer shows its question with the way to answer it", asy
   fireEvent.click(screen.getByRole("button", { name: /Approve the plan/ }));
   const drawer = await screen.findByRole("dialog");
   expect(within(drawer).getByText("Review the plan from Planner")).toBeInTheDocument();
-  expect(within(drawer).getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/runs/r1/review/q1");
+  expect(within(drawer).getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/projects/p1/runs/r1/review/q1");
 
   rerender(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(false)]} />);
   expect(within(screen.getByRole("dialog")).getByRole("button", { name: "approve" })).toBeInTheDocument();

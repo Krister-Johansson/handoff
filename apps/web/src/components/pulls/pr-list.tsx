@@ -2,6 +2,7 @@ import { GitMergeIcon, GitPullRequestClosedIcon, GitPullRequestDraftIcon, GitPul
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { IssueLinks, type IssueLink } from "@/components/runs/issue-links";
+import { runPath } from "@/lib/paths";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +13,7 @@ export type PullItem = {
   branch: string;
   url: string;
   runId: string;
+  projectId: string;
   runStatus: string;
   /** The run's task and linked issues. */
   task?: string;
@@ -58,7 +60,7 @@ export function PullRequestList({
             #{pr.number}
           </a>
           <div className="flex min-w-0 flex-1 flex-col">
-            <Link href={`/runs/${pr.runId}`} className="truncate text-sm hover:underline">
+            <Link href={runPath(pr.projectId, pr.runId)} className="truncate text-sm hover:underline">
               {pr.title ?? pr.branch}
             </Link>
             {pr.task && !titleShowsTask(pr.title, pr.task) && <span className="truncate text-xs text-muted-foreground">{pr.task}</span>}

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
+import { runPath } from "@/lib/paths";
 import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
@@ -95,7 +96,7 @@ export async function startRunAction(_: ActionState, form: FormData): Promise<Ac
   } catch (error) {
     return { ok: false, error: (error as Error).message, values: { task, graphName } };
   }
-  redirect(`/runs/${id}`);
+  redirect(runPath(projectId, id));
 }
 
 export async function listIssuesAction(projectId: string): Promise<{ issues: IssueSummary[] } | { error: string }> {
@@ -127,13 +128,13 @@ export async function unarchivePullAction(_: ActionState, form: FormData): Promi
 }
 
 export async function runAgainAction(_: ActionState, form: FormData): Promise<ActionState> {
-  let id: string;
+  let again: { id: string; projectId: string };
   try {
-    id = (await runAgain(getDb(), field(form, "runId"))).id;
+    again = await runAgain(getDb(), field(form, "runId"));
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  redirect(`/runs/${id}`);
+  redirect(runPath(again.projectId, again.id));
 }
 
 export async function loadGraphVersionAction(projectId: string, name: string, version: number): Promise<unknown> {
