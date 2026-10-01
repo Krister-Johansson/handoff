@@ -1,10 +1,10 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
-import { wakeByKey } from "@handoff/db";
+import { screenshots, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
 import { createRun } from "../runs.ts";
@@ -503,5 +503,61 @@ describe("the pull request's title and body", () => {
     expect(pr.title).toBe("Add a dated changelog");
     expect(pr.body).toContain("Second.");
     expect(pr.body).toContain("Closes #12");
+  });
+});
+
+describe("Screenshots on the pull request", () => {
+  /** A coder that also records a screenshot of its work, as a Demo step would. */
+  const coderWithShot: NodeExecutor = {
+    needsWorkdir: true,
+    execute: async (ctx) => {
+      const result = await coder.execute(ctx);
+      const file = join(mkdtempSync(join(tmpdir(), "shot-")), "0-page-1.png");
+      writeFileSync(file, "png bytes");
+      await db.insert(screenshots).values({ runId: ctx.run.id, nodeExecutionId: ctx.execution.id, position: 0, path: file, caption: "The new task in the list", criterion: "A user can create a new task", works: true });
+      return result;
+    },
+  };
+
+  async function shotRun(origin = createOriginRepo()) {
+    const github = new FakeGitHub();
+    const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add tasks" });
+    const executors: ExecutorRegistry = { planner, coder: coderWithShot, pr: prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github }) };
+    await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+    return { github, run, project };
+  }
+
+  test("the run's screenshots go to the handoff-assets branch and show in the pull request description", async () => {
+    const origin = createOriginRepo();
+    const { github, run, project } = await shotRun(origin);
+    expect(git(origin, "show", `handoff-assets:runs/${run.id}/0-page-1.png`)).toBe("png bytes");
+    const body = github.prs.get(1)!.body;
+    expect(body).toContain("## Screenshots");
+    expect(body).toContain(`![The new task in the list](https://github.com/${project.repoOwner}/${project.repoName}/blob/handoff-assets/runs/${run.id}/0-page-1.png?raw=true)`);
+    expect(body).toContain("A user can create a new task: works");
+    // The run's own branch carries none of it.
+    expect(git(origin, "ls-tree", "-r", "--name-only", run.branchName)).not.toContain("runs/");
+  });
+
+  test("screenshots of earlier runs stay on the assets branch", async () => {
+    const origin = createOriginRepo();
+    const work = mkdtempSync(join(tmpdir(), "assets-"));
+    git(work, "init", "-q", "-b", "handoff-assets");
+    git(work, "commit", "-q", "--allow-empty", "-m", "start");
+    mkdirSync(join(work, "runs", "earlier"), { recursive: true });
+    writeFileSync(join(work, "runs", "earlier", "0-a.png"), "old");
+    git(work, "add", "-A");
+    git(work, "commit", "-qm", "earlier");
+    git(work, "push", "-q", origin, "handoff-assets");
+    const { run } = await shotRun(origin);
+    expect(git(origin, "ls-tree", "-r", "--name-only", "handoff-assets").split("\n")).toEqual(["runs/earlier/0-a.png", `runs/${run.id}/0-page-1.png`].sort());
+  });
+
+  test("a run without screenshots leaves the repository's branches alone", async () => {
+    const { origin, github, deps } = await setup();
+    await drain(deps);
+    expect(() => git(origin, "rev-parse", "--verify", "-q", "handoff-assets")).toThrow();
+    expect(github.prs.get(1)!.body).not.toContain("## Screenshots");
   });
 });
