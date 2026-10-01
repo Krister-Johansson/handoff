@@ -32,3 +32,14 @@ test("the Planner of a run linked to issues reads them in its context", async ()
   expect(prompt).toContain("## #12 Slugify drops digits");
   expect(prompt).toContain("slugify('2nd') returns 'nd'.");
 });
+
+test("the Coder reads the planner's acceptance criteria when the issue lists none", async () => {
+  const { project, graphVersion } = await seedGraph(db, linear);
+  await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Fix the slugify issue", issues: [issue] });
+  const cli = new FakeCliExecutor([{ output: { ...outputs.planner, acceptance: ["slugify('2nd') returns '2nd'"] } }, { output: outputs.coderDone }]);
+  const agent = cliNodeExecutor({ cli, maxTurns: 10, timeoutMs: 60_000 });
+  await drain(engineDeps(db, { planner: agent, coder: agent, tester: scripted({ kind: "waiting", wait: { kind: "human", token: crypto.randomUUID() } }) }));
+  const prompt = cli.requests[1]!.systemPrompt;
+  expect(prompt).toContain("# Acceptance criteria");
+  expect(prompt).toContain("- slugify('2nd') returns '2nd'");
+});
