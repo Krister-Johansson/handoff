@@ -306,13 +306,15 @@ Each PR is one branch and one GitHub issue, worked test first. Test names use th
 | `runs.pr_number` readers assume one PR per run | Set to slice 1's PR; `PrList` and `MergeQueue` read `run_slices` when rows exist (PR 8), and the agent MCP tools in `apps/web/src/server/agent-mcp.ts` get the slice list in `get_run`. |
 | GitHub's native stack preview changes | Not depended on; PR 10 is optional and last. |
 
-## Open questions
+## Decided questions
 
-1. Should a merge request merge the whole stack, or should the dashboard also offer "merge up to slice k"? Recommended: whole stack in v1; the merge node already tolerates a person merging a prefix on GitHub.
-2. Should the PR node wait for approval of slice k before the coder starts slice k+1 (`requireApproval` per slice), or open all slices and let reviews arrive in any order? Recommended: do not block; the stack node's refresh and restack handle late feedback, and reviews can run in parallel with coding.
-3. Should `cancelRun` close the stack's open PRs? Recommended: no, as today for a single PR; add `handoff run cancel --close-prs` later if cancelled stacks accumulate.
-4. Should slice branches be deleted after each merge when the repository does not auto-delete? Recommended: yes (project setting `deleteSliceBranches`, default on), always after the retarget.
-5. Should the planner propose slices by default whenever the graph has a stack node, or only when the issue carries a label such as `stack`? Recommended: by default, with the planner told to prefer one slice unless the task has at least two independently testable parts; the person can flatten at plan review.
+The user accepted every recommendation below on 2026-10-01. Each one is now a decision for the implementation.
+
+1. Should a merge request merge the whole stack, or should the dashboard also offer "merge up to slice k"? Decided: whole stack in v1; the merge node already tolerates a person merging a prefix on GitHub.
+2. Should the PR node wait for approval of slice k before the coder starts slice k+1 (`requireApproval` per slice), or open all slices and let reviews arrive in any order? Decided: do not block; the stack node's refresh and restack handle late feedback, and reviews can run in parallel with coding.
+3. Should `cancelRun` close the stack's open PRs? Decided: no, as today for a single PR; add `handoff run cancel --close-prs` later if cancelled stacks accumulate.
+4. Should slice branches be deleted after each merge when the repository does not auto-delete? Decided: yes (project setting `deleteSliceBranches`, default on), always after the retarget.
+5. Should the planner propose slices by default whenever the graph has a stack node, or only when the issue carries a label such as `stack`? Decided: by default, with the planner told to prefer one slice unless the task has at least two independently testable parts; the person can flatten at plan review.
 
 ## Verification
 

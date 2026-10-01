@@ -352,13 +352,15 @@ Each PR is one GitHub issue, one branch, CI green, `pnpm doctor:react` clean aft
 | The catalog and `agent-mcp.ts` drift | The equality test in PR 1 fails on any difference in names, descriptions or annotations. |
 | Sharing `HANDOFF_HOME` between the dashboard and the worker | Separate `claude-config-assistant` and `assistant/` directories; `gc` knows both. |
 
-## Open questions
+## Decided questions
 
-1. Should the assistant run in the dashboard process (this plan) or in the worker through a Postgres queue? Recommendation: the dashboard process, for streaming latency and one fewer hop; the `AssistantRunner` interface keeps the worker option open.
-2. Default model: `sonnet` (recommended), or the subscription default `opus`? Recommendation: `sonnet` with `low` effort; the settings tab shows what ran and allows `opus` or `haiku`.
-3. Should voice be allowed to approve state changes through `respond`? Recommendation: no in this plan; approval cards need a click. `docs/plans/voice.md` can revisit with a spoken confirmation phrase and a timeout, which its own PR 5 already uses for page commands.
-4. Which tools does WebMCP expose: all catalog tools with the approval dialog (recommended), or read and UI tools only? Recommendation: all, since the dialog and the origin check are the same gate the assistant uses, with a settings switch to turn WebMCP off.
-5. History retention: keep conversations until `handoff gc` removes them after 30 days (recommended), or keep forever? Recommendation: 30 days through the existing `gc --days`, so transcripts under `claude-config-assistant` and the tables shrink together.
+The user accepted every recommendation below on 2026-10-01. Each one is now a decision for the implementation.
+
+1. Should the assistant run in the dashboard process (this plan) or in the worker through a Postgres queue? Decided: the dashboard process, for streaming latency and one fewer hop; the `AssistantRunner` interface keeps the worker option open.
+2. Default model: `sonnet` (recommended), or the subscription default `opus`? Decided: `sonnet` with `low` effort; the settings tab shows what ran and allows `opus` or `haiku`.
+3. Should voice be allowed to approve state changes through `respond`? Decided: no in this plan; approval cards need a click. `docs/plans/voice.md` can revisit with a spoken confirmation phrase and a timeout, which its own PR 5 already uses for page commands.
+4. Which tools does WebMCP expose: all catalog tools with the approval dialog (recommended), or read and UI tools only? Decided: all, since the dialog and the origin check are the same gate the assistant uses, with a settings switch to turn WebMCP off.
+5. History retention: keep conversations until `handoff gc` removes them after 30 days (recommended), or keep forever? Decided: 30 days through the existing `gc --days`, so transcripts under `claude-config-assistant` and the tables shrink together.
 
 ## Verification
 

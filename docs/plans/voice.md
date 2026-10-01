@@ -333,13 +333,15 @@ Each PR is one branch, one GitHub issue, CI green, `pnpm doctor:react` clean aft
 | The assistant plan changes the port shape | Voice touches the port in one file (`voice-provider.tsx`) and a fake; PR 4 is the only one that depends on it. |
 | Chrome's microphone permission prompt appears on every start | Chrome remembers the decision per origin; the manual script confirms the prompt appears once for `http://127.0.0.1:3000`. |
 
-## Open questions
+## Decided questions
 
-1. Recognition language. Recommendation: `en-US` on-device by default. If the user wants Swedish, enable server recognition for `sv-SE` as a conscious opt-in, and revisit Whisper in the browser only if that is unacceptable.
-2. Push to talk shape. Recommendation: `V` toggles and `Escape` stops, matching the single-key style of `[` and `]`. Hold-to-talk on the button can come later without changing the hook.
-3. Confirmation for submits. Recommendation: always confirm "approve", "send back", "request changes", "approve after fixes" and "always allow"; never confirm "works", "doesn't work", "next", "allow once", "deny".
-4. Speaking replies while they stream. Recommendation: speak only completed replies in v1; sentence-level streaming speech is a follow-up once reply lengths are known.
-5. Where the microphone button lives when the assistant panel exists. Recommendation: keep it in the header so it works on every page; the assistant composer gets its own small dictation button that calls the same hook in dictation mode.
+The user accepted every recommendation below on 2026-10-01. Each one is now a decision for the implementation.
+
+1. Recognition language. Decided: `en-US` on-device by default. If the user wants Swedish, enable server recognition for `sv-SE` as a conscious opt-in, and revisit Whisper in the browser only if that is unacceptable.
+2. Push to talk shape. Decided: `V` toggles and `Escape` stops, matching the single-key style of `[` and `]`. Hold-to-talk on the button can come later without changing the hook.
+3. Confirmation for submits. Decided: always confirm "approve", "send back", "request changes", "approve after fixes" and "always allow"; never confirm "works", "doesn't work", "next", "allow once", "deny".
+4. Speaking replies while they stream. Decided: speak only completed replies in v1; sentence-level streaming speech is a follow-up once reply lengths are known.
+5. Where the microphone button lives when the assistant panel exists. Decided: keep it in the header so it works on every page; the assistant composer gets its own small dictation button that calls the same hook in dictation mode.
 
 ## Verification
 
