@@ -3,7 +3,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { eq, graphVersions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
-import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjects, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
+import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjectGraphs, listProjects, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -195,5 +195,20 @@ describe("renaming and deleting graphs", () => {
     await startRunFromGraph(db, { projectId: project.id, graphName: "used", task: "Add a CHANGELOG.md" });
     await saveGraphVersion(db, { projectId: project.id, name: "newer", document: linear });
     expect((await getProjectDetail(db, project.id))!.defaultGraph).toBe("used");
+  });
+
+  test("a project's graphs list their latest version, when they were saved and how many runs used them", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "master", document: linear });
+    await saveGraphVersion(db, { projectId: project.id, name: "master", document: linear });
+    await saveGraphVersion(db, { projectId: project.id, name: "quick", document: linear });
+    await startRunFromGraph(db, { projectId: project.id, graphName: "master", task: "One" });
+    await startRunFromGraph(db, { projectId: project.id, graphName: "master", task: "Two" });
+    const list = await listProjectGraphs(db, project.id);
+    expect(list.map((g) => [g.name, g.latestVersion, g.runs])).toEqual([
+      ["master", 2, 2],
+      ["quick", 1, 0],
+    ]);
+    expect(list[0]!.savedAt).toBeInstanceOf(Date);
   });
 });

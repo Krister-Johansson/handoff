@@ -77,6 +77,21 @@ export async function getProjectDetail(db: Db, projectId: string) {
   return { project, graphs: graphRows, runs: runRows, defaultGraph: lastUsed?.name ?? lastChanged?.name };
 }
 
+/** The project's graphs by name, each with its latest version, when it was last saved and how many runs used any version of it. */
+export async function listProjectGraphs(db: Db, projectId: string) {
+  return db
+    .select({
+      id: graphs.id,
+      name: graphs.name,
+      latestVersion: graphs.latestVersion,
+      savedAt: graphs.updatedAt,
+      runs: sql<number>`(select count(*)::int from runs r join graph_versions v on v.id = r.graph_version_id where v.graph_id = "graphs"."id")`,
+    })
+    .from(graphs)
+    .where(eq(graphs.projectId, projectId))
+    .orderBy(graphs.name);
+}
+
 export async function getGraphForEdit(db: Db, projectId: string, name: string) {
   const [row] = await db
     .select({ version: graphVersions.version, document: graphVersions.document, versionId: graphVersions.id })
