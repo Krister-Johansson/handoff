@@ -12,7 +12,11 @@ export type NowInput = {
   reviews: number;
   /** Where the run stands in its project's merge queue, while its merge step waits there. */
   queue?: RunQueue | undefined;
+  /** Open issues GitHub says block the run's issues, while the run waits for them at its start. */
+  blockedBy?: number[] | undefined;
 };
+
+const andList = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 
 export type RunQueue = { position: number; requested: boolean; mode: "manual" | "auto" };
 
@@ -25,7 +29,7 @@ function queueText({ position, requested, mode }: RunQueue): string {
 }
 
 /** One line saying what a run is doing now, or how it ended, with the tone to show it in. */
-export function describeNow({ status, executions, labels, prNumber, questions, reviews, queue }: NowInput): { tone: StatusTone; text: string } {
+export function describeNow({ status, executions, labels, prNumber, questions, reviews, queue, blockedBy }: NowInput): { tone: StatusTone; text: string } {
   const label = (key: string) => labels[key] ?? key;
   const latest = (s: string) => executions.findLast((e) => e.status === s);
   if (status === "cancelled") return { tone: "muted", text: "Cancelled." };
@@ -40,6 +44,7 @@ export function describeNow({ status, executions, labels, prNumber, questions, r
   const running = latest("running");
   if (running) return { tone: "active", text: `${label(running.nodeKey)} is working${running.attempt > 1 ? `, attempt ${running.attempt}` : ""}` };
   const waiting = latest("waiting");
+  if (waiting && blockedBy?.length) return { tone: "attention", text: `Waiting for ${andList(blockedBy.map((n) => `#${n}`))} to close` };
   if (waiting && queue) return { tone: "attention", text: queueText(queue) };
   if (waiting && reviews > 0) return { tone: "attention", text: `${label(waiting.nodeKey)} waits for your review` };
   if (waiting && questions > 0) return { tone: "attention", text: `Waiting for your answer to ${label(waiting.nodeKey)}` };

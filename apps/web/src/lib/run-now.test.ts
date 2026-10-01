@@ -37,3 +37,10 @@ test("a run waiting in the merge queue says where it stands", () => {
   expect(describeNow({ ...waitingToMerge, queue: { position: 2, requested: false, mode: "manual" } }).text).toBe("Ready to merge, 2nd in line");
   expect(describeNow({ ...waitingToMerge, queue: { position: 3, requested: true, mode: "manual" } }).text).toBe("Merge requested, 3rd in line");
 });
+
+test("a run waiting on GitHub dependencies says which issues it waits for", () => {
+  const blocked = { ...base, status: "waiting", executions: [exec("start", "waiting")] };
+  expect(describeNow({ ...blocked, blockedBy: [3] })).toEqual({ tone: "attention", text: "Waiting for #3 to close" });
+  expect(describeNow({ ...blocked, blockedBy: [5, 6] }).text).toBe("Waiting for #5 and #6 to close");
+  expect(describeNow({ ...blocked, blockedBy: [4, 5, 6] }).text).toBe("Waiting for #4, #5 and #6 to close");
+});

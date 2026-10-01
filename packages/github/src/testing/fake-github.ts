@@ -20,7 +20,22 @@ export class FakeGitHub implements GitHubPort {
     return [...this.issues.values()]
       .filter((i) => i.state === "open")
       .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
-      .map((i) => ({ number: i.number, title: i.title, url: i.url, labels: i.labels ?? [], author: i.author ?? null, updatedAt: i.updatedAt ?? "" }));
+      .map((i) => ({ number: i.number, title: i.title, url: i.url, labels: i.labels ?? [], author: i.author ?? null, updatedAt: i.updatedAt ?? "", blockedBy: this.openOf(i.blockedBy) }));
+  }
+
+  /** The blockers that are still open; an issue the fake does not know counts as open. */
+  private openOf(numbers: number[] | undefined) {
+    return (numbers ?? []).filter((n) => this.issues.get(n)?.state !== "closed");
+  }
+
+  async openBlockers(_repo: RepoRef, number: number) {
+    return this.openOf(this.issues.get(number)?.blockedBy);
+  }
+
+  async addBlockedBy(_repo: RepoRef, issue: number, blocker: number) {
+    const found = this.issues.get(issue);
+    if (!found) throw new Error(`no issue ${issue}`);
+    found.blockedBy = [...new Set([...(found.blockedBy ?? []), blocker])];
   }
 
   async getIssue(_repo: RepoRef, number: number): Promise<IssueDetail> {

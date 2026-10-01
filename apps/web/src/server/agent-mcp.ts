@@ -169,6 +169,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
             title: issue.title,
             url: issue.url,
             labels: issue.labels,
+            blocked_by: issue.blockedBy,
             run: issue.run ? { id: issue.run.id, status: issue.run.status, url: `${baseUrl}${runPath(projectId, issue.run.id)}` } : null,
           }));
       }),

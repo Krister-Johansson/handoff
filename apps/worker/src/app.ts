@@ -56,7 +56,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       coder: agent,
       reviewer: agent,
       code_review: agent,
-      start: startExecutor(),
+      start: startExecutor({ github }),
       finish: finishExecutor(),
       tester: testerExecutor(),
       human_gate: humanGateExecutor({ db, branchDiff }),

@@ -65,6 +65,15 @@ function RunAlerts({ detail, stuck }: { detail: Detail; stuck: StuckLoop | undef
   );
 }
 
+/** The issues GitHub said block the run, while it still waits for them at its start node. */
+function blockersOf({ run, executions, events, graph }: Detail): number[] | undefined {
+  const startNode = (graph?.document as { attributes?: { startNode?: string } } | undefined)?.attributes?.startNode;
+  const waitingAtStart = run.status === "waiting" && executions.some((e) => e.nodeKey === startNode && e.status === "waiting");
+  if (!waitingAtStart) return undefined;
+  const blockers = events.filter((e) => e.type === "run.blocked").flatMap((e) => (e.payload as { blockedBy?: number[] }).blockedBy ?? []);
+  return blockers.length ? [...new Set(blockers)] : undefined;
+}
+
 /** Where the run stands in its project's merge queue, while its merge step waits there. */
 async function queuePlace(projectId: string, runId: string): Promise<RunQueue | undefined> {
   const entry = (await projectMergeQueue(getDb(), projectId)).find((e) => e.runId === runId && e.waiting);
@@ -81,6 +90,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const stuck = run.status === "failed" ? await stuckLoop(getDb(), run.id) : undefined;
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
   const queue = active ? await queuePlace(project.id, run.id) : undefined;
+  const blockedBy = blockersOf(detail);
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
@@ -165,6 +175,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         prNumber={run.prNumber}
         questions={questionItems(detail)}
         queue={queue}
+        blockedBy={blockedBy}
         initialEvents={events}
         graphDocument={graph?.document}
       />

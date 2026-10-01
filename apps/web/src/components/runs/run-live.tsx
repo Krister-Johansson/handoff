@@ -83,6 +83,8 @@ type Props = {
   questions: OpenQuestion[];
   /** Where the run stands in its project's merge queue, while it waits there. */
   queue?: RunQueue | undefined;
+  /** Open issues GitHub says block this run's issues, while it waits for them at its start. */
+  blockedBy?: number[] | undefined;
 };
 
 /** What the run is doing now, with the one thing a person can do about it: open a waiting review, or merge. */
@@ -127,7 +129,7 @@ type EventPayload = {
 };
 
 /** What the run is doing now, its steps, its graph and its events, kept in step with the event stream. */
-export function RunLive({ projectId, runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions, queue }: Props) {
+export function RunLive({ projectId, runId, initialStatus, initialExecutions, initialEvents, graphDocument, labels, prNumber: initialPr, questions, queue, blockedBy }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [prNumber, setPrNumber] = useState(initialPr);
   const [executions, setExecutions] = useState(initialExecutions);
@@ -201,7 +203,7 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
   }, [executions]);
 
   const review = questions.find((q) => q.context?.review);
-  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue });
+  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy });
   const selectedQuestion = questions.find((q) => q.nodeExecutionId === selected?.id);
   const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
   const filter = useMemo(

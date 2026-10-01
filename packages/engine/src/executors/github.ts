@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { CoderOutputSchema, ReviewerOutputSchema, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
 import type { Db } from "@handoff/db";
+import { wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
@@ -269,6 +270,8 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db }): NodeEx
         if (!result.merged) return done({ kind: "failed", error: { code: "merge_failed", message: `GitHub did not merge PR #${number}` } });
         ctx.emit("github.merged", { number, sha: result.sha });
         await closeLinkedIssues(deps.github, ctx, repo, number);
+        // Closed issues may unblock other runs of the project waiting at their Start.
+        if (db) await wakeDependents(db, ctx.project.id);
         return done({ kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } });
       } catch (error) {
         return done({ kind: "failed", error: { code: "merge_failed", message: (error as Error).message } });

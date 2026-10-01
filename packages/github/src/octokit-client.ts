@@ -1,4 +1,5 @@
 import { App, Octokit } from "octokit";
+import { z } from "zod";
 import { PullRequestSnapshotDocument, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
 import type { CheckContext, GitHubPort, IssueDetail, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
 
@@ -36,6 +37,39 @@ type GqlContext = NonNullable<
 >[number];
 
 /** GitHubPort over Octokit, authenticated as a GitHub App installation or with a personal token. */
+const IssueRefs = z.object({ nodes: z.array(z.object({ number: z.number().int(), state: z.string() })) });
+const openNumbers = (nodes: { number: number; state: string }[]) => nodes.filter((n) => n.state === "OPEN").map((n) => n.number);
+
+const OPEN_ISSUES = `query OpenIssues($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    issues(first: 100, states: OPEN, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes { number title url updatedAt author { login } labels(first: 20) { nodes { name } } blockedBy(first: 20) { nodes { number state } } }
+    }
+  }
+}`;
+const OpenIssuesSchema = z.object({
+  repository: z.object({
+    issues: z.object({
+      nodes: z.array(
+        z.object({
+          number: z.number().int(),
+          title: z.string(),
+          url: z.string(),
+          updatedAt: z.string(),
+          author: z.object({ login: z.string() }).nullable(),
+          labels: z.object({ nodes: z.array(z.object({ name: z.string() })) }),
+          blockedBy: IssueRefs,
+        }),
+      ),
+    }),
+  }),
+});
+
+const ISSUE_BLOCKERS = `query IssueBlockers($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) { issue(number: $number) { blockedBy(first: 50) { nodes { number state } } } }
+}`;
+const BlockersSchema = z.object({ repository: z.object({ issue: z.object({ blockedBy: IssueRefs }).nullable() }) });
+
 export class OctokitGitHub implements GitHubPort {
   private constructor(
     private readonly clientFor: (repo: RepoRef) => Promise<Octokit>,
@@ -82,17 +116,31 @@ export class OctokitGitHub implements GitHubPort {
 
   async listIssues(repo: RepoRef): Promise<IssueSummary[]> {
     const octokit = await this.clientFor(repo);
-    const { data } = await octokit.rest.issues.listForRepo({ owner: repo.owner, repo: repo.name, state: "open", sort: "updated", direction: "desc", per_page: 100 });
-    return data
-      .filter((issue) => !issue.pull_request)
-      .map((issue) => ({
-        number: issue.number,
-        title: issue.title,
-        url: issue.html_url,
-        labels: issue.labels.map((l) => (typeof l === "string" ? l : (l.name ?? ""))).filter(Boolean),
-        author: issue.user?.login ?? null,
-        updatedAt: issue.updated_at,
-      }));
+    // GraphQL, so each issue comes with its blockers in one call. GitHub's published schema has no issue
+    // dependencies yet, so this query is checked at runtime instead of generated.
+    const data = OpenIssuesSchema.parse(await octokit.graphql(OPEN_ISSUES, { owner: repo.owner, name: repo.name }));
+    return data.repository.issues.nodes.map((issue) => ({
+      number: issue.number,
+      title: issue.title,
+      url: issue.url,
+      labels: issue.labels.nodes.map((l) => l.name),
+      author: issue.author?.login ?? null,
+      updatedAt: issue.updatedAt,
+      blockedBy: openNumbers(issue.blockedBy.nodes),
+    }));
+  }
+
+  async openBlockers(repo: RepoRef, number: number): Promise<number[]> {
+    const octokit = await this.clientFor(repo);
+    const data = BlockersSchema.parse(await octokit.graphql(ISSUE_BLOCKERS, { owner: repo.owner, name: repo.name, number }));
+    return openNumbers(data.repository.issue?.blockedBy.nodes ?? []);
+  }
+
+  async addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void> {
+    const octokit = await this.clientFor(repo);
+    // The endpoint takes the blocking issue's id, not its number.
+    const { data } = await octokit.rest.issues.get({ owner: repo.owner, repo: repo.name, issue_number: blocker });
+    await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by", { owner: repo.owner, repo: repo.name, issue_number: issue, issue_id: data.id });
   }
 
   async getIssue(repo: RepoRef, number: number): Promise<IssueDetail> {
