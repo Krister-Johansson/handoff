@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FilterLinks } from "@/components/inbox/filter-links";
+import { FilterLinks } from "@/components/filter-links";
 import { formatAgo } from "@/lib/format";
 import type { NotificationFilter } from "@/lib/notifications";
 import { cn } from "@/lib/utils";

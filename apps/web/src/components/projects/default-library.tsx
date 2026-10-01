@@ -6,7 +6,7 @@ import { ChosenLibrary, LibraryChooser } from "@/components/library/library-choo
 import { FieldError } from "@/components/ui/field";
 import type { LibraryChoices, LibrarySelection as Selection } from "@/lib/library-choices";
 import { cn } from "@/lib/utils";
-import { CARD_BODY, SectionCard } from "./section-card";
+import { CARD_BODY, SectionCard } from "@/components/section-card";
 
 /**
  * Library entries every CLI node of every run in the project gets, on top of what each node enables

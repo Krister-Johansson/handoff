@@ -52,7 +52,3 @@ export async function listInbox(db: Db) {
     count: open.length + failed.length,
   };
 }
-
-export async function inboxCount(db: Db): Promise<number> {
-  return (await listInbox(db)).count;
-}

@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { formatAgo } from "@/lib/format";
 import { runPath } from "@/lib/paths";
 import type { RunLine } from "@/server/run-lines";
-import { ROW, ROWS, Tag } from "./section-card";
+import { ROW, ROWS } from "@/components/section-card";
+import { Tag } from "@/components/tag";
 
 export type ActiveRun = { id: string; projectId: string; task: string; status: string; project: string; prNumber: number | null; createdAt: Date };
 

@@ -45,7 +45,7 @@ test("the filters link to the feed narrowed to unread items or one kind, and mar
   const links = screen.getAllByRole("link");
   expect(links.map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
     ["All", "/notifications"],
-    ["Unread2", "/notifications?show=unread"],
+    ["Unread 2", "/notifications?show=unread"],
     ["Needs you", "/notifications?show=input"],
     ["Finished", "/notifications?show=finished"],
     ["Failed", "/notifications?show=failed"],

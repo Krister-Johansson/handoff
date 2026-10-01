@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Crumb } from "@/components/page-header";
-import { Tag } from "@/components/library/tag";
+import { Tag } from "@/components/tag";
 import { libraryIndex } from "@/lib/library-index";
 
 type Tab = "skills" | "mcp" | "agents" | "groups";

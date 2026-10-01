@@ -3,7 +3,7 @@
 import { useActionState } from "react";
 import { ArchiveIcon, ArchiveRestoreIcon } from "lucide-react";
 import { archivePullAction, unarchivePullAction, type ActionState } from "@/app/projects/actions";
-import { FilterLinks } from "@/components/projects/section-card";
+import { FilterLinks } from "@/components/filter-links";
 import { Button } from "@/components/ui/button";
 import { PULL_FILTERS } from "@/lib/pull-filter";
 import type { PullCounts, PullFilter } from "@/server/pulls";
@@ -13,7 +13,7 @@ export function PullFilters({ active, counts }: { active: PullFilter; counts: Pu
   return (
     <FilterLinks
       label="Pull request state"
-      items={PULL_FILTERS.map((f) => ({ href: `?tab=pulls&pr=${f.value}`, label: f.label, count: counts[f.value], current: f.value === active }))}
+      links={PULL_FILTERS.map((f) => ({ href: `?tab=pulls&pr=${f.value}`, label: f.label, count: counts[f.value], current: f.value === active }))}
     />
   );
 }

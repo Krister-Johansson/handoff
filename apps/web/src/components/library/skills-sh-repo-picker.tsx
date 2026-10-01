@@ -10,7 +10,7 @@ import { FieldError } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { SkillsShDetails } from "./skills-sh-details";
-import { Tag } from "./tag";
+import { Tag } from "@/components/tag";
 
 type RepoSkill = { id: string; skillId: string; installs: number };
 

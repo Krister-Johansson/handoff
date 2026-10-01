@@ -25,7 +25,7 @@ import { formatAgo } from "@/lib/format";
 import { runPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 import type { ProjectAttention } from "@/server/project-admin";
-import { Tag } from "./section-card";
+import { Tag } from "@/components/tag";
 
 export type ProjectSummary = {
   id: string;

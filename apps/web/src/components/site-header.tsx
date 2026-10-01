@@ -9,12 +9,12 @@ import { WorkerStatus } from "@/components/worker-status";
 export function SiteHeader() {
   return (
     <header className="sticky top-0 z-30 border-b bg-background/90 backdrop-blur-md">
-      <div className="mx-auto flex h-[52px] w-full max-w-6xl items-center gap-5 px-6">
-        <Link href="/" className="flex items-center gap-2 text-[15px] font-semibold tracking-tight">
+      <div className="mx-auto flex h-[52px] w-full max-w-6xl items-center gap-3 px-4 sm:gap-5 sm:px-6">
+        <Link href="/" aria-label="handoff" className="flex shrink-0 items-center gap-2 text-[15px] font-semibold tracking-tight">
           <span aria-hidden className="grid size-5 place-items-center rounded-md bg-primary">
             <span className="block size-2.5 rounded-[3px] border-2 border-primary-foreground" />
           </span>
-          handoff
+          <span className="max-sm:hidden">handoff</span>
         </Link>
         {/* Runs live under their project; the Overview links to all of them. */}
         <nav className="flex items-center gap-0.5">
@@ -29,7 +29,7 @@ export function SiteHeader() {
               <SettingsIcon />
             </Link>
           </Button>
-          <span className="ml-2.5">
+          <span className="ml-1 sm:ml-2.5">
             <WorkerStatus />
           </span>
         </div>

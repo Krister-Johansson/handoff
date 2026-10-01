@@ -10,7 +10,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toActivity, toChat, type ActivityItem, type ActivityStats, type ChatEntry } from "@/lib/activity";
 import type { RunEvent } from "./event-stream";
-import { Tag } from "./tag";
+import { Tag } from "@/components/tag";
 
 const RESULT_CHARS = 6_000;
 

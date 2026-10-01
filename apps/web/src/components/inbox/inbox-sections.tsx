@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { FailedRunCard, PullRequestCard, QuestionCard, StuckRunCard } from "./cards";
-import { FilterLinks } from "./filter-links";
+import { FilterLinks } from "@/components/filter-links";
 import { inboxCount, inboxItems, type InboxView } from "./inbox-view";
 
 /** A count beside a heading. */

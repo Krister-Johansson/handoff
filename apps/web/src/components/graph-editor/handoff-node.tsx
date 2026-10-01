@@ -54,7 +54,7 @@ function NodeBadges({ id, data }: { id: string; data: HandoffNodeData }) {
   const issues = data.issues ?? [];
   const status = data.status;
   return (
-    <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-muted-foreground [&>[data-tone]]:h-[18px] [&>[data-tone]]:px-1.5 [&>[data-tone]]:text-[10px]">
+    <div className="flex flex-wrap items-center gap-1.5 font-mono text-[10px] text-muted-foreground">
       <span className="truncate">{id}</span>
       {data.isStart && data.nodeType !== "start" && <span className={cn(TAG, "border-transparent bg-secondary text-secondary-foreground")}>start</span>}
       {library > 0 && <span className={TAG}>{library} library</span>}
@@ -63,7 +63,7 @@ function NodeBadges({ id, data }: { id: string; data: HandoffNodeData }) {
           {issues.length === 1 ? "issue" : `${issues.length} issues`}
         </span>
       )}
-      {status && <StatusBadge status={status} label={`${status.replaceAll("_", " ")}${data.attempts && data.attempts > 1 ? ` ×${data.attempts}` : ""}`} />}
+      {status && <StatusBadge size="sm" status={status} label={`${status.replaceAll("_", " ")}${data.attempts && data.attempts > 1 ? ` ×${data.attempts}` : ""}`} />}
     </div>
   );
 }

@@ -29,7 +29,7 @@ const tabsListVariants = cva(
     variants: {
       variant: {
         default: "bg-muted",
-        line: "w-full justify-start gap-0.5 border-b bg-transparent p-0 group-data-horizontal/tabs:h-auto",
+        line: "w-full justify-start gap-0.5 overflow-x-auto border-b bg-transparent p-0 [scrollbar-width:none] group-data-horizontal/tabs:h-auto",
       },
     },
     defaultVariants: {

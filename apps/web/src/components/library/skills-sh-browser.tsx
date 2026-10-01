@@ -9,7 +9,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/u
 import { FieldError } from "@/components/ui/field";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SearchField } from "./search-field";
-import { Tag } from "./tag";
+import { Tag } from "@/components/tag";
 
 const installs = new Intl.NumberFormat("en", { notation: "compact" });
 
@@ -81,7 +81,7 @@ export function SkillsShBrowser({ lead }: { lead?: ReactNode }) {
             <span className="text-muted-foreground">
               {results.length} {results.length === 1 ? "result" : "results"} for
             </span>
-            <Tag fill>{searched}</Tag>
+            <Tag tone="fill">{searched}</Tag>
           </p>
           <ul className="flex flex-col">
             {results.map((hit) => (
