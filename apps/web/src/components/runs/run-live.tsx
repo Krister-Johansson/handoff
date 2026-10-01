@@ -15,7 +15,7 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTi
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCost, formatDuration } from "@/lib/format";
-import { reviewPath } from "@/lib/paths";
+import { reviewPath, tryPath } from "@/lib/paths";
 import { describeNow, type RunQueue } from "@/lib/run-now";
 import { MergeButton } from "./merge-button";
 import { runStatusFromEvent, statusFromEvent, type StatusTone } from "@/lib/status";
@@ -103,13 +103,30 @@ function RunNow({ status, now }: { status: string; now: ReturnType<typeof descri
 }
 
 /** The one thing a person can do about the run now: open a waiting review, or merge. */
-function RunNowAction({ projectId, runId, reviewId, queue }: { projectId: string; runId: string; reviewId: string | undefined; queue: RunQueue | undefined }) {
+function RunNowAction({
+  projectId,
+  runId,
+  reviewId,
+  tryId,
+  queue,
+}: {
+  projectId: string;
+  runId: string;
+  reviewId: string | undefined;
+  tryId: string | undefined;
+  queue: RunQueue | undefined;
+}) {
   const canMerge = queue?.position === 1 && queue.mode === "manual" && !queue.requested;
   return (
     <>
       {reviewId && (
         <Button size="sm" className="shrink-0" asChild>
           <Link href={reviewPath(projectId, runId, reviewId)}>Open the review</Link>
+        </Button>
+      )}
+      {tryId && (
+        <Button size="sm" className="shrink-0" asChild>
+          <Link href={tryPath(projectId, runId, tryId)}>Open Try it</Link>
         </Button>
       )}
       {canMerge && <MergeButton projectId={projectId} runId={runId} />}
@@ -218,6 +235,7 @@ export function RunLive({
   }, [executions]);
 
   const review = questions.find((q) => q.context?.review);
+  const tryIt = questions.find((q) => q.context?.reason === "try");
   const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy });
   const selectedQuestion = questions.find((q) => q.nodeExecutionId === selected?.id);
   const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
@@ -238,7 +256,7 @@ export function RunLive({
           actions={
             <>
               <RunNow status={status} now={now} />
-              <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} queue={queue} />
+              <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} tryId={tryIt?.id} queue={queue} />
               {header.actions}
             </>
           }
@@ -246,7 +264,7 @@ export function RunLive({
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <RunNow status={status} now={now} />
-          <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} queue={queue} />
+          <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} tryId={tryIt?.id} queue={queue} />
         </div>
       )}
       {children}

@@ -231,3 +231,11 @@ test("a step asking permission for a tool call needs you until someone answers",
   await db.update(permissionRequests).set({ status: "allowed" }).where(eq(permissionRequests.id, id));
   expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ done: true, unread: false });
 });
+
+test("a Try it gate's notification opens its own page", async () => {
+  const { project, start, ask } = await setUp();
+  const run = await start("Add projects");
+  const gate = await seedExecution(db, run.id, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [question] = await ask({ runId: run.id, nodeExecutionId: gate.id, question: "Try the app and check each acceptance criterion.", context: { reason: "try" } });
+  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ title: "sandbox: the app is ready for you to try", href: `/projects/${project.id}/runs/${run.id}/try/${question.id}` });
+});
