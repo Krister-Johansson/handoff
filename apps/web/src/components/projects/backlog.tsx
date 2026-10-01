@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 import { StatusBadge } from "@/components/runs/status-badge";
+import { runPath } from "@/lib/paths";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
@@ -79,7 +80,7 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
                       </a>
                     </Button>
                   )}
-                  <Link href={`/runs/${issue.run.id}`} className="rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                  <Link href={runPath(projectId, issue.run.id)} className="rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
                     <StatusBadge status={issue.run.status} />
                   </Link>
                 </span>

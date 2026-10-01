@@ -11,6 +11,7 @@ export async function listInbox(db: Db) {
         context: questions.context,
         createdAt: questions.createdAt,
         runId: runs.id,
+        projectId: runs.projectId,
         task: runs.task,
         nodeKey: nodeExecutions.nodeKey,
         projectName: projects.name,
@@ -24,6 +25,7 @@ export async function listInbox(db: Db) {
     db
       .select({
         runId: runs.id,
+        projectId: runs.projectId,
         task: runs.task,
         projectName: projects.name,
         executionId: nodeExecutions.id,

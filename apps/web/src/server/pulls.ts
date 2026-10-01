@@ -27,6 +27,7 @@ export async function listProjectPulls(
   const rows = await db
     .select({
       runId: runs.id,
+      projectId: runs.projectId,
       runStatus: runs.status,
       task: runs.task,
       issues: runs.issues,
@@ -50,6 +51,7 @@ export async function listProjectPulls(
         branch: row.branch,
         url: `https://github.com/${row.owner}/${row.name}/pull/${row.prNumber}`,
         runId: row.runId,
+        projectId: row.projectId,
         runStatus: row.runStatus,
         task: row.task,
         issues: row.issues,

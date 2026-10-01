@@ -7,6 +7,8 @@ import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
 import { currentSteps, getRunDetail, listRuns } from "./queries";
+import { runPathOf } from "./run-path";
+import { reviewPath, runPath } from "../lib/paths";
 
 export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; baseUrl: string };
 
@@ -54,7 +56,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     graph: graph?.name,
     task: run.task,
     status: run.status,
-    url: `${deps.baseUrl}/runs/${run.id}`,
+    url: `${deps.baseUrl}${runPath(run.projectId, run.id)}`,
     branch: run.branchName,
     pr: run.prNumber ? { number: run.prNumber, url: `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` } : null,
     issues: run.issues.map((i) => ({ number: i.number, title: i.title, url: i.url })),
@@ -75,7 +77,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
         question: q.question,
         options: q.options ?? [],
         // A review shows what to approve; the person can also comment on it in the dashboard.
-        ...(review?.markdown ? { review: review.markdown, review_url: `${deps.baseUrl}/runs/${run.id}/review/${q.id}` } : {}),
+        ...(review?.markdown ? { review: review.markdown, review_url: `${deps.baseUrl}${reviewPath(run.projectId, run.id, q.id)}` } : {}),
       };
     }),
     failed: failed ? { node: failed.nodeKey, attempt: failed.attempt, error: errorMessage(failed.error) } : null,
@@ -90,6 +92,8 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
  */
 export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
   const { db, github, baseUrl } = deps;
+  // The dashboard address of a run known only by id, under its project.
+  const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
   const server = new McpServer({ name: "handoff", version: "1.0.0" }, { instructions: INSTRUCTIONS });
   const read = { readOnlyHint: true, openWorldHint: false };
 
@@ -140,7 +144,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
           repo: `${detail.project.repoOwner}/${detail.project.repoName}`,
           graphs: detail.graphs.map((g) => g.name),
           default_graph: detail.defaultGraph ?? null,
-          recent_runs: detail.runs.slice(0, 10).map((r) => ({ id: r.id, task: r.task, status: r.status, url: `${baseUrl}/runs/${r.id}` })),
+          recent_runs: detail.runs.slice(0, 10).map((r) => ({ id: r.id, task: r.task, status: r.status, url: `${baseUrl}${runPath(detail.project.id, r.id)}` })),
         };
       }),
   );
@@ -154,7 +158,8 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     },
     ({ project, include_started }) =>
       tool(async () => {
-        const backlog = await listBacklog(db, github, (await findProject(db, project)).id);
+        const projectId = (await findProject(db, project)).id;
+        const backlog = await listBacklog(db, github, projectId);
         if ("error" in backlog) throw new Error(backlog.error);
         return backlog.issues
           .filter((issue) => include_started || isTodo(issue))
@@ -163,7 +168,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
             title: issue.title,
             url: issue.url,
             labels: issue.labels,
-            run: issue.run ? { id: issue.run.id, status: issue.run.status, url: `${baseUrl}/runs/${issue.run.id}` } : null,
+            run: issue.run ? { id: issue.run.id, status: issue.run.status, url: `${baseUrl}${runPath(projectId, issue.run.id)}` } : null,
           }));
       }),
   );
@@ -187,7 +192,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
         if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Settings tab.`);
         if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
         const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github);
-        return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: `${baseUrl}/runs/${run.id}` };
+        return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: `${baseUrl}${runPath(detail.project.id, run.id)}` };
       }),
   );
 
@@ -221,7 +226,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
             pr: r.prNumber,
             issues: r.issues.map((i) => i.number),
             created_at: r.createdAt,
-            url: `${baseUrl}/runs/${r.id}`,
+            url: `${baseUrl}${runPath(r.projectId, r.id)}`,
           };
         });
       }),
@@ -254,7 +259,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     ({ run_id, action }) =>
       tool(async () => {
         await resolveExhaustedLoop(db, run_id, action);
-        return { resolved: action, url: `${baseUrl}/runs/${run_id}` };
+        return { resolved: action, url: await urlOf(run_id) };
       }),
   );
 
@@ -298,7 +303,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     ({ question_id, answer, option, comments }) =>
       tool(async () => {
         const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: "claude-code" });
-        return { answered: true, run_id: row.runId, url: `${baseUrl}/runs/${row.runId}` };
+        return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
       }),
   );
 
@@ -319,7 +324,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
           .limit(1);
         if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
         const retry = await repairNodeExecution(db, failed.id, note ? { note } : {});
-        return { node: retry.nodeKey, attempt: retry.attempt, url: `${baseUrl}/runs/${run_id}` };
+        return { node: retry.nodeKey, attempt: retry.attempt, url: await urlOf(run_id) };
       }),
   );
 
@@ -329,7 +334,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     ({ run_id, reason }) =>
       tool(async () => {
         await cancelRun(db, run_id, reason ? { reason } : {});
-        return { cancelled: true, url: `${baseUrl}/runs/${run_id}` };
+        return { cancelled: true, url: await urlOf(run_id) };
       }),
   );
 
@@ -339,7 +344,7 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
     ({ run_id }) =>
       tool(async () => {
         const run = await runAgain(db, run_id);
-        return { run_id: run.id, status: run.status, url: `${baseUrl}/runs/${run.id}` };
+        return { run_id: run.id, status: run.status, url: `${baseUrl}${runPath(run.projectId, run.id)}` };
       }),
   );
 

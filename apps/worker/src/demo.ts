@@ -93,7 +93,7 @@ async function seed() {
 const { project, version } = await seed();
 const run = await createRun(db, { projectId: project.id, graphVersionId: version.id, task: "Add a CHANGELOG.md with today's date" });
 console.log(`demo run ${run.id}`);
-console.log(`open http://localhost:${process.env.WEB_PORT ?? 3000}/runs/${run.id}`);
+console.log(`open http://localhost:${process.env.WEB_PORT ?? 3000}/projects/${project.id}/runs/${run.id}`);
 
 const cli = cliNodeExecutor({ cli: new DemoCli(), maxTurns: 30, timeoutMs: 60_000 });
 const worker = startWorker(

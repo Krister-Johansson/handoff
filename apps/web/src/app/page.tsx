@@ -1,11 +1,12 @@
 import { PageHeader } from "@/components/page-header";
 import Link from "next/link";
-import { FolderGit2Icon, InboxIcon, PlayIcon } from "lucide-react";
+import { FolderGit2Icon, InboxIcon } from "lucide-react";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { getDb } from "@/lib/db";
+import { runPath } from "@/lib/paths";
 import { homeSummary } from "@/server/home";
 import { listInbox } from "@/server/inbox";
 
@@ -40,9 +41,9 @@ export default async function Home() {
           </CardHeader>
           <CardContent>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/runs">
-                <PlayIcon data-icon="inline-start" />
-                All runs
+              <Link href="/projects">
+                <FolderGit2Icon data-icon="inline-start" />
+                Projects
               </Link>
             </Button>
           </CardContent>
@@ -86,7 +87,7 @@ export default async function Home() {
               {summary.activeRuns.map((run) => (
                 <li key={run.id} className="flex items-center gap-3 py-2">
                   <StatusBadge status={run.status} />
-                  <Link href={`/runs/${run.id}`} className="min-w-0 flex-1 truncate hover:underline">
+                  <Link href={runPath(run.projectId, run.id)} className="min-w-0 flex-1 truncate hover:underline">
                     {run.task}
                   </Link>
                   <span className="shrink-0 text-sm text-muted-foreground">{run.project}</span>

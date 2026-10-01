@@ -36,9 +36,9 @@ test("questions, failed runs and pull requests waiting for review each become on
   expect(items).toHaveLength(3);
   expect(items).toEqual(
     expect.arrayContaining([
-      { id: `question:${question!.id}`, kind: "question", title: "sandbox: gate asks a question", body: "Which license?", href: `/runs/${asking.id}` },
-      { id: `failed:${coder.id}`, kind: "failed", title: "sandbox: run failed at coder", body: "Add a CHANGELOG.md", href: `/runs/${failed.id}` },
-      { id: `review:${pr.id}:7`, kind: "review", title: "sandbox: PR #7 waits for your review", body: "Add usage docs", href: `/runs/${review.id}` },
+      { id: `question:${question!.id}`, kind: "question", title: "sandbox: gate asks a question", body: "Which license?", href: `/projects/${project.id}/runs/${asking.id}` },
+      { id: `failed:${coder.id}`, kind: "failed", title: "sandbox: run failed at coder", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${failed.id}` },
+      { id: `review:${pr.id}:7`, kind: "review", title: "sandbox: PR #7 waits for your review", body: "Add usage docs", href: `/projects/${project.id}/runs/${review.id}` },
     ]),
   );
 });
@@ -54,7 +54,7 @@ test("a review at a human gate says what needs approval and links to the review 
     .returning();
   await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
   expect(await listAttention(db)).toEqual([
-    { id: `question:${question!.id}`, kind: "question", title: "sandbox: the plan from planner needs your approval", body: "Build a todo app", href: `/runs/${run.id}/review/${question!.id}` },
+    { id: `question:${question!.id}`, kind: "question", title: "sandbox: the plan from planner needs your approval", body: "Build a todo app", href: `/projects/${project.id}/runs/${run.id}/review/${question!.id}` },
   ]);
 });
 
@@ -70,5 +70,5 @@ test("a run that reached a Finish node with notify on is listed as finished for 
   await db.execute(sql`update events set created_at = now() - interval '2 days' where run_id = ${old.id}`);
   for (const run of [done, quiet, old]) await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, run.id));
 
-  expect(await listAttention(db)).toEqual([{ id: `finished:${done.id}`, kind: "finished", title: "sandbox: run finished", body: "Add a truncate helper", href: `/runs/${done.id}` }]);
+  expect(await listAttention(db)).toEqual([{ id: `finished:${done.id}`, kind: "finished", title: "sandbox: run finished", body: "Add a truncate helper", href: `/projects/${project.id}/runs/${done.id}` }]);
 });

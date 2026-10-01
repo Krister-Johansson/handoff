@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { reviewPath, runPath } from "@/lib/paths";
 
 const REASONS: Record<string, string> = {
   needs_input: "A node asked a question",
@@ -21,6 +22,7 @@ export type QuestionItem = {
   question: string;
   options: string[];
   runId: string;
+  projectId: string;
   task: string;
   nodeKey: string;
   projectName: string;
@@ -36,7 +38,7 @@ function ReviewLink({ item, compact }: { item: QuestionItem; compact: boolean })
         <CardDescription className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{REASONS.approval}</Badge>
           {!compact && (
-            <Link href={`/runs/${item.runId}`} className="truncate hover:underline">
+            <Link href={runPath(item.projectId, item.runId)} className="truncate hover:underline">
               {item.projectName}: {item.task}
             </Link>
           )}
@@ -45,7 +47,7 @@ function ReviewLink({ item, compact }: { item: QuestionItem; compact: boolean })
       </CardHeader>
       <CardFooter>
         <Button asChild>
-          <Link href={`/runs/${item.runId}/review/${item.id}`}>Open the review</Link>
+          <Link href={reviewPath(item.projectId, item.runId, item.id)}>Open the review</Link>
         </Button>
       </CardFooter>
     </Card>
@@ -65,7 +67,7 @@ function AnswerCard({ item, compact }: { item: QuestionItem; compact: boolean })
         <CardDescription className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{REASONS[item.reason] ?? item.reason}</Badge>
           {!compact && (
-            <Link href={`/runs/${item.runId}`} className="truncate hover:underline">
+            <Link href={runPath(item.projectId, item.runId)} className="truncate hover:underline">
               {item.projectName}: {item.task}
             </Link>
           )}
@@ -102,7 +104,7 @@ function AnswerCard({ item, compact }: { item: QuestionItem; compact: boolean })
   );
 }
 
-export type FailedRunItem = { runId: string; task: string; projectName: string; executionId: string; nodeKey: string; attempt: number; error: { code: string; message: string } | null };
+export type FailedRunItem = { runId: string; projectId: string; task: string; projectName: string; executionId: string; nodeKey: string; attempt: number; error: { code: string; message: string } | null };
 
 export function FailedRunCard({ item, compact = false }: { item: FailedRunItem; compact?: boolean }) {
   const [repairState, repair, repairing] = useActionState(repairAction, {} as InboxActionState);
@@ -114,7 +116,7 @@ export function FailedRunCard({ item, compact = false }: { item: FailedRunItem; 
         <CardDescription className="flex flex-wrap items-center gap-2">
           <Badge variant="destructive">failed at {item.nodeKey}</Badge>
           {!compact && (
-            <Link href={`/runs/${item.runId}`} className="truncate hover:underline">
+            <Link href={runPath(item.projectId, item.runId)} className="truncate hover:underline">
               {item.projectName}: {item.task}
             </Link>
           )}

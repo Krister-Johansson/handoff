@@ -16,6 +16,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getDb } from "@/lib/db";
+import { runPath } from "@/lib/paths";
 import { getGitHub } from "@/lib/github";
 import { parseBacklogFilter, parseProjectTab } from "@/lib/project-tab";
 import { parsePullFilter } from "@/lib/pull-filter";
@@ -57,7 +58,7 @@ function RunsTab({ project, runs }: Pick<Detail, "project" | "runs">) {
               <TableRow key={run.id}>
                 <TableCell className="w-full max-w-0">
                   <div className="flex min-w-0 items-center gap-2">
-                    <Link href={`/runs/${run.id}`} className="truncate hover:underline">
+                    <Link href={runPath(project.id, run.id)} className="truncate hover:underline">
                       {run.task}
                     </Link>
                     <IssueLinks issues={run.issues} className="shrink-0" />

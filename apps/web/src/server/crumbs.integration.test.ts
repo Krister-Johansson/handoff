@@ -28,6 +28,6 @@ test("crumbs lead from Projects to a project, its runs, graph or run; a project,
     ["quick", "v1", false],
   ]);
   const crumb = await runCrumb(db, a.id, run);
-  expect(crumb.href).toBe(`/runs/${run.id}`);
-  expect(crumb.menu![0]).toMatchObject({ href: `/runs/${run.id}`, current: true });
+  expect(crumb.href).toBe(`/projects/${a.id}/runs/${run.id}`);
+  expect(crumb.menu![0]).toMatchObject({ href: `/projects/${a.id}/runs/${run.id}`, current: true });
 });

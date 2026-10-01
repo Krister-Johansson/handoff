@@ -1,4 +1,5 @@
 import { and, appendEvents, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
+import { reviewPath, runPath } from "../lib/paths";
 import type { AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";
 
@@ -10,7 +11,7 @@ async function waitingReviews(db: Db) {
     order by e.seq desc limit 1
   )`;
   const rows = await db
-    .select({ executionId: nodeExecutions.id, runId: runs.id, task: runs.task, projectName: projects.name, pr: latestPr })
+    .select({ executionId: nodeExecutions.id, runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name, pr: latestPr })
     .from(nodeExecutions)
     .innerJoin(runs, eq(runs.id, nodeExecutions.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
@@ -22,7 +23,7 @@ async function waitingReviews(db: Db) {
 async function finishedRuns(db: Db) {
   const dismissed = sql`exists (select 1 from events d where d.run_id = ${runs.id} and d.type = 'attention.dismissed')`;
   return db
-    .select({ runId: runs.id, task: runs.task, projectName: projects.name })
+    .select({ runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name })
     .from(events)
     .innerJoin(runs, eq(runs.id, events.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
@@ -36,7 +37,7 @@ async function stuckRuns(db: Db) {
     select e.payload from events e where e.run_id = ${runs.id} and e.type = 'run.failed' order by e.seq desc limit 1
   )`;
   const rows = await db
-    .select({ runId: runs.id, task: runs.task, projectName: projects.name, failure: lastFailure })
+    .select({ runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name, failure: lastFailure })
     .from(runs)
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .where(eq(runs.status, "failed"));
@@ -68,24 +69,24 @@ export async function listAttention(db: Db): Promise<AttentionItem[]> {
     ...inbox.questions.map((q): AttentionItem => {
       const review = (q.context as { review?: { from?: string; kind?: string } }).review;
       return review
-        ? { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: the ${review.kind} from ${review.from} needs your approval`, body: q.task, href: `/runs/${q.runId}/review/${q.id}` }
-        : { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: q.question, href: `/runs/${q.runId}` };
+        ? { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: the ${review.kind} from ${review.from} needs your approval`, body: q.task, href: reviewPath(q.projectId, q.runId, q.id) }
+        : { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: q.question, href: runPath(q.projectId, q.runId) };
     }),
-    ...inbox.failedRuns.map((f): AttentionItem => ({ id: `failed:${f.executionId}`, kind: "failed", title: `${f.projectName}: run failed at ${f.nodeKey}`, body: f.task, href: `/runs/${f.runId}` })),
+    ...inbox.failedRuns.map((f): AttentionItem => ({ id: `failed:${f.executionId}`, kind: "failed", title: `${f.projectName}: run failed at ${f.nodeKey}`, body: f.task, href: runPath(f.projectId, f.runId) })),
     ...reviews.map((r): AttentionItem => ({
       id: `review:${r.executionId}:${r.pr!.number}`,
       kind: "review",
       title: `${r.projectName}: PR #${r.pr!.number} waits for your review`,
       body: r.task,
-      href: `/runs/${r.runId}`,
+      href: runPath(r.projectId, r.runId),
     })),
     ...stuck.map((s): AttentionItem => ({
       id: `stuck:${s.runId}`,
       kind: "failed",
       title: `${s.projectName}: ${s.failure?.nodeKey ?? "a step"} ran out of rounds`,
       body: s.task,
-      href: `/runs/${s.runId}`,
+      href: runPath(s.projectId, s.runId),
     })),
-    ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: f.task, href: `/runs/${f.runId}` })),
+    ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: f.task, href: runPath(f.projectId, f.runId) })),
   ];
 }

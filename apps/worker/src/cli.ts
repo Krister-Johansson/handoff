@@ -165,7 +165,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
       issues: issues.map(({ number, title, url, body }) => ({ number, title, url, body })),
     });
     out(`run ${run.id} queued on branch ${run.branchName}`);
-    out(`${io.webUrl ?? "http://localhost:3000"}/runs/${run.id}`);
+    out(`${io.webUrl ?? "http://localhost:3000"}/projects/${project.id}/runs/${run.id}`);
     if (values.follow) await follow(db, run.id, out);
     return;
   }

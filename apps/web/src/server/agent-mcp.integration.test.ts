@@ -56,7 +56,7 @@ test("projects and the backlog are listed, and an issue leaves the backlog once 
 
 test("start_run starts a run on the default graph linked to the issues, and get_run follows it", async () => {
   const started = await call("start_run", { project: "sandbox", issues: [11] });
-  expect(started).toMatchObject({ run_id: expect.any(String), status: "queued", url: expect.stringMatching(new RegExp(`^${BASE}/runs/`)) });
+  expect(started).toMatchObject({ run_id: expect.any(String), status: "queued", url: expect.stringMatching(new RegExp(`^${BASE}/projects/[0-9a-f-]+/runs/`)) });
   const [run] = await db.select().from(runs).where(eq(runs.id, started.run_id));
   expect(run?.issues.map((i) => i.number)).toEqual([11]);
   const detail = await call("get_run", { run_id: started.run_id });
@@ -100,7 +100,7 @@ test("what needs attention comes with links to the dashboard", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run_id));
   await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
-  expect(await call("list_attention")).toEqual([expect.objectContaining({ kind: "failed", title: "sandbox: run failed at planner", url: `${BASE}/runs/${run_id}` })]);
+  expect(await call("list_attention")).toEqual([expect.objectContaining({ kind: "failed", title: "sandbox: run failed at planner", url: expect.stringMatching(new RegExp(`^${BASE}/projects/[0-9a-f-]+/runs/${run_id}$`)) })]);
 });
 
 test("add_project adds a repository the credential can reach, on its default branch, and refuses one twice", async () => {
@@ -153,7 +153,7 @@ test("a run stopped by a loop that ran out says so, asks for a decision, and goe
     ]),
   );
   expect(await call("list_attention")).toEqual([
-    expect.objectContaining({ id: `stuck:${run_id}`, kind: "failed", title: "sandbox: planner ran out of rounds", url: `${BASE}/runs/${run_id}` }),
+    expect.objectContaining({ id: `stuck:${run_id}`, kind: "failed", title: "sandbox: planner ran out of rounds", url: expect.stringMatching(new RegExp(`^${BASE}/projects/[0-9a-f-]+/runs/${run_id}$`)) }),
   ]);
   expect((await call("get_run", { run_id })).stuck).toEqual({ node: "planner", loop: "planner->planner", attempts: 3 });
   expect(await call("resolve_loop", { run_id, action: "continue" })).toMatchObject({ resolved: "continue" });
