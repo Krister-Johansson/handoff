@@ -5,9 +5,9 @@ import { AgentConnection } from "./agent-connection";
 const actions = vi.hoisted(() => ({ enableAgentAction: vi.fn(), disableAgentAction: vi.fn(), regenerateAgentAction: vi.fn() }));
 vi.mock("@/app/settings/actions", () => actions);
 beforeEach(() => {
-  actions.enableAgentAction.mockReset().mockResolvedValue({ token: "tok-1" });
+  actions.enableAgentAction.mockReset().mockResolvedValue({ token: "tok1-abcdefgh-9xyz" });
   actions.disableAgentAction.mockReset().mockResolvedValue({});
-  actions.regenerateAgentAction.mockReset().mockResolvedValue({ token: "tok-2" });
+  actions.regenerateAgentAction.mockReset().mockResolvedValue({ token: "tok2-abcdefgh-8wvu" });
 });
 
 // Transitions settle slower when every Vitest project runs at once.
@@ -25,20 +25,31 @@ test("turning them on shows the token and how to connect Claude Code", async () 
   render(<AgentConnection {...props} initialToken={undefined} />);
   fireEvent.click(screen.getByRole("switch", { name: "Enable agent connections" }));
   await waitFor(() => expect(actions.enableAgentAction).toHaveBeenCalled(), slow);
-  expect(await screen.findByText("tok-1", {}, slow)).toBeInTheDocument();
+  expect(await screen.findByText("tok1…9xyz", {}, slow)).toBeInTheDocument();
   expect(screen.getByText("/plugin marketplace add Krister-Johansson/handoff")).toBeInTheDocument();
   expect(screen.getByText("/plugin marketplace add /Users/me/handoff")).toBeInTheDocument();
   expect(screen.getByText("/plugin install handoff@handoff")).toBeInTheDocument();
   expect(screen.getByText("claude --dangerously-load-development-channels plugin:handoff@handoff")).toBeInTheDocument();
-  expect(screen.getByText('claude mcp add --transport http handoff http://localhost:3000/api/mcp --header "Authorization: Bearer tok-1"')).toBeInTheDocument();
+  expect(screen.getByText('claude mcp add --transport http handoff http://localhost:3000/api/mcp --header "Authorization: Bearer tok1…9xyz"')).toBeInTheDocument();
+  expect(screen.queryByText(/tok1-abcdefgh-9xyz/)).not.toBeInTheDocument();
 });
 
 test("regenerating replaces the token and turning off removes it", async () => {
-  render(<AgentConnection {...props} initialToken="tok-1" />);
+  render(<AgentConnection {...props} initialToken="tok1-abcdefgh-9xyz" />);
   fireEvent.click(screen.getByRole("button", { name: "Regenerate" }));
-  expect(await screen.findByText("tok-2", {}, slow)).toBeInTheDocument();
+  expect(await screen.findByText("tok2…8wvu", {}, slow)).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("switch", { name: "Enable agent connections" })).toBeEnabled(), slow);
   fireEvent.click(screen.getByRole("switch", { name: "Enable agent connections" }));
   await waitFor(() => expect(actions.disableAgentAction).toHaveBeenCalled(), slow);
-  await waitFor(() => expect(screen.queryByText("tok-2")).not.toBeInTheDocument(), slow);
+  await waitFor(() => expect(screen.queryByText("tok2…8wvu")).not.toBeInTheDocument(), slow);
+});
+
+test("the page shows only the ends of the token, and copying takes the whole token", async () => {
+  const writeText = vi.fn(async () => {});
+  Object.assign(navigator, { clipboard: { writeText } });
+  render(<AgentConnection {...props} initialToken="tok1-abcdefgh-9xyz" />);
+  fireEvent.click(screen.getByRole("button", { name: "Copy token" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("tok1-abcdefgh-9xyz"));
+  fireEvent.click(screen.getByRole("button", { name: "Copy mcp add command" }));
+  await waitFor(() => expect(writeText).toHaveBeenLastCalledWith('claude mcp add --transport http handoff http://localhost:3000/api/mcp --header "Authorization: Bearer tok1-abcdefgh-9xyz"'));
 });

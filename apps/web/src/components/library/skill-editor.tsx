@@ -1,14 +1,18 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { FileTextIcon, PlusIcon, XIcon } from "lucide-react";
+import { useActionState, useId, useState, type ReactNode } from "react";
+import { FileCodeIcon, FileTextIcon, PlusIcon, SaveIcon, XIcon } from "lucide-react";
 import { stringify } from "yaml";
 import { saveSkill, type FormState } from "@/app/library/actions";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { DeleteEntryButton } from "./delete-entry-button";
+import type { EntryHeader } from "@/lib/library-entry-header";
 import { MarkdownEditor } from "./markdown-editor";
 
 export type SkillDraft = {
@@ -44,20 +48,30 @@ function FileList({
     if (onAdd(newPath.trim())) setNewPath("");
   };
   return (
-    <nav aria-label="Files" className="flex flex-col gap-1">
-      {paths.map((path) => (
-        <div key={path} className="group flex items-center gap-1">
-          <Button type="button" variant={open === path ? "secondary" : "ghost"} size="sm" className="min-w-0 flex-1 justify-start font-mono text-xs" onClick={() => onOpen(path)}>
-            <FileTextIcon data-icon="inline-start" />
-            <span className="truncate">{path}</span>
-          </Button>
-          {path !== SKILL_MD && (
-            <Button type="button" variant="ghost" size="icon-xs" aria-label={`Remove ${path}`} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" onClick={() => onRemove(path)}>
-              <XIcon />
+    <nav aria-label="Files" className="flex flex-col gap-0.5 border-b p-2.5 md:border-r md:border-b-0">
+      <h3 className="px-2 pt-1 pb-1.5 text-[11px] font-medium tracking-[0.05em] text-muted-foreground uppercase">Files</h3>
+      {paths.map((path) => {
+        const Icon = isMarkdown(path) ? FileTextIcon : FileCodeIcon;
+        return (
+          <div key={path} className="group flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn("min-w-0 flex-1 justify-start rounded-md font-mono text-xs font-normal text-muted-foreground hover:text-foreground", open === path && "bg-muted text-foreground")}
+              onClick={() => onOpen(path)}
+            >
+              <Icon data-icon="inline-start" />
+              <span className="truncate">{path}</span>
             </Button>
-          )}
-        </div>
-      ))}
+            {path !== SKILL_MD && (
+              <Button type="button" variant="ghost" size="icon-xs" aria-label={`Remove ${path}`} className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" onClick={() => onRemove(path)}>
+                <XIcon />
+              </Button>
+            )}
+          </div>
+        );
+      })}
       <div className="mt-2 flex gap-1">
         <Input
           aria-label="New file path"
@@ -70,7 +84,7 @@ function FileList({
               add();
             }
           }}
-          className="h-8 font-mono text-xs"
+          className="h-7 rounded-md font-mono text-xs"
         />
         <Button type="button" size="icon-sm" variant="outline" aria-label="Add file" onClick={add}>
           <PlusIcon />
@@ -100,40 +114,114 @@ function FrontmatterField({ value, onChange, error }: { value: string; onChange:
   );
 }
 
-function HeaderFields({ isNew, state, description, onDescription }: { isNew: boolean; state: FormState; description: string; onDescription: (value: string) => void }) {
+function HeaderFields({ name, state, description, onDescription }: { name: string | undefined; state: FormState; description: string; onDescription: (value: string) => void }) {
   const nameError = state.errors?.name;
   const descriptionError = state.errors?.description;
   return (
-    <FieldGroup className="grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
-      {isNew && (
-        <Field data-invalid={nameError ? true : undefined}>
-          <FieldLabel htmlFor="skill-name">Name</FieldLabel>
+    <>
+      <Field data-invalid={nameError ? true : undefined}>
+        <FieldLabel htmlFor="skill-name">Name</FieldLabel>
+        {name === undefined ? (
           <Input id="skill-name" name="name" placeholder="ci-triage" defaultValue={state.values?.name} className="font-mono" />
-          {nameError && <FieldError>{nameError}</FieldError>}
-        </Field>
-      )}
-      <Field data-invalid={descriptionError ? true : undefined} className={cn(!isNew && "md:col-span-2")}>
+        ) : (
+          <Input id="skill-name" value={name} disabled className="font-mono" />
+        )}
+        <FieldDescription>Nodes enable the skill by this name.</FieldDescription>
+        {nameError && <FieldError>{nameError}</FieldError>}
+      </Field>
+      <Field data-invalid={descriptionError ? true : undefined}>
         <FieldLabel htmlFor="skill-description">Description</FieldLabel>
         <Input id="skill-description" name="description" value={description} onChange={(e) => onDescription(e.target.value)} />
         <FieldDescription>When Claude should use this skill. It decides from this line.</FieldDescription>
         {descriptionError && <FieldError>{descriptionError}</FieldError>}
       </Field>
-    </FieldGroup>
+    </>
+  );
+}
+
+type SkillFile = SkillDraft["files"][number];
+
+/** The open file: SKILL.md or a supporting file in the editor, or a note for a binary file, which is kept as it is. */
+function FilePane({ current, body, onBody, onFile, error }: { current: SkillFile | undefined; body: string; onBody: (body: string) => void; onFile: (content: string) => void; error: string | undefined }) {
+  return (
+    <div className="flex min-w-0 flex-col">
+      {current?.encoding === "base64" ? (
+        <p className="px-4 py-6 text-sm text-muted-foreground">
+          <span className="font-mono">{current.path}</span> is a binary file ({Math.round((current.content.length * 3) / 4 / 1024)} KB). It is staged with the skill as it is.
+        </p>
+      ) : current ? (
+        <MarkdownEditor key={current.path} label={current.path} isMarkdown={isMarkdown(current.path)} value={current.content} onChange={onFile} />
+      ) : (
+        <MarkdownEditor key={SKILL_MD} label={SKILL_MD} value={body} onChange={onBody} />
+      )}
+      {error && <FieldError className="px-4 pb-3">{error}</FieldError>}
+    </div>
+  );
+}
+
+/** The header's buttons: Delete and Discard changes for a saved skill, and Save, which submits the form below. */
+function EditorActions({
+  formId,
+  name,
+  version,
+  changed,
+  pending,
+  message,
+  onDiscard,
+}: {
+  formId: string;
+  name: string | undefined;
+  version: number | undefined;
+  changed: boolean;
+  pending: boolean;
+  message: string | undefined;
+  onDiscard: () => void;
+}) {
+  return (
+    <>
+      {message && !changed && (
+        <span role="status" className="text-[13px] text-muted-foreground">
+          {message}
+        </span>
+      )}
+      {name && <DeleteEntryButton kind="skill" name={name} />}
+      {name && (
+        <Button type="button" variant="outline" disabled={!changed || pending} onClick={onDiscard}>
+          Discard changes
+        </Button>
+      )}
+      <Button type="submit" form={formId} disabled={pending}>
+        <SaveIcon data-icon="inline-start" />
+        {name && version !== undefined ? `Save as v${version + 1}` : "Save skill"}
+      </Button>
+    </>
   );
 }
 
 /**
  * The whole skill folder: name, description, SKILL.md instructions and supporting files, each file in
- * the markdown editor. Without `skill` it creates a new skill.
+ * the markdown editor, under the page header that holds Save, Discard changes and Delete. Without
+ * `skill` it creates a new skill. `children` sit between the header and the form, such as where an
+ * imported skill came from.
  */
-export function SkillEditor({ skill }: { skill?: SkillDraft }) {
+export function SkillEditor({ header, skill, version, children }: { header: EntryHeader; skill?: SkillDraft; version?: number; children?: ReactNode }) {
+  const formId = useId();
   const [state, action, pending] = useActionState(saveSkill, {} as FormState);
-  const [description, setDescription] = useState(skill?.description ?? "");
-  const [body, setBody] = useState(skill?.body ?? "");
-  const [frontmatter, setFrontmatter] = useState(() => yamlOf(skill?.frontmatter ?? {}));
-  const [files, setFiles] = useState(skill?.files ?? []);
+  const saved = { description: skill?.description ?? "", body: skill?.body ?? "", frontmatter: yamlOf(skill?.frontmatter ?? {}), files: skill?.files ?? [] };
+  const [description, setDescription] = useState(saved.description);
+  const [body, setBody] = useState(saved.body);
+  const [frontmatter, setFrontmatter] = useState(saved.frontmatter);
+  const [files, setFiles] = useState(saved.files);
   const [open, setOpen] = useState(SKILL_MD);
   const error = (field: string) => state.errors?.[field];
+  const changed = description !== saved.description || body !== saved.body || frontmatter !== saved.frontmatter || JSON.stringify(files) !== JSON.stringify(saved.files);
+  const discard = () => {
+    setDescription(saved.description);
+    setBody(saved.body);
+    setFrontmatter(saved.frontmatter);
+    setFiles(saved.files);
+    setOpen(SKILL_MD);
+  };
 
   const current = open === SKILL_MD ? undefined : files.find((f) => f.path === open);
   const addFile = (path: string) => {
@@ -148,50 +236,31 @@ export function SkillEditor({ skill }: { skill?: SkillDraft }) {
   };
 
   return (
-    <form action={action} className="flex flex-col gap-6">
-      {skill ? <input type="hidden" name="name" value={skill.name} /> : <input type="hidden" name="$new" value="1" />}
-      <input type="hidden" name="body" value={body} />
-      <input type="hidden" name="files" value={JSON.stringify(files)} />
-      <HeaderFields isNew={!skill} state={state} description={description} onDescription={setDescription} />
+    <>
+      <PageHeader
+        {...header}
+        actions={<EditorActions formId={formId} name={skill?.name} version={version} changed={changed} pending={pending} message={state.ok ? state.message : undefined} onDiscard={discard} />}
+      />
+      {children}
+      <form id={formId} action={action} className="flex flex-col gap-6">
+        {skill ? <input type="hidden" name="name" value={skill.name} /> : <input type="hidden" name="$new" value="1" />}
+        <input type="hidden" name="body" value={body} />
+        <input type="hidden" name="files" value={JSON.stringify(files)} />
+        <Card className="px-5 py-4">
+          <FieldGroup className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
+            <HeaderFields name={skill?.name} state={state} description={description} onDescription={setDescription} />
+            <div className="md:col-span-2">
+              <FrontmatterField value={frontmatter} onChange={setFrontmatter} error={error("frontmatter")} />
+            </div>
+          </FieldGroup>
+        </Card>
 
-      <div className="grid gap-4 md:grid-cols-[16rem_minmax(0,1fr)]">
-        <FileList
-          paths={[SKILL_MD, ...files.map((f) => f.path)]}
-          open={open}
-          onOpen={setOpen}
-          onAdd={addFile}
-          onRemove={removeFile}
-          error={error("files")}
-        />
+        <Card className="grid gap-0 py-0 md:min-h-[520px] md:grid-cols-[220px_minmax(0,1fr)]">
+          <FileList paths={[SKILL_MD, ...files.map((f) => f.path)]} open={open} onOpen={setOpen} onAdd={addFile} onRemove={removeFile} error={error("files")} />
 
-        <div className="flex min-w-0 flex-col gap-2">
-          {current?.encoding === "base64" ? (
-            <p className="rounded-md border px-4 py-6 text-sm text-muted-foreground">
-              <span className="font-mono">{current.path}</span> is a binary file ({Math.round((current.content.length * 3) / 4 / 1024)} KB). It is staged with the skill as it is.
-            </p>
-          ) : current ? (
-            <MarkdownEditor
-              key={current.path}
-              label={current.path}
-              isMarkdown={isMarkdown(current.path)}
-              value={current.content}
-              onChange={(content) => setFiles(files.map((f) => (f.path === current.path ? { ...f, content } : f)))}
-            />
-          ) : (
-            <MarkdownEditor key={SKILL_MD} label={SKILL_MD} value={body} onChange={setBody} />
-          )}
-          {open === SKILL_MD && error("body") && <FieldError>{error("body")}</FieldError>}
-        </div>
-      </div>
-
-      <FrontmatterField value={frontmatter} onChange={setFrontmatter} error={error("frontmatter")} />
-
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending}>
-          Save skill
-        </Button>
-        {state.ok && state.message && <span className="text-sm text-muted-foreground">{state.message}</span>}
-      </div>
-    </form>
+          <FilePane current={current} body={body} onBody={setBody} onFile={(content) => current && setFiles(files.map((f) => (f.path === current.path ? { ...f, content } : f)))} error={open === SKILL_MD ? error("body") : undefined} />
+        </Card>
+      </form>
+    </>
   );
 }

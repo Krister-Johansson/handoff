@@ -2,10 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { ArrowRightIcon } from "lucide-react";
+import { ArrowRightIcon, FolderGitIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { skillsShPath } from "@/lib/skills-sh-path";
+import { SearchField } from "./search-field";
 
 export function OpenSkillsSh() {
   const router = useRouter();
@@ -13,13 +13,20 @@ export function OpenSkillsSh() {
   const target = skillsShPath(value);
   return (
     <form
-      className="flex gap-2"
+      className="flex flex-wrap gap-2"
       onSubmit={(e) => {
         e.preventDefault();
         if (target) router.push(target);
       }}
     >
-      <Input aria-label="skills.sh owner or repository" placeholder="mattpocock, vercel-labs/agent-skills or a skills.sh link" value={value} onChange={(e) => setValue(e.target.value)} className="max-w-md font-mono" />
+      <SearchField
+        icon={<FolderGitIcon />}
+        aria-label="skills.sh owner or repository"
+        placeholder="Owner, owner/repository or a skills.sh link"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-80 max-w-full"
+      />
       <Button type="submit" variant="outline" disabled={!target}>
         Open
         <ArrowRightIcon data-icon="inline-end" />
