@@ -10,7 +10,7 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { formatAgo } from "@/lib/format";
-import { reviewPath, runPath } from "@/lib/paths";
+import { reviewPath, runPath, tryPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 
 const REASONS: Record<string, string> = {
@@ -140,7 +140,7 @@ function ReviewLink({ item, compact }: { item: QuestionItem; compact: boolean })
   );
 }
 
-/** A Try it gate is answered on its run, where the app opens and the acceptance criteria are checked. */
+/** A Try it gate is answered on its own page, where the app opens and the acceptance criteria are checked one by one. */
 function TryItLink({ item, compact }: { item: QuestionItem; compact: boolean }) {
   return (
     <InboxCard icon={PlayIcon} tone="attention">
@@ -148,7 +148,7 @@ function TryItLink({ item, compact }: { item: QuestionItem; compact: boolean }) 
       <CardTitle>{item.question}</CardTitle>
       <CardActions>
         <Button asChild>
-          <Link href={runPath(item.projectId, item.runId)}>Try it on the run</Link>
+          <Link href={tryPath(item.projectId, item.runId, item.id)}>Open Try it</Link>
         </Button>
       </CardActions>
     </InboxCard>

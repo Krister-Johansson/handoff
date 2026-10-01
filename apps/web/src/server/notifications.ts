@@ -1,6 +1,6 @@
 import { alias, and, desc, eq, events, nodeExecutions, not, notificationReads, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { describePermission } from "../lib/permission";
-import { reviewPath, runPath } from "../lib/paths";
+import { reviewPath, runPath, tryPath } from "../lib/paths";
 import type { NotificationFilter, NotificationItem, NotificationKind } from "../lib/notifications";
 
 /** The kinds a filter shows: "Needs you" covers questions, permission requests and pull requests ready to merge; "Finished" merges too. */
@@ -85,7 +85,9 @@ function toItem(row: Row, until: Date | undefined): NotificationItem {
     case "merged":
       return { ...base, title: `${name}: PR #${payload.number} merged`, unread };
     case "input": {
-      const review = (row.context as { review?: { from?: string; kind?: string } } | null)?.review;
+      const context = row.context as { review?: { from?: string; kind?: string }; reason?: string } | null;
+      const review = context?.review;
+      if (context?.reason === "try" && payload.questionId) return { ...base, title: `${name}: the app is ready for you to try`, href: tryPath(row.projectId, row.runId, payload.questionId), unread };
       if (review && payload.questionId) return { ...base, title: `${name}: the ${review.kind} from ${review.from} needs your review`, href: reviewPath(row.projectId, row.runId, payload.questionId), unread };
       return { ...base, title: `${name}: ${payload.nodeKey ?? "a gate"} asks a question`, body: row.question ?? row.task, unread };
     }

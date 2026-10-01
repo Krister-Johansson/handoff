@@ -266,6 +266,12 @@ test("the event list says it is live while the run goes on, and not once it ende
   expect(screen.queryByText("live")).not.toBeInTheDocument();
 });
 
+test("a Try it gate waiting on a person puts the way to it beside the run's status", () => {
+  const tryIt = { ...question(false), context: { reason: "try", acceptance: ["A user can create a new task"] } };
+  render(<RunLive {...common} labels={{ gate: "Try it" }} initialStatus="waiting" initialExecutions={[gate]} questions={[tryIt]} />);
+  expect(screen.getByRole("link", { name: "Open Try it" })).toHaveAttribute("href", "/projects/p1/runs/r1/try/q1");
+});
+
 test("a run first in the merge queue can be merged beside its status", async () => {
   const merge = { id: "e9", nodeKey: "merge", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
   render(<RunLive {...common} labels={{ merge: "Merge" }} initialStatus="waiting" initialExecutions={[merge]} queue={{ position: 1, requested: false, mode: "manual" }} />);

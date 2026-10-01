@@ -4,7 +4,6 @@ import { ClockIcon, CoinsIcon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, T
 import { GraphDocumentSchema, summarizeOutput } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
-import { TryItCard } from "@/components/runs/try-it-card";
 import { PermissionCard, type PermissionRequestView } from "@/components/runs/permission-card";
 import { pendingPermissions } from "@/server/permissions";
 import { IssueLinks } from "@/components/runs/issue-links";
@@ -56,7 +55,9 @@ function RunAlerts({ detail, stuck, permissions }: { detail: Detail; stuck: Stuc
       ))}
       {questionItems(detail)
         .filter((q) => !q.context?.review)
-        .map((q) => (q.reason === "try" ? <TryItCard key={q.id} item={q} /> : <QuestionCard key={q.id} compact item={q} />))}
+        .map((q) => (
+          <QuestionCard key={q.id} compact item={q} />
+        ))}
       {stuck && <StuckLoopCard runId={run.id} node={nodeLabels(graph?.document)[stuck.nodeKey] ?? stuck.nodeKey} loop={stuck.edgeKey} attempts={stuck.attempts} />}
       {run.status === "failed" && failed && !stuck && (
         <FailedRunCard

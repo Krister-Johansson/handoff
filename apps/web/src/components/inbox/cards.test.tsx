@@ -41,10 +41,10 @@ test("a review opens on its review page, with the run beside it", () => {
   expect(screen.queryByRole("button", { name: "approve" })).not.toBeInTheDocument();
 });
 
-test("a Try it question in the Inbox opens its run, where the app and the checklist are", () => {
+test("a Try it question opens its own page, where the app and the criteria are", () => {
   render(<QuestionCard item={{ ...run, id: "q3", question: "Try the app and check each acceptance criterion.", options: ["approve", "changes"], nodeKey: "try", reason: "try", context: { reason: "try" } }} />);
   expect(screen.getByText("Try the app")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Try it on the run" })).toHaveAttribute("href", "/projects/p1/runs/r1");
+  expect(screen.getByRole("link", { name: "Open Try it" })).toHaveAttribute("href", "/projects/p1/runs/r1/try/q3");
   expect(screen.queryByRole("button", { name: "approve" })).not.toBeInTheDocument();
 });
 
