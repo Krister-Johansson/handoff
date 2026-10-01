@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BotIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, HistoryIcon } from "lucide-react";
+import { BotIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, FileCodeIcon, HistoryIcon } from "lucide-react";
 import type { DiffFile } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -11,13 +11,19 @@ import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitl
 import { markViewedAction } from "@/app/inbox/actions";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { commentedAt, placeEarlier, type EarlierRound } from "@/lib/earlier";
-import { placeFindings, type Findings } from "@/lib/findings";
+import { placeFindings, type Finding, type Findings } from "@/lib/findings";
 import type { LineTokens } from "@/lib/highlight-types";
 import { numberOn, type LineComment, type LineSelection, type Side } from "@/lib/line-comments";
 import { useReviewDraft } from "@/lib/use-review-draft";
+import { cn } from "@/lib/utils";
 import { viewState, type View, type ViewState } from "@/lib/viewed";
 import { FileDiff } from "./file-diff";
+import { CARD, PROSE, PROSE_TIGHT } from "./styles";
 import { SubmitReview } from "./submit-review";
+
+/** The design's segmented control: two or more choices in one soft well, the chosen one raised. */
+const SEG = "rounded-md border bg-subtle p-0.5";
+const SEG_ITEM = "h-6 min-w-0 rounded-[4px] px-2.5 text-xs text-muted-foreground hover:bg-transparent data-[state=on]:bg-secondary data-[state=on]:text-foreground";
 
 type Mode = "changes" | "whole";
 type Layout = "unified" | "split";
@@ -61,25 +67,33 @@ function useFileCursor(count: number) {
 }
 
 function FileMenu({ files, current, go, viewed }: { files: DiffFile[]; current: number; go: (index: number) => void; viewed: (file: DiffFile) => boolean }) {
-  const left = files.filter((f) => !viewed(f)).length;
+  const seen = files.filter(viewed).length;
   return (
-    <div className="flex items-center gap-1">
+    <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="outline" size="sm">
-            {`File ${current + 1} of ${files.length} · ${left} left`}
+          <Button type="button" variant="outline" size="sm" className="min-w-0">
+            <FileCodeIcon data-icon="inline-start" />
+            <span className="max-w-[min(22rem,40vw)] truncate font-mono">{files[current]?.path}</span>{" "}
+            <span className="text-muted-foreground">{`${current + 1} of ${files.length}`}</span>
             <ChevronDownIcon data-icon="inline-end" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-h-80 w-96 overflow-y-auto">
-          {files.map((file, index) => (
-            <DropdownMenuItem key={file.path} onSelect={() => go(index)}>
-              <CheckIcon className={viewed(file) ? "text-emerald-600" : "invisible"} aria-label={viewed(file) ? "viewed" : undefined} />
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">{file.path}</span>
-              <span className="font-mono text-xs text-red-600 dark:text-red-400">{`−${file.deletions}`}</span>
-              <span className="font-mono text-xs text-emerald-600 dark:text-emerald-400">{`+${file.additions}`}</span>
-            </DropdownMenuItem>
-          ))}
+        <DropdownMenuContent align="start" className="w-[min(26rem,calc(100vw-2rem))] p-0">
+          <div className="max-h-80 overflow-y-auto p-1.5">
+            {files.map((file, index) => (
+              <DropdownMenuItem key={file.path} onSelect={() => go(index)} className={cn("gap-2.5 text-xs", index === current && "bg-accent")}>
+                <CheckIcon className={viewed(file) ? "text-success" : "invisible"} aria-label={viewed(file) ? "viewed" : undefined} />
+                <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
+                <span className="font-mono text-success">{`+${file.additions}`}</span>
+                <span className="font-mono text-danger">{`−${file.deletions}`}</span>
+              </DropdownMenuItem>
+            ))}
+          </div>
+          <div className="flex justify-between gap-4 border-t px-3.5 py-2 text-xs text-muted-foreground">
+            <span>{`${seen} of ${files.length} viewed`}</span>
+            <span>[ and ] move between files</span>
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
       <Button type="button" variant="ghost" size="icon-sm" aria-label="Previous file" disabled={current === 0} onClick={() => go(current - 1)}>
@@ -88,7 +102,7 @@ function FileMenu({ files, current, go, viewed }: { files: DiffFile[]; current: 
       <Button type="button" variant="ghost" size="icon-sm" aria-label="Next file" disabled={current === files.length - 1} onClick={() => go(current + 1)}>
         <ChevronRightIcon />
       </Button>
-    </div>
+    </>
   );
 }
 
@@ -99,7 +113,10 @@ function LastRound({ round }: { round: EarlierRound }) {
       <PopoverTrigger asChild>
         <Button type="button" variant="ghost" size="sm">
           <HistoryIcon data-icon="inline-start" />
-          {`Last round (${round.comments.length})`}
+          Last round{" "}
+          <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-secondary px-[5px] text-[11px] font-semibold tabular-nums text-secondary-foreground">
+            {round.comments.length}
+          </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-96">
@@ -107,11 +124,11 @@ function LastRound({ round }: { round: EarlierRound }) {
           <PopoverTitle>Last round</PopoverTitle>
           <PopoverDescription>{round.answer}</PopoverDescription>
         </PopoverHeader>
-        <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto text-sm">
+        <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto">
           {round.comments.map((c) => (
-            <li key={`${c.path}:${c.line}:${c.body}`} className="rounded-md border p-2">
-              {c.path && <span className="block truncate font-mono text-xs text-muted-foreground">{`${c.path}${c.line ? `:${c.line}${c.endLine ? `-${c.endLine}` : ""}` : ""}`}</span>}
-              <div className="prose prose-sm max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none prose-p:my-0">
+            <li key={`${c.path}:${c.line}:${c.body}`} className="flex flex-col gap-0.5 rounded-lg border border-dashed border-input bg-subtle px-3 py-2">
+              {c.path && <span className="block truncate font-mono text-[11px] text-muted-foreground">{`${c.path}${c.line ? `:${c.line}${c.endLine ? `-${c.endLine}` : ""}` : ""}`}</span>}
+              <div className={PROSE_TIGHT}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.body}</ReactMarkdown>
               </div>
             </li>
@@ -122,37 +139,57 @@ function LastRound({ round }: { round: EarlierRound }) {
   );
 }
 
-const VERDICTS: Record<Findings["verdict"], string> = { approve: "approve", request_changes: "request changes" };
+const VERDICTS: Record<Findings["verdict"], string> = { approve: "approved", request_changes: "requested changes" };
+
+const locationOf = (f: Finding) => (f.line !== undefined ? `${f.path}:${f.line}` : f.path);
+
+/** A finding's first paragraph, for a one-line summary of a finding the diff shows in full. */
+const firstParagraph = (body: string) => body.trim().split(/\n\s*\n/)[0] ?? "";
 
 /**
- * The code reviewing step's verdict, how many findings it left and how many of those the diff below
- * shows, then in full only the findings on files the diff does not include.
+ * The code reviewing step's verdict and every finding with where it is. A finding on a file in the
+ * diff links to that file and shows its first paragraph, since the whole of it sits on its line; a
+ * finding on a file outside the diff is shown in full here, the only place it appears.
  */
-function FindingsSummary({ findings, by, files }: { findings: Findings; by: string; files: DiffFile[] }) {
-  const paths = new Set(files.map((f) => f.path));
-  const elsewhere = findings.comments.filter((c) => !paths.has(c.path));
+function FindingsSummary({ findings, by, files, open }: { findings: Findings; by: string; files: DiffFile[]; open: (index: number) => void }) {
+  const index = new Map(files.map((f, i) => [f.path, i]));
   const n = findings.comments.length;
+  const inDiff = findings.comments.filter((c) => index.has(c.path)).length;
   return (
-    <section aria-label="Code review findings" className="flex flex-col gap-2 rounded-lg border p-4 text-sm">
-      <p className="flex flex-wrap items-center gap-2">
-        <BotIcon className="size-4 text-muted-foreground" />
-        <span className="font-medium">{`${by}: ${VERDICTS[findings.verdict]}`}</span>
-        <span className="text-muted-foreground">
-          {n === 0 ? "No findings." : `${n} finding${n === 1 ? "" : "s"}, ${n - elsewhere.length} shown in the diff`}
-        </span>
-      </p>
-      {elsewhere.length > 0 && (
-        <ul className="flex flex-col gap-1.5">
-          {elsewhere.map((c) => (
-            <li key={`${c.path}:${c.line}:${c.body}`} className="flex flex-col gap-0.5">
-              <span className="font-mono text-xs text-muted-foreground">{c.line !== undefined ? `${c.path}:${c.line}` : c.path}</span>
-              <div className="prose prose-sm max-w-none dark:prose-invert prose-code:before:content-none prose-code:after:content-none prose-p:my-0">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.body}</ReactMarkdown>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+    <section aria-label="Code review findings" className={cn(CARD, "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-4 px-[18px] py-3.5")}>
+      <span className="grid size-8 place-items-center rounded-md bg-active-bg text-active">
+        <BotIcon className="size-3.5" />
+      </span>
+      <div className="flex min-w-0 flex-col">
+        <div className="flex flex-wrap items-baseline gap-x-2">
+          <h2 className="text-sm font-semibold">
+            {n === 0 ? "Code review found nothing" : `Code review found ${n} ${n === 1 ? "thing" : "things"}`}
+          </h2>
+          <span className="text-xs text-muted-foreground">{`· ${by} · ${VERDICTS[findings.verdict]}${n > 0 ? ` · ${inDiff} in the diff` : ""}`}</span>
+        </div>
+        {inDiff > 0 && <p className="mt-0.5 text-[13px] text-muted-foreground">Findings on files in the diff also sit on their lines below.</p>}
+        {n > 0 && (
+          <ul className="mt-2 flex flex-col gap-1.5 text-[13px]">
+            {findings.comments.map((c) => {
+              const at = index.get(c.path);
+              return (
+                <li key={`${c.path}:${c.line}:${c.body}`} className="flex flex-col gap-x-2 gap-y-0.5 sm:flex-row sm:items-baseline">
+                  {at === undefined ? (
+                    <span className="shrink-0 font-mono text-xs whitespace-nowrap text-muted-foreground">{locationOf(c)}</span>
+                  ) : (
+                    <button type="button" className="shrink-0 text-left font-mono text-xs whitespace-nowrap text-muted-foreground hover:text-foreground hover:underline" onClick={() => open(at)}>
+                      {locationOf(c)}
+                    </button>
+                  )}
+                  <div className={cn(PROSE_TIGHT, "min-w-0 flex-1", at !== undefined && "line-clamp-2")}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{at === undefined ? c.body : firstParagraph(c.body)}</ReactMarkdown>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </section>
   );
 }
@@ -229,24 +266,42 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
       return next;
     });
 
+  const drafted = readOnly ? 0 : comments.length;
+
   return (
     <div className="flex flex-col gap-4">
       {findings ? (
-        <FindingsSummary findings={findings} by={findings.by} files={files} />
+        <FindingsSummary
+          findings={findings}
+          by={findings.by}
+          files={files}
+          open={(index) => {
+            setOpen(files[index]!.path, true);
+            go(index);
+          }}
+        />
       ) : (
-        <article className="prose prose-sm max-w-none rounded-lg border p-4 dark:prose-invert prose-code:before:content-none prose-code:after:content-none">
+        <article className={cn(CARD, PROSE, "px-6 py-5")}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
         </article>
       )}
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-lg border bg-background/95 p-2 backdrop-blur">
+      <div className="sticky top-[60px] z-20 flex flex-wrap items-center gap-2 rounded-lg border bg-background/90 p-2 backdrop-blur-md">
         <FileMenu files={files} current={current} go={go} viewed={(f) => stateOf(f).viewed} />
-        <ToggleGroup type="single" variant="outline" size="sm" value={mode} onValueChange={(value) => value && setMode(value as Mode)} aria-label="Show">
-          <ToggleGroupItem value="changes">Changes</ToggleGroupItem>
-          <ToggleGroupItem value="whole">Whole file</ToggleGroupItem>
+        <ToggleGroup type="single" spacing={0.5} value={mode} onValueChange={(value) => value && setMode(value as Mode)} aria-label="Show" className={SEG}>
+          <ToggleGroupItem value="changes" className={SEG_ITEM}>
+            Changes
+          </ToggleGroupItem>
+          <ToggleGroupItem value="whole" className={SEG_ITEM}>
+            Whole file
+          </ToggleGroupItem>
         </ToggleGroup>
-        <ToggleGroup type="single" variant="outline" size="sm" value={layout} onValueChange={(value) => value && setLayout(value as Layout)} aria-label="Layout">
-          <ToggleGroupItem value="unified">Unified</ToggleGroupItem>
-          <ToggleGroupItem value="split">Split</ToggleGroupItem>
+        <ToggleGroup type="single" spacing={0.5} value={layout} onValueChange={(value) => value && setLayout(value as Layout)} aria-label="Layout" className={SEG}>
+          <ToggleGroupItem value="unified" className={SEG_ITEM}>
+            Unified
+          </ToggleGroupItem>
+          <ToggleGroupItem value="split" className={SEG_ITEM}>
+            Split
+          </ToggleGroupItem>
         </ToggleGroup>
         <Button type="button" variant="ghost" size="icon-sm" aria-label="Collapse all files" onClick={() => setClosed(new Set(files.map((f) => f.path)))}>
           <ChevronsDownUpIcon />
@@ -255,14 +310,15 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
           <ChevronsUpDownIcon />
         </Button>
         {last && last.comments.length > 0 && <LastRound round={last} />}
+        {drafted > 0 && <span className="ml-auto text-xs text-muted-foreground">{`${drafted} ${drafted === 1 ? "comment" : "comments"} drafted`}</span>}
         {!readOnly && (
           <Popover>
             <PopoverTrigger asChild>
-              <Button type="button" size="sm" className="ml-auto">
+              <Button type="button" size="sm" className={cn(drafted === 0 && "ml-auto")}>
                 Submit review
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-96">
+            <PopoverContent align="end" className="w-[min(25rem,calc(100vw-2rem))]">
               <PopoverHeader>
                 <PopoverTitle>Submit review</PopoverTitle>
                 <PopoverDescription>{`Comments go back to ${from}.`}</PopoverDescription>

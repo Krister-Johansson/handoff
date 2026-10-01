@@ -3,12 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { MessageSquarePlusIcon, XIcon } from "lucide-react";
+import { CopyIcon, MessageSquareIcon, MessageSquarePlusIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { quoteRanges } from "@/lib/quote-ranges";
 import { useReviewDraft } from "@/lib/use-review-draft";
+import { CARD, PROSE } from "./styles";
 import { SubmitReview } from "./submit-review";
 
 type Comment = { quote: string; body: string };
@@ -25,14 +26,30 @@ function useQuoteHighlights(root: React.RefObject<HTMLElement | null>, quotes: s
   }, [root, quotes]);
 }
 
-function Composer({ quote, onAdd, onCancel }: { quote: string | undefined; onAdd: (body: string) => void; onCancel: () => void }) {
+function Composer({
+  quote,
+  inputRef,
+  onAdd,
+  onCancel,
+}: {
+  quote: string | undefined;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  onAdd: (body: string) => void;
+  onCancel: () => void;
+}) {
   const [body, setBody] = useState("");
   return (
-    <Field>
-      <FieldLabel htmlFor="review-comment">Comment</FieldLabel>
-      {quote ? <blockquote className="border-l-2 pl-2 text-xs text-muted-foreground">&quot;{quote}&quot;</blockquote> : <FieldDescription>Select text in the plan to comment on it.</FieldDescription>}
-      <Textarea id="review-comment" rows={3} value={body} disabled={!quote} onChange={(e) => setBody(e.target.value)} />
-      <div className="flex gap-2">
+    <Field className="gap-1.5">
+      <FieldLabel htmlFor="review-comment" className="text-[13px]">
+        Comment
+      </FieldLabel>
+      {quote ? (
+        <blockquote className="border-l-2 border-active-dot px-2.5 py-0.5 text-xs text-muted-foreground italic">&quot;{quote}&quot;</blockquote>
+      ) : (
+        <FieldDescription className="text-xs">Select text in the plan to comment on it.</FieldDescription>
+      )}
+      <Textarea ref={inputRef} id="review-comment" rows={3} value={body} disabled={!quote} onChange={(e) => setBody(e.target.value)} className="bg-subtle" />
+      <div className="mt-1.5 flex gap-2">
         <Button
           type="button"
           size="sm"
@@ -58,35 +75,75 @@ function Composer({ quote, onAdd, onCancel }: { quote: string | undefined; onAdd
 function CommentList({ comments, onRemove }: { comments: Comment[]; onRemove: (index: number) => void }) {
   if (comments.length === 0) return null;
   return (
-    <ul aria-label="Comments" className="flex flex-col gap-2">
-      {comments.map((comment, index) => (
-        <li key={`${comment.quote}:${comment.body}`} className="flex items-start gap-2 rounded-md border p-2 text-sm">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="truncate text-xs text-muted-foreground">&quot;{comment.quote}&quot;</span>
-            <span>{comment.body}</span>
-          </div>
-          <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove comment on ${comment.quote}`} onClick={() => onRemove(index)}>
-            <XIcon />
-          </Button>
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-1.5">
+      <span className="text-xs font-medium text-muted-foreground">{`${comments.length} ${comments.length === 1 ? "comment" : "comments"}`}</span>
+      <ul aria-label="Comments" className="flex flex-col gap-1.5">
+        {comments.map((comment, index) => (
+          <li key={`${comment.quote}:${comment.body}`} className="flex items-start gap-2 rounded-lg border bg-subtle px-3 py-2.5 text-[13px]">
+            <MessageSquareIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+              <span className="truncate text-xs text-muted-foreground italic">&quot;{comment.quote}&quot;</span>
+              <span className="whitespace-pre-wrap">{comment.body}</span>
+            </div>
+            <Button type="button" size="icon-xs" variant="ghost" aria-label={`Remove comment on ${comment.quote}`} onClick={() => onRemove(index)}>
+              <XIcon />
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
+}
+
+/** A passage a person selected, where it sits in the plan, and whether its comment and copy buttons still show. */
+type Selected = { text: string; at?: { top: number; left: number }; bar: boolean };
+
+/** Where a selection ends, relative to `root`, for buttons that sit just under it. Undefined where layout is unknown. */
+function placeUnder(range: Range, root: HTMLElement) {
+  if (typeof range.getBoundingClientRect !== "function") return undefined;
+  const r = range.getBoundingClientRect();
+  const box = root.getBoundingClientRect();
+  return { top: r.bottom - box.top + 6, left: Math.max(0, r.left - box.left) };
 }
 
 /** The text a person selects inside `root`, kept until they select something else there. */
 function useSelectedText(root: React.RefObject<HTMLElement | null>) {
-  const [selected, setSelected] = useState<string>();
+  const [selected, setSelected] = useState<Selected>();
   useEffect(() => {
     const onChange = () => {
       const selection = document.getSelection();
       const text = selection?.toString().replace(/\s+/g, " ").trim();
-      if (text && selection?.anchorNode && root.current?.contains(selection.anchorNode)) setSelected(text);
+      if (!text || !selection?.anchorNode || !root.current?.contains(selection.anchorNode)) return;
+      const at = selection.rangeCount > 0 ? placeUnder(selection.getRangeAt(0), root.current) : undefined;
+      setSelected({ text, bar: true, ...(at ? { at } : {}) });
     };
     document.addEventListener("selectionchange", onChange);
     return () => document.removeEventListener("selectionchange", onChange);
   }, [root]);
   return [selected, setSelected] as const;
+}
+
+/** Buttons under a selection: comment on it in the side panel, or copy it. */
+function SelectionBar({ selected, onComment }: { selected: Selected; onComment: () => void }) {
+  // Pressing a button must not clear the selection it acts on.
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+  return (
+    <div
+      role="toolbar"
+      aria-label="Selection"
+      style={selected.at ? { top: selected.at.top, left: selected.at.left } : undefined}
+      className="absolute z-10 inline-flex gap-0.5 rounded-md border border-input bg-popover p-0.5 text-xs text-popover-foreground shadow-md"
+    >
+      <Button type="button" size="xs" variant="ghost" onMouseDown={keep} onClick={onComment}>
+        <MessageSquarePlusIcon data-icon="inline-start" />
+        Comment
+      </Button>
+      <Button type="button" size="xs" variant="ghost" onMouseDown={keep} onClick={() => void navigator.clipboard?.writeText(selected.text)}>
+        <CopyIcon data-icon="inline-start" />
+        Copy
+      </Button>
+    </div>
+  );
 }
 
 /**
@@ -95,27 +152,44 @@ function useSelectedText(root: React.RefObject<HTMLElement | null>) {
  */
 export function PlanReview({ questionId, runId, from, markdown }: { questionId: string; runId: string; from: string; markdown: string }) {
   const article = useRef<HTMLElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
   const [selected, setSelected] = useSelectedText(article);
   const { comments, setComments, note, setNote, onSending, onFailed } = useReviewDraft<Comment>(questionId);
   useQuoteHighlights(article, comments.map((c) => c.quote));
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-      <article ref={article} className="prose prose-sm max-w-none rounded-lg border p-6 dark:prose-invert prose-code:before:content-none prose-code:after:content-none">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-      </article>
-      <aside className="flex flex-col gap-4 lg:sticky lg:top-4 lg:self-start">
-        <Composer
-          key={selected}
-          quote={selected}
-          onAdd={(body) => {
-            setComments((list) => [...list, { quote: selected!, body }]);
-            setSelected(undefined);
-          }}
-          onCancel={() => setSelected(undefined)}
-        />
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="relative">
+        <article ref={article} className={`${CARD} ${PROSE} px-8 py-7`}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+        </article>
+        {selected?.bar && (
+          <SelectionBar
+            selected={selected}
+            onComment={() => {
+              setSelected((s) => s && { ...s, bar: false });
+              input.current?.focus();
+            }}
+          />
+        )}
+      </div>
+      <aside className="flex flex-col gap-4 lg:sticky lg:top-[76px]">
+        <div className={`${CARD} px-5 py-4`}>
+          <Composer
+            key={selected?.text}
+            quote={selected?.text}
+            inputRef={input}
+            onAdd={(body) => {
+              setComments((list) => [...list, { quote: selected!.text, body }]);
+              setSelected(undefined);
+            }}
+            onCancel={() => setSelected(undefined)}
+          />
+        </div>
         <CommentList comments={comments} onRemove={(index) => setComments((list) => list.filter((_, i) => i !== index))} />
-        <SubmitReview questionId={questionId} runId={runId} target={from} comments={comments} note={note} setNote={setNote} onSending={onSending} onFailed={onFailed} />
+        <div className={`${CARD} px-5 py-4`}>
+          <SubmitReview questionId={questionId} runId={runId} target={from} comments={comments} note={note} setNote={setNote} onSending={onSending} onFailed={onFailed} />
+        </div>
       </aside>
     </div>
   );

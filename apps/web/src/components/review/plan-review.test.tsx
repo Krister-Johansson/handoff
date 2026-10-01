@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { PlanReview } from "./plan-review";
 
@@ -39,6 +39,23 @@ test("the plan is rendered, and a selected passage can be commented on", () => {
   fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
   expect(screen.getByRole("list", { name: "Comments" })).toHaveTextContent("a JSON file");
   expect(screen.getByRole("list", { name: "Comments" })).toHaveTextContent("Use SQLite instead.");
+});
+
+test("a selection offers comment, which moves to the comment box, and copy", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.assign(navigator, { clipboard: { writeText } });
+  render(<PlanReview {...props} />);
+  expect(screen.queryByRole("toolbar", { name: "Selection" })).not.toBeInTheDocument();
+  select("a JSON file");
+  const toolbar = screen.getByRole("toolbar", { name: "Selection" });
+  fireEvent.click(within(toolbar).getByRole("button", { name: "Copy" }));
+  expect(writeText).toHaveBeenCalledWith("a JSON file");
+  fireEvent.click(within(toolbar).getByRole("button", { name: "Comment" }));
+  expect(screen.getByLabelText("Comment")).toHaveFocus();
+  fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Use SQLite." } });
+  fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+  expect(screen.queryByRole("toolbar", { name: "Selection" })).not.toBeInTheDocument();
+  expect(screen.getByText("1 comment")).toBeInTheDocument();
 });
 
 test("requesting changes sends the note and every comment with its quote", async () => {
