@@ -27,11 +27,13 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
   if (fromType === "planner" && typeof o.plan === "string") {
     const steps = strings(o.steps);
     const paths = strings(o.ownedPaths);
+    const acceptance = strings(o.acceptance);
     return {
       kind: "plan",
       markdown: [
         o.plan.trim(),
         ...(steps.length ? ["", "## Steps", "", ...steps.map((step, i) => `${i + 1}. ${step}`)] : []),
+        ...(acceptance.length ? ["", "## Acceptance criteria", "", ...acceptance.map((item) => `- ${item}`)] : []),
         ...(paths.length ? ["", "## Files it will change", "", ...paths.map((p) => `- \`${p}\``)] : []),
       ].join("\n"),
     };

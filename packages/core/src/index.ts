@@ -18,3 +18,4 @@ export * from "./project-name.ts";
 export * from "./summary/summarize.ts";
 export * from "./library/skill-markdown.ts";
 export * from "./review/diff.ts";
+export * from "./acceptance.ts";

@@ -17,7 +17,7 @@ export const RunStateSchema = z
   .object({
     task: z.string(),
     issues: z.array(LinkedIssueSchema).optional(),
-    plan: z.object({ plan: z.string(), steps: z.array(z.string()), ownedPaths: z.array(z.string()) }).optional(),
+    plan: z.object({ plan: z.string(), steps: z.array(z.string()), ownedPaths: z.array(z.string()), acceptance: z.array(z.string()).optional() }).optional(),
     prNumber: z.number().int().optional(),
     feedback: FeedbackSchema.optional(),
     loops: z.record(z.string(), z.object({ attempts: z.number().int() })).default({}),

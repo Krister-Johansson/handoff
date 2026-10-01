@@ -1,4 +1,4 @@
-import { ALL_TOOLS, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
+import { acceptanceOf, ALL_TOOLS, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
 import type { NodeExecutionRow } from "@handoff/db";
 
 export const DEFAULT_MAX_TURNS = 60;
@@ -127,6 +127,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     node.config.allTools === true ? ALL_TOOLS : Array.isArray(configTools) ? configTools.map(String) : nodeCatalog[node.type].allowedTools;
   const maxTurns = typeof node.config.maxTurns === "number" ? node.config.maxTurns : DEFAULT_MAX_TURNS;
 
+  const acceptance = acceptanceOf(state);
   const packet: ContextPacket = {
     task: state.task,
     nodeKey: node.key,
@@ -138,6 +139,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     ...(decisionsOf(state).length ? { decisions: decisionsOf(state) } : {}),
     ...(suggestionsOf(state, node.key).length ? { suggestions: suggestionsOf(state, node.key) } : {}),
     ...(state.issues?.length ? { issues: state.issues } : {}),
+    ...(acceptance ? { acceptance } : {}),
   };
   const previousReview = previousReviewOf(node, state, sentBackTo);
   if (previousReview) packet.previousReview = previousReview;

@@ -142,3 +142,12 @@ test("a conflict with main asks the coder to merge it in, keep both changes and 
   // It comes before the output contract, so it reads as the job, not an afterthought.
   expect(md.indexOf("# Merge conflict with main")).toBeLessThan(md.indexOf("# Output contract"));
 });
+
+test("the run's acceptance criteria follow the linked issues, saying where they came from", () => {
+  const md = renderContextPacket({ ...packet, acceptance: { source: "planner", items: ["A user can create a new task", "Tasks persist after a reload"] } });
+  const headings = md.split("\n").filter((l) => l.startsWith("# "));
+  expect(headings.slice(0, 2)).toEqual(["# Task", "# Acceptance criteria"]);
+  expect(md).toContain("- A user can create a new task\n- Tasks persist after a reload");
+  expect(md).toContain("The planner wrote these");
+  expect(renderContextPacket({ ...packet, acceptance: { source: "issue", items: ["x"] } })).toContain("The linked issues list these");
+});
