@@ -170,11 +170,10 @@ const question = (review: boolean) => ({
   context: review ? { review: { from: "planner", kind: "plan", markdown: "Plan" } } : {},
 });
 
-test("a review waiting on a person puts the way to it in the banner", () => {
+test("a review waiting on a person puts the way to it beside the run's status", () => {
   render(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(true)]} />);
-  const banner = screen.getByRole("status");
-  expect(banner).toHaveTextContent("Approve the plan waits for your review");
-  expect(within(banner).getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/projects/p1/runs/r1/review/q1");
+  expect(screen.getByRole("status")).toHaveTextContent("Approve the plan waits for your review");
+  expect(screen.getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/projects/p1/runs/r1/review/q1");
 });
 
 test("a gate that starts waiting while the page is open refreshes it, so its question arrives", () => {
@@ -258,12 +257,11 @@ test("the event list says it is live while the run goes on, and not once it ende
   expect(screen.queryByText("live")).not.toBeInTheDocument();
 });
 
-test("a run first in the merge queue can be merged from its banner", async () => {
+test("a run first in the merge queue can be merged beside its status", async () => {
   const merge = { id: "e9", nodeKey: "merge", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
   render(<RunLive {...common} labels={{ merge: "Merge" }} initialStatus="waiting" initialExecutions={[merge]} queue={{ position: 1, requested: false, mode: "manual" }} />);
-  const banner = screen.getByRole("status");
-  expect(banner).toHaveTextContent("Ready to merge");
-  fireEvent.click(within(banner).getByRole("button", { name: "Merge" }));
+  expect(screen.getByRole("status")).toHaveTextContent("Ready to merge");
+  fireEvent.click(screen.getByRole("button", { name: "Merge" }));
   await waitFor(() => expect(projectActions.requestMergeAction).toHaveBeenCalledWith({ runId: "r1", projectId: "p1" }));
 });
 
@@ -271,5 +269,24 @@ test("a run further back in the queue has no merge button", () => {
   const merge = { id: "e9", nodeKey: "merge", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
   render(<RunLive {...common} initialStatus="waiting" initialExecutions={[merge]} queue={{ position: 2, requested: false, mode: "manual" }} />);
   expect(screen.getByRole("status")).toHaveTextContent("Ready to merge, 2nd in line");
-  expect(within(screen.getByRole("status")).queryByRole("button", { name: "Merge" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Merge" })).not.toBeInTheDocument();
+});
+
+test("what the run is doing now sits in the page header, beside the run's actions", () => {
+  render(
+    <RunLive
+      {...common}
+      labels={{ gate: "Approve the plan" }}
+      initialStatus="waiting"
+      initialExecutions={[gate]}
+      questions={[question(true)]}
+      header={{ crumbs: [{ label: "Projects", href: "/projects" }], title: "Add a module", meta: "master v12", actions: <button type="button">Cancel run</button> }}
+    />,
+  );
+  const header = screen.getByRole("heading", { level: 1, name: "Add a module" }).closest("header")!;
+  expect(within(header).getByRole("status")).toHaveTextContent("Approve the plan waits for your review");
+  expect(within(header).getByRole("link", { name: "Open the review" })).toBeInTheDocument();
+  expect(within(header).getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
+  expect(header).toHaveTextContent("master v12");
+  expect(screen.getAllByRole("status")).toHaveLength(1);
 });
