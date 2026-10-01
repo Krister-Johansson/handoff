@@ -8,10 +8,12 @@ export type NowInput = {
   prNumber: number | null;
   /** Open questions waiting for a person. */
   questions: number;
+  /** How many of them are reviews, answered on the review page. */
+  reviews: number;
 };
 
 /** One line saying what a run is doing now, or how it ended, with the tone to show it in. */
-export function describeNow({ status, executions, labels, prNumber, questions }: NowInput): { tone: StatusTone; text: string } {
+export function describeNow({ status, executions, labels, prNumber, questions, reviews }: NowInput): { tone: StatusTone; text: string } {
   const label = (key: string) => labels[key] ?? key;
   const latest = (s: string) => executions.findLast((e) => e.status === s);
   if (status === "cancelled") return { tone: "muted", text: "Cancelled." };
@@ -26,6 +28,7 @@ export function describeNow({ status, executions, labels, prNumber, questions }:
   const running = latest("running");
   if (running) return { tone: "active", text: `${label(running.nodeKey)} is working${running.attempt > 1 ? `, attempt ${running.attempt}` : ""}` };
   const waiting = latest("waiting");
+  if (waiting && reviews > 0) return { tone: "attention", text: `${label(waiting.nodeKey)} waits for your review` };
   if (waiting && questions > 0) return { tone: "attention", text: `Waiting for your answer to ${label(waiting.nodeKey)}` };
   if (waiting && prNumber !== null) return { tone: "attention", text: `Waiting for CI and reviews on PR #${prNumber}` };
   if (waiting) return { tone: "attention", text: `Waiting: ${label(waiting.nodeKey)}` };

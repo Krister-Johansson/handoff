@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { RunLive } from "./run-live";
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), cancelAction: vi.fn(), repairAction: vi.fn() }));
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
@@ -44,7 +45,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const executions = [{ id: "e1", nodeKey: "planner", attempt: 1, status: "passed", costUsd: null, durationMs: null }];
-const common = { runId: "r1", initialEvents: [], labels: { planner: "Plan", coder: "Code" }, prNumber: null, questions: 0 };
+const common = { runId: "r1", initialEvents: [], labels: { planner: "Plan", coder: "Code" }, prNumber: null, questions: [] };
 
 test("selecting a step opens what it produced", async () => {
   render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
@@ -150,4 +151,43 @@ test("a node whose result sent work back shows sent back instead of passed", () 
     FakeEventSource.instances[0]!.emit({ seq: 2, type: "edge.taken", payload: { edgeKey: "reviewer->planner", from: "reviewer", to: "planner" }, nodeExecutionId: "e2", createdAt: "2026-10-01T10:00:00Z" }),
   );
   expect(screen.getAllByText("sent back").length).toBeGreaterThan(0);
+});
+
+const gate = { id: "e5", nodeKey: "gate", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
+const question = (review: boolean) => ({
+  id: "q1",
+  nodeExecutionId: "e5",
+  question: "Review the plan from Planner",
+  options: ["approve", "changes"],
+  runId: "r1",
+  task: "Add a module",
+  nodeKey: "gate",
+  projectName: "demo",
+  reason: "approval",
+  context: review ? { review: { from: "planner", kind: "plan", markdown: "Plan" } } : {},
+});
+
+test("a review waiting on a person puts the way to it in the banner", () => {
+  render(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(true)]} />);
+  const banner = screen.getByRole("status");
+  expect(banner).toHaveTextContent("Approve the plan waits for your review");
+  expect(within(banner).getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/runs/r1/review/q1");
+});
+
+test("a gate that starts waiting while the page is open refreshes it, so its question arrives", () => {
+  render(<RunLive {...common} initialStatus="running" initialExecutions={[{ ...gate, status: "running" }]} />);
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 1, type: "node.waiting", payload: { nodeKey: "gate", attempt: 1 }, nodeExecutionId: "e5", createdAt: "2026-10-01T10:00:00Z" }));
+  expect(refresh).toHaveBeenCalled();
+});
+
+test("a waiting gate's drawer shows its question with the way to answer it", async () => {
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ ...detail("waiting", ""), id: "e5", nodeKey: "gate", nodeType: "human_gate" })));
+  const { rerender } = render(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(true)]} />);
+  fireEvent.click(screen.getByRole("button", { name: /Approve the plan/ }));
+  const drawer = await screen.findByRole("dialog");
+  expect(within(drawer).getByText("Review the plan from Planner")).toBeInTheDocument();
+  expect(within(drawer).getByRole("link", { name: "Open the review" })).toHaveAttribute("href", "/runs/r1/review/q1");
+
+  rerender(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(false)]} />);
+  expect(within(screen.getByRole("dialog")).getByRole("button", { name: "approve" })).toBeInTheDocument();
 });

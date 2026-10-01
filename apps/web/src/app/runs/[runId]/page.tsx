@@ -7,7 +7,7 @@ import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox
 import { IssueLinks } from "@/components/runs/issue-links";
 import { RunAgainButton } from "@/components/runs/run-again-button";
 import { PageHeader } from "@/components/page-header";
-import { RunLive } from "@/components/runs/run-live";
+import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
 import { projectCrumbs, projectTabCrumb, runCrumb } from "@/server/crumbs";
 import { StuckLoopCard } from "@/components/runs/stuck-loop-card";
 import { stuckLoop, type StuckLoop } from "@handoff/engine/operations";
@@ -26,18 +26,30 @@ function nodeLabels(document: unknown): Record<string, string> {
 
 type Detail = NonNullable<Awaited<ReturnType<typeof getRunDetail>>>;
 
-/** What the run needs from a person: its open questions, a decision for a loop that ran out, or a repair. */
+/** The run's open questions as the cards and the drawer show them. */
+function questionItems({ run, project, openQuestions }: Detail): OpenQuestion[] {
+  return openQuestions.map((q) => ({
+    ...q,
+    runId: run.id,
+    task: run.task,
+    projectName: project.name,
+    reason: typeof q.context.reason === "string" ? q.context.reason : "approval",
+  }));
+}
+
+/**
+ * What the run needs from a person: questions to answer here, a decision for a loop that ran out, or a
+ * repair. A review waiting on a person is opened from the status banner instead.
+ */
 function RunAlerts({ detail, stuck }: { detail: Detail; stuck: StuckLoop | undefined }) {
-  const { run, project, graph, openQuestions, failed } = detail;
+  const { run, project, graph, failed } = detail;
   return (
     <>
-      {openQuestions.map((q) => (
-        <QuestionCard
-          key={q.id}
-          compact
-          item={{ ...q, runId: run.id, task: run.task, projectName: project.name, reason: typeof q.context.reason === "string" ? q.context.reason : "approval" }}
-        />
-      ))}
+      {questionItems(detail)
+        .filter((q) => !q.context?.review)
+        .map((q) => (
+          <QuestionCard key={q.id} compact item={q} />
+        ))}
       {stuck && <StuckLoopCard runId={run.id} node={nodeLabels(graph?.document)[stuck.nodeKey] ?? stuck.nodeKey} loop={stuck.edgeKey} attempts={stuck.attempts} />}
       {run.status === "failed" && failed && !stuck && (
         <FailedRunCard
@@ -53,7 +65,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
   const { runId } = await params;
   const detail = await getRunDetail(getDb(), runId);
   if (!detail) notFound();
-  const { run, project, executions, events, graph, openQuestions } = detail;
+  const { run, project, executions, events, graph } = detail;
   const stuck = run.status === "failed" ? await stuckLoop(getDb(), run.id) : undefined;
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
@@ -112,7 +124,7 @@ export default async function RunPage({ params }: { params: Promise<{ runId: str
         }))}
         labels={nodeLabels(graph?.document)}
         prNumber={run.prNumber}
-        questions={openQuestions.length}
+        questions={questionItems(detail)}
         initialEvents={events}
         graphDocument={graph?.document}
       />
