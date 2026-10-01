@@ -66,7 +66,13 @@ export function buildClaudeArgv(input: ClaudeArgvInput): string[] {
     input.systemPromptFile,
     "--settings",
     // Thinking summaries instead of redacted blocks, so the dashboard can show what an agent thought.
-    JSON.stringify({ disableAllHooks: true, showThinkingSummaries: true, ...(input.claudeMdExcludes ? { claudeMdExcludes: input.claudeMdExcludes } : {}) }),
+    // No attribution: the CLI's default Co-Authored-By trailer overrides the repository's commit conventions.
+    JSON.stringify({
+      disableAllHooks: true,
+      showThinkingSummaries: true,
+      attribution: { commit: "", pr: "", sessionUrl: false },
+      ...(input.claudeMdExcludes ? { claudeMdExcludes: input.claudeMdExcludes } : {}),
+    }),
     "--strict-mcp-config",
   ];
   if (input.mcpConfigPath) argv.push("--mcp-config", input.mcpConfigPath);

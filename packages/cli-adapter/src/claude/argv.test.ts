@@ -38,7 +38,7 @@ describe("buildClaudeArgv", () => {
     expect(flagValue(argv, "--permission-mode")).toBe("acceptEdits");
     expect(flagValue(argv, "--permission-prompts")).toBe("none");
     expect(argv).toContain("--strict-mcp-config");
-    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true, showThinkingSummaries: true });
+    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true, showThinkingSummaries: true, attribution: { commit: "", pr: "", sessionUrl: false } });
     expect(flagValue(argv, "--allowedTools")).toBe("Read,Edit,Bash(git *)");
     expect(flagValue(argv, "--max-turns")).toBe("40");
     expect(flagValue(argv, "--append-system-prompt-file")).toBe("/tmp/stage/context.md");
@@ -73,7 +73,12 @@ describe("buildClaudeArgv", () => {
 
   test("buildClaudeArgv passes claudeMdExcludes in --settings only when given", () => {
     const argv = buildClaudeArgv({ ...base, claudeMdExcludes: ["/a/CLAUDE.md"] });
-    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({ disableAllHooks: true, showThinkingSummaries: true, claudeMdExcludes: ["/a/CLAUDE.md"] });
+    expect(JSON.parse(flagValue(argv, "--settings")!)).toEqual({
+      disableAllHooks: true,
+      showThinkingSummaries: true,
+      attribution: { commit: "", pr: "", sessionUrl: false },
+      claudeMdExcludes: ["/a/CLAUDE.md"],
+    });
   });
 
   test("buildClaudeArgv never disables session persistence", () => {
@@ -110,4 +115,10 @@ test("claude returns thinking summaries, so the dashboard can show what an agent
   const argv = buildClaudeArgv(base);
   const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!) as Record<string, unknown>;
   expect(settings.showThinkingSummaries).toBe(true);
+});
+
+test("claude adds no attribution to commits or pull requests, so the repository's commit conventions hold", () => {
+  const argv = buildClaudeArgv(base);
+  const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!) as Record<string, unknown>;
+  expect(settings.attribution).toEqual({ commit: "", pr: "", sessionUrl: false });
 });
