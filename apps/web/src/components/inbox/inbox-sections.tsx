@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { FailedRunCard, PullRequestCard, QuestionCard, ReadyToMergeCard, StuckRunCard } from "./cards";
 import { FilterLinks } from "@/components/filter-links";
+import { PermissionCard } from "@/components/runs/permission-card";
 import { inboxCount, inboxItems, type InboxView } from "./inbox-view";
 
 /** A count beside a heading. */
@@ -47,6 +48,11 @@ function Group({ id, title, count, children }: { id: string; title: string; coun
 export function InboxSections({ view }: { view: InboxView }) {
   return (
     <div className="flex flex-col gap-6">
+      <Group id="inbox-permissions" title="Permission requests" count={view.permissions?.length ?? 0}>
+        {view.permissions?.map((p) => (
+          <PermissionCard key={p.id} request={p} run={p} />
+        ))}
+      </Group>
       <Group id="inbox-reviews" title="Reviews to open" count={view.reviews.length}>
         {view.reviews.map((q) => (
           <QuestionCard key={q.id} item={q} />

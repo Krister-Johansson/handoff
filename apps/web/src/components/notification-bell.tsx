@@ -37,7 +37,7 @@ function toastFor(item: NotificationJson, open: (href: string) => void) {
   const options = { description: item.body, icon: <KindTile kind={item.kind} />, classNames: TOAST_CLASSES, action: { label: "Open", onClick: () => open(item.href) } };
   if (item.kind === "finished" || item.kind === "merged") toast.success(item.title, options);
   else if (item.kind === "failed") toast.error(item.title, { ...options, duration: 10_000 });
-  else if (item.kind === "input" || item.kind === "ready") toast.warning(item.title, { ...options, duration: 10_000 });
+  else if (item.kind === "input" || item.kind === "permission" || item.kind === "ready") toast.warning(item.title, { ...options, duration: 10_000 });
   else toast.info(item.title, options);
 }
 

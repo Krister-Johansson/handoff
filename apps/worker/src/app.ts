@@ -29,6 +29,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     configDir,
     ...(env.HANDOFF_CLAUDE_PASSTHROUGH_ENV ? { passthroughEnv: env.HANDOFF_CLAUDE_PASSTHROUGH_ENV.split(",").map((k) => k.trim()) } : {}),
   });
+  const db = createDb(env.DATABASE_URL);
   const cliOptions = {
     cli,
     maxTurns: env.HANDOFF_MAX_TURNS,
@@ -36,9 +37,10 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     idleTimeoutMs: 10 * 60_000,
     ...(env.HANDOFF_MODEL ? { model: env.HANDOFF_MODEL } : {}),
     ...(env.HANDOFF_EFFORT ? { effort: env.HANDOFF_EFFORT } : {}),
+    // A tool call outside a step's allow rules waits for a person on the run page instead of being denied.
+    permissions: { db },
   };
   const agent = cliNodeExecutor(cliOptions);
-  const db = createDb(env.DATABASE_URL);
   const git = new GitWorktreeProvider({
     root: home,
     gitEnv: async (remote) => {

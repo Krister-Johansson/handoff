@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import { InboxProjectFilter, InboxSections } from "./inbox-sections";
 import { narrowInbox, type InboxView } from "./inbox-view";
 
-vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), repairAction: vi.fn(), cancelAction: vi.fn(), resolveLoopAction: vi.fn() }));
+vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), repairAction: vi.fn(), cancelAction: vi.fn(), resolveLoopAction: vi.fn(), answerPermissionAction: vi.fn() }));
 const projectActions = vi.hoisted(() => ({ requestMergeAction: vi.fn(async () => ({ ok: true })) }));
 vi.mock("@/app/projects/actions", () => projectActions);
 
@@ -61,4 +61,14 @@ test("a pull request first in its project's merge queue can be merged from the i
   expect(group).toHaveTextContent("#54 F06 Test harness");
   fireEvent.click(within(group).getByRole("button", { name: "Merge" }));
   await waitFor(() => expect(projectActions.requestMergeAction).toHaveBeenCalledWith({ runId: "r-m", projectId: "p1" }));
+});
+
+test("permission requests come first, each with its run and the answers a person can give", () => {
+  const request = { ...todo, id: "3f6b2a10-0000-4000-8000-000000000001", runId: "22222222-2222-4222-8222-222222222222", task: "#10 Projects in the sidebar", nodeKey: "coder-1", toolName: "Bash", input: { command: "git -C /w log" } };
+  render(<InboxSections view={{ ...view, permissions: [request] }} />);
+  const [first] = screen.getAllByRole("region");
+  expect(within(first!).getByRole("heading", { level: 2 }).textContent).toBe("Permission requests1");
+  expect(within(first!).getByRole("link", { name: "#10 Projects in the sidebar" })).toHaveAttribute("href", "/projects/p1/runs/22222222-2222-4222-8222-222222222222");
+  expect(within(first!).getByRole("button", { name: "Allow once" })).toBeInTheDocument();
+  expect(narrowInbox({ ...view, permissions: [request] }, "p2").permissions).toEqual([]);
 });

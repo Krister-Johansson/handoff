@@ -3,6 +3,7 @@ import { stuckLoop } from "@handoff/engine/operations";
 import { stuckRuns, waitingReviews } from "./attention";
 import { listInbox } from "./inbox";
 import { projectMergeQueue } from "./merge-queue";
+import { allPendingPermissions } from "./permissions";
 
 /** The first pull request of each project's merge queue, when it waits for a person to merge it. */
 async function readyToMerge(db: Db) {
@@ -25,7 +26,7 @@ async function readyToMerge(db: Db) {
  * GitHub. A run stuck on a loop is listed only as stuck, since it needs a decision rather than a repair.
  */
 export async function inboxGroups(db: Db) {
-  const [inbox, reviews, stuck, ready] = await Promise.all([listInbox(db), waitingReviews(db), stuckRuns(db), readyToMerge(db)]);
+  const [inbox, reviews, stuck, ready, permissions] = await Promise.all([listInbox(db), waitingReviews(db), stuckRuns(db), readyToMerge(db), allPendingPermissions(db)]);
   const loops = await Promise.all(stuck.map(async (s) => ({ run: s, loop: await stuckLoop(db, s.runId) })));
   const stuckRunsList = loops.flatMap(({ run, loop }) =>
     loop
@@ -51,8 +52,8 @@ export async function inboxGroups(db: Db) {
       ci: r.pr!.ci ?? null,
     })),
   };
-  const withReady = { ...groups, readyToMerge: ready };
-  const count = groups.reviews.length + groups.questions.length + groups.failedRuns.length + groups.stuckRuns.length + groups.pullRequests.length + ready.length;
+  const withReady = { ...groups, readyToMerge: ready, permissions };
+  const count = permissions.length + groups.reviews.length + groups.questions.length + groups.failedRuns.length + groups.stuckRuns.length + groups.pullRequests.length + ready.length;
   return { ...withReady, count };
 }
 

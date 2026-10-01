@@ -7,16 +7,18 @@ test("each node type offers what it can notify about", () => {
   expect(notifyKindsOf("finish")).toEqual(["finished"]);
   expect(notifyKindsOf("human_gate")).toEqual(["input", "failed"]);
   expect(notifyKindsOf("merge")).toEqual(["ready", "merged", "failed"]);
-  expect(notifyKindsOf("coder")).toEqual(["failed"]);
+  expect(notifyKindsOf("coder")).toEqual(["permission", "failed"]);
+  expect(notifyKindsOf("tester")).toEqual(["failed"]);
 });
 
 test("by default a node notifies about what needs a person and how the run ended, not about starts or merges", () => {
   const node = { notify: undefined };
-  expect(["started", "finished", "failed", "input", "ready", "merged"].map((k) => [k, notifies(node, k as never)])).toEqual([
+  expect(["started", "finished", "failed", "input", "permission", "ready", "merged"].map((k) => [k, notifies(node, k as never)])).toEqual([
     ["started", false],
     ["finished", true],
     ["failed", true],
     ["input", true],
+    ["permission", true],
     ["ready", true],
     ["merged", false],
   ]);

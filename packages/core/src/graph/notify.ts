@@ -3,9 +3,10 @@ import type { NodeType } from "../schema/graph.ts";
 
 /**
  * What a node can tell a person about: the run started (Start) or finished (Finish), the node failed,
- * a gate waits for an answer, a pull request is ready to merge, or it merged.
+ * a gate waits for an answer, a Claude step asks permission for a tool call, a pull request is ready to
+ * merge, or it merged.
  */
-export const NotifyKindSchema = z.enum(["started", "finished", "failed", "input", "ready", "merged"]);
+export const NotifyKindSchema = z.enum(["started", "finished", "failed", "input", "permission", "ready", "merged"]);
 export type NotifyKind = z.infer<typeof NotifyKindSchema>;
 
 /** A node's notification settings, by kind. A kind left out uses its default. */
@@ -13,7 +14,10 @@ export const NotifySettingsSchema = z.partialRecord(NotifyKindSchema, z.boolean(
 export type NotifySettings = z.infer<typeof NotifySettingsSchema>;
 
 /** On by default: what needs a person, and how the run ended. Starts and merges stay quiet. */
-const DEFAULT_ON: Record<NotifyKind, boolean> = { started: false, finished: true, failed: true, input: true, ready: true, merged: false };
+const DEFAULT_ON: Record<NotifyKind, boolean> = { started: false, finished: true, failed: true, input: true, permission: true, ready: true, merged: false };
+
+/** The steps Claude Code runs, which can ask permission for a tool call. */
+const CLAUDE_STEPS = new Set<NodeType>(["planner", "coder", "reviewer", "code_review", "demo"]);
 
 /** What a node of this type can notify about, in the order the inspector lists them. */
 export function notifyKindsOf(type: NodeType): NotifyKind[] {
@@ -21,6 +25,7 @@ export function notifyKindsOf(type: NodeType): NotifyKind[] {
   if (type === "finish") return ["finished"];
   if (type === "human_gate") return ["input", "failed"];
   if (type === "merge") return ["ready", "merged", "failed"];
+  if (CLAUDE_STEPS.has(type)) return ["permission", "failed"];
   return ["failed"];
 }
 

@@ -456,6 +456,7 @@ const NOTIFY_COPY: Record<NotifyKind, { label: string; description: string }> = 
   finished: { label: "Run finished", description: "When a run ends here." },
   failed: { label: "Failed", description: "When this step fails the run." },
   input: { label: "Waiting for you", description: "When this gate asks a question or waits for a review." },
+  permission: { label: "Asks permission", description: "When Claude wants a tool call its allow rules do not cover, and waits for you to allow it." },
   ready: { label: "Ready to merge", description: "When the pull request is first in line and waits for you." },
   merged: { label: "Merged", description: "When the pull request merges." },
 };

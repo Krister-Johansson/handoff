@@ -44,6 +44,12 @@ describe("buildClaudeArgv", () => {
     expect(flagValue(argv, "--append-system-prompt-file")).toBe("/tmp/stage/context.md");
   });
 
+  test("with a permission tool, a request the rules do not settle goes to that tool instead of being denied", () => {
+    const argv = buildClaudeArgv({ ...base, mcpConfigPath: "/tmp/stage/mcp.json", permissionPromptTool: "mcp__handoff__approve" });
+    expect(flagValue(argv, "--permission-prompt-tool")).toBe("mcp__handoff__approve");
+    expect(argv).not.toContain("--permission-prompts");
+  });
+
   test("buildClaudeArgv sets the session id and name for a new session", () => {
     const argv = buildClaudeArgv(base);
     expect(flagValue(argv, "--session-id")).toBe(base.session.id);

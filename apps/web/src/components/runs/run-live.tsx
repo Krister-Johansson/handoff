@@ -167,6 +167,8 @@ export function RunLive({
         // A gate's question is read on the server; refreshing brings it to the banner and the drawer.
         router.refresh();
       }
+      // A step's permission request is read on the server; refreshing shows it with its answers.
+      if (event.type === "permission.requested") router.refresh();
       if (event.type === "node.claimed") setStatus("running");
       // A node that passed and then took a loop edge sent its work back.
       const edgeKey = (event.payload as { edgeKey?: unknown } | null)?.edgeKey;

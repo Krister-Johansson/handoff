@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckIcon, CircleCheckIcon, CircleXIcon, GitMergeIcon, MessageCircleQuestionIcon, PlayIcon } from "lucide-react";
+import { CheckIcon, CircleCheckIcon, CircleXIcon, GitMergeIcon, MessageCircleQuestionIcon, PlayIcon, ShieldQuestionIcon } from "lucide-react";
 import { Tag } from "@/components/tag";
 import { formatAgo } from "@/lib/format";
 import type { NotificationKind } from "@/lib/notifications";
@@ -11,6 +11,7 @@ const KIND_STYLE: Record<NotificationKind, { icon: typeof PlayIcon; tile: string
   finished: { icon: CircleCheckIcon, tile: "bg-success-bg text-success" },
   failed: { icon: CircleXIcon, tile: "bg-danger-bg text-danger" },
   input: { icon: MessageCircleQuestionIcon, tile: "bg-attention-bg text-attention" },
+  permission: { icon: ShieldQuestionIcon, tile: "bg-attention-bg text-attention" },
   ready: { icon: GitMergeIcon, tile: "bg-attention-bg text-attention" },
   merged: { icon: GitMergeIcon, tile: "bg-success-bg text-success" },
 };
