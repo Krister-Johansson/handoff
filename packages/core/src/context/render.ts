@@ -31,6 +31,8 @@ export type ContextPacket = {
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
   suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
   issues?: { number: number; title: string; url: string; body: string }[];
+  /** A reviewer's own last review of this work, when it runs again: what it asked for and what came back. */
+  previousReview?: { comments: ({ body: string } & Place)[]; reply?: string | undefined; reviewedAt?: string | undefined };
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
   repairNote?: string;
@@ -84,6 +86,23 @@ export function renderContextPacket(packet: ContextPacket): string {
       out.push(`## #${issue.number} ${issue.title}`, "", issue.url, "");
       if (body) out.push(cut ? `${body.slice(0, ISSUE_BODY_CHARS)}\n\n(issue body cut at ${ISSUE_BODY_CHARS} characters)` : body, "");
     }
+  }
+  if (packet.previousReview) {
+    const { comments, reply, reviewedAt } = packet.previousReview;
+    out.push(
+      "# Your previous review",
+      "",
+      "You reviewed this work before and sent it back with the comments below. For each one, check whether the changes since then handle it.",
+      reviewedAt
+        ? `Then look only for new problems in lines changed since your last review (\`git diff ${reviewedAt}..HEAD\`). Do not raise findings on code you already reviewed and left alone.`
+        : "Then look only for new problems the changes since then introduced. Do not raise findings on code you already reviewed and left alone.",
+      "",
+      "## Your comments",
+      "",
+      ...comments.map((c) => `- ${c.path ? `${placeOf(c)}: ` : ""}${c.body}`),
+      "",
+    );
+    if (reply) out.push("## What was changed since", "", reply, "");
   }
   out.push("# Run state", "", "```json", JSON.stringify(packet.stateSlice, null, 2), "```", "");
   out.push(

@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { contractRegistry, DEFAULT_REVIEW_LEVEL, isContractName, renderContextPacket, type NodeType } from "@handoff/core";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliSession } from "@handoff/cli-adapter";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
@@ -18,6 +20,17 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
     "Approve only when you have no such finding; comments you add to an approval reach the later steps as suggestions.",
 };
 
+const execFileAsync = promisify(execFile);
+
+/** The commit the worktree is on, or undefined when it is not a git checkout. */
+async function headOf(cwd: string): Promise<string | undefined> {
+  try {
+    return (await execFileAsync("git", ["rev-parse", "--short", "HEAD"], { cwd })).stdout.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const modelOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.node.config.model === "string" ? ctx.node.config.model : options.model);
 const effortOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.node.config.effort === "string" ? ctx.node.config.effort : options.effort);
 
@@ -31,7 +44,8 @@ function codeReviewPrompt(ctx: ExecutorContext): string {
   const level = typeof ctx.node.config.level === "string" ? ctx.node.config.level : DEFAULT_REVIEW_LEVEL;
   return [
     `Review this branch's changes against ${ctx.run.baseBranch} with the code-review skill: invoke it with the Skill tool, skill code-review, args "${level} ${ctx.run.branchName}".`,
-    "Do not edit files. Then return request_changes with one comment per finding (path, line, body), or approve when it finds nothing.",
+    "Do not edit files. Then return request_changes only for a finding that makes the change wrong, insecure, or misses the task, with one comment per such finding (path, line, body). " +
+      "Approve otherwise, and put every other finding as a comment on the approval: those reach the later steps and the pull request as suggestions.",
   ].join(" ");
 }
 
@@ -42,6 +56,9 @@ function firstPrompt(ctx: ExecutorContext): string {
     ...(ctx.packet.instructions ? ["Follow the instructions for this step in the system prompt."] : []),
     ...(ctx.packet.priorAttempt || ctx.packet.humanAnswer
       ? ["An earlier attempt was sent back: address every point under Previous attempt in the system prompt, and keep what was not questioned."]
+      : []),
+    ...(ctx.packet.previousReview
+      ? ["You reviewed this work before: follow Your previous review in the system prompt, checking your earlier comments and only what changed since."]
       : []),
   ].join(" ");
 }
@@ -110,6 +127,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           ? `A person answered your question: "${answer.text}". Continue the task with that answer. When finished, return the structured output required by the output contract.`
           : firstPrompt(ctx);
 
+      const reviewedAt = ctx.node.type === "reviewer" || ctx.node.type === "code_review" ? await headOf(ctx.workdir.path) : undefined;
       let mcpProblems: string[] = [];
       let fatalRetryError: string | undefined;
       let rateLimited = false;
@@ -188,6 +206,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
             cost,
             // A planner's question is not a plan: the run keeps no plan until the answer comes back.
             ...(ctx.node.type === "planner" && (result.validated as { status?: string }).status !== "needs_input" ? { statePatch: { plan: result.validated } } : {}),
+            // A review remembers the commit it looked at, so its next round can look only at what changed since.
+            ...(reviewedAt ? { statePatch: { reviewedAt: { ...(ctx.state.reviewedAt as Record<string, string> | undefined), [ctx.node.key]: reviewedAt } } } : {}),
           };
         case "interrupted":
           return { kind: "interrupted" };
