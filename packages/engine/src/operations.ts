@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { appendEvents, events, nodeExecutions, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
+import { appendEvents, events, nodeExecutions, permissionRequests, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
 import type { RunState } from "@handoff/core";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
@@ -55,6 +55,20 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string }
     await appendEvents(tx, runId, [{ type: "run.cancelled", payload: { reason: opts.reason ?? null } }]);
   });
   await stopRunPreviews(db, runId);
+}
+
+/**
+ * Records a person's answer to a step's permission request; the step's watcher hands it to Claude Code.
+ * A request already answered, or expired when its step ended, cannot be answered again.
+ */
+export async function decidePermission(db: Db, id: string, input: { allow: boolean; decidedBy: string; message?: string; rule?: string }) {
+  const [row] = await db
+    .update(permissionRequests)
+    .set({ status: input.allow ? "allowed" : "denied", decidedBy: input.decidedBy, decidedAt: new Date(), message: input.message ?? null, rule: input.rule ?? null })
+    .where(and(eq(permissionRequests.id, id), eq(permissionRequests.status, "pending")))
+    .returning();
+  if (!row) throw new Error("That request was already answered, or its step has ended.");
+  return row;
 }
 
 /** Wakes a Try it gate that still waits for its answer, so it starts the run's app again if it stopped. */

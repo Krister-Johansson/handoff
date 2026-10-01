@@ -16,6 +16,11 @@ export type ClaudeArgvInput = {
   agents?: Record<string, AgentDefinition>;
   /** Absolute path globs for the CLI's claudeMdExcludes setting. */
   claudeMdExcludes?: string[];
+  /**
+   * An MCP tool (in the MCP config) that answers permission requests the allow rules do not settle, so a
+   * person can approve them while the run waits. Without one, such requests are denied at once.
+   */
+  permissionPromptTool?: string;
 };
 
 /**
@@ -56,8 +61,7 @@ export function buildClaudeArgv(input: ClaudeArgvInput): string[] {
     JSON.stringify(input.jsonSchema),
     "--permission-mode",
     "acceptEdits",
-    "--permission-prompts",
-    "none",
+    ...(input.permissionPromptTool ? ["--permission-prompt-tool", input.permissionPromptTool] : ["--permission-prompts", "none"]),
     "--allowedTools",
     input.allowedTools.join(","),
     "--max-turns",

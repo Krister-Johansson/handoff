@@ -105,6 +105,16 @@ describe("ClaudeCliExecutor", () => {
     expect(result.outcome).toBe("timeout");
   });
 
+  test("a run that goes quiet is stopped as idle, unless it is waiting on a person", async () => {
+    const { executor, request, onEvent } = setup({ lines: [lines.init()], hangAfterLine: 1 });
+    const idle = await executor.run({ ...request, idleTimeoutMs: 200 }, { signal: new AbortController().signal, onEvent });
+    expect([idle.outcome, idle.errorMessage]).toEqual(["timeout", "stopped: idle"]);
+
+    const waiting = await executor.run({ ...request, idleTimeoutMs: 200, timeoutMs: 900 }, { signal: new AbortController().signal, onEvent, holdIdle: () => true });
+    // Only the run's own time limit ends it.
+    expect([waiting.outcome, waiting.errorMessage]).toEqual(["timeout", "stopped: timeout"]);
+  });
+
   test("executor spawns with CLAUDE_CONFIG_DIR set and without ANTHROPIC_API_KEY", async () => {
     const { executor, request, fake, onEvent } = setup({ lines: [lines.init(), lines.result({ structured_output: { status: "done", summary: "" } })] });
     await executor.run(request, { signal: new AbortController().signal, onEvent });

@@ -182,6 +182,15 @@ test("a gate that starts waiting while the page is open refreshes it, so its que
   expect(refresh).toHaveBeenCalled();
 });
 
+test("a step that asks permission while the page is open refreshes it, so the request shows", () => {
+  render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
+  refresh.mockClear();
+  act(() =>
+    FakeEventSource.instances[0]!.emit({ seq: 1, type: "permission.requested", payload: { id: "p1", toolName: "Bash", input: { command: "ls" } }, nodeExecutionId: "e1", createdAt: "2026-10-01T10:00:00Z" }),
+  );
+  expect(refresh).toHaveBeenCalled();
+});
+
 test("a waiting gate's drawer shows its question with the way to answer it", async () => {
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ ...detail("waiting", ""), id: "e5", nodeKey: "gate", nodeType: "human_gate" })));
   const { rerender } = render(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(true)]} />);

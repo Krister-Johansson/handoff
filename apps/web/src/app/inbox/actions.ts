@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { answerQuestion, cancelRun, repairNodeExecution, resolveExhaustedLoop, restartTryIt } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, resolveExhaustedLoop, restartTryIt } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
 import { runPathOf } from "@/server/run-path";
 import { markViewed } from "@/server/review";
+import { allowToolForNode } from "@/server/allow-tool";
+import { permissionExecution } from "@/server/permissions";
 
 export type InboxActionState = { ok?: boolean; error?: string };
 
@@ -124,5 +126,37 @@ export async function restartTryItAction(input: z.input<typeof RestartSchema>): 
     return { ok: false, error: (error as Error).message };
   }
   refresh(parsed.data.runId);
+  return { ok: true };
+}
+
+const PermissionAnswerSchema = z.discriminatedUnion("decision", [
+  z.object({ id: z.string().uuid(), runId: z.string().uuid(), decision: z.literal("once") }),
+  z.object({ id: z.string().uuid(), runId: z.string().uuid(), decision: z.literal("always"), rule: z.string().min(1).max(500) }),
+  z.object({ id: z.string().uuid(), runId: z.string().uuid(), decision: z.literal("deny"), message: z.string().max(2_000).optional() }),
+]);
+
+/**
+ * Answers a step's permission request. Always allow also adds the rule to the node in the graph's next
+ * version, so later runs do not ask.
+ */
+export async function answerPermissionAction(input: z.input<typeof PermissionAnswerSchema>): Promise<InboxActionState> {
+  const parsed = PermissionAnswerSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That answer cannot be sent." };
+  const answer = parsed.data;
+  try {
+    if (answer.decision === "always") {
+      const executionId = await permissionExecution(getDb(), answer.id);
+      await allowToolForNode(getDb(), { runId: answer.runId, executionId, rule: answer.rule });
+    }
+    await decidePermission(getDb(), answer.id, {
+      allow: answer.decision !== "deny",
+      decidedBy: "dashboard",
+      ...(answer.decision === "always" ? { rule: answer.rule } : {}),
+      ...(answer.decision === "deny" && answer.message ? { message: answer.message } : {}),
+    });
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  refresh(answer.runId);
   return { ok: true };
 }

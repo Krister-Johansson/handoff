@@ -1,11 +1,27 @@
 import { execFile } from "node:child_process";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
-import { contractRegistry, DEFAULT_REVIEW_LEVEL, isContractName, renderContextPacket, type NodeType } from "@handoff/core";
+import { contractRegistry, DEFAULT_REVIEW_LEVEL, isContractName, notifies, renderContextPacket, type NodeType } from "@handoff/core";
+import type { Db } from "@handoff/db";
+import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliSession } from "@handoff/cli-adapter";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
-/** model and effort are the worker's defaults; a node's config.model and config.effort override them. */
-export type CliNodeOptions = { cli: CliExecutor; maxTurns: number; timeoutMs: number; idleTimeoutMs?: number; model?: string; effort?: string };
+/**
+ * model and effort are the worker's defaults; a node's config.model and config.effort override them.
+ * With `permissions`, a tool call the step's allow rules do not cover waits for a person to allow or
+ * deny it (up to `timeoutMs`), instead of being denied at once.
+ */
+export type CliNodeOptions = {
+  cli: CliExecutor;
+  maxTurns: number;
+  timeoutMs: number;
+  idleTimeoutMs?: number;
+  model?: string;
+  effort?: string;
+  permissions?: { db: Db; timeoutMs?: number };
+};
 
 const PROMPTS: Partial<Record<NodeType, string>> = {
   planner:
@@ -139,6 +155,27 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       const forward = () => local.abort();
       if (ctx.signal.aborted) local.abort();
       ctx.signal.addEventListener("abort", forward, { once: true });
+      // A person answers permission requests through handoff's permission server, next to the library's MCP servers.
+      // Not in a Docker workspace: the server runs on the host, where the container's Claude Code cannot start it.
+      let mcpConfigPath = ctx.library?.mcpConfigPath;
+      let requiredServers = ctx.library?.mcpServers ?? [];
+      let permissionWatch: PermissionWatch | undefined;
+      if (options.permissions && !ctx.workdir.container) {
+        const dir = join(ctx.stagingDir, "permissions");
+        const servers = mcpConfigPath ? (JSON.parse(readFileSync(mcpConfigPath, "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers : {};
+        mcpConfigPath = join(ctx.stagingDir, "mcp-permissions.json");
+        writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: { ...servers, handoff: permissionServer(dir, options.permissions.timeoutMs ?? PERMISSION_TIMEOUT_MS) } }, null, 2), { mode: 0o600 });
+        requiredServers = [...requiredServers, "handoff"];
+        permissionWatch = watchPermissions(options.permissions.db, {
+          runId: ctx.run.id,
+          executionId: ctx.execution.id,
+          dir,
+          onRequest: (request) => {
+            ctx.emit("permission.requested", request);
+            if (notifies(ctx.node, "permission")) ctx.emit("notify", { kind: "permission", nodeKey: ctx.node.key, requestId: request.id });
+          },
+        });
+      }
       const base: Omit<CliRunRequest, "prompt" | "session" | "maxTurns"> = {
         systemPrompt: renderContextPacket(ctx.packet),
         cwd: ctx.workdir.path,
@@ -147,7 +184,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         allowedTools: ctx.packet.constraints.allowedTools,
         contract: contractRegistry[contractName],
         addDirs: ctx.library?.addDirs ?? [],
-        ...(ctx.library?.mcpConfigPath ? { mcpConfigPath: ctx.library.mcpConfigPath } : {}),
+        ...(mcpConfigPath ? { mcpConfigPath } : {}),
+        ...(permissionWatch ? { permissionPromptTool: PERMISSION_TOOL } : {}),
         ...(ctx.library?.agents ? { agents: ctx.library.agents } : {}),
         timeoutMs: options.timeoutMs,
         ...(options.idleTimeoutMs ? { idleTimeoutMs: options.idleTimeoutMs } : {}),
@@ -157,7 +195,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       const runOptions: CliRunOptions = {
         signal: local.signal,
         onEvent: (event) => {
-          if (event.type === "cli.system.init") mcpProblems = mcpInitProblems(event.payload, ctx.library?.mcpServers ?? []);
+          if (event.type === "cli.system.init") mcpProblems = mcpInitProblems(event.payload, requiredServers);
           if (event.type === "cli.system.api_retry") {
             const error = (event.payload as { error?: string } | undefined)?.error;
             if (error && FATAL_API_ERRORS.has(error)) {
@@ -170,13 +208,19 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         },
         onSessionId: (id) => ctx.setSessionId(id),
         onSpawn: (pid) => ctx.setChildPid(pid),
+        holdIdle: () => permissionWatch?.waiting() ?? false,
       };
-      let result = await options.cli.run({ ...base, prompt, session, maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns }, runOptions);
-      if (result.outcome === "error_max_turns" && !local.signal.aborted) {
-        // One short resumed turn to wrap up, instead of failing work that is nearly done.
-        const id = result.sessionId ?? session.id;
-        ctx.emit("node.finishing", { reason: "max_turns" });
-        result = await options.cli.run({ ...base, prompt: FINISH_PROMPT, session: { mode: "resume", id }, maxTurns: FINISH_TURNS }, runOptions);
+      let result;
+      try {
+        result = await options.cli.run({ ...base, prompt, session, maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns }, runOptions);
+        if (result.outcome === "error_max_turns" && !local.signal.aborted) {
+          // One short resumed turn to wrap up, instead of failing work that is nearly done.
+          const id = result.sessionId ?? session.id;
+          ctx.emit("node.finishing", { reason: "max_turns" });
+          result = await options.cli.run({ ...base, prompt: FINISH_PROMPT, session: { mode: "resume", id }, maxTurns: FINISH_TURNS }, runOptions);
+        }
+      } finally {
+        await permissionWatch?.stop();
       }
       ctx.signal.removeEventListener("abort", forward);
 

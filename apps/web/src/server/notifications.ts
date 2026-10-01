@@ -1,12 +1,14 @@
-import { alias, and, desc, eq, events, nodeExecutions, not, notificationReads, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { alias, and, desc, eq, events, nodeExecutions, not, notificationReads, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { describePermission } from "../lib/permission";
 import { reviewPath, runPath } from "../lib/paths";
 import type { NotificationFilter, NotificationItem, NotificationKind } from "../lib/notifications";
 
-/** The kinds a filter shows: "Needs you" covers questions and pull requests ready to merge, "Finished" merges too. */
-const kindsOf = (filter: NotificationKind): NotificationKind[] => (filter === "input" ? ["input", "ready"] : filter === "finished" ? ["finished", "merged"] : [filter]);
+/** The kinds a filter shows: "Needs you" covers questions, permission requests and pull requests ready to merge; "Finished" merges too. */
+const kindsOf = (filter: NotificationKind): NotificationKind[] =>
+  filter === "input" ? ["input", "permission", "ready"] : filter === "finished" ? ["finished", "merged"] : [filter];
 
 /** What a node said in its notification: what about, which node, and the details its kind needs. */
-type Payload = { kind: NotificationKind; nodeKey?: string; reason?: string; number?: number; questionId?: string };
+type Payload = { kind: NotificationKind; nodeKey?: string; reason?: string; number?: number; questionId?: string; requestId?: string };
 
 const kind = sql<string>`${events.payload}->>'kind'`;
 
@@ -18,11 +20,13 @@ const emitter = alias(nodeExecutions, "emitter");
 
 /**
  * Whether the person has done what a notification asked: a question is done once answered or once its
- * run ended; a pull request ready to merge once its merge was asked for or its merge step stopped
- * waiting; a failed run once it was repaired. The others ask nothing.
+ * run ended; a permission request once answered or expired; a pull request ready to merge once its
+ * merge was asked for or its merge step stopped waiting; a failed run once it was repaired. The others
+ * ask nothing.
  */
 const done = sql<boolean>`case ${kind}
   when 'input' then ${questions.answeredAt} is not null or ${runs.status} in ('succeeded', 'failed', 'cancelled')
+  when 'permission' then ${permissionRequests.status} is distinct from 'pending'
   when 'ready' then ${runs.mergeRequestedAt} is not null or coalesce(${emitter.status} <> 'waiting', false)
   when 'failed' then ${runs.status} <> 'failed'
   else false end`;
@@ -51,11 +55,14 @@ const feed = (db: Db) =>
       projectName: projects.name,
       question: questions.question,
       context: questions.context,
+      toolName: permissionRequests.toolName,
+      toolInput: permissionRequests.input,
     })
     .from(events)
     .innerJoin(runs, eq(runs.id, events.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(questions, sql`${questions.id} = (${events.payload}->>'questionId')::uuid`)
+    .leftJoin(permissionRequests, sql`${permissionRequests.id} = (${events.payload}->>'requestId')::uuid`)
     .leftJoin(emitter, eq(emitter.id, events.nodeExecutionId))
     .$dynamic();
 
@@ -71,6 +78,10 @@ function toItem(row: Row, until: Date | undefined): NotificationItem {
       return { ...base, title: failedTitle(name, payload), unread };
     case "ready":
       return { ...base, title: `${name}: PR #${payload.number} is ready to merge`, unread };
+    case "permission": {
+      const { action, detail } = describePermission(row.toolName ?? "a tool", row.toolInput ?? {});
+      return { ...base, title: `${name}: ${payload.nodeKey ?? "a step"} ${action}`, body: detail || row.task, unread };
+    }
     case "merged":
       return { ...base, title: `${name}: PR #${payload.number} merged`, unread };
     case "input": {
@@ -118,6 +129,7 @@ async function unreadCount(db: Db, until: Date | undefined) {
     .innerJoin(runs, eq(runs.id, events.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
     .leftJoin(questions, sql`${questions.id} = (${events.payload}->>'questionId')::uuid`)
+    .leftJoin(permissionRequests, sql`${permissionRequests.id} = (${events.payload}->>'requestId')::uuid`)
     .leftJoin(emitter, eq(emitter.id, events.nodeExecutionId))
     .where(and(eq(events.type, "notify"), eq(projects.isDemo, false), not(done), until ? sql`${ms} > ${until}` : undefined));
   return row?.n ?? 0;

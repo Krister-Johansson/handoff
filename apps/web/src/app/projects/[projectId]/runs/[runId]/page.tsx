@@ -5,6 +5,8 @@ import { GraphDocumentSchema, summarizeOutput } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
 import { TryItCard } from "@/components/runs/try-it-card";
+import { PermissionCard, type PermissionRequestView } from "@/components/runs/permission-card";
+import { pendingPermissions } from "@/server/permissions";
 import { IssueLinks } from "@/components/runs/issue-links";
 import { RunAgainButton } from "@/components/runs/run-again-button";
 import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
@@ -45,10 +47,13 @@ function questionItems({ run, project, openQuestions }: Detail): OpenQuestion[] 
  * What the run needs from a person: questions to answer here, a decision for a loop that ran out, or a
  * repair. A review waiting on a person is opened from the status banner instead.
  */
-function RunAlerts({ detail, stuck }: { detail: Detail; stuck: StuckLoop | undefined }) {
+function RunAlerts({ detail, stuck, permissions }: { detail: Detail; stuck: StuckLoop | undefined; permissions: PermissionRequestView[] }) {
   const { run, project, graph, failed } = detail;
   return (
     <>
+      {permissions.map((p) => (
+        <PermissionCard key={p.id} request={p} />
+      ))}
       {questionItems(detail)
         .filter((q) => !q.context?.review)
         .map((q) => (q.reason === "try" ? <TryItCard key={q.id} item={q} /> : <QuestionCard key={q.id} compact item={q} />))}
@@ -88,7 +93,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const { run, project, executions, events, graph } = detail;
   const stuck = run.status === "failed" ? await stuckLoop(getDb(), run.id) : undefined;
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
-  const queue = active ? await queuePlace(project.id, run.id) : undefined;
+  const [queue, permissions] = active ? await Promise.all([queuePlace(project.id, run.id), pendingPermissions(getDb(), run.id)]) : [undefined, []];
   const blockedBy = blockersOf(detail);
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   return (
@@ -177,7 +182,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         initialEvents={events}
         graphDocument={graph?.document}
       >
-        <RunAlerts detail={detail} stuck={stuck} />
+        <RunAlerts detail={detail} stuck={stuck} permissions={permissions} />
       </RunLive>
     </main>
   );

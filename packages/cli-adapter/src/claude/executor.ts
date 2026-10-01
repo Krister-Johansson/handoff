@@ -28,7 +28,7 @@ const STDERR_TAIL_LINES = 50;
 export class ClaudeCliExecutor implements CliExecutor {
   constructor(private readonly options: ClaudeCliExecutorOptions) {}
 
-  async run(request: CliRunRequest, { signal, onEvent, onSessionId, onSpawn }: CliRunOptions): Promise<CliRunResult> {
+  async run(request: CliRunRequest, { signal, onEvent, onSessionId, onSpawn, holdIdle }: CliRunOptions): Promise<CliRunResult> {
     mkdirSync(request.stagingDir, { recursive: true });
     const systemPromptFile = join(request.stagingDir, "context.md");
     writeFileSync(systemPromptFile, request.systemPrompt);
@@ -47,6 +47,7 @@ export class ClaudeCliExecutor implements CliExecutor {
       ...(request.model ? { model: request.model } : {}),
       ...(request.effort ? { effort: request.effort } : {}),
       ...(request.agents ? { agents: request.agents } : {}),
+      ...(request.permissionPromptTool ? { permissionPromptTool: request.permissionPromptTool } : {}),
     });
 
     const childEnv = buildClaudeEnv({
@@ -103,7 +104,7 @@ export class ClaudeCliExecutor implements CliExecutor {
     const resetIdle = () => {
       if (!request.idleTimeoutMs) return;
       if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => stop("idle"), request.idleTimeoutMs);
+      idleTimer = setTimeout(() => (holdIdle?.() ? resetIdle() : stop("idle")), request.idleTimeoutMs);
     };
     resetIdle();
 

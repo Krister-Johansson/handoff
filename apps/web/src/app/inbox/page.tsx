@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 
 /** Everything that waits on a person, grouped by what they must do, optionally for one project. */
 export default async function InboxPage({ searchParams }: { searchParams: Promise<{ project?: string | string[] }> }) {
-  const [{ project }, { reviews, questions, failedRuns, stuckRuns, pullRequests, readyToMerge }] = await Promise.all([searchParams, inboxGroups(getDb())]);
-  const view: InboxView = { reviews, questions, failedRuns: failedRuns.map((f) => ({ ...f, error: f.error ?? null })), stuckRuns, pullRequests, readyToMerge };
+  const [{ project }, { reviews, questions, failedRuns, stuckRuns, pullRequests, readyToMerge, permissions }] = await Promise.all([searchParams, inboxGroups(getDb())]);
+  const view: InboxView = { reviews, questions, failedRuns: failedRuns.map((f) => ({ ...f, error: f.error ?? null })), stuckRuns, pullRequests, readyToMerge, permissions };
   const current = typeof project === "string" ? project : undefined;
   const shown = narrowInbox(view, current);
   const total = inboxCount(view);

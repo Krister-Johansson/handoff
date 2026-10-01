@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, nodeExecutions, projects, questions, runs, sql } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, permissionRequests, projects, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
 import type { NotificationFilter } from "../lib/notifications";
@@ -212,4 +212,22 @@ test("a merge node that says its pull request merged is news that asks nothing",
   expect(items).toMatchObject([{ kind: "merged", title: "sandbox: PR #54 merged", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true }]);
   expect(unread).toBe(1);
   expect((await listNotifications(db, { limit: 8, filter: "finished" })).items.map((i) => i.kind)).toEqual(["merged"]);
+});
+
+test("a step asking permission for a tool call needs you until someone answers", async () => {
+  const { project, start, notify } = await setUp();
+  const run = await start("Add tasks");
+  const coder = await seedExecution(db, run.id, { nodeKey: "coder-1", status: "running" });
+  const id = crypto.randomUUID();
+  await db.insert(permissionRequests).values({ id, runId: run.id, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "git -C /w log --oneline -8" } });
+  await notify(run.id, "permission", { nodeKey: "coder-1", requestId: id }, coder.id);
+  const { items, unread } = await listNotifications(db, { limit: 8 });
+  expect(items).toMatchObject([
+    { kind: "permission", title: "sandbox: coder-1 asks to run a command", body: "git -C /w log --oneline -8", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true },
+  ]);
+  expect(unread).toBe(1);
+  expect((await listNotifications(db, { limit: 8, filter: "input" })).items.map((i) => i.kind)).toEqual(["permission"]);
+
+  await db.update(permissionRequests).set({ status: "allowed" }).where(eq(permissionRequests.id, id));
+  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ done: true, unread: false });
 });

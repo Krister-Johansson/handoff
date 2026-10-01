@@ -25,6 +25,8 @@ export type CliRunRequest = {
   container?: string;
   /** Subagent definitions for --agents. */
   agents?: Record<string, AgentDefinition>;
+  /** An MCP tool, in the MCP config, that a person answers permission requests through. */
+  permissionPromptTool?: string;
 };
 
 export type AgentDefinition = { description: string; prompt: string; tools?: string[]; model?: string };
@@ -56,6 +58,8 @@ export type CliRunOptions = {
   onSessionId?: (id: string) => void | Promise<void>;
   /** Called with the child's pid (its process group) right after spawning. */
   onSpawn?: (pid: number) => void | Promise<void>;
+  /** True while the run waits on a person (a permission request), so going quiet is not idleness. */
+  holdIdle?: () => boolean;
 };
 
 /** Runs one agent turn in a working directory. The Claude CLI implementation is the only one today. */
