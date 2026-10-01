@@ -19,6 +19,11 @@ export type ProjectRun = {
   createdAt: Date;
 };
 
+// Columns that give way as the screen narrows; on a phone the task and its status remain.
+const SM = "max-sm:hidden";
+const MD = "max-md:hidden";
+const LG = "max-lg:hidden";
+
 /** A project's runs, newest first: task with what it is doing now, graph version, branch, PR, cost, start and status. */
 export function RunsTable({ runs, lines, repoUrl, now = new Date() }: { runs: ProjectRun[]; lines: Map<string, RunLine>; repoUrl: string; now?: Date }) {
   return (
@@ -26,11 +31,11 @@ export function RunsTable({ runs, lines, repoUrl, now = new Date() }: { runs: Pr
       <TableHeader>
         <TableRow className="hover:bg-transparent">
           <TableHead className={TH}>Task</TableHead>
-          <TableHead className={TH}>Graph</TableHead>
-          <TableHead className={TH}>Branch</TableHead>
-          <TableHead className={TH}>PR</TableHead>
-          <TableHead className={cn(TH, "text-right")}>Cost</TableHead>
-          <TableHead className={TH}>Started</TableHead>
+          <TableHead className={cn(TH, MD)}>Graph</TableHead>
+          <TableHead className={cn(TH, LG)}>Branch</TableHead>
+          <TableHead className={cn(TH, SM)}>PR</TableHead>
+          <TableHead className={cn(TH, MD, "text-right")}>Cost</TableHead>
+          <TableHead className={cn(TH, SM)}>Started</TableHead>
           <TableHead className={cn(TH, "text-right")}>Status</TableHead>
         </TableRow>
       </TableHeader>
@@ -48,9 +53,9 @@ export function RunsTable({ runs, lines, repoUrl, now = new Date() }: { runs: Pr
                 </div>
                 {line && <div className={cn("truncate text-xs", line.now.tone === "danger" ? "text-danger" : "text-muted-foreground")}>{line.now.text}</div>}
               </TableCell>
-              <TableCell className={cn(TD, "font-mono text-xs text-muted-foreground")}>{line && `${line.graph} v${line.version}`}</TableCell>
-              <TableCell className={cn(TD, "max-w-56 truncate font-mono text-xs text-muted-foreground")}>{run.branchName}</TableCell>
-              <TableCell className={TD}>
+              <TableCell className={cn(TD, MD, "font-mono text-xs text-muted-foreground")}>{line && `${line.graph} v${line.version}`}</TableCell>
+              <TableCell className={cn(TD, LG, "max-w-56 truncate font-mono text-xs text-muted-foreground")}>{run.branchName}</TableCell>
+              <TableCell className={cn(TD, SM)}>
                 {run.prNumber !== null ? (
                   <a className="font-mono text-xs hover:underline hover:underline-offset-3" href={`${repoUrl}/pull/${run.prNumber}`}>
                     #{run.prNumber}
@@ -59,10 +64,10 @@ export function RunsTable({ runs, lines, repoUrl, now = new Date() }: { runs: Pr
                   <span className="text-muted-foreground">none</span>
                 )}
               </TableCell>
-              <TableCell className={cn(TD, "text-right text-muted-foreground tabular-nums")} title={line?.costUsd ? "Client-side estimate reported by the Claude CLI" : undefined}>
+              <TableCell className={cn(TD, MD, "text-right text-muted-foreground tabular-nums")} title={line?.costUsd ? "Client-side estimate reported by the Claude CLI" : undefined}>
                 {line?.costUsd ? formatCost(line.costUsd) : ""}
               </TableCell>
-              <TableCell className={cn(TD, "text-muted-foreground")} title={run.createdAt.toISOString()}>
+              <TableCell className={cn(TD, SM, "text-muted-foreground")} title={run.createdAt.toISOString()}>
                 {formatAgo(run.createdAt, now)}
               </TableCell>
               <TableCell className={cn(TD, "text-right")}>
