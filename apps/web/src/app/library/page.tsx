@@ -152,10 +152,7 @@ export default async function LibraryPage({ searchParams }: { searchParams: Prom
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <PageHeader
-        crumbs={[
-          { label: "Library", href: "/library" },
-          { label: sections.find((s) => s.value === active)?.label ?? "Skills", menu: sections.map((s) => ({ label: s.label, href: `/library?tab=${s.value}`, current: s.value === active })) },
-        ]}
+        crumbs={[{ label: "Library" }]}
         title="Library"
         description="Skills, MCP servers, subagents and groups of them that graph nodes enable by name."
       />

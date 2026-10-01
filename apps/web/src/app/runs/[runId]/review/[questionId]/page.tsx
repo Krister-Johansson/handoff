@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { PageHeader } from "@/components/page-header";
 import { CodeReview } from "@/components/review/code-review";
-import { projectCrumbs, projectTabCrumb, runCrumb } from "@/server/crumbs";
+import { projectCrumbs, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { PlanReview } from "@/components/review/plan-review";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
@@ -94,7 +94,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ runId: 
       <PageHeader
         crumbs={[
           ...(await projectCrumbs(getDb(), { id: review.projectId, name: review.projectName })),
-          projectTabCrumb(review.projectId, "runs"),
+          projectRunsCrumb(review.projectId),
           await runCrumb(getDb(), review.projectId, { id: runId, task: review.task }),
           { label: review.review.kind === "code" ? "Code review" : "Review" },
         ]}
