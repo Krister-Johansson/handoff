@@ -30,6 +30,19 @@ async function finishedRuns(db: Db) {
     .orderBy(desc(events.createdAt));
 }
 
+/** Runs stopped because a loop used all its attempts: no step failed, so they need a decision rather than a repair. */
+async function stuckRuns(db: Db) {
+  const lastFailure = sql<{ reason?: string; nodeKey?: string } | null>`(
+    select e.payload from events e where e.run_id = ${runs.id} and e.type = 'run.failed' order by e.seq desc limit 1
+  )`;
+  const rows = await db
+    .select({ runId: runs.id, task: runs.task, projectName: projects.name, failure: lastFailure })
+    .from(runs)
+    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .where(eq(runs.status, "failed"));
+  return rows.filter((r) => r.failure?.reason === "loop_exhausted");
+}
+
 const FINISHED = /^finished:([0-9a-f-]{36})$/i;
 
 /**
@@ -50,7 +63,7 @@ export async function dismissAttention(db: Db, itemId: string) {
  * and runs that reached a Finish node with notify on, which need no action.
  */
 export async function listAttention(db: Db): Promise<AttentionItem[]> {
-  const [inbox, reviews, finished] = await Promise.all([listInbox(db), waitingReviews(db), finishedRuns(db)]);
+  const [inbox, reviews, finished, stuck] = await Promise.all([listInbox(db), waitingReviews(db), finishedRuns(db), stuckRuns(db)]);
   return [
     ...inbox.questions.map((q): AttentionItem => {
       const review = (q.context as { review?: { from?: string; kind?: string } }).review;
@@ -65,6 +78,13 @@ export async function listAttention(db: Db): Promise<AttentionItem[]> {
       title: `${r.projectName}: PR #${r.pr!.number} waits for your review`,
       body: r.task,
       href: `/runs/${r.runId}`,
+    })),
+    ...stuck.map((s): AttentionItem => ({
+      id: `stuck:${s.runId}`,
+      kind: "failed",
+      title: `${s.projectName}: ${s.failure?.nodeKey ?? "a step"} ran out of rounds`,
+      body: s.task,
+      href: `/runs/${s.runId}`,
     })),
     ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: f.task, href: `/runs/${f.runId}` })),
   ];
