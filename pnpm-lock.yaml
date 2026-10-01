@@ -199,6 +199,9 @@ importers:
       '@codemirror/view':
         specifier: 6.43.13
         version: 6.43.13
+      '@handoff/cli-adapter':
+        specifier: workspace:*
+        version: link:../../packages/cli-adapter
       '@handoff/core':
         specifier: workspace:*
         version: link:../../packages/core
