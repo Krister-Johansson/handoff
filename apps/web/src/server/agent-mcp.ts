@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
-import { and, desc, eq, listLibraryIndex, nodeExecutions, projects, type Db } from "@handoff/db";
-import { answerQuestion, cancelRun, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
+import { redactSecrets } from "@handoff/core";
+import { and, desc, eq, events, listLibraryIndex, nodeExecutions, projects, type Db, type QuestionComment } from "@handoff/db";
+import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort } from "@handoff/github";
 import { projectReadiness } from "./readiness";
 import { dismissAttention, listAttention } from "./attention";
@@ -10,9 +10,19 @@ import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGr
 import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
-import { reviewPath, runPath } from "../lib/paths";
+import { annotationsOf, CATALOG } from "../lib/assistant/catalog";
+import { summarizeEvent } from "../lib/event-summary";
+import type { NotificationFilter } from "../lib/notifications";
+import { reviewPath, runPath, tryPath } from "../lib/paths";
+import { describePermission } from "../lib/permission";
+import { inboxGroups } from "./inbox-groups";
+import { listNotifications } from "./notifications";
 
-export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; baseUrl: string };
+/** `actor` is who answers through these tools, recorded on questions and permission requests: claude-code by default. */
+export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; baseUrl: string; actor?: string };
+
+const EVENTS_DEFAULT = 50;
+const EVENTS_MAX = 200;
 
 const INSTRUCTIONS = `handoff runs graphs of coding agents on GitHub repositories. A project is a repository; its backlog is the open issues no run works on yet.
 
@@ -92,15 +102,18 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
  * handoff's operations as MCP tools, for an agent such as the user's Claude Code session. Each tool
  * calls the same server functions the dashboard uses.
  */
-export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
+/** The tool handlers, by catalog name: each takes the tool's parsed arguments and returns its result. */
+type Handlers = Record<string, (args: never) => Promise<unknown>>;
+
+function handlersFor(deps: HandoffMcpDeps): Handlers {
   const { db, github, baseUrl } = deps;
+  const actor = deps.actor ?? "claude-code";
   // The dashboard address of a run known only by id, under its project.
   const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
-  const server = new McpServer({ name: "handoff", version: "1.0.0" }, { instructions: INSTRUCTIONS });
-  const read = { readOnlyHint: true, openWorldHint: false };
+  const url = (href: string) => `${baseUrl}${href}`;
 
-  server.registerTool("list_projects", { description: "The projects: each is a GitHub repository with graphs and runs.", annotations: read }, () =>
-    tool(async () =>
+  return {
+    list_projects: async () =>
       (await listProjects(db)).map((p) => ({
         name: p.name,
         id: p.id,
@@ -110,310 +123,202 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
         active_runs: p.activeRuns,
         url: `${baseUrl}/projects/${p.id}`,
       })),
-    ),
-  );
 
-  server.registerTool(
-    "add_project",
-    {
-      description: "Adds a GitHub repository as a handoff project. Runs branch off its default branch; new projects have no graph until one is created on the project's Settings tab.",
-      inputSchema: {
-        repo: z.string().describe("owner/name on GitHub"),
-        name: z.string().optional().describe("Project name; defaults to the repository's"),
-        default_branch: z.string().optional().describe("Defaults to the repository's default branch"),
-      },
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    add_project: async ({ repo, name, default_branch }: { repo: string; name?: string; default_branch?: string }) => {
+      const known = (await listProjects(db)).find((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === repo.toLowerCase());
+      if (known) throw new Error(`${repo} is already a project: ${known.name}.`);
+      const listed = default_branch ? undefined : (await github?.listRepos().catch(() => []))?.find((r) => r.fullName.toLowerCase() === repo.toLowerCase());
+      const project = await createProject(db, { repo, defaultBranch: default_branch ?? listed?.defaultBranch ?? "main", ...(name ? { name } : {}) }, github);
+      return { name: project.name, id: project.id, repo: `${project.repoOwner}/${project.repoName}`, default_branch: project.defaultBranch, url: `${baseUrl}/projects/${project.id}` };
     },
-    ({ repo, name, default_branch }) =>
-      tool(async () => {
-        const known = (await listProjects(db)).find((p) => `${p.repoOwner}/${p.repoName}`.toLowerCase() === repo.toLowerCase());
-        if (known) throw new Error(`${repo} is already a project: ${known.name}.`);
-        const listed = default_branch ? undefined : (await github?.listRepos().catch(() => []))?.find((r) => r.fullName.toLowerCase() === repo.toLowerCase());
-        const project = await createProject(db, { repo, defaultBranch: default_branch ?? listed?.defaultBranch ?? "main", ...(name ? { name } : {}) }, github);
-        return { name: project.name, id: project.id, repo: `${project.repoOwner}/${project.repoName}`, default_branch: project.defaultBranch, url: `${baseUrl}/projects/${project.id}` };
-      }),
-  );
 
-  server.registerTool(
-    "get_project",
-    { description: "A project's graphs, the graph new runs use by default, and its latest runs.", inputSchema: { project: z.string().describe("Project name or id") }, annotations: read },
-    ({ project }) =>
-      tool(async () => {
-        const detail = await getProjectDetail(db, (await findProject(db, project)).id);
-        if (!detail) throw new Error(`There is no project ${project}.`);
-        return {
-          name: detail.project.name,
-          repo: `${detail.project.repoOwner}/${detail.project.repoName}`,
-          graphs: detail.graphs.map((g) => g.name),
-          default_graph: detail.defaultGraph ?? null,
-          recent_runs: detail.runs.slice(0, 10).map((r) => ({ id: r.id, task: r.task, status: r.status, url: `${baseUrl}${runPath(detail.project.id, r.id)}` })),
-        };
-      }),
-  );
-
-  server.registerTool(
-    "setup_project",
-    {
-      description:
-        "Checks whether a project is set up to work well with handoff: a graph, a running worker, a setup command, CLAUDE.md, an app that starts from .claude/launch.json for Demo and Try it, CI, acceptance criteria in issues, issue dependencies and webhooks. Each item says what was found and how to fix it.",
-      inputSchema: { project: z.string().describe("Project name or id") },
-      annotations: read,
+    get_project: async ({ project }: { project: string }) => {
+      const detail = await getProjectDetail(db, (await findProject(db, project)).id);
+      if (!detail) throw new Error(`There is no project ${project}.`);
+      return {
+        name: detail.project.name,
+        repo: `${detail.project.repoOwner}/${detail.project.repoName}`,
+        graphs: detail.graphs.map((g) => g.name),
+        default_graph: detail.defaultGraph ?? null,
+        recent_runs: detail.runs.slice(0, 10).map((r) => ({ id: r.id, task: r.task, status: r.status, url: url(runPath(detail.project.id, r.id)) })),
+      };
     },
-    ({ project }) =>
-      tool(async () => ({
-        ...(await projectReadiness(db, github, (await findProject(db, project)).id)),
-        guide: "Follow the handoff-setup skill to fix the items marked todo, one at a time, asking the user before changing their repository.",
-      })),
-  );
 
-  server.registerTool(
-    "list_backlog",
-    {
-      description: "The project's open GitHub issues that no run works on yet, newest activity first. With include_started, also issues a run already took.",
-      inputSchema: { project: z.string().describe("Project name or id"), include_started: z.boolean().optional() },
-      annotations: read,
-    },
-    ({ project, include_started }) =>
-      tool(async () => {
-        const projectId = (await findProject(db, project)).id;
-        const backlog = await listBacklog(db, github, projectId);
-        if ("error" in backlog) throw new Error(backlog.error);
-        return backlog.issues
-          .filter((issue) => include_started || isTodo(issue))
-          .map((issue) => ({
-            number: issue.number,
-            title: issue.title,
-            url: issue.url,
-            labels: issue.labels,
-            blocked_by: issue.blockedBy,
-            run: issue.run ? { id: issue.run.id, status: issue.run.status, url: `${baseUrl}${runPath(projectId, issue.run.id)}` } : null,
-          }));
-      }),
-  );
+    setup_project: async ({ project }: { project: string }) => ({
+      ...(await projectReadiness(db, github, (await findProject(db, project)).id)),
+      guide: "Follow the handoff-setup skill to fix the items marked todo, one at a time, asking the user before changing their repository.",
+    }),
 
-  server.registerTool(
-    "start_run",
-    {
-      description: "Starts a run on the project. Link issues by number (their bodies go to the agents) and leave the task empty to use their titles, or describe a task.",
-      inputSchema: {
-        project: z.string().describe("Project name or id"),
-        issues: z.array(z.number().int().positive()).optional().describe("GitHub issue numbers the run works on"),
-        task: z.string().optional().describe("What to do; defaults to the issues' titles"),
-        graph: z.string().optional().describe("Graph name; defaults to the one the project's latest run used"),
-      },
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-    },
-    ({ project, issues, task, graph }) =>
-      tool(async () => {
-        const detail = await getProjectDetail(db, (await findProject(db, project)).id);
-        const graphName = graph ?? detail?.defaultGraph;
-        if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Settings tab.`);
-        if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
-        const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github);
-        return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: `${baseUrl}${runPath(detail.project.id, run.id)}` };
-      }),
-  );
-
-  server.registerTool(
-    "list_runs",
-    {
-      description: "Runs, newest first, each with the step it is on and for how long. status active means queued, running or waiting.",
-      inputSchema: { project: z.string().optional().describe("Project name"), status: z.enum(["active", "succeeded", "failed", "cancelled"]).optional() },
-      annotations: read,
-    },
-    ({ project, status }) =>
-      tool(async () => {
-        const listed = await listRuns(db, { ...(project ? { project } : {}), ...(status ? { status } : {}) }, 30);
-        const steps = await currentSteps(db, listed.map((r) => r.id));
-        return listed.map((r) => {
-          const step = steps.get(r.id);
-          return {
-            id: r.id,
-            project: r.project,
-            task: r.task,
-            status: r.status,
-            current_step: step
-              ? {
-                  node: step.nodeKey,
-                  attempt: step.attempt,
-                  status: step.status,
-                  since: step.since?.toISOString() ?? null,
-                  for_seconds: step.since ? Math.round((Date.now() - step.since.getTime()) / 1000) : null,
-                }
-              : null,
-            pr: r.prNumber,
-            issues: r.issues.map((i) => i.number),
-            created_at: r.createdAt,
-            url: `${baseUrl}${runPath(r.projectId, r.id)}`,
-          };
-        });
-      }),
-  );
-
-  server.registerTool(
-    "get_run",
-    {
-      description: "Where a run stands: status, steps with their start, end and duration, PR, linked issues, open questions and the failed step.",
-      inputSchema: { run_id: z.string() },
-      annotations: read,
-    },
-    ({ run_id }) => tool(() => runSummary(deps, run_id)),
-  );
-
-  server.registerTool(
-    "list_attention",
-    { description: "Everything waiting on a person (questions from Human gates, failed runs, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).", annotations: read },
-    () => tool(async () => (await listAttention(db)).map(({ href, ...item }) => ({ ...item, url: `${baseUrl}${href}` }))),
-  );
-
-  server.registerTool(
-    "resolve_loop",
-    {
-      description:
-        "Decides for a run stuck because a loop used all its attempts (get_run shows stuck): retry sends the work back for another round, continue goes on as if the step approved, stop cancels the run. Only with the user's decision.",
-      inputSchema: { run_id: z.string(), action: z.enum(["retry", "continue", "stop"]) },
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-    },
-    ({ run_id, action }) =>
-      tool(async () => {
-        await resolveExhaustedLoop(db, run_id, action);
-        return { resolved: action, url: await urlOf(run_id) };
-      }),
-  );
-
-  server.registerTool(
-    "dismiss_attention",
-    {
-      description: "Takes a finished run (an item of kind finished from list_attention) off the list once the user has seen it. Other items leave the list when someone acts on them.",
-      inputSchema: { item_id: z.string().describe("The item's id from list_attention, finished:<run id>") },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    },
-    ({ item_id }) =>
-      tool(async () => {
-        await dismissAttention(db, item_id);
-        return { dismissed: true };
-      }),
-  );
-
-  server.registerTool(
-    "answer_question",
-    {
-      description: "Answers a question a run asked, which lets it continue. Only answer with the user's decision.",
-      inputSchema: {
-        question_id: z.string(),
-        answer: z.string().min(1),
-        option: z.string().optional().describe("One of the question's options, when it has them: approve or changes for a review"),
-        comments: z
-          .array(
-            z.object({
-              quote: z.string().optional().describe("The passage or code the comment is about"),
-              body: z.string(),
-              path: z.string().optional().describe("For a code review: the file"),
-              line: z.number().int().positive().optional().describe("For a code review: the first line, in the new file"),
-              endLine: z.number().int().positive().optional().describe("For a code review: the last line, when the comment covers several"),
-            }),
-          )
-          .optional()
-          .describe("For a review: comments on quoted passages or on lines of files"),
-      },
-      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    },
-    ({ question_id, answer, option, comments }) =>
-      tool(async () => {
-        const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: "claude-code" });
-        return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
-      }),
-  );
-
-  server.registerTool(
-    "repair_run",
-    {
-      description: "Re-runs the failed step of a failed run in place, keeping what earlier steps did. A note is passed to the step's agent.",
-      inputSchema: { run_id: z.string(), node: z.string().optional().describe("The failed step; defaults to the one that failed last"), note: z.string().optional() },
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-    },
-    ({ run_id, node, note }) =>
-      tool(async () => {
-        const [failed] = await db
-          .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey })
-          .from(nodeExecutions)
-          .where(and(eq(nodeExecutions.runId, run_id), eq(nodeExecutions.status, "failed"), node ? eq(nodeExecutions.nodeKey, node) : undefined))
-          .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
-          .limit(1);
-        if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
-        const retry = await repairNodeExecution(db, failed.id, note ? { note } : {});
-        return { node: retry.nodeKey, attempt: retry.attempt, url: await urlOf(run_id) };
-      }),
-  );
-
-  server.registerTool(
-    "list_merge_queue",
-    {
-      description:
-        "A project's pull requests that are ready to merge, in the order they will merge. Each merges only when it is first, after catching up with main; a manual one also needs a person to ask (request_merge).",
-      inputSchema: { project: z.string().describe("Project name or id") },
-      annotations: read,
-    },
-    ({ project }) =>
-      tool(async () => {
-        const { id } = await findProject(db, project);
-        return (await projectMergeQueue(db, id)).map((e) => ({
-          position: e.position,
-          run_id: e.runId,
-          task: e.task,
-          pr: e.prNumber,
-          mode: e.mode,
-          requested: e.requested,
-          catching_up: !e.waiting,
-          url: `${baseUrl}${runPath(id, e.runId)}`,
+    list_backlog: async ({ project, include_started }: { project: string; include_started?: boolean }) => {
+      const projectId = (await findProject(db, project)).id;
+      const backlog = await listBacklog(db, github, projectId);
+      if ("error" in backlog) throw new Error(backlog.error);
+      return backlog.issues
+        .filter((issue) => include_started || isTodo(issue))
+        .map((issue) => ({
+          number: issue.number,
+          title: issue.title,
+          url: issue.url,
+          labels: issue.labels,
+          blocked_by: issue.blockedBy,
+          run: issue.run ? { id: issue.run.id, status: issue.run.status, url: url(runPath(projectId, issue.run.id)) } : null,
         }));
-      }),
-  );
-
-  server.registerTool(
-    "request_merge",
-    {
-      description:
-        "Asks to merge a run's pull request, or with project and all every one in the project's merge queue. They merge one at a time in queue order, each brought up to date with main first. Merging changes the repository: ask the user first.",
-      inputSchema: { run_id: z.string().optional(), project: z.string().describe("Project name or id").optional(), all: z.boolean().optional() },
-      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
-    ({ run_id, project, all }) =>
-      tool(async () => {
-        if (all) {
-          if (!project) throw new Error("Give the project to merge all of its queue.");
-          const { id } = await findProject(db, project);
-          await requestMergeAll(db, id);
-          return { requested: (await projectMergeQueue(db, id)).filter((e) => e.requested).map((e) => e.runId) };
-        }
-        if (!run_id) throw new Error("Give run_id, or project with all: true.");
-        await requestMerge(db, run_id);
-        return { requested: [run_id], url: await urlOf(run_id) };
-      }),
-  );
 
-  server.registerTool(
-    "cancel_run",
-    { description: "Cancels a run. Ask the user first.", inputSchema: { run_id: z.string(), reason: z.string().optional() }, annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false } },
-    ({ run_id, reason }) =>
-      tool(async () => {
-        await cancelRun(db, run_id, reason ? { reason } : {});
-        return { cancelled: true, url: await urlOf(run_id) };
-      }),
-  );
+    start_run: async ({ project, issues, task, graph }: { project: string; issues?: number[]; task?: string; graph?: string }) => {
+      const detail = await getProjectDetail(db, (await findProject(db, project)).id);
+      const graphName = graph ?? detail?.defaultGraph;
+      if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Settings tab.`);
+      if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
+      const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github);
+      return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };
+    },
 
-  server.registerTool(
-    "run_again",
-    { description: "Starts a finished run's task again on the latest version of its graph.", inputSchema: { run_id: z.string() }, annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true } },
-    ({ run_id }) =>
-      tool(async () => {
-        const run = await runAgain(db, run_id);
-        return { run_id: run.id, status: run.status, url: `${baseUrl}${runPath(run.projectId, run.id)}` };
-      }),
-  );
+    list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {
+      const listed = await listRuns(db, { ...(project ? { project } : {}), ...(status ? { status } : {}) }, 30);
+      const steps = await currentSteps(db, listed.map((r) => r.id));
+      return listed.map((r) => {
+        const step = steps.get(r.id);
+        return {
+          id: r.id,
+          project: r.project,
+          task: r.task,
+          status: r.status,
+          current_step: step
+            ? {
+                node: step.nodeKey,
+                attempt: step.attempt,
+                status: step.status,
+                since: step.since?.toISOString() ?? null,
+                for_seconds: step.since ? Math.round((Date.now() - step.since.getTime()) / 1000) : null,
+              }
+            : null,
+          pr: r.prNumber,
+          issues: r.issues.map((i) => i.number),
+          created_at: r.createdAt,
+          url: url(runPath(r.projectId, r.id)),
+        };
+      });
+    },
 
-  server.registerTool("list_library", { description: "Skills, MCP servers, agents and groups nodes can enable by name.", annotations: read }, () =>
-    tool(async () => {
+    get_run: ({ run_id }: { run_id: string }) => runSummary(deps, run_id),
+
+    get_run_events: async ({ run_id, limit }: { run_id: string; limit?: number }) => {
+      const rows = await db
+        .select({ seq: events.seq, type: events.type, payload: events.payload, createdAt: events.createdAt })
+        .from(events)
+        .where(eq(events.runId, run_id))
+        .orderBy(desc(events.seq))
+        .limit(Math.min(limit ?? EVENTS_DEFAULT, EVENTS_MAX));
+      return {
+        run_id,
+        url: await urlOf(run_id),
+        events: rows.reverse().map((e) => redactSecrets(`${e.createdAt.toISOString()} ${e.type} ${summarizeEvent(e)}`.trim())),
+      };
+    },
+
+    list_attention: async () => (await listAttention(db)).map(({ href, ...item }) => ({ ...item, url: url(href) })),
+
+    list_inbox: async ({ project }: { project?: string }) => {
+      const projectId = project ? (await findProject(db, project)).id : undefined;
+      const groups = await inboxGroups(db);
+      const mine = <T extends { projectId: string }>(items: T[]) => (projectId ? items.filter((i) => i.projectId === projectId) : items);
+      return {
+        permissions: mine(groups.permissions).map((p) => {
+          const { action, detail } = describePermission(p.toolName, p.input);
+          return { id: p.id, project: p.projectName, run: p.task, node: p.nodeKey, tool: p.toolName, asks: action, detail, url: url(runPath(p.projectId, p.runId)) };
+        }),
+        reviews: mine(groups.reviews).map((q) => ({ id: q.id, project: q.projectName, run: q.task, node: q.nodeKey, question: q.question, url: url(reviewPath(q.projectId, q.runId, q.id)) })),
+        questions: mine(groups.questions).map((q) => ({
+          id: q.id,
+          project: q.projectName,
+          run: q.task,
+          node: q.nodeKey,
+          question: q.question,
+          options: q.options,
+          url: url((q.context as { reason?: string }).reason === "try" ? tryPath(q.projectId, q.runId, q.id) : runPath(q.projectId, q.runId)),
+        })),
+        ready_to_merge: mine(groups.readyToMerge).map((r) => ({ run_id: r.runId, project: r.projectName, run: r.task, pr: r.prNumber, url: url(runPath(r.projectId, r.runId)) })),
+        failed_runs: mine(groups.failedRuns).map((f) => ({ run_id: f.runId, project: f.projectName, run: f.task, node: f.nodeKey, url: url(runPath(f.projectId, f.runId)) })),
+        stuck_runs: mine(groups.stuckRuns).map((s) => ({ run_id: s.runId, project: s.projectName, run: s.task, node: s.nodeKey, loop: s.loop, attempts: s.attempts, url: url(runPath(s.projectId, s.runId)) })),
+        pull_requests: mine(groups.pullRequests).map((p) => ({ run_id: p.runId, project: p.projectName, run: p.task, pr: p.number, pr_url: p.url, ci: p.ci, url: url(runPath(p.projectId, p.runId)) })),
+      };
+    },
+
+    list_notifications: async ({ filter, limit }: { filter?: NotificationFilter; limit?: number }) => {
+      const { items, unread } = await listNotifications(db, { limit: limit ?? 20, ...(filter ? { filter } : {}) });
+      return { unread, items: items.map((n) => ({ kind: n.kind, title: n.title, body: n.body, at: n.createdAt.toISOString(), unread: n.unread, done: n.done, url: url(n.href) })) };
+    },
+
+    resolve_loop: async ({ run_id, action }: { run_id: string; action: "retry" | "continue" | "stop" }) => {
+      await resolveExhaustedLoop(db, run_id, action);
+      return { resolved: action, url: await urlOf(run_id) };
+    },
+
+    dismiss_attention: async ({ item_id }: { item_id: string }) => {
+      await dismissAttention(db, item_id);
+      return { dismissed: true };
+    },
+
+    answer_question: async ({ question_id, answer, option, comments }: { question_id: string; answer: string; option?: string; comments?: QuestionComment[] }) => {
+      const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: actor });
+      return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
+    },
+
+    answer_permission: async ({ request_id, decision, message }: { request_id: string; decision: "allow" | "deny"; message?: string }) => {
+      const row = await decidePermission(db, request_id, { allow: decision === "allow", decidedBy: actor, ...(decision === "deny" && message ? { message } : {}) });
+      return { decision: row.status, url: await urlOf(row.runId) };
+    },
+
+    repair_run: async ({ run_id, node, note }: { run_id: string; node?: string; note?: string }) => {
+      const [failed] = await db
+        .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey })
+        .from(nodeExecutions)
+        .where(and(eq(nodeExecutions.runId, run_id), eq(nodeExecutions.status, "failed"), node ? eq(nodeExecutions.nodeKey, node) : undefined))
+        .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
+        .limit(1);
+      if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
+      const retry = await repairNodeExecution(db, failed.id, note ? { note } : {});
+      return { node: retry.nodeKey, attempt: retry.attempt, url: await urlOf(run_id) };
+    },
+
+    list_merge_queue: async ({ project }: { project: string }) => {
+      const { id } = await findProject(db, project);
+      return (await projectMergeQueue(db, id)).map((e) => ({
+        position: e.position,
+        run_id: e.runId,
+        task: e.task,
+        pr: e.prNumber,
+        mode: e.mode,
+        requested: e.requested,
+        catching_up: !e.waiting,
+        url: url(runPath(id, e.runId)),
+      }));
+    },
+
+    request_merge: async ({ run_id, project, all }: { run_id?: string; project?: string; all?: boolean }) => {
+      if (all) {
+        if (!project) throw new Error("Give the project to merge all of its queue.");
+        const { id } = await findProject(db, project);
+        await requestMergeAll(db, id);
+        return { requested: (await projectMergeQueue(db, id)).filter((e) => e.requested).map((e) => e.runId) };
+      }
+      if (!run_id) throw new Error("Give run_id, or project with all: true.");
+      await requestMerge(db, run_id);
+      return { requested: [run_id], url: await urlOf(run_id) };
+    },
+
+    cancel_run: async ({ run_id, reason }: { run_id: string; reason?: string }) => {
+      await cancelRun(db, run_id, reason ? { reason } : {});
+      return { cancelled: true, url: await urlOf(run_id) };
+    },
+
+    run_again: async ({ run_id }: { run_id: string }) => {
+      const run = await runAgain(db, run_id);
+      return { run_id: run.id, status: run.status, url: url(runPath(run.projectId, run.id)) };
+    },
+
+    list_library: async () => {
       const { skills, mcp, agents, groups } = await listLibraryIndex(db);
       return {
         skills: skills.map((s) => ({ name: s.name, description: s.description })),
@@ -421,8 +326,24 @@ export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
         agents: agents.map((a) => ({ name: a.name, description: a.description })),
         groups: groups.map((g) => ({ name: g.name, description: g.description })),
       };
-    }),
-  );
+    },
+  } satisfies Handlers;
+}
 
+/**
+ * handoff's operations as MCP tools, for an agent such as the user's Claude Code session or the
+ * dashboard's assistant. The catalog says what each tool is; each calls the same server functions the
+ * dashboard uses.
+ */
+export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
+  const server = new McpServer({ name: "handoff", version: "1.0.0" }, { instructions: INSTRUCTIONS });
+  const handlers = handlersFor(deps);
+  for (const spec of CATALOG.filter((t) => t.kind === "data")) {
+    const handler = handlers[spec.name] as ((args: unknown) => Promise<unknown>) | undefined;
+    if (!handler) throw new Error(`The catalog's tool ${spec.name} has no handler.`);
+    server.registerTool(spec.name, { title: spec.title, description: spec.description, inputSchema: spec.input.shape, annotations: annotationsOf(spec) }, (args: unknown) =>
+      tool(() => handler(args)),
+    );
+  }
   return server;
 }

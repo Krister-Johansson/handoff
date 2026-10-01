@@ -2,9 +2,10 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { and, appendEvents, eq, nodeExecutions, questions, runs } from "@handoff/db";
+import { and, appendEvents, eq, nodeExecutions, permissionRequests, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
+import { CATALOG } from "../lib/assistant/catalog";
 import { createHandoffMcpServer } from "./agent-mcp";
 import { createProject, saveGraphVersion } from "./graphs";
 
@@ -36,34 +37,16 @@ async function call(name: string, args: Record<string, unknown> = {}) {
   return result.isError ? { error: text } : JSON.parse(text);
 }
 
-test("the tools are listed, and read-only ones say so", async () => {
+test("the agent MCP server lists exactly the catalog's data tools with their descriptions and annotations", async () => {
   const { tools } = await client.listTools();
-  const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
-  expect(Object.keys(byName).sort()).toEqual(
-    [
-      "add_project",
-      "answer_question",
-      "cancel_run",
-      "dismiss_attention",
-      "get_project",
-      "get_run",
-      "list_attention",
-      "list_backlog",
-      "list_library",
-      "list_merge_queue",
-      "list_projects",
-      "list_runs",
-      "repair_run",
-      "request_merge",
-      "resolve_loop",
-      "run_again",
-      "setup_project",
-      "start_run",
-    ].sort(),
-  );
-  expect(byName.list_backlog?.annotations?.readOnlyHint).toBe(true);
-  expect(byName.cancel_run?.annotations?.destructiveHint).toBe(true);
-  expect(byName.setup_project?.annotations?.readOnlyHint).toBe(true);
+  const data = CATALOG.filter((t) => t.kind === "data");
+  expect(tools.map((t) => t.name).sort()).toEqual(data.map((t) => t.name).sort());
+  for (const spec of data) {
+    const listed = tools.find((t) => t.name === spec.name)!;
+    expect(listed.description).toBe(spec.description);
+    expect(listed.annotations).toMatchObject({ readOnlyHint: spec.readOnly, title: spec.title });
+  }
+  expect(tools.find((t) => t.name === "cancel_run")?.annotations?.destructiveHint).toBe(true);
 });
 
 test("setup_project says what the project still needs to work well with handoff, and how to fix it", async () => {
@@ -207,4 +190,49 @@ test("the merge queue lists ready pull requests in order, and a merge can be ask
   expect(await call("request_merge", { project: "sandbox", all: true })).toMatchObject({ requested: [first, second] });
   expect((await call("list_merge_queue", { project: "sandbox" })).map((e: { requested: boolean }) => e.requested)).toEqual([true, true]);
   expect(await call("request_merge", {})).toMatchObject({ error: expect.stringContaining("run_id") });
+});
+
+async function startedRun() {
+  const started = await call("start_run", { project: "sandbox", issues: [11] });
+  return started.run_id as string;
+}
+
+test("list_inbox groups permission requests, reviews, questions, ready to merge, failed, stuck and pull requests for one project", async () => {
+  const runId = await startedRun();
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running" });
+  await db.insert(permissionRequests).values({ id: "3f6b2a10-0000-4000-8000-000000000001", runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "git -C /w log" } });
+  const gate = await seedExecution(db, runId, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Which license?" });
+  const inbox = await call("list_inbox", { project: "sandbox" });
+  expect(Object.keys(inbox).sort()).toEqual(["failed_runs", "permissions", "pull_requests", "questions", "ready_to_merge", "reviews", "stuck_runs"]);
+  expect(inbox.permissions).toEqual([
+    expect.objectContaining({ id: "3f6b2a10-0000-4000-8000-000000000001", node: "coder", tool: "Bash", asks: "asks to run a command", detail: "git -C /w log", url: expect.stringContaining(`/runs/${runId}`) }),
+  ]);
+  expect(inbox.questions).toEqual([expect.objectContaining({ question: "Which license?", url: expect.stringContaining(`/runs/${runId}`) })]);
+  expect((await call("list_inbox", { project: "nowhere" })).error).toMatch(/no project nowhere/);
+});
+
+test("get_run_events returns the latest lines of a run with secrets redacted and a cap", async () => {
+  const runId = await startedRun();
+  const many = Array.from({ length: 60 }, (_, i) => ({ type: "node.claimed", payload: { nodeKey: `step${i}`, attempt: 1 } }));
+  await db.transaction((tx) => appendEvents(tx, runId, [...many, { type: "node.failed", payload: { nodeKey: "coder", attempt: 1, error: { message: "push failed with ghp_abcdefghijklmnopqrstuvwxyz0123456789" } } }]));
+  const result = await call("get_run_events", { run_id: runId, limit: 5 });
+  expect(result.events).toHaveLength(5);
+  expect(result.events.at(-1)).toMatch(/node\.failed coder, attempt 1: push failed with /);
+  expect(JSON.stringify(result)).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+  expect((await call("get_run_events", { run_id: runId })).events).toHaveLength(50);
+});
+
+test("answer_permission allows a pending request once and records who decided", async () => {
+  const runId = await startedRun();
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running" });
+  await db.insert(permissionRequests).values({ id: "3f6b2a10-0000-4000-8000-000000000002", runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "ls" } });
+  expect(await call("answer_permission", { request_id: "3f6b2a10-0000-4000-8000-000000000002", decision: "allow" })).toMatchObject({ decision: "allowed" });
+  const [row] = await db.select().from(permissionRequests).where(eq(permissionRequests.id, "3f6b2a10-0000-4000-8000-000000000002"));
+  expect(row).toMatchObject({ status: "allowed", decidedBy: "claude-code" });
+  expect((await call("answer_permission", { request_id: "3f6b2a10-0000-4000-8000-000000000002", decision: "deny" })).error).toMatch(/already answered/);
+});
+
+test("answer_permission cannot always allow", async () => {
+  expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });
