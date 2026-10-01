@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { AttentionNotifier } from "@/components/attention-notifier";
+import { NotificationBell } from "@/components/notification-bell";
 import { InboxLink } from "@/components/inbox-link";
 import { WorkerStatus } from "@/components/worker-status";
 
@@ -24,7 +24,7 @@ export function SiteHeader() {
           </Button>
         </nav>
         <div className="ml-auto flex items-center gap-3">
-          <AttentionNotifier />
+          <NotificationBell />
           <Button variant="ghost" size="icon-sm" asChild>
             <Link href="/settings" aria-label="Settings">
               <SettingsIcon />

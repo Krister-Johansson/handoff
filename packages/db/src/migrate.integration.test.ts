@@ -36,6 +36,7 @@ describe("migrations", () => {
       "library_mcp_servers",
       "library_skills",
       "node_executions",
+      "notification_reads",
       "projects",
       "questions",
       "review_views",

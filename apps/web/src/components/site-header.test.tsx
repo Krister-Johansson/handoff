@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import { SiteHeader } from "./site-header";
 
 vi.mock("@/components/inbox-link", () => ({ InboxLink: () => <a href="/inbox">Inbox</a> }));
-vi.mock("@/components/attention-notifier", () => ({ AttentionNotifier: () => null }));
+vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
 vi.mock("@/components/worker-status", () => ({ WorkerStatus: () => null }));
 
 test("the top bar leads to projects, the inbox and the library; runs are reached through their project", () => {

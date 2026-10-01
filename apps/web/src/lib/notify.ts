@@ -1,10 +1,10 @@
-import { readPrefs, type AttentionItem } from "@/lib/attention";
+import { readPrefs } from "@/lib/attention";
 import { playPing } from "@/lib/ping";
 
 export const hasNotifications = () => typeof Notification !== "undefined";
 
 /** Tells the person about new items, the ways they chose on the settings page: a ping, desktop notifications or both. */
-export function notify(items: AttentionItem[]) {
+export function notify(items: { id: string; title: string; body: string; href: string }[]) {
   const prefs = readPrefs();
   if (prefs.sound) playPing();
   if (!prefs.desktop || !hasNotifications() || Notification.permission !== "granted") return;
