@@ -10,7 +10,7 @@ export function SettingsTabs({ active, children }: { active: SettingsTab; childr
   const router = useRouter();
   return (
     <Tabs value={active} onValueChange={(tab) => router.push(`?tab=${tab}`, { scroll: false })} className="gap-4">
-      <TabsList>
+      <TabsList variant="line">
         <TabsTrigger value="appearance">Appearance</TabsTrigger>
         <TabsTrigger value="notifications">Notifications</TabsTrigger>
         <TabsTrigger value="agents">Claude Code</TabsTrigger>

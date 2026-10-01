@@ -5,6 +5,7 @@ import { SiteHeader } from "./site-header";
 vi.mock("@/components/inbox-link", () => ({ InboxLink: () => <a href="/inbox">Inbox</a> }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
 vi.mock("@/components/worker-status", () => ({ WorkerStatus: () => null }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1/runs/r1" }));
 
 test("the top bar leads to projects, the inbox and the library; runs are reached through their project", () => {
   render(<SiteHeader />);
@@ -14,5 +15,7 @@ test("the top bar leads to projects, the inbox and the library; runs are reached
     ["Inbox", "/inbox"],
     ["Library", "/library"],
   ]);
+  expect(within(nav).getByRole("link", { name: "Projects" })).toHaveAttribute("aria-current", "page");
+  expect(within(nav).getByRole("link", { name: "Library" })).not.toHaveAttribute("aria-current");
   expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
 });

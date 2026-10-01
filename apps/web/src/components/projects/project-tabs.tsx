@@ -5,7 +5,10 @@ import type { ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { ProjectTab } from "@/lib/project-tab";
 
-export const Count = ({ n }: { n: number }) => <span className="ml-1 rounded-full bg-muted px-1.5 text-xs text-muted-foreground tabular-nums">{n}</span>;
+/** A count beside a tab or filter, as a small grey pill. */
+export const Count = ({ n }: { n: number }) => (
+  <span className="inline-flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-secondary px-1 text-[11px] font-semibold text-secondary-foreground tabular-nums">{n}</span>
+);
 
 /** Runs, Issues, Pull requests, Graphs and Settings; the server renders only the active tab, chosen by ?tab=. */
 export function ProjectTabs({
@@ -23,7 +26,7 @@ export function ProjectTabs({
   const router = useRouter();
   return (
     <Tabs value={active} onValueChange={(tab) => router.push(`?tab=${tab}`, { scroll: false })} className="gap-4">
-      <TabsList>
+      <TabsList variant="line">
         <TabsTrigger value="runs">
           Runs <Count n={counts.runs} />
         </TabsTrigger>

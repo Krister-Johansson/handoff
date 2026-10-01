@@ -1,14 +1,13 @@
-import { Badge } from "@/components/ui/badge";
 import { statusTone, TONE_CLASS } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
-/** A run or node status in its tone's color; running statuses pulse. */
+/** A run or node status as a pill in its tone's colour, with a dot that pulses while running. */
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
   const tone = statusTone(status);
   return (
-    <Badge variant="outline" data-tone={tone} className={cn("gap-1.5", TONE_CLASS[tone])}>
-      {tone === "active" && <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-current" />}
+    <span data-tone={tone} className={cn("inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-full border px-2 text-xs font-medium whitespace-nowrap", TONE_CLASS[tone])}>
+      {tone !== "neutral" && tone !== "muted" && <span aria-hidden className={cn("size-1.5 rounded-full bg-current", tone === "active" && "animate-pulse")} />}
       {label ?? status.replaceAll("_", " ")}
-    </Badge>
+    </span>
   );
 }

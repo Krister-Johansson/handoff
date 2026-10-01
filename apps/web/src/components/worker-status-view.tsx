@@ -7,7 +7,7 @@ export function WorkerStatusView({ live, queuedRuns }: { live: number; queuedRun
   const hint = online ? "The worker claims queued nodes." : queuedRuns > 0 ? `${queuedRuns} queued runs are waiting. Start one with pnpm dev:worker.` : "Start one with pnpm dev:worker.";
   return (
     <span className="flex items-center gap-1.5 text-xs text-muted-foreground" title={hint}>
-      <span className={cn("size-2 rounded-full", online ? "bg-emerald-500" : queuedRuns > 0 ? "bg-destructive" : "bg-muted-foreground/40")} />
+      <span className={cn("size-[7px] rounded-full", online ? "bg-success-dot" : queuedRuns > 0 ? "bg-danger-dot" : "bg-muted-foreground/40")} />
       {label}
     </span>
   );

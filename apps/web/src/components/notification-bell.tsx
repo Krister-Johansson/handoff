@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { BellIcon, BellRingIcon } from "lucide-react";
 import { toast } from "sonner";
 import { NotificationList } from "@/components/notifications/notification-list";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
@@ -104,9 +103,13 @@ export function NotificationBell({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" aria-label={label(feed.unread)}>
+        <Button type="button" variant="ghost" size="icon-sm" className="relative text-muted-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground" aria-label={label(feed.unread)}>
           <Icon />
-          {feed.unread > 0 && <Badge variant="destructive">{feed.unread}</Badge>}
+          {feed.unread > 0 && (
+            <span className="absolute -top-0.5 -right-1 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-danger-dot px-1 text-[10px] font-semibold text-white tabular-nums">
+              {feed.unread}
+            </span>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="flex w-96 flex-col gap-2 p-2">

@@ -17,13 +17,13 @@ export const statusTone = (status: string): StatusTone => tones[status] ?? "neut
 
 /** Badge colors per tone, readable in light and dark mode. */
 export const TONE_CLASS: Record<StatusTone, string> = {
-  success: "border-transparent bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  active: "border-transparent bg-sky-500/15 text-sky-700 dark:text-sky-300",
-  attention: "border-transparent bg-amber-500/15 text-amber-800 dark:text-amber-300",
+  success: "border-transparent bg-success-bg text-success",
+  active: "border-transparent bg-active-bg text-active",
+  attention: "border-transparent bg-attention-bg text-attention",
   neutral: "border-border text-muted-foreground",
-  danger: "border-transparent bg-destructive/15 text-destructive",
-  muted: "border-transparent bg-muted text-muted-foreground",
-  repaired: "border-transparent bg-violet-500/15 text-violet-700 dark:text-violet-300",
+  danger: "border-transparent bg-danger-bg text-danger",
+  muted: "border-transparent bg-secondary text-muted-foreground",
+  repaired: "border-transparent bg-repaired-bg text-repaired",
 };
 
 /** Status a node execution moves to when this event arrives, if any. */
