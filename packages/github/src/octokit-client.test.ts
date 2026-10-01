@@ -53,6 +53,24 @@ test("updatePr patches the title and body of a pull request", async () => {
   expect(calls[0]!.body).toEqual({ title: "T2", body: "B2" });
 });
 
+test("expectsChecks is true when the repository has an active workflow or the branch requires status checks", async () => {
+  const none = fakeFetch({
+    "GET /repos/octo/sample/actions/workflows": () => ({ json: { total_count: 1, workflows: [{ id: 1, state: "disabled_manually" }] } }),
+    "GET /repos/octo/sample/rules/branches/main": () => ({ json: [{ type: "pull_request" }] }),
+  });
+  expect(await OctokitGitHub.withToken("t", { fetch: none.fetch }).expectsChecks(repo, "main")).toBe(false);
+  const workflow = fakeFetch({
+    "GET /repos/octo/sample/actions/workflows": () => ({ json: { total_count: 1, workflows: [{ id: 1, state: "active" }] } }),
+    "GET /repos/octo/sample/rules/branches/main": () => ({ json: [] }),
+  });
+  expect(await OctokitGitHub.withToken("t", { fetch: workflow.fetch }).expectsChecks(repo, "main")).toBe(true);
+  const required = fakeFetch({
+    "GET /repos/octo/sample/actions/workflows": () => ({ json: { total_count: 0, workflows: [] } }),
+    "GET /repos/octo/sample/rules/branches/main": () => ({ json: [{ type: "required_status_checks" }] }),
+  });
+  expect(await OctokitGitHub.withToken("t", { fetch: required.fetch }).expectsChecks(repo, "main")).toBe(true);
+});
+
 test("getPrSnapshot maps the GraphQL pull request, rollup and review threads", async () => {
   const { fetch } = fakeFetch({
     "POST /graphql": () => ({

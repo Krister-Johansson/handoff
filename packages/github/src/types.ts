@@ -64,6 +64,8 @@ export interface GitHubPort {
   /** Replaces a pull request's title and description. */
   updatePr(repo: RepoRef, number: number, input: { title: string; body: string }): Promise<void>;
   getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot>;
+  /** Whether checks will ever run on a pull request into `branch`: an active Actions workflow, or a branch rule that requires status checks. */
+  expectsChecks(repo: RepoRef, branch: string): Promise<boolean>;
   getJobLogTail(repo: RepoRef, jobId: number, lines?: number): Promise<string | undefined>;
   mergePr(repo: RepoRef, number: number, method?: "squash" | "merge" | "rebase"): Promise<{ merged: boolean; sha?: string }>;
   /** Updates the PR comment whose body contains `marker`, or creates it. */

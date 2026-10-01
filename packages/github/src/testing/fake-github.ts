@@ -42,6 +42,13 @@ export class FakeGitHub implements GitHubPort {
     return this.repoId;
   }
 
+  /** Whether the fake repository runs CI on pull requests; false for one with no workflows or required checks. */
+  ciConfigured = true;
+
+  async expectsChecks(_repo: RepoRef, _branch: string): Promise<boolean> {
+    return this.ciConfigured;
+  }
+
   async findPrByHead(_repo: RepoRef, branch: string): Promise<PrInfo | undefined> {
     const pr = [...this.prs.values()].find((p) => p.headRef === branch && p.state === "open");
     return pr ? { number: pr.number, url: pr.url, headSha: pr.headSha } : undefined;
