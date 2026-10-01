@@ -5,6 +5,8 @@ import { saveProjectLibraryAction } from "@/app/projects/actions";
 import { ChosenLibrary, LibraryChooser } from "@/components/library/library-chooser";
 import { FieldError } from "@/components/ui/field";
 import type { LibraryChoices, LibrarySelection as Selection } from "@/lib/library-choices";
+import { cn } from "@/lib/utils";
+import { CARD_BODY, SectionCard } from "./section-card";
 
 /**
  * Library entries every CLI node of every run in the project gets, on top of what each node enables
@@ -23,15 +25,10 @@ export function DefaultLibrary({ projectId, available, initial }: { projectId: s
       }),
     );
   return (
-    <div className="flex flex-col gap-3">
-      <ChosenLibrary
-        selection={initial}
-        disabled={saving}
-        empty="No default yet: runs get only what each node enables."
-        onRemove={(kind, name) => void save({ ...initial, [kind]: initial[kind].filter((n) => n !== name) })}
-      />
-      {error && <FieldError>{error}</FieldError>}
-      <div>
+    <SectionCard
+      title="Default library"
+      description="Every planner, coder and reviewer in this project's runs gets these, on top of what each node enables."
+      action={
         <LibraryChooser
           available={available}
           initial={initial}
@@ -40,7 +37,17 @@ export function DefaultLibrary({ projectId, available, initial }: { projectId: s
           title="Default library"
           description="Every planner, coder and reviewer in this project's runs gets what you tick here."
         />
+      }
+    >
+      <div className={cn(CARD_BODY, "flex flex-col gap-3")}>
+        <ChosenLibrary
+          selection={initial}
+          disabled={saving}
+          empty="No default yet: runs get only what each node enables."
+          onRemove={(kind, name) => void save({ ...initial, [kind]: initial[kind].filter((n) => n !== name) })}
+        />
+        {error && <FieldError>{error}</FieldError>}
       </div>
-    </div>
+    </SectionCard>
   );
 }

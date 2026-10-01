@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { eq, projects, runs } from "@handoff/db";
-import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
+import { createTestDb, seedExecution, seedRun, truncateAll } from "@handoff/db/testing";
 import { homeSummary } from "./home.ts";
 
 const db = createTestDb();
@@ -14,6 +14,14 @@ test("homeSummary lists active runs newest first and counts recent outcomes", as
   const summary = await homeSummary(db);
   expect(summary.activeRuns.map((r) => r.id)).toEqual([waiting.id]);
   expect(summary.recent).toMatchObject({ succeeded: 1, failed: 0 });
+});
+
+test("homeSummary adds up what the last 7 days' steps cost", async () => {
+  const { run } = await seedRun(db, { status: "running" });
+  await seedExecution(db, run.id, { costUsd: "1.25" });
+  await seedExecution(db, run.id, { costUsd: "0.50", attempt: 2 });
+  await seedExecution(db, run.id, { costUsd: "9", attempt: 3, createdAt: new Date(Date.now() - 8 * 86_400_000) });
+  expect((await homeSummary(db)).recent.costUsd).toBeCloseTo(1.75);
 });
 
 test("homeSummary hides demo projects' runs unless asked", async () => {

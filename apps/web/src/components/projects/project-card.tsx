@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { useActionState, useCallback, useEffect, useState } from "react";
 import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react";
 import { deleteProjectAction, updateProjectAction, type ActionState } from "@/app/projects/actions";
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/runs/status-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   AlertDialog,
@@ -21,8 +21,11 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { formatAgo } from "@/lib/format";
+import { runPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 import type { ProjectAttention } from "@/server/project-admin";
+import { Tag } from "./section-card";
 
 export type ProjectSummary = {
   id: string;
@@ -32,6 +35,8 @@ export type ProjectSummary = {
   defaultBranch: string;
   isDemo: boolean;
   runCount: number;
+  /** Queued, running and waiting runs; the card counts the ones not queued or running as waiting. */
+  activeRuns?: number;
   setupCommand?: string | null;
 };
 
@@ -148,7 +153,7 @@ export function ProjectSettingsActions({ project }: { project: ProjectSummary })
         <PencilIcon data-icon="inline-start" />
         Edit
       </Button>
-      <Button size="sm" variant="outline" className="text-destructive" onClick={() => setOpen("delete")}>
+      <Button size="sm" variant="outline" className="text-danger hover:bg-danger-bg hover:text-danger" onClick={() => setOpen("delete")}>
         <Trash2Icon data-icon="inline-start" />
         Delete
       </Button>
@@ -186,28 +191,33 @@ function ProjectMenu({ project }: { project: ProjectSummary }) {
   );
 }
 
-/** A project with what it needs from the user (questions, failed runs, reviews) and what it is busy with. */
-export function ProjectCard({ project, attention }: { project: ProjectSummary; attention: ProjectAttention }) {
+/** A project's newest run, shown at the foot of its card. */
+export type LatestRun = { id: string; task: string; status: string; createdAt: Date };
+
+/** A project with what it needs from the user (questions, failed runs, reviews), what it is busy with and its newest run. */
+export function ProjectCard({ project, attention, latest, now = new Date() }: { project: ProjectSummary; attention: ProjectAttention; latest?: LatestRun; now?: Date }) {
   const needsYou = attention.questions + attention.failed + attention.reviews > 0;
+  const waiting = Math.max(0, (project.activeRuns ?? 0) - attention.running);
   return (
-    <Card className={cn("relative h-full transition-colors hover:bg-muted/50", needsYou && "border-amber-500/60 dark:border-amber-400/50")}>
-      <CardHeader>
-        <CardTitle>
-          <Link href={`/projects/${project.id}`} className="rounded-sm after:absolute after:inset-0 after:rounded-xl focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring">
-            {project.name}
-          </Link>
-        </CardTitle>
-        <CardDescription className="font-mono text-xs">
+    <Card className={cn("relative h-full gap-3.5 px-5 py-[18px] transition-colors hover:bg-muted/50", needsYou && "ring-attention-dot/45")}>
+      <div className="flex min-w-0 flex-col gap-0.5 pr-8">
+        <Link
+          href={`/projects/${project.id}`}
+          className="truncate rounded-sm text-[15px] font-semibold underline-offset-3 after:absolute after:inset-0 after:rounded-xl hover:underline focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+        >
+          {project.name}
+        </Link>
+        <span className="truncate font-mono text-xs text-muted-foreground">
           {project.repoOwner}/{project.repoName} · {project.defaultBranch}
-        </CardDescription>
-        <CardAction>
-          <ProjectMenu project={project} />
-        </CardAction>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {needsYou && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-amber-500/10 px-2.5 py-1.5 text-sm text-amber-900 dark:text-amber-200">
-            <span className="font-medium">Needs you</span>
+        </span>
+      </div>
+      <div className="absolute top-3 right-3">
+        <ProjectMenu project={project} />
+      </div>
+      <div className="flex flex-col gap-3">
+        {needsYou ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md bg-attention-bg px-2.5 py-2 text-[13px]">
+            <span className="font-medium text-attention">Needs you</span>
             {attention.questions > 0 && (
               <Link href="/inbox" className={ATTENTION_LINK}>
                 {plural(attention.questions, "question")}
@@ -224,14 +234,28 @@ export function ProjectCard({ project, attention }: { project: ProjectSummary; a
               </Link>
             )}
           </div>
+        ) : (
+          <div className="rounded-md bg-subtle px-2.5 py-2 text-[13px] text-muted-foreground">Nothing needs you.</div>
         )}
-        <div className="flex flex-wrap gap-2">
-          <Badge variant="outline">{plural(project.runCount, "run")}</Badge>
-          {project.isDemo && <Badge variant="secondary">demo</Badge>}
-          {attention.running > 0 && <Badge variant="secondary">{attention.running} running</Badge>}
-          {attention.waitingOnCi > 0 && <Badge variant="outline">{attention.waitingOnCi} waiting on CI</Badge>}
+        <div className="flex flex-wrap gap-1.5">
+          <Tag>{plural(project.runCount, "run")}</Tag>
+          {project.isDemo && <Tag tone="fill">demo</Tag>}
+          {attention.running > 0 && <Tag tone="active">{attention.running} running</Tag>}
+          {waiting > 0 && <Tag tone="attention">{waiting} waiting</Tag>}
+          {attention.waitingOnCi > 0 && <Tag>{attention.waitingOnCi} waiting on CI</Tag>}
         </div>
-      </CardContent>
+      </div>
+      {latest && (
+        <div className="mt-auto flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <StatusBadge status={latest.status} />
+          <Link href={runPath(project.id, latest.id)} className={cn(ATTENTION_LINK, "min-w-0 truncate")}>
+            {latest.task}
+          </Link>
+          <span className="ml-auto shrink-0" title={latest.createdAt.toISOString()}>
+            {formatAgo(latest.createdAt, now)}
+          </span>
+        </div>
+      )}
     </Card>
   );
 }

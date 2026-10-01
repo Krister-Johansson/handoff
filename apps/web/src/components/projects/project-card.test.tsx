@@ -22,6 +22,16 @@ test("a project that needs nothing shows its repository and run count, and no ca
   expect(screen.getByText("octo/sample · main")).toBeInTheDocument();
   expect(screen.getByText("8 runs")).toBeInTheDocument();
   expect(screen.queryByText("Needs you")).not.toBeInTheDocument();
+  expect(screen.getByText("Nothing needs you.")).toBeInTheDocument();
+});
+
+test("active runs that are not running count as waiting, and the newest run shows with its status", () => {
+  const latest = { id: "r7", task: "Todo CRUD with optimistic updates", status: "running", createdAt: new Date("2026-10-01T11:48:00Z") };
+  render(<ProjectCard project={{ ...project, activeRuns: 4 }} attention={{ ...calm, running: 1 }} latest={latest} now={new Date("2026-10-01T12:00:00Z")} />);
+  expect(screen.getByText("1 running")).toBeInTheDocument();
+  expect(screen.getByText("3 waiting")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Todo CRUD with optimistic updates" })).toHaveAttribute("href", "/projects/p1/runs/r7");
+  expect(screen.getByText("12 minutes ago")).toBeInTheDocument();
 });
 
 test("questions, failed runs and pull requests to review call for attention, each linking to where to act", () => {
