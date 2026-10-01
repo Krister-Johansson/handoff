@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { RotateCcwIcon } from "lucide-react";
+import { RepeatIcon } from "lucide-react";
 import { runAgainAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 
@@ -13,7 +13,7 @@ export function RunAgainButton({ runId }: { runId: string }) {
       <input type="hidden" name="runId" value={runId} />
       {state.error && <span className="text-xs text-destructive">{state.error}</span>}
       <Button type="submit" variant="outline" size="sm" disabled={pending}>
-        <RotateCcwIcon data-icon="inline-start" />
+        <RepeatIcon data-icon="inline-start" />
         Run again
       </Button>
     </form>

@@ -5,12 +5,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { BrainIcon, ChevronRightIcon, WrenchIcon } from "lucide-react";
 import { TerminalOutput } from "@/components/terminal-output";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toActivity, toChat, type ActivityItem, type ActivityStats, type ChatEntry } from "@/lib/activity";
 import type { RunEvent } from "./event-stream";
+import { Tag } from "./tag";
 
 const RESULT_CHARS = 6_000;
 
@@ -31,7 +31,7 @@ type Allow = (rule: string) => Promise<string>;
 function Denied({ denial, allow }: { denial: NonNullable<Extract<ActivityItem, { kind: "tool" }>["denied"]>; allow: Allow }) {
   const [saved, setSaved] = useState<string>();
   return (
-    <div className="mb-2 flex flex-col gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+    <div className="mb-2 flex flex-col gap-1.5 rounded-md border border-attention-dot/35 bg-attention-bg p-2 text-xs">
       <p>
         <span className="font-medium">Needs approval, which a run cannot give: </span>
         <span className="font-mono">{denial.reason}</span>
@@ -57,29 +57,25 @@ function Tool({ item, allow }: { item: Extract<ActivityItem, { kind: "tool" }>; 
   const result = item.result && item.result.length > RESULT_CHARS ? `${item.result.slice(0, RESULT_CHARS)}\n… (cut at ${RESULT_CHARS} characters)` : item.result;
   return (
     <details className="group/tool">
-      <summary className="flex cursor-pointer list-none items-center gap-2 py-0.5 text-xs [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-xs [&::-webkit-details-marker]:hidden">
         <ChevronRightIcon className="size-3 shrink-0 text-muted-foreground transition-transform group-open/tool:rotate-90" />
         <span className="shrink-0 font-medium">{item.name}</span>
         {item.target && <span className="min-w-0 truncate font-mono text-muted-foreground">{item.target}</span>}
-        {item.result === undefined && (
-          <Badge variant="outline" className="ml-auto shrink-0">
-            running
-          </Badge>
-        )}
+        {item.result === undefined && <Tag className="ml-auto">running</Tag>}
         {item.denied ? (
-          <Badge variant="outline" className="ml-auto shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-300">
+          <Tag tone="attention" className="ml-auto">
             denied
-          </Badge>
+          </Tag>
         ) : (
           item.error && (
-            <Badge variant="destructive" className="ml-auto shrink-0">
+            <Tag tone="danger" className="ml-auto">
               error
-            </Badge>
+            </Tag>
           )
         )}
       </summary>
       {item.denied && <Denied denial={item.denied} allow={allow} />}
-      <div className="mt-1 mb-2">{item.denied ? null : result ? <TerminalOutput text={result} label={`${item.name} result`} /> : <p className="text-xs text-muted-foreground">No output yet.</p>}</div>
+      <div className="mt-1.5 mb-0.5">{item.denied ? null : result ? <TerminalOutput text={result} label={`${item.name} result`} /> : <p className="text-xs text-muted-foreground">No output yet.</p>}</div>
     </details>
   );
 }
@@ -88,45 +84,40 @@ function Tool({ item, allow }: { item: Extract<ActivityItem, { kind: "tool" }>; 
 function Fold({ icon, summary, badge, children }: { icon: ReactNode; summary: ReactNode; badge?: ReactNode; children: ReactNode }) {
   return (
     <details className="group/fold">
-      <summary className="flex cursor-pointer list-none items-center gap-2 py-0.5 text-sm text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronRightIcon className="size-3.5 shrink-0 transition-transform group-open/fold:rotate-90" />
+      <summary className="flex cursor-pointer list-none items-center gap-[7px] text-[13px] text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+        <ChevronRightIcon className="size-[13px] shrink-0 transition-transform group-open/fold:rotate-90" />
         {icon}
         <span className="min-w-0 flex-1">{summary}</span>
         {badge}
       </summary>
-      <div className="mt-1.5 ml-5 flex flex-col gap-1.5 border-l pl-3">{children}</div>
+      <div className="mt-1.5 ml-[7px] flex flex-col gap-1.5 border-l pl-3">{children}</div>
     </details>
   );
+}
+
+/** What a step of tool calls most needs said: denials first, then that it runs, its errors, or else how many calls it made. */
+function ToolsTag({ entry }: { entry: Extract<ChatEntry, { kind: "tools" }> }) {
+  if (entry.denied) return <Tag tone="attention">{`${entry.denied} denied`}</Tag>;
+  if (entry.running) return <Tag>running</Tag>;
+  if (entry.errors) return <Tag tone="danger">{entry.errors === 1 ? "1 error" : `${entry.errors} errors`}</Tag>;
+  return <Tag>{entry.tools.length === 1 ? "1 tool" : `${entry.tools.length} tools`}</Tag>;
 }
 
 function Entry({ entry, allow }: { entry: ChatEntry; allow: Allow }) {
   if (entry.kind === "message")
     return (
-      <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-pre:my-1 prose-code:before:content-none prose-code:after:content-none">
+      <div className="prose prose-sm max-w-none text-[13px] leading-normal text-foreground dark:prose-invert prose-p:my-1 prose-code:rounded prose-code:bg-muted prose-code:px-[5px] prose-code:py-px prose-code:font-mono prose-code:text-xs prose-code:font-normal prose-code:before:content-none prose-code:after:content-none prose-pre:my-1">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown>
       </div>
     );
   if (entry.kind === "thinking")
     return (
-      <Fold icon={<BrainIcon className="size-3.5 shrink-0" />} summary={<span className="italic">Thought</span>}>
-        <p className="text-sm whitespace-pre-wrap text-muted-foreground italic">{entry.text}</p>
+      <Fold icon={<BrainIcon className="size-[13px] shrink-0" />} summary="Thought">
+        <p className="text-[13px] whitespace-pre-wrap text-muted-foreground italic">{entry.text}</p>
       </Fold>
     );
-  const badge = entry.denied ? (
-    <Badge variant="outline" className="shrink-0 border-amber-500/40 text-amber-700 dark:text-amber-300">
-      {`${entry.denied} denied`}
-    </Badge>
-  ) : entry.running ? (
-    <Badge variant="outline" className="shrink-0">
-      running
-    </Badge>
-  ) : entry.errors ? (
-    <Badge variant="destructive" className="shrink-0">
-      {entry.errors === 1 ? "1 error" : `${entry.errors} errors`}
-    </Badge>
-  ) : undefined;
   return (
-    <Fold icon={<WrenchIcon className="size-3.5 shrink-0" />} summary={entry.summary} badge={badge}>
+    <Fold icon={<WrenchIcon className="size-[13px] shrink-0" />} summary={entry.summary} badge={<ToolsTag entry={entry} />}>
       {entry.tools.map((tool) => (
         <Tool key={tool.key} item={tool} allow={allow} />
       ))}
@@ -189,14 +180,14 @@ export function ExecutionActivity({ runId, executionId, live }: { runId: string;
   return (
     <section aria-label="Activity" className="flex flex-col gap-2">
       <div className="flex flex-col gap-0.5">
-        <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Activity</h3>
+        <h3 className="text-[11px] font-medium tracking-[0.05em] text-muted-foreground uppercase">Activity</h3>
         <Stats stats={stats} />
       </div>
       {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No activity yet.</p>
+        <p className="text-[13px] text-muted-foreground">No activity yet.</p>
       ) : (
-        <ScrollArea className="h-[min(65svh,44rem)] rounded-md border [&_[data-slot=scroll-area-viewport]>div]:!block">
-          <ol ref={list} className="flex flex-col gap-2 p-2">
+        <ScrollArea className="h-[min(65svh,44rem)] rounded-lg border [&_[data-slot=scroll-area-viewport]>div]:!block">
+          <ol ref={list} className="flex flex-col gap-2.5 p-3">
             {chat.map((entry) => (
               <li key={entry.key}>
                 <Entry entry={entry} allow={allow} />

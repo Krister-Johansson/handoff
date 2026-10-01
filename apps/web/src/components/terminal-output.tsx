@@ -8,10 +8,10 @@ import { cn } from "@/lib/utils";
 // A dark block in both themes, so the usual terminal colours keep their contrast.
 const FG: Record<AnsiColor, string> = {
   black: "text-zinc-500",
-  red: "text-red-400",
-  green: "text-emerald-400",
-  yellow: "text-amber-300",
-  blue: "text-sky-400",
+  red: "text-[oklch(0.78_0.16_25)]",
+  green: "text-[oklch(0.8_0.15_160)]",
+  yellow: "text-[oklch(0.85_0.14_85)]",
+  blue: "text-[oklch(0.8_0.12_235)]",
   magenta: "text-fuchsia-400",
   cyan: "text-cyan-400",
   white: "text-zinc-100",
@@ -47,7 +47,7 @@ const BG: Record<AnsiColor, string> = {
 function Run({ run }: { run: AnsiRun }) {
   if (!run.fg && !run.bg && !run.bold && !run.dim) return <>{run.text}</>;
   return (
-    <span data-fg={run.fg} className={cn(run.fg && FG[run.fg], run.bg && BG[run.bg], run.bold && "font-semibold", run.dim && "opacity-60")}>
+    <span data-fg={run.fg} className={cn(run.fg && FG[run.fg], run.bg && BG[run.bg], run.bold && "font-semibold", run.dim && "opacity-55")}>
       {run.text}
     </span>
   );
@@ -69,20 +69,20 @@ export function TerminalOutput({ text, label = "output", className }: { text: st
   const lines = parseAnsi(text.replace(/\s+$/, ""));
   const plain = lines.map((line) => line.map((r) => r.text).join("")).join("\n");
   return (
-    <div className={cn("group relative overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 text-zinc-200", className)}>
+    <div className={cn("group relative overflow-hidden rounded-md border bg-terminal text-terminal-foreground", className)}>
       <Button
         type="button"
         size="icon-xs"
         variant="ghost"
         aria-label={`Copy ${label}`}
-        className="absolute top-1.5 right-1.5 text-zinc-400 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-zinc-800 hover:text-zinc-100"
+        className="absolute top-1.5 right-1.5 text-terminal-foreground/60 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-white/10 hover:text-terminal-foreground"
         onClick={() => void navigator.clipboard?.writeText(plain)}
       >
         <CopyIcon />
       </Button>
-      <pre className="max-h-80 overflow-auto p-3 font-mono text-xs leading-5 whitespace-pre-wrap break-words">
+      <pre className="max-h-[260px] overflow-auto px-3 py-2.5 font-mono text-xs leading-[1.55] whitespace-pre-wrap break-words">
         {keyed(lines).map(({ key, runs }) => (
-          <div key={key} className="min-h-5">
+          <div key={key} className="min-h-[1.55em]">
             {keyed(runs).map(({ key: runKey, runs: run }) => (
               <Run key={runKey} run={run} />
             ))}

@@ -192,3 +192,66 @@ test("a waiting gate's drawer shows its question with the way to answer it", asy
   rerender(<RunLive {...common} labels={{ gate: "Approve the plan" }} initialStatus="waiting" initialExecutions={[gate]} questions={[question(false)]} />);
   expect(within(screen.getByRole("dialog")).getByRole("button", { name: "approve" })).toBeInTheDocument();
 });
+
+const loopGraph = {
+  attributes: { startNode: "planner" },
+  nodes: [
+    { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+    { key: "reviewer", attributes: { type: "reviewer", x: 300, y: 0 } },
+  ],
+  edges: [
+    { key: "planner->reviewer", source: "planner", target: "reviewer", attributes: { port: "done" } },
+    { key: "reviewer->planner", source: "reviewer", target: "planner", attributes: { port: "changes" } },
+  ],
+};
+const looped = { ...executions[0]!, attempt: 2, via: "reviewer->planner", durationMs: 111_000, costUsd: "0.39" };
+
+test("a step that a loop edge sent back names that edge, and the open step is marked", () => {
+  render(
+    <RunLive
+      {...common}
+      graphDocument={loopGraph}
+      labels={{ planner: "Plan", reviewer: "Review" }}
+      initialStatus="running"
+      initialExecutions={[looped, { id: "e8", nodeKey: "reviewer", attempt: 2, status: "running", costUsd: null, durationMs: null, via: "planner->reviewer" }]}
+    />,
+  );
+  const step = screen.getByRole("button", { name: /Plan/ });
+  expect(step).toHaveTextContent("attempt 2");
+  expect(step).toHaveTextContent("via reviewer->planner");
+  // A forward edge is the usual way on and goes unnamed in the list.
+  expect(screen.getByRole("button", { name: /Review/ })).not.toHaveTextContent("via planner->reviewer");
+  expect(step).not.toHaveAttribute("aria-current");
+  fireEvent.click(step);
+  expect(step).toHaveAttribute("aria-current", "step");
+});
+
+test("the drawer heads with the node, its attempt, status, the edge that started it, time and cost", async () => {
+  render(<RunLive {...common} initialStatus="running" initialExecutions={[looped]} />);
+  fireEvent.click(screen.getByRole("button", { name: /Plan/ }));
+  const drawer = await screen.findByRole("dialog");
+  const heading = within(drawer).getByRole("heading", { level: 2 });
+  expect(heading).toHaveTextContent("Plan");
+  expect(heading).toHaveTextContent("planner");
+  expect(heading).toHaveTextContent("attempt 2");
+  expect(within(drawer).getByText("after reviewer->planner")).toBeInTheDocument();
+  expect(within(drawer).getByText("$0.39")).toBeInTheDocument();
+  fireEvent.click(within(drawer).getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+test("the Events tab counts the run's events, live", () => {
+  const initialEvents = [{ seq: 1, type: "run.started", payload: {}, nodeExecutionId: null, createdAt: "2026-10-01T10:00:00Z" }];
+  render(<RunLive {...common} initialEvents={initialEvents} initialStatus="running" initialExecutions={executions} />);
+  expect(screen.getByRole("tab", { name: /Events/ })).toHaveTextContent("Events1");
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 2, type: "node.claimed", payload: { nodeKey: "planner", attempt: 1 }, nodeExecutionId: "e1", createdAt: "2026-10-01T10:00:01Z" }));
+  expect(screen.getByRole("tab", { name: /Events/ })).toHaveTextContent("Events2");
+});
+
+test("the event list says it is live while the run goes on, and not once it ended", () => {
+  const { unmount } = render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
+  expect(screen.getByText("live")).toBeInTheDocument();
+  unmount();
+  render(<RunLive {...common} initialStatus="succeeded" initialExecutions={executions} />);
+  expect(screen.queryByText("live")).not.toBeInTheDocument();
+});

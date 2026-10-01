@@ -1,21 +1,22 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ComponentProps } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { Maximize2Icon } from "lucide-react";
+import { Maximize2Icon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatCost, formatDuration } from "@/lib/format";
 import { reviewPath } from "@/lib/paths";
 import { describeNow } from "@/lib/run-now";
-import { runStatusFromEvent, statusFromEvent, TONE_CLASS } from "@/lib/status";
+import { runStatusFromEvent, statusFromEvent, type StatusTone } from "@/lib/status";
 import { loopEdgeKeys } from "@/lib/sent-back";
 import { triggeringEdges } from "@/lib/triggering-edges";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,50 @@ import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
 import { StatusBadge } from "./status-badge";
 import { Steps, type StepView } from "./steps";
+import { Tag } from "./tag";
+
+/** The status banner's border and fill per tone; its text stays the page's foreground. */
+const BANNER: Record<StatusTone, string> = {
+  success: "border-success-dot/35 bg-success-bg",
+  active: "border-active-dot/35 bg-active-bg",
+  attention: "border-attention-dot/35 bg-attention-bg",
+  danger: "border-danger-dot/35 bg-danger-bg",
+  repaired: "border-repaired-dot/35 bg-repaired-bg",
+  neutral: "bg-card",
+  muted: "bg-card",
+};
+
+const LEGEND = [
+  { label: "passed", dot: "bg-success-dot" },
+  { label: "running", dot: "bg-active-dot" },
+  { label: "waiting", dot: "bg-attention-dot" },
+  { label: "failed", dot: "bg-danger-dot" },
+];
+
+/** A node's name in the drawer's title: its label, its key, and its attempt after the first. */
+function NodeName({ step, label }: { step: StepView; label: string }) {
+  return (
+    <>
+      {label}
+      <span className="font-mono text-xs font-normal text-muted-foreground">{step.nodeKey}</span>
+      {step.attempt > 1 && <Tag>{`attempt ${step.attempt}`}</Tag>}
+    </>
+  );
+}
+
+/** The line under the drawer's title: status, the edge that started the execution, its time and cost. */
+function NodeFacts({ step, className, ...props }: { step: StepView } & ComponentProps<"div">) {
+  const facts = [step.via ? `after ${step.via}` : undefined, formatDuration(step.durationMs), formatCost(step.costUsd)].filter(Boolean);
+  return (
+    // Takes the id and class a dialog description passes on, so the dialog stays described by it.
+    <div {...props} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", className)}>
+      <StatusBadge status={step.status} />
+      {facts.map((fact) => (
+        <span key={fact}>{fact}</span>
+      ))}
+    </div>
+  );
+}
 
 export type ExecutionView = StepView;
 
@@ -63,11 +108,13 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
   const [nodeFilter, setNodeFilter] = useState("");
   // Claude CLI events from the live stream, for the drawer's activity of a node that is still running.
   const [liveCli, setLiveCli] = useState<RunEvent[]>([]);
+  const [eventCount, setEventCount] = useState(initialEvents.length);
   const router = useRouter();
   const loopEdges = useMemo(() => loopEdgeKeys(graphDocument), [graphDocument]);
 
   const onEvent = useCallback(
     (event: RunEvent) => {
+      setEventCount((n) => n + 1);
       if (event.type.startsWith("cli.") && event.nodeExecutionId) setLiveCli((list) => [...list.slice(-3_000), event]);
       const runStatus = runStatusFromEvent(event.type);
       if (runStatus) setStatus(runStatus);
@@ -135,9 +182,11 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
     [showCli, nodeFilter, executions],
   );
 
+  const live = status === "queued" || status === "running" || status === "waiting";
+
   return (
-    <div className="flex flex-col gap-4">
-      <div role="status" className={cn("flex items-center gap-3 rounded-lg border px-4 py-3", TONE_CLASS[now.tone])}>
+    <div className="flex flex-col gap-6">
+      <div role="status" className={cn("flex items-center gap-3 rounded-lg border px-3.5 py-2.5", BANNER[now.tone])}>
         <StatusBadge status={status} />
         <span className="min-w-0 truncate text-sm font-medium">{now.text}</span>
         {review && (
@@ -146,34 +195,51 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
           </Button>
         )}
       </div>
-      <Tabs defaultValue="steps" className="gap-4">
+      <Tabs defaultValue="steps" className="gap-6">
         <TabsList variant="line">
           <TabsTrigger value="steps">Steps</TabsTrigger>
           <TabsTrigger value="graph">Graph</TabsTrigger>
-          <TabsTrigger value="events">Events</TabsTrigger>
+          <TabsTrigger value="events">
+            Events
+            <span className="inline-flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-secondary px-[5px] text-[11px] font-semibold text-secondary-foreground tabular-nums">
+              {eventCount}
+            </span>
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="steps">
-          <Card>
-            <CardContent>
-              <Steps steps={executions} labels={labels} onSelect={setSelectedId} />
+          <Card className="py-3">
+            <CardContent className="px-3.5">
+              <Steps steps={executions} labels={labels} loopEdges={loopEdges} selectedId={selected?.id} onSelect={setSelectedId} />
             </CardContent>
           </Card>
         </TabsContent>
         <TabsContent value="graph">
-          {graphDocument !== undefined && <RunGraph document={graphDocument} statuses={statuses} activeEdges={activeEdges} onNodeClick={selectLatest} className="h-[28rem]" />}
+          {graphDocument !== undefined && (
+            <div className="relative">
+              <RunGraph document={graphDocument} statuses={statuses} activeEdges={activeEdges} onNodeClick={selectLatest} className="h-[500px] rounded-lg" />
+              <ul aria-label="Legend" className="absolute top-3 right-3 z-[5] flex gap-3 rounded-lg border border-input bg-card px-2.5 py-1.5 text-[11px] text-muted-foreground shadow-xs">
+                {LEGEND.map((item) => (
+                  <li key={item.label} className="flex items-center gap-1.5">
+                    <span aria-hidden className={cn("size-[7px] rounded-full", item.dot)} />
+                    {item.label}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </TabsContent>
         {/* Always mounted: the stream also drives the steps and the banner. */}
         <TabsContent value="events" forceMount className="data-[state=inactive]:hidden">
-          <Card>
-            <CardContent className="flex flex-col gap-3">
+          <Card className="gap-0 py-0">
+            <div className="flex flex-wrap items-center justify-between gap-4 px-3.5 py-3">
               <div className="flex flex-wrap items-center gap-4">
                 <Field orientation="horizontal" className="w-auto">
                   <Switch id="events-cli" checked={showCli} onCheckedChange={setShowCli} />
-                  <FieldLabel htmlFor="events-cli" className="font-normal">
+                  <FieldLabel htmlFor="events-cli" className="text-[13px] font-normal">
                     Claude CLI events
                   </FieldLabel>
                 </Field>
-                <NativeSelect size="sm" aria-label="Node" value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)}>
+                <NativeSelect size="sm" aria-label="Node" value={nodeFilter} onChange={(e) => setNodeFilter(e.target.value)} className="min-w-40 text-xs">
                   <NativeSelectOption value="">All nodes</NativeSelectOption>
                   {nodeKeys.map((key) => (
                     <NativeSelectOption key={key} value={key}>
@@ -182,25 +248,42 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
                   ))}
                 </NativeSelect>
               </div>
-              <EventStream runId={runId} initialEvents={initialEvents} onEvent={onEvent} filter={filter} />
-            </CardContent>
+              {live && (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <span aria-hidden className="size-[7px] animate-pulse rounded-full bg-active-dot" />
+                  live
+                </span>
+              )}
+            </div>
+            <EventStream runId={runId} initialEvents={initialEvents} onEvent={onEvent} filter={filter} className="border-t" />
           </Card>
         </TabsContent>
       </Tabs>
       <Sheet open={selected !== undefined && !poppedOut} onOpenChange={(open) => !open && setSelectedId(null)}>
-        <SheetContent className="w-full overflow-y-auto data-[side=right]:sm:max-w-xl">
+        <SheetContent showCloseButton={false} className="w-full gap-0 bg-card data-[side=right]:sm:max-w-[600px]">
           {selected && (
             <>
-              <SheetHeader>
-                <div className="flex items-center gap-1 pr-8">
-                  <SheetTitle className="mr-auto">{labels[selected.nodeKey] ?? selected.nodeKey}</SheetTitle>
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label="Pop out" onClick={() => setPoppedOut(true)}>
-                    <Maximize2Icon />
-                  </Button>
+              <SheetHeader className="gap-1 border-b px-5 pt-4 pb-3">
+                <div className="flex items-center gap-2">
+                  <SheetTitle className="flex min-w-0 flex-wrap items-center gap-2 text-[15px] font-semibold">
+                    <NodeName step={selected} label={labels[selected.nodeKey] ?? selected.nodeKey} />
+                  </SheetTitle>
+                  <div className="ml-auto flex shrink-0 items-center gap-1">
+                    <Button type="button" variant="ghost" size="icon-sm" aria-label="Pop out" onClick={() => setPoppedOut(true)}>
+                      <Maximize2Icon />
+                    </Button>
+                    <SheetClose asChild>
+                      <Button type="button" variant="ghost" size="icon-sm" aria-label="Close">
+                        <XIcon />
+                      </Button>
+                    </SheetClose>
+                  </div>
                 </div>
-                <SheetDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</SheetDescription>
+                <SheetDescription asChild className="text-xs">
+                  <NodeFacts step={selected} />
+                </SheetDescription>
               </SheetHeader>
-              <div className="flex flex-col gap-4 px-4 pb-6">
+              <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-5 pt-4 pb-6">
                 {selectedQuestion && <QuestionCard compact item={selectedQuestion} />}
                 <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} />
               </div>
@@ -209,12 +292,16 @@ export function RunLive({ projectId, runId, initialStatus, initialExecutions, in
         </SheetContent>
       </Sheet>
       <Dialog open={selected !== undefined && poppedOut} onOpenChange={(open) => !open && setPoppedOut(false)}>
-        <DialogContent className="h-[90dvh] content-start sm:max-w-[min(96vw,90rem)]">
+        <DialogContent className="h-[90dvh] content-start bg-card sm:max-w-[min(96vw,90rem)]">
           {selected && (
             <>
-              <DialogHeader>
-                <DialogTitle>{labels[selected.nodeKey] ?? selected.nodeKey}</DialogTitle>
-                <DialogDescription>What this execution produced, the checks the engine ran on it, and what the agent did.</DialogDescription>
+              <DialogHeader className="gap-1">
+                <DialogTitle className="flex min-w-0 flex-wrap items-center gap-2 text-[15px] font-semibold">
+                  <NodeName step={selected} label={labels[selected.nodeKey] ?? selected.nodeKey} />
+                </DialogTitle>
+                <DialogDescription asChild className="text-xs">
+                  <NodeFacts step={selected} />
+                </DialogDescription>
               </DialogHeader>
               {selectedQuestion && <QuestionCard compact item={selectedQuestion} />}
               <ExecutionPanel runId={runId} executionId={selected.id} status={selected.status} liveCli={liveCli} wide />

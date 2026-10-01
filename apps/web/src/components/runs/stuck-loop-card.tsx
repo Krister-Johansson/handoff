@@ -23,7 +23,7 @@ export function StuckLoopCard({ runId, node, loop, attempts }: { runId: string; 
       setError(result.ok ? undefined : result.error);
     });
   return (
-    <Card className="border-amber-500/40">
+    <Card className="ring-attention-dot/45">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <RepeatIcon className="size-4" />
