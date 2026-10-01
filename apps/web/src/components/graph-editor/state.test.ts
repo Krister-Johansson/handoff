@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json";
-import { toReactFlow } from "@handoff/core";
+import { notifies, toReactFlow } from "@handoff/core";
 import { changesEdit, documentOf, editorReducer, issuesOf } from "./state";
 
 const initial = () => toReactFlow(linear);
@@ -37,9 +37,11 @@ describe("graph editor state", () => {
     expect(again.nodes.filter((n) => n.data.nodeType === "start")).toHaveLength(1);
   });
 
-  test("a Finish node notifies by default", () => {
+  test("a new Finish node notifies by default, from its notification defaults rather than its config", () => {
     const state = editorReducer(initial(), { type: "addNode", nodeType: "finish", position: { x: 0, y: 0 } });
-    expect(state.nodes.find((n) => n.id === "finish-1")?.data.config).toEqual({ notify: true });
+    const finish = state.nodes.find((n) => n.id === "finish-1")!;
+    expect(finish.data.config).toEqual({});
+    expect(notifies(finish.data, "finished")).toBe(true);
   });
 
   test("connecting two nodes that already have an edge re-wires that edge to the new ports, keeping its settings", () => {

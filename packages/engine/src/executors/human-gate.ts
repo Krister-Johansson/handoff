@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { limitDiff, type DiffFile } from "@handoff/core";
+import { limitDiff, notifies, type DiffFile } from "@handoff/core";
 import { questions, type Db } from "@handoff/db";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
@@ -148,6 +148,7 @@ export function humanGateExecutor(deps: { db: Db; branchDiff?: BranchDiff }): No
           .returning();
         question ??= (await deps.db.select().from(questions).where(and(eq(questions.nodeExecutionId, ctx.execution.id))))[0]!;
         ctx.emit("human.asked", { questionId: question.id, question: question.question, options: question.options });
+        if (notifies(ctx.node, "input")) ctx.emit("notify", { kind: "input", nodeKey: ctx.node.key, questionId: question.id });
       }
       if (question.answer === null) return { kind: "waiting", wait: { kind: "human", token: question.id } };
 

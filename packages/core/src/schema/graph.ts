@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ConditionSchema } from "../conditions/schema.ts";
 import { ContextSelectorSchema, ContractSchema } from "./contracts.ts";
+import { NotifySettingsSchema } from "../graph/notify.ts";
 
 export const NodeTypeSchema = z.enum(["start", "planner", "coder", "reviewer", "code_review", "tester", "pr", "merge", "human_gate", "finish", "function"]);
 export type NodeType = z.infer<typeof NodeTypeSchema>;
@@ -25,6 +26,8 @@ export const NodeAttributesSchema = z.object({
   contract: ContractSchema.optional(),
   contextSelector: ContextSelectorSchema.optional(),
   library: LibrarySelectionSchema.optional(),
+  /** What the node tells a person about; see notifies for the defaults. */
+  notify: NotifySettingsSchema.optional(),
   x: z.number().default(0),
   y: z.number().default(0),
 });

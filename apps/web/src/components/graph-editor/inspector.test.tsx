@@ -169,12 +169,36 @@ test("a node lists the edges that reach it and leave it, with each loop's budget
   expect(items.map((li) => li.textContent)).toEqual(["feedback←reviewer.changesmax 3", "passed→reviewer"]);
 });
 
-test("Finish can stop notifying", () => {
+const withNode = (id: string, nodeType: string, data: Partial<FlowGraph["nodes"][number]["data"]> = {}): FlowGraph => ({
+  ...graph,
+  nodes: [...graph.nodes, { id, type: "handoff", position: { x: 0, y: 0 }, data: { nodeType, label: id, isStart: false, config: {}, ...data } }],
+});
+
+test("a merge node says it is ready to merge and when it fails, and stays quiet about merging until turned on", () => {
   const dispatch = vi.fn();
-  const withFinish: FlowGraph = { ...graph, nodes: [...graph.nodes, { id: "finish", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "finish", label: "Finish", isStart: false, config: { notify: true } } }] };
-  render(<Inspector graph={withFinish} selection={{ nodeId: "finish" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
-  const notify = screen.getByRole("switch", { name: "Notify when done" });
-  expect(notify).toBeChecked();
-  fireEvent.click(notify);
-  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "finish", patch: { config: { notify: false } } });
+  render(<Inspector graph={withNode("merge", "merge")} selection={{ nodeId: "merge" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  const section = screen.getByRole("group", { name: "Notifications" });
+  expect(within(section).getAllByRole("switch").map((s) => [s.getAttribute("aria-label") ?? s.id, (s as HTMLButtonElement).getAttribute("aria-checked")])).toEqual([
+    ["notify-ready", "true"],
+    ["notify-merged", "false"],
+    ["notify-failed", "true"],
+  ]);
+  fireEvent.click(within(section).getByRole("switch", { name: "Merged" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "merge", patch: { notify: { merged: true } } });
+});
+
+test("Start stays quiet about the run starting until turned on", () => {
+  render(<Inspector graph={withNode("start", "start")} selection={{ nodeId: "start" }} library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  expect(screen.getByRole("switch", { name: "Run started" })).not.toBeChecked();
+});
+
+test("Finish's earlier notify switch shows as Run finished, and changing it moves it into the node's notifications", () => {
+  const dispatch = vi.fn();
+  render(<Inspector graph={withNode("finish", "finish", { config: { notify: false } })} selection={{ nodeId: "finish" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  const finished = screen.getByRole("switch", { name: "Run finished" });
+  expect(finished).not.toBeChecked();
+  fireEvent.click(finished);
+  expect(dispatch).toHaveBeenCalledWith({ type: "replaceNodeConfig", id: "finish", config: {} });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "finish", patch: { notify: { finished: true } } });
+  expect(screen.queryByText("Notify when done")).not.toBeInTheDocument();
 });

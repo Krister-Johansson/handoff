@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { CoderOutputSchema, ReviewerOutputSchema, type CoderOutput } from "@handoff/core";
+import { CoderOutputSchema, notifies, ReviewerOutputSchema, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
 import { and, eq, events, type Db } from "@handoff/db";
 import { depsKey, wakeDependents } from "../dependencies.ts";
@@ -270,6 +270,7 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db }): NodeEx
           // First in line and waiting for a person: say so once, so the dashboard can tell them.
           if (turn.position === 1 && mode === "manual" && !turn.requested && !(await emittedBefore(db, ctx.execution.id, "merge.ready"))) {
             ctx.emit("merge.ready", { number });
+            if (notifies(ctx.node, "ready")) ctx.emit("notify", { kind: "ready", nodeKey: ctx.node.key, number });
           }
           const key = queueKey(ctx.project.id);
           await ctx.registerWait(key);
@@ -298,6 +299,7 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db }): NodeEx
         const result = await deps.github.mergePr(repo, number, method);
         if (!result.merged) return done({ kind: "failed", error: { code: "merge_failed", message: `GitHub did not merge PR #${number}` } });
         ctx.emit("github.merged", { number, sha: result.sha });
+        if (notifies(ctx.node, "merged")) ctx.emit("notify", { kind: "merged", nodeKey: ctx.node.key, number });
         await closeLinkedIssues(deps.github, ctx, repo, number);
         // Closed issues may unblock other runs of the project waiting at their Start.
         if (db) await wakeDependents(db, ctx.project.id);
