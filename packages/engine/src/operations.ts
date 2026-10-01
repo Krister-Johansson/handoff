@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { appendEvents, events, nodeExecutions, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
 import type { RunState } from "@handoff/core";
 import { loadCompiledGraph } from "./graph-cache.ts";
+import { stopRunPreviews } from "./preview/preview.ts";
 import { createExecution } from "./scheduler/complete.ts";
 
 /** Re-runs a failed node execution as a new attempt, keeping every upstream result in run state. */
@@ -38,7 +39,7 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
   });
 }
 
-/** Cancels a run: stops claiming its work, fails queued and waiting nodes, and signals the running one. */
+/** Cancels a run: stops claiming its work, fails queued and waiting nodes, signals the running one, and stops its apps. */
 export async function cancelRun(db: Db, runId: string, opts: { reason?: string } = {}) {
   await db.transaction(async (tx) => {
     const [run] = await tx
@@ -53,6 +54,7 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string }
       .where(and(eq(nodeExecutions.runId, runId), inArray(nodeExecutions.status, ["pending", "waiting"])));
     await appendEvents(tx, runId, [{ type: "run.cancelled", payload: { reason: opts.reason ?? null } }]);
   });
+  await stopRunPreviews(db, runId);
 }
 
 /** Records a person's answer and wakes the Human gate waiting on it. */

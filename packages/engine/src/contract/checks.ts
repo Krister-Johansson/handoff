@@ -55,7 +55,7 @@ export async function shell(
           stdio: ["ignore", "pipe", "pipe"],
           detached: true,
         })
-      : spawn("sh", ["-c", command], { cwd, env: { ...commandEnv(), ...passed }, stdio: ["ignore", "pipe", "pipe"], detached: true });
+      : spawn("sh", ["-c", command], { cwd, env: { ...commandEnv(), ...passed } as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"], detached: true });
     const tracker = child.pid && !container ? trackDescendants(child.pid, 500) : undefined;
     const killGroup = () => {
       try {

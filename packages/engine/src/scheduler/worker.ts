@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { join } from "node:path";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { notifies, redactSecrets, RunStateSchema } from "@handoff/core";
+import { stopWorkerPreviews } from "../preview/preview.ts";
 import {
   appendEvents,
   claimNext,
@@ -132,6 +133,8 @@ export function startWorker(deps: EngineDeps, opts: { pollIntervalMs?: number; m
       return [];
     });
     if (orphans.length) deps.log?.(`stopped ${orphans.length} orphaned claude processes`);
+    // Apps this worker started for people to try, before it stopped: nothing else would end them.
+    await stopWorkerPreviews(deps.db, deps.workerId).catch((error) => deps.log?.("preview cleanup failed", String(error)));
     while (!stopping) {
       if (inFlight.size < maxInFlight) {
         try {
