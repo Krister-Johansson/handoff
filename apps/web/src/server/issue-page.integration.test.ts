@@ -1,8 +1,8 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, nodeExecutions, questions, runs } from "@handoff/db";
+import { eq, nodeExecutions, projects, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 import { issueRuns, loadIssuePage } from "./issue-page.ts";
 
@@ -80,6 +80,93 @@ test("an issue outside the plan reads with its facts, blockers, the issues it bl
   ]);
   expect(page.blocking.map((b) => b.number)).toEqual([88]);
   expect(page.comments.map((c) => [c.author, c.authorAssociation, c.body])).toEqual([["ann", "OWNER", "Notes from the review"]]);
+});
+
+const repo = { owner: "octo", name: "sample" };
+
+/**
+ * todooverkill's epic #1 with story #2 and its tasks #3 (Running, blocked by #6 and the closed #7) and
+ * #4 (Ready, blocked by #3), plus story #5 with its own task; GitHub keeps the story's tasks in the order 4, 3.
+ */
+async function planned() {
+  const { project: p, github, start } = await project({});
+  const plan = new FakeProjects(github);
+  const { number } = await plan.createProject("octo", repo, "todooverkill plan");
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, p.id));
+  const issue = async (title: string, labels: string[], parent?: number, blockedBy?: number[]) =>
+    (await plan.createIssue(repo, { project: number, title, body: `${title} body`, labels, parent, blockedBy })).number;
+  const status = (n: number, value: string) => {
+    plan.itemsOf(repo).get(n)!.status = value;
+  };
+  const epic = await issue("Finish Milestone 1", ["epic"]);
+  const story = await issue("Board interactions", ["story"], epic);
+  github.issues.set(6, { number: 6, title: "Restyle columns", url: url(6), body: "", state: "open" });
+  github.issues.set(7, { number: 7, title: "Move menu", url: url(7), body: "", state: "closed" });
+  const task = await issue("Drag and drop", ["task"], story, [6, 7]);
+  const second = await issue("Reorder subtasks", ["task"], story, [task]);
+  github.parents.delete(task);
+  github.parents.set(task, story);
+  const other = await issue("Labels end to end", ["story"], epic);
+  const otherTask = await issue("Label editor", ["task"], other, [6]);
+  status(task, "Running");
+  status(second, "Ready");
+  return { project: p, github, plan, number, start, epic, story, task, second, other, otherTask, status };
+}
+
+test("a task of the plan reads under Plan with its Status, its story and epic with their progress, and its blockers' statuses", async () => {
+  const { project: p, github, plan, epic, story, task, second } = await planned();
+  const page = await loadIssuePage(db, github, plan, p.id, task);
+  if (page.state !== "found") throw new Error(page.state);
+  expect(page).toMatchObject({ section: "plan", kind: "task", place: { planned: true, project: { title: "todooverkill plan" }, item: { number: task, status: "Running" } } });
+  if (!page.place.planned) throw new Error("not planned");
+  expect(page.place.parents.map((x) => [x.kind, x.number, x.title, `${x.progress.done} of ${x.progress.total}`])).toEqual([
+    ["story", story, "Board interactions", "0 of 2"],
+    ["epic", epic, "Finish Milestone 1", "0 of 3"],
+  ]);
+  expect(page.blockedBy.map((b) => [b.number, b.state, b.status])).toEqual([
+    [6, "open", undefined],
+    [7, "closed", undefined],
+  ]);
+  expect(page.blocking.map((b) => [b.number, b.status])).toEqual([[second, "Ready"]]);
+});
+
+test("a story lists its tasks in GitHub's sub-issue order, marks the one whose run needs you, and narrows the timeline to itself and its tasks", async () => {
+  const { project: p, github, plan, epic, story, task, second, status } = await planned();
+  status(task, "Ready");
+  github.issues.get(6)!.state = "closed";
+  const run = await startRunFromGraph(db, { projectId: p.id, graphName: "linear", task: "", issues: [task] }, github, plan);
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+  await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run.id));
+
+  const page = await loadIssuePage(db, github, plan, p.id, story);
+  if (page.state !== "found" || !page.place.planned || page.place.kind !== "story") throw new Error("not a story");
+  expect(page.section).toBe("plan");
+  expect(page.place.item.tasks.map((t) => [t.number, t.needsYou])).toEqual([
+    [second, false],
+    [task, true],
+  ]);
+  expect(page.place.parents.map((x) => x.number)).toEqual([epic]);
+  expect(page.place.timeline.items.map((i) => i.number).sort()).toEqual([story, task, second].sort());
+});
+
+test("an epic lists its stories in GitHub's order and what waits: the open blockers that hold its tasks, the one holding the most first", async () => {
+  const { project: p, github, plan, epic, story, other, task } = await planned();
+  github.parents.delete(story);
+  github.parents.set(story, epic);
+
+  const page = await loadIssuePage(db, github, plan, p.id, epic);
+  if (page.state !== "found" || !page.place.planned || page.place.kind !== "epic") throw new Error("not an epic");
+  expect(page.place.item.stories.map((s) => s.number)).toEqual([other, story]);
+  expect(page.place.item.progress).toMatchObject({ done: 0, total: 3 });
+  expect(page.place.waiting).toEqual({
+    needsYou: [],
+    waitingTasks: 3,
+    blockers: [
+      { number: 6, title: "Restyle columns", url: url(6), status: undefined, blocks: 2 },
+      { number: task, title: "Drag and drop", url: url(task), status: "Running", blocks: 1 },
+    ],
+  });
+  expect(page.place.timeline?.items.map((i) => i.number).sort()).toEqual([epic, story, other].sort());
 });
 
 test("a number GitHub does not know is not found, a pull request's number says so, and an unreachable GitHub keeps the title the latest run linked", async () => {

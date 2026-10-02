@@ -3,8 +3,9 @@ import { GitHubReadError, type GitHubPort, type IssueComment, type IssueDetail, 
 import { reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
 import { waitingRuns } from "./overview";
-import { loadPlan, type PlanUnavailable } from "./plan";
+import { loadPlan, type PlanEpic, type PlanProgress, type PlanStory, type PlanTask, type PlanUnavailable, type PlanView } from "./plan";
 import { runLines, type RunLine } from "./run-lines";
+import type { Timeline } from "../lib/plan/schedule";
 
 /** What a run waits on from a person: a review or a question, with the page that answers it. */
 export type RunWait = { kind: "review" | "question"; text: string; href: string };
@@ -41,7 +42,45 @@ export type IssueLink = IssueRef & { status: PlanStatus | undefined };
 /** Where an issue outside the plan stands: why, when the project's plan cannot be read or there is none. */
 export type Unplanned = { planned: false; reason: PlanUnavailable["reason"] | undefined; error: string | undefined; project: PlanProject | undefined };
 
-export type IssuePlace = Unplanned;
+/** A story or an epic a plan item is part of, with its progress over all its tasks. */
+export type PlanParent = { kind: "story" | "epic"; number: number; title: string; url: string; progress: PlanProgress };
+
+/** A task of the plan: its item, and the story and the epic it is part of, nearest first. */
+export type PlannedTask = { planned: true; kind: "task"; project: PlanProject; item: PlanTask; parents: PlanParent[] };
+
+/** A task under a story or an epic on the page, with whether its latest run waits on a person (the Needs you chip). */
+export type IssueTask = PlanTask & { needsYou: boolean };
+
+/** A story of the plan: its tasks in GitHub's sub-issue order, its epic, and the timeline of it and its tasks. */
+export type PlannedStory = {
+  planned: true;
+  kind: "story";
+  project: PlanProject;
+  item: Omit<PlanStory, "tasks"> & { tasks: IssueTask[] };
+  parents: PlanParent[];
+  timeline: Timeline | undefined;
+};
+
+/** What an epic waits on: tasks whose runs need a person, and the open blockers that hold its tasks, the one that holds the most first. */
+export type EpicWaiting = {
+  needsYou: number[];
+  /** How many of its open tasks wait on an open blocker. */
+  waitingTasks: number;
+  blockers: { number: number; title: string; url: string; status: PlanStatus | undefined; blocks: number }[];
+};
+
+/** An epic of the plan: its stories in GitHub's sub-issue order, what waits, and the timeline of it and its stories. */
+export type PlannedEpic = {
+  planned: true;
+  kind: "epic";
+  project: PlanProject;
+  item: Omit<PlanEpic, "stories" | "tasks"> & { stories: (Omit<PlanStory, "tasks"> & { tasks: IssueTask[] })[]; tasks: IssueTask[] };
+  waiting: EpicWaiting;
+  timeline: Timeline | undefined;
+};
+
+type Planned = PlannedTask | PlannedStory | PlannedEpic;
+export type IssuePlace = Unplanned | Planned;
 
 export type FoundIssue = {
   state: "found";
@@ -92,18 +131,25 @@ export async function loadIssuePage(
     return unreachable(error instanceof Error ? error.message : String(error));
   }
   if (issue.pullRequest) return { state: "pull-request", url: issue.url };
-  const [dependencies, comments, viewer, planned] = await Promise.all([
+  const [dependencies, comments, viewer, planned, order, waiting] = await Promise.all([
     github.dependencies(repo, number),
     github.listIssueComments(repo, number),
     github.viewer().catch(() => undefined),
     loadPlan(db, github, plan, projectId),
+    // The sub-issue order of a story or an epic; a task's list is empty and costs one call.
+    github.listSubIssues(repo, number).then((refs) => refs.map((r) => r.number)),
+    inboxGroups(db, { projectId }).then((groups) => waitingRuns({ ...groups, failedRuns: groups.failedRuns.map((f) => ({ ...f, error: f.error ?? null })) })),
   ]);
-  const place: IssuePlace = "reason" in planned ? { planned: false, reason: planned.reason, error: planned.error, project: undefined } : { planned: false, reason: undefined, error: undefined, project: planned.project };
-  const link = (ref: IssueRef): IssueLink => ({ ...ref, status: undefined });
+  const place: IssuePlace =
+    "reason" in planned
+      ? { planned: false, reason: planned.reason, error: planned.error, project: undefined }
+      : (placeIn(planned, number, { waiting, order }) ?? { planned: false, reason: undefined, error: undefined, project: planned.project });
+  const statusOf = new Map("reason" in planned ? [] : planItems(planned).map((i) => [i.number, i.status] as const));
+  const link = (ref: IssueRef): IssueLink => ({ ...ref, status: statusOf.get(ref.number) });
   return {
     state: "found",
-    section: "issues",
-    kind: "issue",
+    section: place.planned ? "plan" : "issues",
+    kind: place.planned ? place.kind : "issue",
     issue,
     place,
     blockedBy: openFirst(dependencies.blockedBy).map(link),
@@ -111,6 +157,72 @@ export async function loadIssuePage(
     comments,
     viewer,
   };
+}
+
+/** Every item of a plan once: epics, their stories, and every task. */
+function planItems(view: PlanView): (PlanEpic | PlanStory | PlanTask)[] {
+  return [...view.epics, ...view.epics.flatMap((e) => e.stories), ...view.epics.flatMap((e) => [...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...view.unparented];
+}
+
+const parentOf = (kind: "story" | "epic", item: PlanStory | PlanEpic): PlanParent => ({ kind, number: item.number, title: item.title, url: item.url, progress: item.progress });
+
+/** Items in GitHub's sub-issue order; those GitHub did not list follow by number, as the plan sorts them. */
+function inOrder<T extends { number: number }>(items: T[], order: number[]): T[] {
+  const at = new Map(order.map((n, i) => [n, i]));
+  return items.toSorted((a, b) => (at.get(a.number) ?? order.length + a.number) - (at.get(b.number) ?? order.length + b.number));
+}
+
+/** The timeline of one item and the items under it, with the arrows between them. */
+function timelineOf(timeline: Timeline | undefined, numbers: number[]): Timeline | undefined {
+  if (!timeline) return undefined;
+  const keep = new Set(numbers);
+  return { today: timeline.today, items: timeline.items.filter((i) => keep.has(i.number)), arrows: timeline.arrows.filter((a) => keep.has(a.from) && keep.has(a.to)) };
+}
+
+/**
+ * The open blockers that hold an epic's tasks, the one that holds the most first, and how many of its
+ * open tasks wait on one. Titles come from the plan, else from the repository's open issues.
+ */
+function waitingIn(epic: PlanEpic, view: PlanView, tasks: IssueTask[]): EpicWaiting {
+  const open = tasks.filter((t) => t.state === "open");
+  const holds = new Map<number, number>();
+  for (const task of open) for (const blocker of task.blockedBy) holds.set(blocker, (holds.get(blocker) ?? 0) + 1);
+  const known = new Map<number, { title: string; url: string; status: PlanStatus | undefined }>([
+    ...view.unplanned.map((i) => [i.number, { title: i.title, url: i.url, status: undefined }] as const),
+    ...planItems(view).map((i) => [i.number, { title: i.title, url: i.url, status: i.status }] as const),
+  ]);
+  const blockers = [...holds]
+    .map(([number, blocks]) => ({ number, title: known.get(number)?.title ?? "", url: known.get(number)?.url ?? "", status: known.get(number)?.status, blocks }))
+    .sort((a, b) => b.blocks - a.blocks || a.number - b.number);
+  return { needsYou: tasks.filter((t) => t.needsYou).map((t) => t.number), waitingTasks: open.filter((t) => t.blockedBy.length > 0).length, blockers };
+}
+
+/** Where an issue sits in the plan, or undefined when it is not an item of it. */
+function placeIn(view: PlanView, number: number, ctx: { waiting: Set<string>; order: number[] }): Planned | undefined {
+  const mark = (task: PlanTask): IssueTask => ({ ...task, needsYou: task.run !== null && ctx.waiting.has(task.run.id) });
+  const project = view.project;
+  for (const epic of view.epics) {
+    if (epic.number === number) {
+      const stories = inOrder(epic.stories, ctx.order).map((s) => ({ ...s, tasks: s.tasks.map(mark) }));
+      const tasks = epic.tasks.map(mark);
+      const all = [...stories.flatMap((s) => s.tasks), ...tasks];
+      const timeline = timelineOf(view.timeline, [epic.number, ...stories.map((s) => s.number)]);
+      return { planned: true, kind: "epic", project, item: { ...epic, stories, tasks }, waiting: waitingIn(epic, view, all), timeline };
+    }
+    for (const story of epic.stories) {
+      if (story.number === number) {
+        const tasks = inOrder(story.tasks, ctx.order).map(mark);
+        const timeline = timelineOf(view.timeline, [story.number, ...tasks.map((t) => t.number)]);
+        return { planned: true, kind: "story", project, item: { ...story, tasks }, parents: [parentOf("epic", epic)], timeline };
+      }
+      const task = story.tasks.find((t) => t.number === number);
+      if (task) return { planned: true, kind: "task", project, item: task, parents: [parentOf("story", story), parentOf("epic", epic)] };
+    }
+    const task = epic.tasks.find((t) => t.number === number);
+    if (task) return { planned: true, kind: "task", project, item: task, parents: [parentOf("epic", epic)] };
+  }
+  const loose = view.unparented.find((t) => t.number === number);
+  return loose ? { planned: true, kind: "task", project, item: loose, parents: [] } : undefined;
 }
 
 /** Every run whose linked issues include `number`, newest first, from handoff's own records. */
