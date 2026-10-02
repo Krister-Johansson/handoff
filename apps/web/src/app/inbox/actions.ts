@@ -16,10 +16,12 @@ export type InboxActionState = { ok?: boolean; error?: string };
 
 const field = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
 
-function refresh(runId: string) {
-  revalidatePath("/inbox");
-  // Run pages sit under their project; revalidate the route rather than look the project up.
-  if (runId) revalidatePath("/projects/[projectId]/runs/[runId]", "page");
+/**
+ * After an answer, repair or cancel: the root layout holds the sidebar's Inbox badge, and its pages
+ * include the Inbox and the run page, so revalidating it refreshes all three.
+ */
+function refresh() {
+  revalidatePath("/", "layout");
 }
 
 export async function answerAction(_: InboxActionState, form: FormData): Promise<InboxActionState> {
@@ -32,7 +34,7 @@ export async function answerAction(_: InboxActionState, form: FormData): Promise
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  refresh(field(form, "runId"));
+  refresh();
   return { ok: true };
 }
 
@@ -44,7 +46,7 @@ export async function repairAction(_: InboxActionState, form: FormData): Promise
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  refresh(field(form, "runId"));
+  refresh();
   return { ok: true };
 }
 
@@ -54,7 +56,7 @@ export async function cancelAction(_: InboxActionState, form: FormData): Promise
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  refresh(field(form, "runId"));
+  refresh();
   return { ok: true };
 }
 
@@ -88,7 +90,7 @@ export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchem
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  refresh(runId);
+  refresh();
   redirect((await runPathOf(getDb(), runId)) ?? "/inbox");
 }
 
@@ -113,7 +115,7 @@ export async function resolveLoopAction(input: z.input<typeof ResolveLoopSchema>
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  refresh(parsed.data.runId);
+  refresh();
   return { ok: true };
 }
 
@@ -128,7 +130,7 @@ export async function restartTryItAction(input: z.input<typeof RestartSchema>): 
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  refresh(parsed.data.runId);
+  refresh();
   return { ok: true };
 }
 
@@ -160,6 +162,6 @@ export async function answerPermissionAction(input: z.input<typeof PermissionAns
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  refresh(answer.runId);
+  refresh();
   return { ok: true };
 }

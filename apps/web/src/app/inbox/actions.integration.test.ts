@@ -1,21 +1,24 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { appendEvents, eq, nodeExecutions, projects, runs } from "@handoff/db";
-import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { appendEvents, eq, nodeExecutions, projects, questions, runs } from "@handoff/db";
+import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "@/server/graphs";
 
 const db = createTestDb();
 // The dashboard's environment: the test database, and fakes where it would reach GitHub.
-const env = vi.hoisted(() => ({ github: undefined as unknown, projects: undefined as unknown }));
+const env = vi.hoisted(() => ({ github: undefined as unknown, projects: undefined as unknown, revalidatePath: vi.fn() }));
 vi.mock("server-only", () => ({}));
-vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
+vi.mock("next/cache", () => ({ revalidatePath: env.revalidatePath }));
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { cancelAction, resolveLoopAction } = await import("./actions");
+const { answerAction, cancelAction, resolveLoopAction } = await import("./actions");
 
-beforeEach(() => truncateAll(db));
+beforeEach(async () => {
+  env.revalidatePath.mockClear();
+  await truncateAll(db);
+});
 afterAll(() => db.$client.end());
 
 const repo = { owner: "octo", name: "sample" };
@@ -61,4 +64,14 @@ test("stopping a run whose loop ran out from the inbox sets its task back to Rea
   );
   expect(await resolveLoopAction({ runId: run.id, action: "stop" })).toEqual({ ok: true });
   expect(await statusOf()).toBe("Ready");
+});
+
+test("answering a question from the inbox revalidates the layout, so the sidebar's Inbox badge drops it", async () => {
+  const { run } = await runOnReadyTask();
+  const ask = await seedExecution(db, run.id, { nodeKey: "ask", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [question] = await db.insert(questions).values({ runId: run.id, nodeExecutionId: ask.id, question: "Which license?", context: { reason: "needs_input" } }).returning();
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
+
+  expect(await answerAction({}, form({ questionId: question!.id, runId: run.id, answer: "MIT" }))).toEqual({ ok: true });
+  expect(env.revalidatePath).toHaveBeenCalledWith("/", "layout");
 });

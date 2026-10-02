@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNotNull, projects, runs, type Db } from "@handoff/db";
 import { stuckLoop } from "@handoff/engine/operations";
+import { inboxCount } from "@/components/inbox/inbox-view";
 import { stuckRuns, waitingReviews } from "./attention";
 import { listInbox } from "./inbox";
 import { projectMergeQueue } from "./merge-queue";
@@ -57,8 +58,12 @@ export async function inboxGroups(db: Db, opts: { projectId?: string } = {}) {
     })),
   };
   const withReady = { ...groups, readyToMerge: ready, permissions };
-  const count = permissions.length + groups.reviews.length + groups.questions.length + groups.failedRuns.length + groups.stuckRuns.length + groups.pullRequests.length + ready.length;
-  return { ...withReady, count };
+  return { ...withReady, count: inboxCount(withReady) };
+}
+
+/** How many items the Inbox page shows, for the sidebar's Inbox badge. */
+export async function inboxTotal(db: Db) {
+  return inboxCount(await inboxGroups(db));
 }
 
 export type InboxGroups = Awaited<ReturnType<typeof inboxGroups>>;

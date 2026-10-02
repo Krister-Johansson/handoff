@@ -3,7 +3,9 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import { appendEvents, eq, nodeExecutions, permissionRequests, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
-import { inboxGroups } from "./inbox-groups";
+import { answerQuestion } from "@handoff/engine/operations";
+import { inboxCount } from "@/components/inbox/inbox-view";
+import { inboxGroups, inboxTotal } from "./inbox-groups";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -128,4 +130,25 @@ test("narrowed to a project, the inbox holds only that project's items, permissi
   expect(groups.failedRuns).toEqual([]);
   expect(groups.count).toBe(2);
   expect((await inboxGroups(db)).count).toBe(4);
+});
+
+test("the sidebar's Inbox count and the Inbox page count the same items, and both drop when one is answered", async () => {
+  const { start } = await setUp();
+  const asking = await start("Pick a license");
+  const ask = await seedExecution(db, asking.id, { nodeKey: "ask", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [question] = await db.insert(questions).values({ runId: asking.id, nodeExecutionId: ask.id, question: "Which license?", context: { reason: "needs_input" } }).returning();
+  const coder = await seedExecution(db, asking.id, { nodeKey: "coder", status: "running" });
+  await db.insert(permissionRequests).values({ id: crypto.randomUUID(), runId: asking.id, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "pnpm test" } });
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, asking.id));
+  const broken = await start("Add a CHANGELOG.md");
+  await seedExecution(db, broken.id, { nodeKey: "coder", status: "failed" });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, broken.id));
+
+  // The Inbox page counts the groups it shows; the sidebar reads only the total.
+  expect(inboxCount(await inboxGroups(db))).toBe(3);
+  expect(await inboxTotal(db)).toBe(3);
+
+  await answerQuestion(db, question!.id, { answer: "MIT", answeredBy: "dashboard" });
+  expect(inboxCount(await inboxGroups(db))).toBe(2);
+  expect(await inboxTotal(db)).toBe(2);
 });
