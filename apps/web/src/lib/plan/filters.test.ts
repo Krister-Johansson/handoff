@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { epic, planView, story, task, unplannedIssue } from "@/components/plan/testing/plan-fixtures";
+import { epic, person, planView, story, task, unplannedIssue } from "@/components/plan/testing/plan-fixtures";
 import { planPath } from "@/lib/paths";
 import { filterPlan, isFiltered, parsePlanFilters } from "./filters";
 
@@ -20,8 +20,8 @@ test("the Assignee filter reads ?assignee= as me, none or a login, and the searc
 });
 
 test("the Assignee filter keeps the tasks assigned to me, to nobody, or to one person", () => {
-  const view = planView([epic(12, "Project management", [story(41, "Shaping", 12, [task(55, "Tools", "Running", { assignees: ["krister"] }), task(57, "Migration", "Shaping")])])], {
-    unparented: [task(70, "Speak", "Ready", { assignees: ["example-dev", "krister"] })],
+  const view = planView([epic(12, "Project management", [story(41, "Shaping", 12, [task(55, "Tools", "Running", { assignees: [person("krister")] }), task(57, "Migration", "Shaping")])])], {
+    unparented: [task(70, "Speak", "Ready", { assignees: [person("example-dev"), person("krister")] })],
     unplanned: [unplannedIssue(301, "Worker restarts")],
   });
   const tasks = (assignee: string, me?: string) => {

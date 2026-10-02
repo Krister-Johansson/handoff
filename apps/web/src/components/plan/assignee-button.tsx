@@ -3,46 +3,51 @@
 import { use, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { UserRoundPlusIcon } from "lucide-react";
+import type { Assignee } from "@handoff/github";
 import type { PlanTask } from "@/server/plan";
+import { PersonAvatar } from "@/components/person-avatar";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from "@/components/ui/command";
 import { FieldError } from "@/components/ui/field";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { taskColumn } from "@/lib/plan/task";
 import { cn } from "@/lib/utils";
 import { Assigning, type AssignablePerson, type AssignControl } from "./plan-context";
 
-const initials = (login: string) => login.slice(0, 2).toUpperCase();
-
-/** A login's initials in a small circle; mine in the primary colour. */
-function Initials({ login, me }: { login: string; me: boolean }) {
+/** A person's avatar in a small circle; without one, their initials, mine in the primary colour. */
+function Face({ person, me }: { person: Assignee; me: boolean }) {
   return (
-    <span
-      aria-hidden
-      className={cn("grid size-5 shrink-0 place-items-center rounded-full text-[9px] font-semibold tracking-wide", me ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}
-    >
-      {initials(login)}
-    </span>
+    <PersonAvatar
+      size="default"
+      person={person}
+      className="size-5"
+      fallbackClassName={cn("text-[9px] font-semibold tracking-wide", me ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}
+    />
   );
 }
 
-/** The first assignee's initials and how many more there are. */
-function Assignees({ logins, me }: { logins: string[]; me: string | undefined }) {
+/** The first assignee's avatar and how many more there are. */
+function Assignees({ people, me }: { people: Assignee[]; me: string | undefined }) {
+  const [first] = people;
+  if (!first) return null;
   return (
     <>
-      <Initials login={logins[0]!} me={logins[0] === me} />
-      {logins.length > 1 && <span className="text-[10px] text-muted-foreground tabular-nums">+{logins.length - 1}</span>}
+      <Face person={first} me={first.login === me} />
+      {people.length > 1 && <span className="text-[10px] text-muted-foreground tabular-nums">+{people.length - 1}</span>}
     </>
   );
 }
 
+const loginsOf = (task: PlanTask) => task.assignees.map((a) => a.login);
+
 const nameOf = (task: PlanTask) =>
-  task.assignees.length === 0 ? `Assign #${task.number}` : `${task.assignees.length === 1 ? "Assignee" : "Assignees"}: ${task.assignees.join(", ")}. Change`;
+  task.assignees.length === 0 ? `Assign #${task.number}` : `${task.assignees.length === 1 ? "Assignee" : "Assignees"}: ${loginsOf(task).join(", ")}. Change`;
 
 /**
- * Who is assigned to a task, on a tree row or a board card: their initials as a button, or a dashed
- * person on an open task with nobody. Without a way to assign, the initials only show who is assigned.
- * A Done task shows an assignee only when it has one.
+ * Who is assigned to a task, on a tree row or a board card: their avatar as a button, with their logins
+ * in its tooltip, or a dashed person on an open task with nobody. Without a way to assign, the avatar
+ * only shows who is assigned. A Done task shows an assignee only when it has one.
  */
 export function AssigneeButton({ task }: { task: PlanTask }) {
   const control = use(Assigning);
@@ -50,8 +55,8 @@ export function AssigneeButton({ task }: { task: PlanTask }) {
   if (!control) {
     if (assigned.length === 0) return null;
     return (
-      <span title={`Assigned to ${assigned.join(", ")}`} className="inline-flex items-center gap-0.5">
-        <Assignees logins={assigned} me={undefined} />
+      <span title={`Assigned to ${loginsOf(task).join(", ")}`} className="inline-flex items-center gap-0.5">
+        <Assignees people={assigned} me={undefined} />
       </span>
     );
   }
@@ -69,7 +74,7 @@ function AssignPopover({ task, control }: { task: PlanTask; control: AssignContr
   const [people, setPeople] = useState<AssignablePerson[]>();
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
-  const assigned = task.assignees;
+  const assigned = loginsOf(task);
   const isAssigned = new Set(assigned);
   const me = control.me;
   const name = nameOf(task);
@@ -91,17 +96,22 @@ function AssignPopover({ task, control }: { task: PlanTask; control: AssignContr
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon-xs" aria-label={name} className={cn("rounded-full", assigned.length > 1 && "w-auto gap-0.5 px-0.5")}>
-          {assigned.length > 0 ? (
-            <Assignees logins={assigned} me={me} />
-          ) : (
-            <span aria-hidden className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground/50 text-muted-foreground">
-              <UserRoundPlusIcon className="size-3" />
-            </span>
-          )}
-        </Button>
-      </PopoverTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon-xs" aria-label={name} className={cn("rounded-full", assigned.length > 1 && "w-auto gap-0.5 px-0.5")}>
+              {assigned.length > 0 ? (
+                <Assignees people={task.assignees} me={me} />
+              ) : (
+                <span aria-hidden className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground/50 text-muted-foreground">
+                  <UserRoundPlusIcon className="size-3" />
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{assigned.length > 0 ? assigned.join(", ") : "Assign"}</TooltipContent>
+      </Tooltip>
       <PopoverContent align="end" className="w-60 gap-0 p-0" aria-label={name}>
         <Command>
           <CommandInput placeholder="Find a person" />
@@ -111,7 +121,7 @@ function AssignPopover({ task, control }: { task: PlanTask; control: AssignContr
               <>
                 <CommandGroup>
                   <CommandItem value="assign me" disabled={pending} onSelect={() => change(assigned, true)}>
-                    <Initials login={me} me />
+                    <Face person={people?.find((p) => p.login === me) ?? { login: me, avatarUrl: "" }} me />
                     <span className="flex flex-col leading-tight">
                       <span className="font-medium">Assign me</span>
                       <span className="text-xs text-muted-foreground">I will work on this</span>
@@ -125,7 +135,7 @@ function AssignPopover({ task, control }: { task: PlanTask; control: AssignContr
               <CommandGroup heading="People who can be assigned">
                 {people.map((p) => (
                   <CommandItem key={p.login} value={p.login} disabled={pending} data-checked={isAssigned.has(p.login) ? "true" : undefined} onSelect={() => toggle(p.login)}>
-                    <Initials login={p.login} me={p.login === me} />
+                    <Face person={p} me={p.login === me} />
                     <span className="truncate font-mono text-xs">{p.login}</span>
                   </CommandItem>
                 ))}

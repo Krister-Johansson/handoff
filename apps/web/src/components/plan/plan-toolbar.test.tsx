@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { PlanTab } from "./plan-tab";
-import { epic, planView, run, story, task, timelineOf, unplannedIssue } from "./testing/plan-fixtures";
+import { epic, person, planView, run, story, task, timelineOf, unplannedIssue } from "./testing/plan-fixtures";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -21,12 +21,12 @@ const READ_AT = Date.parse("2026-10-02T12:00:00Z");
 const view = planView(
   [
     epic(12, "Project management", [
-      story(40, "Read the plan from GitHub", 12, [task(52, "Projects port", "Done", { state: "closed" }), task(53, "Plan read model", "Done", { state: "closed", assignees: ["krister"] })]),
+      story(40, "Read the plan from GitHub", 12, [task(52, "Projects port", "Done", { state: "closed" }), task(53, "Plan read model", "Done", { state: "closed", assignees: [person("krister")] })]),
       story(41, "Shaping with the assistant", 12, [
-        task(55, "Shaping tools", "Running", { run: run("r5", "running"), assignees: ["krister"] }),
-        task(56, "Approval cards", "Running", { assignees: ["example-dev"] }),
+        task(55, "Shaping tools", "Running", { run: run("r5", "running"), assignees: [person("krister")] }),
+        task(56, "Approval cards", "Running", { assignees: [person("example-dev")] }),
         task(57, "Add the migration", "Shaping", { blockedBy: [55] }),
-        task(58, "Plan page tree and board", "Ready", { assignees: ["krister"] }),
+        task(58, "Plan page tree and board", "Ready", { assignees: [person("krister")] }),
       ]),
     ]),
     epic(10, "Voice", [story(18, "Voice settings", 10, [task(72, "Picker with local voices first", "Ready")])]),

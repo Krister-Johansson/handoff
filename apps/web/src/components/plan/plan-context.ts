@@ -6,8 +6,8 @@ import { createContext, use } from "react";
 export const SearchQuery = createContext("");
 export const useSearchQuery = () => use(SearchQuery);
 
-/** A person who can be assigned issues in the project's repository. */
-export type AssignablePerson = { login: string };
+/** A person who can be assigned issues in the project's repository, with their GitHub avatar. */
+export type AssignablePerson = { login: string; avatarUrl: string };
 
 /**
  * What the assignee control needs from the server: who "me" is, the people the repository can assign,
