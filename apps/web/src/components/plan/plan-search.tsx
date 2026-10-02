@@ -102,7 +102,7 @@ export function PlanSearchField({
   };
 
   return (
-    <InputGroup className={cn("h-8 bg-background dark:bg-input/30", className)}>
+    <InputGroup className={cn("h-7 bg-background dark:bg-input/30", className)}>
       <InputGroupAddon>
         <SearchIcon />
       </InputGroupAddon>
@@ -116,7 +116,7 @@ export function PlanSearchField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
-        className="text-[13px] [&::-webkit-search-cancel-button]:hidden"
+        className="h-full text-[13px] [&::-webkit-search-cancel-button]:hidden"
       />
       <InputGroupAddon align="inline-end" className="gap-1">
         <span role="status" aria-live="polite" className="text-[11.5px] font-normal whitespace-nowrap tabular-nums">

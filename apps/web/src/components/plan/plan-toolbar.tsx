@@ -10,7 +10,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { planPath } from "@/lib/paths";
 import type { PlanFilters } from "@/lib/plan/filters";
 import type { PlanViewName } from "@/lib/project-tab";
+import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
 import { useCollapsed } from "./use-collapsed";
+
 
 const VIEWS: { value: PlanViewName; label: string; icon: ReactNode }[] = [
   { value: "tree", label: "Tree", icon: <ListTreeIcon /> },
@@ -24,8 +26,8 @@ function ViewToggle({ projectId, view, filters }: { projectId: string; view: Pla
   return (
     <ToggleGroup
       type="single"
-      variant="outline"
-      size="sm"
+      spacing={0.5}
+      className={SEGMENTED}
       value={view}
       onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: v as PlanViewName }), { scroll: false })}
       aria-label="View"
@@ -33,7 +35,7 @@ function ViewToggle({ projectId, view, filters }: { projectId: string; view: Pla
       {VIEWS.map((v) => (
         <Tooltip key={v.value}>
           <TooltipTrigger asChild>
-            <ToggleGroupItem value={v.value} aria-label={v.label}>
+            <ToggleGroupItem value={v.value} aria-label={v.label} className={SEGMENTED_ITEM}>
               {v.icon}
               <span className="max-sm:sr-only">{v.label}</span>
             </ToggleGroupItem>

@@ -32,6 +32,8 @@ import { chartRange } from "@/lib/plan/timeline-rows";
 import { defaultZoom, shortDay, timeScale, type Zoom } from "@/lib/plan/timeline-scale";
 import { cn } from "@/lib/utils";
 import type { StartRunContext } from "./plan-actions";
+import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
+
 
 /** What the chart and the list form both take. */
 export type TimelineProps = StartRunContext & {
@@ -138,14 +140,18 @@ export function TimelineControls({
       )}
       <ToggleGroup
         type="single"
-        variant="outline"
-        size="sm"
+        spacing={0.5}
+        className={SEGMENTED}
         value={scale.zoom}
         onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: v as Zoom }), { scroll: false })}
         aria-label="Zoom"
       >
-        <ToggleGroupItem value="weeks">Weeks</ToggleGroupItem>
-        <ToggleGroupItem value="months">Months</ToggleGroupItem>
+        <ToggleGroupItem value="weeks" className={SEGMENTED_ITEM}>
+          Weeks
+        </ToggleGroupItem>
+        <ToggleGroupItem value="months" className={SEGMENTED_ITEM}>
+          Months
+        </ToggleGroupItem>
       </ToggleGroup>
       <Legend />
     </div>

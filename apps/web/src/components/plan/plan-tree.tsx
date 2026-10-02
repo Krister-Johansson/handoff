@@ -111,6 +111,8 @@ function Chevron({ expanded, onToggle, label }: { expanded: boolean; onToggle: (
 }
 
 const LEFT = "flex min-w-0 flex-1 basis-64 items-center gap-2.5";
+/** A task row's left side wraps its chips under the title when they leave the title no room. */
+const TASK_LEFT = "flex min-w-0 flex-1 basis-64 flex-wrap items-center gap-x-2.5 gap-y-1";
 const RIGHT = "ml-auto flex shrink-0 items-center gap-3";
 
 function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean } & RowContext) {
@@ -118,9 +120,12 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
   const q = useSearchQuery();
   return (
     <TreeRow id={`t${task.number}`} level={outside ? 2 : 3} label={`Task #${task.number} ${task.title}, ${column}`} match={matchesQuery(task, q)}>
-      <span className={LEFT}>
-        <StatusPill column={column} spinning={column === "Running" && task.run?.status === "running"} />
-        <IssueTitle item={task} />
+      <span className={TASK_LEFT}>
+        <span className="flex max-w-full min-w-0 items-center gap-2.5">
+          <StatusPill column={column} spinning={column === "Running" && task.run?.status === "running"} />
+          <IssueTitle item={task} />
+        </span>
+
         <TaskTags task={task} skipped={ctx.skipped?.[task.number]} />
         {outside && task.parent !== undefined && <Tag>parent #{task.parent} is not in the plan</Tag>}
         {column !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={ctx.repoUrl} />}
@@ -128,7 +133,7 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
       <span className={RIGHT}>
         <RunCell task={task} projectId={ctx.projectId} needsYou={ctx.needsYou} />
         <PrLink task={task} repoUrl={ctx.repoUrl} />
-        <span className="flex min-w-6 justify-center">
+        <span className="flex min-w-6 justify-center empty:hidden">
           <AssigneeButton task={task} />
         </span>
         <TaskActions task={task} projectId={ctx.projectId} start={ctx} />
