@@ -179,9 +179,23 @@ export function PlanReview({ questionId, runId, from, markdown }: { questionId: 
         setComments((list) => [...list, { quote, body }]);
         return `Drafted a comment on "${quote}". ${commentCount(comments.length + 1)}.`;
       },
-      page_remove_comment: undefined,
-      page_set_note: undefined,
-      page_submit_review: undefined,
+      page_remove_comment: ({ quote: given }) => {
+        const quote = normalize(given);
+        if (!comments.some((c) => c.quote === quote)) {
+          const drafted = comments.map((c) => `"${c.quote}"`);
+          throw new Error(`No drafted comment is on "${quote}". ${drafted.length ? `The drafted comments are on: ${drafted.join("; ")}.` : "No comments are drafted."}`);
+        }
+        setComments((list) => {
+          const first = list.findIndex((c) => c.quote === quote);
+          return list.filter((_, i) => i !== first);
+        });
+        return `Removed the comment on "${quote}". ${commentCount(comments.length - 1)}.`;
+      },
+      page_set_note: ({ note: next }) => {
+        setNote(next);
+        return next.trim() ? `Set the overall comment to "${next}"` : "Cleared the overall comment.";
+      },
+      page_submit_review: ({ option }) => submitReviewTool({ questionId, runId, option, note, comments, target: from, onSending, onFailed }),
     },
     () => ({ questionId, runId, from, comments, note }),
   );

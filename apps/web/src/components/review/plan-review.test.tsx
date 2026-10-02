@@ -156,3 +156,32 @@ test("page_comment_on_passage adds a comment for a quote in the plan and refuses
   }
   expect(screen.getByText("1 comment")).toBeInTheDocument();
 });
+
+/** What a server action that redirects rejects with in the browser, once Next has started the navigation. */
+const redirectTo = (path: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${path};303;` });
+
+test("page_submit_review approve sends approve", async () => {
+  const { call } = await withAssistant();
+  actions.answerReviewAction.mockRejectedValueOnce(redirectTo("/projects/p1/runs/r1"));
+  expect(await call("page_submit_review", { option: "approve" })).toEqual({ text: "Approved. The run page opens.", isError: false });
+  expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "approve", note: "", comments: [] });
+});
+
+test("page_remove_comment and page_set_note change the drafts the page shows, and fix needs one of them", async () => {
+  const { call } = await withAssistant();
+  await call("page_comment_on_passage", { quote: "add a CLI", body: "A web page." });
+  await call("page_comment_on_passage", { quote: "Add storage", body: "Fine." });
+  expect(await call("page_remove_comment", { quote: "a CLI" })).toEqual({
+    text: 'No drafted comment is on "a CLI". The drafted comments are on: "add a CLI"; "Add storage".',
+    isError: true,
+  });
+  expect(await call("page_remove_comment", { quote: "Add storage" })).toEqual({ text: 'Removed the comment on "Add storage". 1 comment drafted.', isError: false });
+  expect(screen.getByRole("list", { name: "Comments" })).not.toHaveTextContent("Fine.");
+  expect(await call("page_set_note", { note: "Close." })).toEqual({ text: 'Set the overall comment to "Close."', isError: false });
+  expect(screen.getByLabelText("Overall comment")).toHaveValue("Close.");
+
+  expect(await call("page_remove_comment", { quote: "add a CLI" })).toMatchObject({ isError: false });
+  expect(await call("page_set_note", { note: "" })).toEqual({ text: "Cleared the overall comment.", isError: false });
+  expect(await call("page_submit_review", { option: "fix" })).toEqual({ text: "Add a comment or an overall comment first, so there is something to fix.", isError: true });
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+});
