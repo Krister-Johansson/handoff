@@ -42,7 +42,8 @@ import {
 import type { RepoRef } from "../types.ts";
 import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "./types.ts";
+import { planFieldWrites, setPlanFieldsDocument } from "./plan-fields.ts";
+import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -267,6 +268,17 @@ export class OctokitProjects implements ProjectsPort {
       if (date === null) await this.octokit.graphql(ClearPlanFieldDocument.toString(), ids);
       else await this.octokit.graphql(SetPlanDateDocument.toString(), { ...ids, date });
     }
+    return "set";
+  }
+
+  async setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult> {
+    const { item } = await this.issuePlan(repo, project, issue);
+    if (!item) return "not-in-project";
+    const writes = planFieldWrites({ dates: dateFieldIds(item.project), estimates: estimateFieldIds(item.project) }, fields);
+    if (typeof writes === "string") return writes;
+    if (writes.length === 0) return "set";
+    const { document, variables } = setPlanFieldsDocument(writes);
+    await this.octokit.graphql(document, { projectId: item.project.id, itemId: item.id, ...variables });
     return "set";
   }
 

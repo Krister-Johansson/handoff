@@ -108,6 +108,10 @@ export type NewPlanIssue = {
 /** Dates to write on an item, YYYY-MM-DD: a date sets the field, null clears it, a missing key leaves it. */
 export type PlanDates = { start?: string | null; target?: string | null };
 
+/** Fields to write on an item: Start and Target as YYYY-MM-DD, Size, and Estimate in hours. A value sets the field, null clears it, a missing key leaves it. */
+export type PlanFields = PlanDates & { size?: PlanSize | null; estimate?: number | null };
+export type SetFieldsResult = "set" | "not-in-project" | "no-field" | "no-option";
+
 /** One of a user's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
 export type PlanProjectChoice = { number: number; title: string; url: string; linked: boolean; missingStatusOptions: PlanStatus[] };
 

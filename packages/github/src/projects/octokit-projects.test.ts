@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { buildSchema, Kind, parse, validate } from "graphql";
 import { expect, test } from "vitest";
 import { fakeGraphql, GraphqlErrors } from "../testing/fake-fetch.ts";
 import { OctokitProjects } from "./octokit-projects.ts";
@@ -864,6 +866,71 @@ test("status and date writes work on a Project that lacks Start, Target, Size an
   expect(await projects.setStatus(repo, 5, 12, "Ready")).toBe("set");
   expect(await projects.setDates(repo, 5, 12, { start: "2026-10-06" })).toBe("no-field");
   expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan", "SetPlanStatus", "IssuePlan"]);
+});
+
+/** GitHub's schema, vendored, to check the documents built at run time that codegen never sees. */
+// GitHub publishes a schema that graphql-js would reject for its deprecations, so it is taken as valid.
+const githubSchema = buildSchema(readFileSync(new URL("../schema/schema.docs.graphql", import.meta.url), "utf8"), { assumeValid: true });
+
+/** The mutations a document sends, as [alias, mutation]; throws when the document is not valid against GitHub's schema. */
+function mutationsOf(query: string): [string, string][] {
+  const document = parse(query);
+  const errors = validate(githubSchema, document);
+  if (errors.length) throw new Error(errors.map((e) => e.message).join("\n"));
+  const operation = document.definitions[0];
+  if (operation?.kind !== Kind.OPERATION_DEFINITION) throw new Error("not an operation");
+  return operation.selectionSet.selections.flatMap((s) => (s.kind === Kind.FIELD ? [[s.alias?.value ?? s.name.value, s.name.value] as [string, string]] : []));
+}
+
+/** A Project with every field handoff reads: Status, Start, Target, Size with S, M and L, and Estimate. */
+const fullProject = (number: number) => ({ ...planProject(number), size: sizeField("S", "M", "L"), estimate: projectField("F_estimate", "NUMBER") });
+
+test("setPlanFields writes Start, Target, Size and Estimate in one request after one read, and clears a field with null", async () => {
+  const { fetch, operations, calls } = fakeGraphql({
+    IssuePlan: () => issuePlan(12, [{ id: "PVTI_3", project: fullProject(3) }]),
+    SetPlanFields: () => ({ start: { projectV2Item: { id: "PVTI_3" } } }),
+  });
+  const projects = port(fetch);
+  const sentQuery = () => (calls.at(-1)!.body as { query: string }).query;
+
+  expect(await projects.setPlanFields(repo, 3, 12, { start: "2026-10-06", target: "2026-10-07", size: "M", estimate: 10.5 })).toBe("set");
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
+    [
+      "SetPlanFields",
+      {
+        projectId: "PVT_3",
+        itemId: "PVTI_3",
+        startField: "F_start",
+        startValue: "2026-10-06",
+        targetField: "F_target",
+        targetValue: "2026-10-07",
+        sizeField: "F_size",
+        sizeValue: "o_M",
+        estimateField: "F_estimate",
+        estimateValue: 10.5,
+      },
+    ],
+  ]);
+  expect(mutationsOf(sentQuery())).toEqual([
+    ["start", "updateProjectV2ItemFieldValue"],
+    ["target", "updateProjectV2ItemFieldValue"],
+    ["size", "updateProjectV2ItemFieldValue"],
+    ["estimate", "updateProjectV2ItemFieldValue"],
+  ]);
+
+  // null clears; a field left out is not sent.
+  operations.length = 0;
+  expect(await projects.setPlanFields(repo, 3, 12, { size: null, estimate: null, target: "2026-10-09" })).toBe("set");
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
+    ["SetPlanFields", { projectId: "PVT_3", itemId: "PVTI_3", targetField: "F_target", targetValue: "2026-10-09", sizeField: "F_size", estimateField: "F_estimate" }],
+  ]);
+  expect(mutationsOf(sentQuery())).toEqual([
+    ["target", "updateProjectV2ItemFieldValue"],
+    ["size", "clearProjectV2ItemFieldValue"],
+    ["estimate", "clearProjectV2ItemFieldValue"],
+  ]);
 });
 
 test("setStatus still fails for an issue GitHub cannot resolve", async () => {
