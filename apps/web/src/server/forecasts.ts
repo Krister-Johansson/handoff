@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNotNull, nodeExecutions, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
-import { PLAN_SIZES, type PlanSize } from "@handoff/github";
+import { PLAN_SIZES, sizeOf, type PlanSize } from "@handoff/github";
 import { forecastOf, runParts, type ForecastSample, type Forecasts } from "../lib/plan/forecast.ts";
 
 export type ProjectForecasts = {
@@ -12,10 +12,15 @@ export type ProjectForecasts = {
  * The forecast of each size from the project's succeeded runs that link exactly one task, and the project's
  * capacity. Computed on every read; nothing of it is stored.
  */
-export async function loadForecasts(db: Db, projectId: string, _sizeOfIssue: (issue: number) => PlanSize | undefined): Promise<ProjectForecasts> {
+export async function loadForecasts(db: Db, projectId: string, sizeOfIssue: (issue: number) => PlanSize | undefined): Promise<ProjectForecasts> {
   const [project] = await db.select({ capacity: projects.planHoursPerDay }).from(projects).where(eq(projects.id, projectId));
   const finished = await db
-    .select({ id: runs.id, size: runs.size, startedAt: runs.startedAt, finishedAt: runs.finishedAt, mergeQueuedAt: runs.mergeQueuedAt, mergeRequestedAt: runs.mergeRequestedAt })
+    .select({
+      id: runs.id,
+      size: runs.size,
+      proposal: sql<string | null>`${runs.state}->'plan'->>'size'`,
+      issue: sql<number>`(${runs.issues}->0->>'number')::int`,
+      startedAt: runs.startedAt, finishedAt: runs.finishedAt, mergeQueuedAt: runs.mergeQueuedAt, mergeRequestedAt: runs.mergeRequestedAt })
     .from(runs)
     .where(
       and(
@@ -58,7 +63,9 @@ export async function loadForecasts(db: Db, projectId: string, _sizeOfIssue: (is
 
   const samples: Record<PlanSize, ForecastSample[]> = { S: [], M: [], L: [] };
   for (const run of finished) {
-    const size = run.size;
+    // The size the task had when the run started; a run from before that was recorded counts under its
+    // planner's proposal, then under its task's current Size, so sizing finished tasks seeds the forecasts.
+    const size = run.size ?? sizeOf(run.proposal) ?? sizeOfIssue(run.issue);
     if (!size) continue;
     const steps = executionsOf.get(run.id) ?? [];
     const parts = runParts(

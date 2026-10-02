@@ -64,3 +64,20 @@ test("only succeeded runs of the size that link one task count", async () => {
   expect(forecasts.S).toMatchObject({ source: "default", minutes: 30, runs: 0, measuredMinutes: null });
   expect(capacity).toBe(6);
 });
+
+test("a run without a recorded size counts under its planner's proposal, then its task's current size", async () => {
+  const { project, finished } = await seeded();
+  // Recorded M wins over the planner's S.
+  await finished({ minutes: 10, size: "M", proposal: "S" });
+  // No recorded size: the planner's S wins over the task's current L.
+  await finished({ minutes: 20, issues: [7], proposal: "S" });
+  // No recorded size and no proposal: the task's current L.
+  await finished({ minutes: 30, issues: [7] });
+  // Neither, and the task has no size now: left out.
+  await finished({ minutes: 40, issues: [8] });
+
+  const { forecasts } = await loadForecasts(db, project.id, (issue) => (issue === 7 ? "L" : undefined));
+  expect([forecasts.S.runs, forecasts.S.measuredMinutes]).toEqual([1, 20]);
+  expect([forecasts.M.runs, forecasts.M.measuredMinutes]).toEqual([1, 10]);
+  expect([forecasts.L.runs, forecasts.L.measuredMinutes]).toEqual([1, 30]);
+});
