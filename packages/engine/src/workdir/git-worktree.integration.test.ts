@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { createOriginRepo, git } from "../testing/git.ts";
+import { createOriginRepo, flakyFetches, git } from "../testing/git.ts";
 import { GitWorktreeProvider } from "./git-worktree.ts";
 
 const setup = () => {
@@ -48,13 +48,27 @@ test("GitWorktreeProvider hands the remote's git config to git through the envir
   const provider = new GitWorktreeProvider({
     root: mkdtempSync(join(tmpdir(), "handoff-home-")),
     gitEnv: async () => ({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.file.allow", GIT_CONFIG_VALUE_0: "never" }),
+    retryMs: 1,
   });
   await expect(provider.acquire({ runId: "run-1", remoteUrl: origin, baseBranch: "main", branchName: "handoff/run-1" })).rejects.toThrow(/not allowed/);
+});
+
+test("a mirror fetch that fails twice and then succeeds still gives the run its worktree", async () => {
+  const origin = createOriginRepo();
+  const root = mkdtempSync(join(tmpdir(), "handoff-home-"));
+  // Another run made the clone, so this run's acquire fetches into it.
+  await new GitWorktreeProvider({ root }).acquire({ runId: "run-0", remoteUrl: origin, baseBranch: "main", branchName: "handoff/run-0" });
+  const flaky = flakyFetches(2);
+  const provider = new GitWorktreeProvider({ root, gitEnv: async () => flaky.env, retryMs: 10 });
+  const workdir = await provider.acquire({ runId: "run-1", remoteUrl: origin, baseBranch: "main", branchName: "handoff/run-1" });
+  expect(flaky.tried()).toBe(3);
+  expect(existsSync(join(workdir.path, "README.md"))).toBe(true);
 });
 
 test("a failed clone does not reveal the auth header", async () => {
   const provider = new GitWorktreeProvider({
     root: mkdtempSync(join(tmpdir(), "handoff-home-")),
+    retryMs: 1,
     gitEnv: async () => ({ GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.extraheader", GIT_CONFIG_VALUE_0: "AUTHORIZATION: basic c2VjcmV0LXRva2Vu" }),
   });
   const failure = provider.acquire({ runId: "run-1", remoteUrl: join(tmpdir(), "no-such-repo"), baseBranch: "main", branchName: "handoff/run-1" });
