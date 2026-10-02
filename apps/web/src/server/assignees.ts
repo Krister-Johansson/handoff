@@ -21,6 +21,11 @@ export async function assignmentOf(db: DbExecutor, runId: string): Promise<RunAs
   return assignment;
 }
 
+/** The token's user, "me" on the dashboard; undefined with a GitHub App, without GitHub, or when GitHub does not answer. */
+export async function tokenUser(github: GitHubPort | undefined): Promise<string | undefined> {
+  return github?.viewer().catch(() => undefined);
+}
+
 /** A person the assignee picker offers; `you` marks the token's user. */
 export type AssignableUser = Assignable & { you: boolean };
 

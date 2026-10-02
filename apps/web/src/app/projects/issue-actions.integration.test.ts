@@ -11,7 +11,7 @@ vi.mock("next/cache", () => ({ revalidatePath: (path: string) => void env.revali
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => undefined }));
 
-const { assignAction, assignableAction, startIssueRunAction } = await import("./issue-actions");
+const { assignAction, assignableAction, planAssignAction, planPeopleAction, startIssueRunAction } = await import("./issue-actions");
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -38,6 +38,22 @@ test("Start run on the issue page starts a run on the issue, stays on the page a
   github.issues.set(67, { number: 67, title: "Another", url: "u", body: "", state: "open", assignees: ["ann"] });
   expect(await startIssueRunAction({ projectId: p.id, issue: 67, graphName: "linear" })).toEqual({ ok: true, runId: expect.any(String) });
   expect(await startIssueRunAction({ projectId: p.id, issue: 66, graphName: "linear" })).toEqual({ ok: false, error: expect.stringContaining("#66 is taken by run") });
+});
+
+test("the Plan's assignee control lists the people by login and assigns on GitHub, the token's user for me, without moving the Status", async () => {
+  const { github, project: p } = await project();
+  github.assignable = [
+    { login: "ann", avatarUrl: "a1" },
+    { login: "octocat", avatarUrl: "a2" },
+  ];
+  expect(await planPeopleAction(p.id)).toEqual([{ login: "octocat" }, { login: "ann" }]);
+  expect(await planAssignAction(p.id, 66, { logins: ["ann"], me: true })).toEqual({ ok: true });
+  expect(github.issues.get(66)!.assignees).toEqual(["ann", "octocat"]);
+  expect(env.revalidated).toContain(`/projects/${p.id}/plan`);
+  expect(await planAssignAction(p.id, 66, { logins: ["stranger"] })).toEqual({ ok: false, error: expect.stringContaining("stranger cannot be assigned") });
+
+  env.github = undefined;
+  await expect(planPeopleAction(p.id)).rejects.toThrow("GitHub access");
 });
 
 test("the assignee picker lists who can be assigned with you first, and assigning writes GitHub", async () => {

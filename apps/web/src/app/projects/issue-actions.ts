@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
-import { issuePath } from "@/lib/paths";
+import type { AssignablePerson } from "@/components/plan/plan-context";
+import { issuePath, planPath } from "@/lib/paths";
 import { assignableUsers, assignmentOf, setIssueAssignees, type AssignableUser } from "@/server/assignees";
 import { startRunFromGraph } from "@/server/graphs";
 
@@ -40,7 +41,24 @@ export async function assignableAction(projectId: string): Promise<{ repo: strin
   }
 }
 
-const AssignSchema = IssueSchema.extend({ logins: z.array(z.string().min(1)), me: z.boolean().optional() });
+/**
+ * The Plan's assignee control: the people the repository can assign, the token's user first. Bound to
+ * the project on the Plan page. Throws when GitHub cannot list them, which the control says.
+ */
+export async function planPeopleAction(projectId: string): Promise<AssignablePerson[]> {
+  if (!z.string().uuid().safeParse(projectId).success) throw new Error("That project has no people to assign.");
+  return (await assignableUsers(getDb(), getGitHub(), projectId)).users.map((u) => ({ login: u.login }));
+}
+
+/** The Plan's assignee control: replaces an issue's assignees on GitHub, plus the token's user with `me`. Bound to the project on the Plan page. */
+export async function planAssignAction(projectId: string, issue: number, change: { logins: string[]; me?: boolean }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await assignAction({ projectId, issue, ...change });
+  if (!result.ok) return result;
+  revalidatePath(planPath(projectId));
+  return { ok: true };
+}
+
+const AssignSchema =IssueSchema.extend({ logins: z.array(z.string().min(1)), me: z.boolean().optional() });
 
 /** The assignee picker and Assign me: replaces the issue's assignees on GitHub; the plan's Status stays. */
 export async function assignAction(input: z.input<typeof AssignSchema>): Promise<{ ok: true; assignees: string[] } | { ok: false; error: string }> {
