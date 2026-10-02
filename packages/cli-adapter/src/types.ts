@@ -27,6 +27,8 @@ export type CliRunRequest = {
   agents?: Record<string, AgentDefinition>;
   /** An MCP tool, in the MCP config, that a person answers permission requests through. */
   permissionPromptTool?: string;
+  /** Values handoff sets for the child on top of its minimal environment, such as the run's identity. Never secrets. */
+  env?: Record<string, string>;
 };
 
 export type AgentDefinition = { description: string; prompt: string; tools?: string[]; model?: string };

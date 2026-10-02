@@ -28,7 +28,8 @@ export function commandEnv(base: Record<string, string | undefined> = process.en
 /**
  * Runs a shell command in the worktree, or inside the run's container when one is given. The command
  * gets its own process group, so a timeout or an abort stops everything it started, and whatever it
- * left running in the background is stopped when it ends.
+ * left running in the background is stopped when it ends. `env` adds values handoff sets itself, such
+ * as the run's identity; `passEnv` names variables passed from the worker's own environment.
  */
 export async function shell(
   command: string,
@@ -37,10 +38,11 @@ export async function shell(
   container?: string,
   passEnv: readonly string[] = [],
   signal?: AbortSignal,
+  env: Record<string, string> = {},
 ): Promise<{ exitCode: number | null; output: string; timedOut: boolean }> {
   const problem = passEnvProblem(passEnv);
   if (problem) throw new Error(problem);
-  const passed = pickEnv(passEnv, process.env);
+  const passed = { ...pickEnv(passEnv, process.env), ...env };
   return new Promise((resolve) => {
     // docker exec -e NAME reads the value from the docker client's environment, so values stay out of argv.
     const child = container

@@ -55,6 +55,16 @@ test("lists projects and expands one to show repository, branch, setup command a
   expect(within(detail("Plan on GitHub")).getByRole("button", { name: "Set up the plan" })).toBeInTheDocument();
 });
 
+test("the open project shows its teardown command and agent notes", () => {
+  render(<ProjectsSettings projects={[{ ...handoff, teardownCommand: "dropdb app_test", agentNotes: "Postgres runs on 5433." }, shop]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(detail("Teardown command")).toHaveTextContent("dropdb app_test");
+  expect(detail("Agent notes")).toHaveTextContent("Postgres runs on 5433.");
+  fireEvent.click(screen.getByRole("button", { name: "Show example-shop" }));
+  expect(detail("Teardown command")).toHaveTextContent("none");
+  expect(detail("Agent notes")).toHaveTextContent("none");
+});
+
 test("Add project opens the add form", async () => {
   const { unmount } = render(<ProjectsSettings projects={[handoff]} />);
   fireEvent.click(screen.getByRole("button", { name: "Add project" }));

@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 /** What the edit and delete dialogs show of a project. */
 export type ProjectSummary = {
@@ -25,6 +26,8 @@ export type ProjectSummary = {
   defaultBranch: string;
   runCount: number;
   setupCommand?: string | null;
+  teardownCommand?: string | null;
+  agentNotes?: string | null;
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -71,7 +74,32 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 placeholder="pnpm install --frozen-lockfile"
                 defaultValue={state.values?.setupCommand ?? project.setupCommand ?? ""}
               />
-              <FieldDescription>Runs once in each run&apos;s worktree before its first step there, for example to install dependencies. Leave it empty to run nothing.</FieldDescription>
+              <FieldDescription>
+                Runs once in each run&apos;s worktree before its first step there, for example to install dependencies. It sees HANDOFF_RUN_ID, HANDOFF_RUN_SHORT and
+                HANDOFF_WORKTREE, so it can name a test database per run. Leave it empty to run nothing.
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`edit-teardown-${project.id}`}>Teardown command</FieldLabel>
+              <Input
+                id={`edit-teardown-${project.id}`}
+                name="teardownCommand"
+                className="font-mono"
+                placeholder="dropdb --if-exists app_test_$HANDOFF_RUN_SHORT"
+                defaultValue={state.values?.teardownCommand ?? project.teardownCommand ?? ""}
+              />
+              <FieldDescription>Runs in the worktree just before handoff removes it, to drop what the setup command made for the run.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`edit-notes-${project.id}`}>Agent notes</FieldLabel>
+              <Textarea
+                id={`edit-notes-${project.id}`}
+                name="agentNotes"
+                rows={3}
+                placeholder="The database container is shared and already running."
+                defaultValue={state.values?.agentNotes ?? project.agentNotes ?? ""}
+              />
+              <FieldDescription>Every agent step reads these facts about the project&apos;s environment. Do not put secrets here: the notes are stored as plain text.</FieldDescription>
             </Field>
             {state.error && <FieldError>{state.error}</FieldError>}
           </FieldGroup>

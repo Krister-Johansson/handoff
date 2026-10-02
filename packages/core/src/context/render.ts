@@ -52,6 +52,11 @@ export type ContextPacket = {
   repairNote?: string;
   /** What earlier attempts of this step were told in this run: allowed files, operator notes, answers. */
   memory?: NodeMemory;
+  /**
+   * Where the step works: the run's branch, the project's setup command that ran in its worktree (null
+   * when the project has none), and the project's notes about its environment. Steps with a worktree only.
+   */
+  environment?: { branch: string; setupCommand: string | null; agentNotes?: string | undefined };
   /** The base branch moved and now changes the same lines as this branch: the work is to merge it in. */
   conflict?: { base: string; baseSha: string; files: string[] };
 };
@@ -97,6 +102,22 @@ function renderMemory({ extraPaths, notes, answers }: NodeMemory): string[] {
     out.push(...answers.map((a) => `- ${quoted(a.question)} ${a.option && a.option !== a.answer ? `${a.option}: ` : ""}${a.answer}`), "");
   }
   return out;
+}
+
+/** The worktree the step works in: its branch, what setup installed, and the run's identity. */
+function renderWorktree(environment: ContextPacket["environment"]): string[] {
+  if (!environment) return ["The current working directory is a git worktree of the repository on this run's branch.", ""];
+  const { branch, setupCommand } = environment;
+  return [
+    `The current working directory is a git worktree of the repository on this run's branch, \`${branch}\`. Commit to it. Do not create or switch to another branch.`,
+    "",
+    setupCommand
+      ? `The project's setup command, \`${setupCommand}\`, ran in this worktree before this step. What it installs and creates is in place.`
+      : "The project has no setup command, so nothing was installed in this worktree before this step. Install what you need with the repository's own tools.",
+    "",
+    "The environment has HANDOFF_RUN_ID, HANDOFF_RUN_SHORT (its first eight characters) and HANDOFF_WORKTREE. Other runs work on the same machine at the same time: name anything you create outside the worktree, such as a test database, after HANDOFF_RUN_SHORT.",
+    "",
+  ];
 }
 
 const LOG_TAIL_LINES = 80;
@@ -194,15 +215,9 @@ export function renderContextPacket(packet: ContextPacket): string {
     if (reply) out.push("## What was changed since", "", reply, "");
   }
   out.push("# Run state", "", "```json", JSON.stringify(packet.stateSlice, null, 2), "```", "");
-  out.push(
-    "# Repository context",
-    "",
-    "The current working directory is a git worktree of the repository on this run's branch.",
-    "",
-    "Relevant paths:",
-    list(packet.repoPaths, "- (none specified)"),
-    "",
-  );
+  out.push("# Repository context", "", ...renderWorktree(packet.environment), "Relevant paths:", list(packet.repoPaths, "- (none specified)"), "");
+  const notes = packet.environment?.agentNotes?.trim();
+  if (notes) out.push("# About this project's environment", "", notes, "");
   out.push(
     "# Constraints",
     "",

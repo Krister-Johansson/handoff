@@ -14,6 +14,11 @@ export type Workdir = { path: string; baseSha: string; container?: string };
 export interface WorkdirProvider {
   acquire(spec: WorkdirSpec): Promise<Workdir>;
   release(spec: WorkdirSpec): Promise<void>;
+  /**
+   * Moves a worktree whose branch has no commits of its own to the base branch's latest commit.
+   * Returns the commits it moved from and to, or nothing when the branch has commits or is current.
+   */
+  fastForward?(spec: WorkdirSpec): Promise<{ from: string; to: string } | undefined>;
 }
 
 export type ExecutorContext = {

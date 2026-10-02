@@ -30,6 +30,44 @@ function launchCheck(text: string | undefined): ReadinessCheck {
   }
 }
 
+/** Each package manager's lockfile, with the setup command that installs exactly what it pins. */
+const LOCKFILE_INSTALLS: [file: string, command: string][] = [
+  ["pnpm-lock.yaml", "pnpm install --frozen-lockfile"],
+  ["package-lock.json", "npm ci"],
+  ["yarn.lock", "yarn install --frozen-lockfile"],
+  ["bun.lock", "bun install --frozen-lockfile"],
+  ["bun.lockb", "bun install --frozen-lockfile"],
+];
+
+/** The first lockfile on the default branch, and the install command it suggests. */
+async function lockfileOf(github: GitHubPort, repo: { owner: string; name: string }, branch: string) {
+  const found = await Promise.all(LOCKFILE_INSTALLS.map(([file]) => github.getFile(repo, file, branch).catch(() => undefined)));
+  const index = found.findIndex((text) => text !== undefined);
+  return index === -1 ? undefined : { file: LOCKFILE_INSTALLS[index]![0], install: LOCKFILE_INSTALLS[index]![1] };
+}
+
+/** Whether each run's worktree is set up; a repository with a lockfile and no setup command gets the install command to use. */
+function setupCheck(setupCommand: string | null, lockfile: { file: string; install: string } | undefined): ReadinessCheck {
+  const base = { id: "setup_command", title: "A setup command", required: false };
+  if (setupCommand) return check({ ...base, status: "ok", detail: `Each run's worktree runs \`${setupCommand}\` first.` });
+  const perRun =
+    " If the tests need their own database, create it there too, for example by copying .env.example to .env with the test database named after HANDOFF_RUN_SHORT, and drop it in the teardown command.";
+  if (lockfile) {
+    return check({
+      ...base,
+      status: "todo",
+      detail: `The repository has ${lockfile.file}, but runs start in a fresh worktree with no dependencies installed.`,
+      fix: `Set the project's setup command in Settings, Projects to \`${lockfile.install}\`, so tests, Demo and Try it have dependencies.${perRun}`,
+    });
+  }
+  return check({
+    ...base,
+    status: "todo",
+    detail: "Runs start in a fresh worktree with no dependencies installed.",
+    fix: `Set the project's setup command in Settings, Projects, such as \`pnpm install\`, so tests, Demo and Try it have dependencies.${perRun}`,
+  });
+}
+
 /** How many of the recent open issues list acceptance criteria as checkboxes. */
 async function acceptanceCheck(github: GitHubPort, repo: { owner: string; name: string }, numbers: number[]): Promise<ReadinessCheck> {
   const base = { id: "acceptance", title: "Issues list acceptance criteria", required: false };
@@ -96,6 +134,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
     github?.listIssues(repo).catch(() => []) ?? Promise.resolve([]),
     planCheck(plan, project),
   ]);
+  const lockfile = project.setupCommand || !github ? undefined : await lockfileOf(github, repo, project.defaultBranch);
 
   const checks: ReadinessCheck[] = [
     graphRows.length
@@ -111,16 +150,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
     workers.length
       ? check({ id: "worker", title: "A worker is running", required: true, status: "ok", detail: `${workers.length} worker${workers.length === 1 ? "" : "s"} online.` })
       : check({ id: "worker", title: "A worker is running", required: true, status: "todo", detail: "No worker has checked in in the last minute.", fix: "Start one with `pnpm dev:worker` in the handoff checkout." }),
-    project.setupCommand
-      ? check({ id: "setup_command", title: "A setup command", required: false, status: "ok", detail: `Each run's worktree runs \`${project.setupCommand}\` first.` })
-      : check({
-          id: "setup_command",
-          title: "A setup command",
-          required: false,
-          status: "todo",
-          detail: "Runs start in a fresh worktree with no dependencies installed.",
-          fix: "Set the project's setup command in Settings, Projects, such as `pnpm install`, so tests, Demo and Try it have dependencies.",
-        }),
+    setupCheck(project.setupCommand, lockfile),
     claudeMd !== undefined
       ? check({ id: "claude_md", title: "CLAUDE.md for the agents", required: false, status: "ok", detail: "The agents read the repository's CLAUDE.md." })
       : check({

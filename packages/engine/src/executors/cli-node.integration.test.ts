@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
+import { eq, projects } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,6 +50,19 @@ test("the Coder request carries the context packet, owned paths, catalog tools a
   expect(request.systemPrompt).toContain("Only change files under: CHANGELOG.md");
   expect(request.allowedTools).toContain("Edit");
   expect(cli.requests[0]!.allowedTools).not.toContain("Edit");
+});
+
+test("a Claude step gets the run's identity in its environment, and its packet names the branch, the setup command and the agent notes", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
+  const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: createOriginRepo() });
+  await db.update(projects).set({ setupCommand: "true", agentNotes: "Postgres runs on port 5433." }).where(eq(projects.id, project.id));
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+  await drain(engineDeps(db, registry(cli), { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+  const request = cli.requests[1]!;
+  expect(request.env).toEqual({ HANDOFF_RUN_ID: run.id, HANDOFF_RUN_SHORT: run.id.slice(0, 8), HANDOFF_WORKTREE: request.cwd });
+  expect(request.systemPrompt).toContain(`on this run's branch, \`${run.branchName}\``);
+  expect(request.systemPrompt).toContain("The project's setup command, `true`, ran in this worktree");
+  expect(request.systemPrompt).toContain("# About this project's environment\n\nPostgres runs on port 5433.");
 });
 
 test("Coder node with status needs_input passes the contract without checks", async () => {

@@ -23,7 +23,21 @@ test("editing submits the new name, default branch and setup command", async () 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(actions.updateProjectAction).toHaveBeenCalledTimes(1));
   const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
-  expect(Object.fromEntries(form)).toEqual({ projectId: "p1", name: "renamed", defaultBranch: "trunk", setupCommand: "pnpm install --frozen-lockfile" });
+  expect(Object.fromEntries(form)).toEqual({ projectId: "p1", name: "renamed", defaultBranch: "trunk", setupCommand: "pnpm install --frozen-lockfile", teardownCommand: "", agentNotes: "" });
+});
+
+test("editing submits the teardown command and the agent notes, and says to keep secrets out of the notes", async () => {
+  render(<EditProjectDialog project={{ ...project, teardownCommand: "dropdb app_test", agentNotes: "Postgres runs on 5433." }} open onOpenChange={() => {}} />);
+  expect(screen.getByLabelText("Teardown command")).toHaveValue("dropdb app_test");
+  expect(screen.getByLabelText("Agent notes")).toHaveValue("Postgres runs on 5433.");
+  expect(screen.getByText(/Do not put secrets here/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Teardown command"), { target: { value: "dropdb --if-exists app_test_$HANDOFF_RUN_SHORT" } });
+  fireEvent.change(screen.getByLabelText("Agent notes"), { target: { value: "The database container is shared and already running." } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(actions.updateProjectAction).toHaveBeenCalledTimes(1));
+  const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
+  expect(form.get("teardownCommand")).toBe("dropdb --if-exists app_test_$HANDOFF_RUN_SHORT");
+  expect(form.get("agentNotes")).toBe("The database container is shared and already running.");
 });
 
 test("deleting asks first, says what goes, and shows a refusal", async () => {

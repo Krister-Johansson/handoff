@@ -90,6 +90,20 @@ test("the plan check is info without a plan, ok with one, and todo when the toke
   expect(await planCheck(plan)).toMatchObject({ status: "todo", detail: expect.stringContaining(`#${number + 10}`) });
 });
 
+test("a repository with a lockfile and no setup command gets a warning with a suggestion", async () => {
+  const project = await createProject(db, { name: "sample", repo: "octo/sample", defaultBranch: "main" });
+  const github = new FakeGitHub();
+  github.files.set("pnpm-lock.yaml", "lockfileVersion: '9.0'\n");
+  const setup = (await projectReadiness(db, github, project.id)).checks.find((c) => c.id === "setup_command")!;
+  expect(setup).toMatchObject({ status: "todo", required: false, detail: expect.stringContaining("pnpm-lock.yaml") });
+  expect(setup.fix).toContain("`pnpm install --frozen-lockfile`");
+  expect(setup.fix).toContain("HANDOFF_RUN_SHORT");
+
+  github.files.delete("pnpm-lock.yaml");
+  github.files.set("package-lock.json", "{}");
+  expect((await projectReadiness(db, github, project.id)).checks.find((c) => c.id === "setup_command")!.fix).toContain("`npm ci`");
+});
+
 test("a launch file that does not parse says why", async () => {
   const project = await createProject(db, { name: "sample", repo: "octo/sample", defaultBranch: "main" });
   const github = new FakeGitHub();

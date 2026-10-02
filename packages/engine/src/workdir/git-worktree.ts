@@ -53,6 +53,25 @@ export class GitWorktreeProvider implements WorkdirProvider {
     });
   }
 
+  /**
+   * Fetches the base branch and fast-forwards the run's worktree to it, when the branch has no commits
+   * of its own: work that waited on a plan gate starts from the newest base instead of an old one.
+   */
+  fastForward(spec: WorkdirSpec): Promise<{ from: string; to: string } | undefined> {
+    return this.serial(spec.remoteUrl, async () => {
+      const mirror = this.mirrorPath(spec.remoteUrl);
+      const path = this.worktreePath(spec.runId);
+      if (!existsSync(path)) return undefined;
+      const base = `origin/${spec.baseBranch}`;
+      if ((await this.git(path, ["rev-list", "--count", `${base}..HEAD`])) !== "0") return undefined;
+      await this.git(mirror, ["fetch", "-q", "--prune", "origin"], (await this.options.gitEnv?.(spec.remoteUrl)) ?? {});
+      const [from, to] = [await this.git(path, ["rev-parse", "HEAD"]), await this.git(path, ["rev-parse", base])];
+      if (from === to || (await this.git(path, ["rev-list", "--count", `${base}..HEAD`])) !== "0") return undefined;
+      await this.git(path, ["merge", "-q", "--ff-only", base]);
+      return { from, to };
+    });
+  }
+
   release(spec: WorkdirSpec): Promise<void> {
     return this.serial(spec.remoteUrl, async () => {
       const mirror = this.mirrorPath(spec.remoteUrl);

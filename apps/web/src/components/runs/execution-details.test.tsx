@@ -94,6 +94,12 @@ test("a Tester shows the command, exit code and output tail", () => {
   expect(screen.getByText("not ok 1 - slugify")).toBeInTheDocument();
 });
 
+test("a Tester that passed only on its retry shows the note about the first run", () => {
+  const note = "The first run failed (exited 1) and a retry passed, so a test may be flaky. The first run's output:\nFAIL flaky.test.ts";
+  render(<ExecutionDetails detail={{ ...base, nodeType: "tester", output: { passed: true, command: "npm test", exitCode: 0, tail: "1 passed", note } }} />);
+  expect(screen.getByText(/a retry passed, so a test may be flaky/)).toBeInTheDocument();
+});
+
 test("a Reviewer shows its verdict and each comment with its location", () => {
   render(
     <ExecutionDetails
