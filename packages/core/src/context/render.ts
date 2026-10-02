@@ -1,4 +1,4 @@
-import type { NodeMemory } from "../schema/run-state.ts";
+import type { NodeMemory, PreviousRun } from "../schema/run-state.ts";
 
 /** A deterministic check's result; a path check that failed names the files outside the plan in `files`. */
 export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined; files?: string[] | undefined };
@@ -67,6 +67,8 @@ export type ContextPacket = {
    * when the project has none), and the project's notes about its environment. Steps with a worktree only.
    */
   environment?: { branch: string; setupCommand: string | null; agentNotes?: string | undefined };
+  /** For a planner: the failed run this run continues, whose branch this run's branch starts from. */
+  earlierRun?: PreviousRun;
   /** The base branch moved and now changes the same lines as this branch: the work is to merge it in. */
   conflict?: { base: string; baseSha: string; files: string[] };
 };
@@ -114,6 +116,33 @@ function renderMemory({ extraPaths, notes, answers }: NodeMemory): string[] {
   return out;
 }
 
+/** The run this one continues: where its branch ended, its plan, the decisions made in it, and the findings left open. */
+function renderEarlierRun({ branch, plan, decisions, findings }: PreviousRun): string[] {
+  const out = [
+    "# An earlier run of this task",
+    "",
+    `An earlier run of this task failed, and a person ran it again from its branch, \`${branch}\`. This run's branch starts where that branch ended, so the earlier run's commits are already in the worktree.`,
+    "Plan the rest of the work: keep what the earlier run built that fits the task, fix what its reviews found, and do not redo what its commits already do. Read the commits with `git log` before you plan.",
+    "",
+  ];
+  if (plan) out.push("## Its plan", "", plan.plan, "", ...plan.steps.map((s) => `- ${s}`), "");
+  if (decisions.length) {
+    out.push("## Decisions a person made in it", "", "They still hold.", "");
+    for (const d of decisions) {
+      if (d.note) out.push(`- ${d.note}`);
+      for (const c of d.comments) {
+        const place = placeOf(c);
+        out.push(`- ${c.quote ? `${place ? `${place} on` : "On"} ${quoted(c.quote)}: ` : place ? `${place}: ` : ""}${c.body}`);
+      }
+    }
+    out.push("");
+  }
+  if (findings.length) {
+    out.push("## Review findings it left open", "", ...findings.map((f) => `- ${f.severity ? `[${f.severity}] ` : ""}${f.path ? `${placeOf(f)}: ` : ""}${f.body}`), "");
+  }
+  return out;
+}
+
 /** The worktree the step works in: its branch, what setup installed, and the run's identity. */
 function renderWorktree(environment: ContextPacket["environment"]): string[] {
   if (!environment) return ["The current working directory is a git worktree of the repository on this run's branch.", ""];
@@ -149,6 +178,7 @@ export function renderContextPacket(packet: ContextPacket): string {
   out.push("# Task", "", packet.task, "");
   if (packet.stage === "plan") out.push("# Stage", "", PLAN_STAGE, "");
   if (packet.instructions) out.push("# Instructions for this step", "", packet.instructions, "");
+  if (packet.earlierRun) out.push(...renderEarlierRun(packet.earlierRun));
   if (packet.decisions?.length) {
     out.push(
       "# Decisions from the person reviewing this run",

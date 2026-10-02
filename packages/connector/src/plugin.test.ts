@@ -69,7 +69,7 @@ test("the handoff skill says get_run has the whole command of a permission promp
   expect(skill).toMatch(/permission prompt[^\n]*whole command[^\n]*`answer_permission`/);
   expect(skill).toMatch(/approve, changes or fix/);
   expect(skill).toMatch(/Try it gate[^\n]*`criteria`/);
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.11.0");
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.12.0");
 });
 
 test("the plugin ships a setup skill that walks through setup_project", () => {

@@ -40,6 +40,28 @@ export const NodeMemorySchema = z.object({
 });
 export type NodeMemory = z.infer<typeof NodeMemorySchema>;
 
+/**
+ * The run this run continues, when a person ran a failed run again from its branch: its branch, where
+ * this run's branch starts, and what its planner should know of it: the plan, the decisions people made
+ * at its gates, and the review findings it did not get to fix.
+ */
+export const PreviousRunSchema = z.object({
+  runId: z.string(),
+  branch: z.string(),
+  plan: z.object({ plan: z.string(), steps: z.array(z.string()) }).optional(),
+  decisions: z
+    .array(
+      z.object({
+        gate: z.string(),
+        note: z.string().optional(),
+        comments: z.array(z.object({ quote: z.string().optional(), path: z.string().optional(), line: z.number().int().optional(), endLine: z.number().int().optional(), body: z.string() })),
+      }),
+    )
+    .default([]),
+  findings: z.array(z.object({ path: z.string().optional(), line: z.number().int().optional(), body: z.string(), severity: z.string().optional(), from: z.string() })).default([]),
+});
+export type PreviousRun = z.infer<typeof PreviousRunSchema>;
+
 export const RunStateSchema = z
   .object({
     task: z.string(),
@@ -51,6 +73,7 @@ export const RunStateSchema = z
     nodes: z.record(z.string(), NodeResultSchema).default({}),
     human: z.record(z.string(), HumanAnswerSchema).default({}),
     memory: z.record(z.string(), NodeMemorySchema).optional(),
+    previousRun: PreviousRunSchema.optional(),
   })
   .loose();
 

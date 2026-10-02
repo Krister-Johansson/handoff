@@ -3,11 +3,27 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import { appendEvents, eq, nodeExecutions, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { dismissAttention, listAttention } from "./attention";
-import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
+import { createProject, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
 afterAll(() => db.$client.end());
+
+test("a superseded run is not in list_attention", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const failed = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a CHANGELOG.md" });
+  await seedExecution(db, failed.id, { nodeKey: "coder", status: "failed" });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, failed.id));
+  const finished = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a truncate helper" });
+  await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, finished.id));
+  await db.transaction((tx) => appendEvents(tx, finished.id, [{ type: "run.finish", payload: { notify: true } }]));
+  expect(await listAttention(db)).toHaveLength(2);
+
+  await runAgain(db, failed.id);
+  await runAgain(db, finished.id);
+  expect(await listAttention(db)).toEqual([]);
+});
 
 test("questions, failed runs and pull requests waiting for review each become one item that links to the run", async () => {
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });

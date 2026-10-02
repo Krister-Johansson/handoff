@@ -1,0 +1,2 @@
+ALTER TABLE "runs" ADD COLUMN "superseded_by" uuid;--> statement-breakpoint
+ALTER TABLE "runs" ADD CONSTRAINT "runs_superseded_by_runs_id_fkey" FOREIGN KEY ("superseded_by") REFERENCES "runs"("id") ON DELETE SET NULL;

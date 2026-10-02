@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ClockIcon, CoinsIcon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, TimerIcon } from "lucide-react";
-import { GraphDocumentSchema, summarizeOutput } from "@handoff/core";
+import { GraphDocumentSchema, RunStateSchema, summarizeOutput } from "@handoff/core";
+import { branchHasWork } from "@handoff/engine/runs";
+import { RunLineage } from "@/components/runs/run-lineage";
 import { Button } from "@/components/ui/button";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
 import { PermissionCard, type PermissionRequestView } from "@/components/runs/permission-card";
@@ -92,6 +94,37 @@ async function queuePlace(projectId: string, runId: string): Promise<RunQueue | 
   return entry && { position: entry.position, requested: entry.requested, mode: entry.mode };
 }
 
+/**
+ * The run's pull request, and Cancel while it is active or Run again once it ended. A run another run
+ * superseded links to that run instead of offering Run again.
+ */
+function RunActions({ run, project, active }: { run: Detail["run"]; project: Detail["project"]; active: boolean }) {
+  return (
+    <>
+      {run.prNumber !== null ? (
+        <Button size="sm" variant="outline" asChild>
+          <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
+            <GitPullRequestIcon data-icon="inline-start" />
+            PR #{run.prNumber}
+          </a>
+        </Button>
+      ) : (
+        active && (
+          <Button size="sm" variant="outline" disabled>
+            <GitPullRequestIcon data-icon="inline-start" />
+            No PR yet
+          </Button>
+        )
+      )}
+      {active ? (
+        <CancelRunButton runId={run.id} />
+      ) : (
+        !project.isDemo && !run.supersededBy && <RunAgainButton runId={run.id} branch={run.branchName} hasWork={branchHasWork(run)} />
+      )}
+    </>
+  );
+}
+
 export default async function RunPage({ params }: { params: Promise<{ projectId: string; runId: string }> }) {
   const { projectId, runId } = await params;
   const detail = await getRunDetail(getDb(), runId);
@@ -116,6 +149,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
               <IssueLinks variant="meta" projectId={project.id} issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
               <PartOf issues={run.issues} projectId={project.id} />
               <StartedByScheduler startedBy={run.startedBy} place={scheduledPlace(events)} />
+              <RunLineage projectId={project.id} continues={RunStateSchema.shape.previousRun.parse(run.state.previousRun)?.runId ?? null} supersededBy={run.supersededBy} />
               {graph && (
                 <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
                   <GitForkIcon aria-hidden />
@@ -149,26 +183,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
               </a>
             </div>
           ),
-          actions: (
-            <>
-              {run.prNumber !== null ? (
-                <Button size="sm" variant="outline" asChild>
-                  <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
-                    <GitPullRequestIcon data-icon="inline-start" />
-                    PR #{run.prNumber}
-                  </a>
-                </Button>
-              ) : (
-                active && (
-                  <Button size="sm" variant="outline" disabled>
-                    <GitPullRequestIcon data-icon="inline-start" />
-                    No PR yet
-                  </Button>
-                )
-              )}
-              {active ? <CancelRunButton runId={run.id} /> : !project.isDemo && <RunAgainButton runId={run.id} />}
-            </>
-          ),
+          actions: <RunActions run={run} project={project} active={active} />,
         }}
         runId={run.id}
         projectId={project.id}

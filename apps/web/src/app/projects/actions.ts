@@ -142,7 +142,13 @@ export async function unarchivePullAction(_: ActionState, form: FormData): Promi
 export async function runAgainAction(_: ActionState, form: FormData): Promise<ActionState> {
   let again: { id: string; projectId: string };
   try {
-    again = await runAgain(getDb(), field(form, "runId"), { projects: getProjects(), startedBy: "dashboard" });
+    const from = field(form, "from");
+    again = await runAgain(getDb(), field(form, "runId"), {
+      github: getGitHub(),
+      projects: getProjects(),
+      startedBy: "dashboard",
+      from: from === "branch" || from === "scratch" ? from : undefined,
+    });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

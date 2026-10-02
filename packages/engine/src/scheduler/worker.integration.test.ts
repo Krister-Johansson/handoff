@@ -6,7 +6,7 @@ import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { cancelRun, repairNodeExecution } from "../operations.ts";
-import { createRun } from "../runs.ts";
+import { createRun, previousRunOf } from "../runs.ts";
 import { createOriginRepo, git } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
@@ -80,6 +80,34 @@ test("the first coder attempt starts on the latest base when the branch has no c
   expect(coderSaw).toBe(true);
   const { types } = await inspect(db, run.id);
   expect(types).toContain("workdir.fast_forwarded");
+});
+
+test("a run started again from the branch works on the earlier run's commits", async () => {
+  const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
+  let sawChangelog: boolean | undefined;
+  const cli = new FakeCliExecutor([
+    async (request, options) => {
+      writeFileSync(join(request.cwd, "CHANGELOG.md"), "# Changelog\n");
+      git(request.cwd, "add", "CHANGELOG.md");
+      git(request.cwd, "commit", "-qm", "changelog");
+      await options.onSessionId?.(request.session.id);
+      const output = { status: "failed", summary: "ran out of ideas" };
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: output, validated: output };
+    },
+    async (request, options) => {
+      sawChangelog = existsSync(join(request.cwd, "CHANGELOG.md"));
+      await options.onSessionId?.(request.session.id);
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: outputs.coderDone, validated: outputs.coderDone };
+    },
+  ]);
+  const { run: earlier, deps } = await failedRun(cli, workdirs);
+  await cancelRun(db, earlier.id);
+  await runOnce(deps);
+
+  const again = await createRun(db, { projectId: earlier.projectId, graphVersionId: earlier.graphVersionId, task: earlier.task, previousRun: previousRunOf(earlier) });
+  await drain(deps);
+  expect(sawChangelog).toBe(true);
+  expect((await inspect(db, again.id)).run.status).toBe("succeeded");
 });
 
 test("a failed run keeps its worktree until it is repaired or cancelled", async () => {

@@ -356,6 +356,22 @@ test("held is recorded once until the reasons change", async () => {
   expect(held).toEqual([[first.id], [first.id, second.id], [third.id]]);
 });
 
+test("a superseded run does not make its task look cancelled to the scheduler", async () => {
+  const p = await planned();
+  const issue = await p.task("Run again by a person");
+  const start = (again: boolean) => startRun(db, { projectId: p.project.id, graphName: "g", task: "", issues: [issue], startedBy: "dashboard", again }, { github: p.github, projects: p.plan });
+  const earlier = await start(false);
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, earlier.id));
+  // Run again: the new run takes the earlier one's place, which is marked superseded and cancelled.
+  const again = await start(true);
+  await db.update(runs).set({ status: "cancelled", supersededBy: again.id }).where(eq(runs.id, earlier.id));
+  // The new run finished, and a person put the task back in Ready for more work.
+  await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, again.id));
+  p.plan.itemsOf(repo).get(issue)!.status = "Ready";
+
+  expect(await p.check()).toMatchObject({ state: "running", started: [{ issue }] });
+});
+
 test("a task whose cancelled run a person released starts on the next check", async () => {
   const p = await planned();
   const issue = await p.task("Cancelled by a person");
