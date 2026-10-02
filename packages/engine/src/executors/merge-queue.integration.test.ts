@@ -3,14 +3,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { asc, eq, notifications, runs, wakeByKey } from "@handoff/db";
+import { asc, eq, notifications, projects, projectSchedulers, runs, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { checkProject } from "../backlog-scheduler/tick.ts";
 import { wakeDependents } from "../dependencies.ts";
 import { mergeQueue, requestMerge, requestMergeAll } from "../operations.ts";
 import { createRun } from "../runs.ts";
 import { createOriginRepo, git } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
+import { schedulerOn } from "../testing/scheduler.ts";
+import { scripted } from "../testing/scripted.ts";
 import type { ExecutorRegistry, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { finishExecutor } from "./flow.ts";
@@ -194,4 +197,41 @@ describe("merge queue", () => {
     // It caught up and still went first.
     expect(github.merged).toEqual([await prOf(first.id), await prOf(second.id)]);
   });
+});
+
+test("a merge that closes a task nudges the scheduler, and the next check starts the task whose last blocker it closed", async () => {
+  const repo = { owner: "octo", name: "sample" };
+  const github = new FakeGitHub();
+  const plan = new FakeProjects(github);
+  const { number: planNumber } = await plan.createProject("octo", repo, "sample plan");
+  const { project, graphVersion } = await seedGraph(db, graph("auto"), { localClonePath: createOriginRepo() });
+  await db.update(projects).set({ planProjectNumber: planNumber }).where(eq(projects.id, project.id));
+  const task = async (title: string, blockedBy: number[] = []) => {
+    const created = await plan.createIssue(repo, { project: planNumber, title, body: "", labels: ["task"], blockedBy });
+    plan.itemsOf(repo).get(created.number)!.status = "Ready";
+    return created;
+  };
+  const first = await task("Theme tokens");
+  const next = await task("Board view", [first.number]);
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Theme tokens", issues: [{ number: first.number, title: "Theme tokens", url: first.url, body: "" }] });
+  const scheduler = await schedulerOn(db, project.id);
+  await db.update(projectSchedulers).set({ maxRuns: 2 }).where(eq(projectSchedulers.projectId, project.id));
+  // The run goes on after its merge, so only the merge can nudge the scheduler.
+  const after: NodeExecutor = scripted({ kind: "waiting", wait: { kind: "timer", key: "later", deadlineAt: new Date(Date.now() + 3_600_000) } });
+  const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github, db, projects: plan }), finish: after };
+  const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+  await drain(deps);
+  const number = (await inspect(db, run.id)).run.prNumber!;
+  github.setChecks(number, "SUCCESS");
+  await wakeByKey(db, `gh:pr:42:${number}`, { reason: "webhook" });
+  await drain(deps);
+
+  expect(github.merged).toEqual([number]);
+  expect(github.issues.get(first.number)!.state).toBe("closed");
+  expect((await inspect(db, run.id)).run.status).toBe("waiting");
+  expect(await scheduler.due()).toBe(0);
+
+  await checkProject({ db, github, projects: plan, owner: "worker-1" }, project.id);
+  const started = await db.select().from(runs).where(eq(runs.startedBy, "scheduler"));
+  expect(started.map((r) => r.issues.map((i) => i.number))).toEqual([[next.number]]);
 });
