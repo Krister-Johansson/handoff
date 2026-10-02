@@ -1,13 +1,23 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, type ComponentProps } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { DiffFile, DiffLine } from "@handoff/core";
+import { AssistantProvider, useAssistant } from "@/components/assistant/assistant-provider";
+import type { AssistantPort } from "@/lib/assistant/port";
+import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { CodeReview } from "./code-review";
 
 const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn(), markViewedAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
 const followUp = vi.hoisted(() => ({ createFollowUpAction: vi.fn() }));
 vi.mock("@/app/inbox/follow-up-action", () => followUp);
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/projects/p1/runs/r1/review/q1",
+}));
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
   followUp.createFollowUpAction.mockReset();
   actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true });
   actions.markViewedAction.mockReset().mockResolvedValue({ ok: true });
@@ -325,4 +335,62 @@ test("Create follow-up issue opens one issue with the chosen findings", async ()
 test("a code review without findings says the reviewer found nothing", () => {
   render(<CodeReview {...props} findings={{ verdict: "approve", by: "code_review-1", comments: [] }} />);
   expect(screen.getByRole("heading", { name: "Code review found nothing" })).toBeInTheDocument();
+});
+
+function Grab({ onPort }: { onPort: (port: AssistantPort) => void }) {
+  const port = useAssistant();
+  useEffect(() => {
+    onPort(port);
+  }, [onPort, port]);
+  return null;
+}
+
+/**
+ * The code review inside the assistant, with a turn running so the test can call the page's tools as
+ * the model would: `call` emits a ui_call and resolves with the page's answer.
+ */
+async function withAssistant(overrides: Partial<ComponentProps<typeof CodeReview>> = {}) {
+  const transport = new FakeAssistantTransport();
+  let port: AssistantPort | undefined;
+  const onPort = (p: AssistantPort) => (port = p);
+  render(
+    <AssistantProvider transport={transport} available>
+      <Grab onPort={onPort} />
+      <CodeReview {...props} {...overrides} />
+    </AssistantProvider>,
+  );
+  act(() => void port!.send("what is on this page"));
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  let next = 1;
+  const call = async (name: string, args: unknown = {}) => {
+    const requestId = `u${next++}`;
+    act(() => transport.emit({ type: "ui_call", requestId, name, args }));
+    await waitFor(() => expect(transport.uiReplies.find((r) => r.requestId === requestId)).toBeDefined());
+    const { text, isError } = transport.uiReplies.find((r) => r.requestId === requestId)!;
+    return { text, isError };
+  };
+  const whereAmI = async () => JSON.parse((await call("where_am_i")).text) as { page?: { kind: string; tools: { name: string }[]; state: { data: Record<string, unknown> } } };
+  return { call, whereAmI, transport };
+}
+
+const fileCursor = () => screen.getByRole("button", { name: / of 3$/ });
+
+test("page_go_to_file moves by path, index and direction, and opens the file", async () => {
+  const { call, whereAmI } = await withAssistant();
+  fireEvent.click(within(screen.getByRole("region", { name: "src/b.ts" })).getByRole("button", { name: "Collapse src/b.ts" }));
+
+  expect(await call("page_go_to_file", { path: "src/b.ts" })).toEqual({ text: "Now on file 2 of 3: src/b.ts.", isError: false });
+  expect(fileCursor()).toHaveTextContent("src/b.ts 2 of 3");
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByText("export const b = 1;")).toBeInTheDocument();
+
+  expect(await call("page_go_to_file", { index: 3 })).toEqual({ text: "Now on file 3 of 3: pnpm-lock.yaml.", isError: false });
+  expect(await call("page_go_to_file", { direction: "previous" })).toEqual({ text: "Now on file 2 of 3: src/b.ts.", isError: false });
+  expect(await call("page_go_to_file", { direction: "next" })).toEqual({ text: "Now on file 3 of 3: pnpm-lock.yaml.", isError: false });
+  expect(await call("page_go_to_file")).toEqual({ text: "Already on the last file, 3 of 3: pnpm-lock.yaml.", isError: false });
+  expect((await whereAmI()).page?.state.data).toMatchObject({ current: 3 });
+
+  expect(await call("page_go_to_file", { path: "src/c.ts" })).toEqual({ text: "src/c.ts is not in this review. The files are: 1. src/a.ts; 2. src/b.ts; 3. pnpm-lock.yaml.", isError: true });
+  expect(await call("page_go_to_file", { index: 4 })).toEqual({ text: "There is no file 4. The files run from 1 to 3.", isError: true });
+  expect(fileCursor()).toHaveTextContent("pnpm-lock.yaml 3 of 3");
 });

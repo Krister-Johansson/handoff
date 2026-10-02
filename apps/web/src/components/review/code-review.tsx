@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { markViewedAction } from "@/app/inbox/actions";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { commentedAt, placeEarlier, type EarlierRound } from "@/lib/earlier";
 import { placeFindings, type Findings, type FollowUp } from "@/lib/findings";
 import type { LineTokens } from "@/lib/highlight-types";
@@ -157,6 +158,24 @@ type Props = {
   findings?: (Findings & { by: string; followUp?: FollowUp | undefined }) | undefined;
 };
 
+/** How a refusal lists the files a page tool can take. */
+const fileList = (files: DiffFile[]) => `The files are: ${files.map((f, i) => `${i + 1}. ${f.path}`).join("; ")}.`;
+
+/**
+ * The file a page tool names, from 0: by its path or its index from 1. Throws a refusal that says
+ * what there is to choose from.
+ */
+function findFile(files: DiffFile[], which: { path?: string | undefined; index?: number | undefined }): number {
+  if (which.path !== undefined) {
+    const at = files.findIndex((f) => f.path === which.path);
+    if (at < 0) throw new Error(`${which.path} is not in this review. ${fileList(files)}`);
+    return at;
+  }
+  if (which.index === undefined) throw new Error("Name the file by its path or its index.");
+  if (which.index > files.length) throw new Error(`There is no file ${which.index}. The files run from 1 to ${files.length}.`);
+  return which.index - 1;
+}
+
 /** Which files count as viewed: the saved marks, overridden by what the person clicks on this page. */
 function useViewed(runId: string, files: DiffFile[], views: View[], earlier: EarlierRound[], enabled: boolean) {
   const initial = useMemo(() => {
@@ -216,6 +235,30 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
     });
 
   const drafted = readOnly ? 0 : comments.length;
+
+  usePageTools(
+    "code_review",
+    {
+      page_go_to_file: ({ path, index, direction }) => {
+        if (!files.length) throw new Error("This review has no files.");
+        const to = path === undefined && index === undefined ? current + (direction === "previous" ? -1 : 1) : findFile(files, { path, index });
+        const at = Math.max(0, Math.min(files.length - 1, to));
+        const named = `${at + 1} of ${files.length}: ${files[at]!.path}.`;
+        if (at === current && to !== current) return `Already on the ${to < 0 ? "first" : "last"} file, ${named}`;
+        setOpen(files[at]!.path, true);
+        go(at);
+        return `Now on file ${named}`;
+      },
+      page_set_diff_view: undefined,
+      page_expand_files: undefined,
+      page_mark_viewed: undefined,
+      page_comment_on_lines: undefined,
+      page_remove_line_comment: undefined,
+      page_set_note: undefined,
+      page_submit_review: undefined,
+    },
+    () => ({ questionId, runId, from, current: files.length ? current + 1 : null }),
+  );
 
   return (
     <div className="flex flex-col gap-4">
