@@ -302,7 +302,12 @@ test("a max-turns failure stores the subtype, turn count, cost and last message"
   });
 });
 
-test("code review is skipped with the earlier verdict when the fingerprint matches", async () => {
+test("code review is skipped with the earlier verdict when the fingerprint matches", () => heldReview("code_review"));
+
+test("a reviewer after a coder has passed is skipped the same way, since it reviews the change", () => heldReview("reviewer"));
+
+/** A review approves the change, main is merged in, and the review runs again with the same change. */
+async function heldReview(type: "code_review" | "reviewer") {
   const origin = createOriginRepo({ "notes.txt": "one\ntwo\nthree\n" });
   // The first attempt changes the notes; the second only merges main, as a coder resolving a conflict would.
   const coder: NodeExecutor = {
@@ -331,7 +336,7 @@ test("code review is skipped with the earlier verdict when the fingerprint match
     attributes: { startNode: "coder" },
     nodes: [
       { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
-      { key: "review", attributes: { type: "code_review", x: 300, y: 0 } },
+      { key: "review", attributes: { type, x: 300, y: 0 } },
       { key: "pr", attributes: { type: "pr", x: 600, y: 0 } },
     ],
     edges: [
@@ -345,7 +350,7 @@ test("code review is skipped with the earlier verdict when the fingerprint match
   const cli = new FakeCliExecutor([{ output: verdict }]);
   const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Change the notes" });
-  const executors = { coder, code_review: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr } as unknown as ExecutorRegistry;
+  const executors = { coder, [type]: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr } as unknown as ExecutorRegistry;
   await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
 
   const { executions, events } = await inspect(db, run.id);
@@ -361,7 +366,7 @@ test("code review is skipped with the earlier verdict when the fingerprint match
   expect(executions.find((e) => e.nodeKey === "review" && e.attempt === 2)!.output).toEqual(verdict);
   const held = events.find((e) => e.type === "approval.held");
   expect((held?.payload as { message?: string } | undefined)?.message).toMatch(/^Unchanged since your approval at .+; only main was merged in$/);
-});
+}
 
 /**
  * A coder that commits a change to the notes and stops the run when it is sent back, a code review in
