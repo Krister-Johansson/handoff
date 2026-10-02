@@ -45,6 +45,8 @@ export function runParts(run: ForecastRun, questions: ForecastQuestion[], permis
   const open: Interval[] = [
     ...questions.map((q): Interval => [q.createdAt.getTime(), (q.answeredAt ?? run.finishedAt).getTime()]),
     ...permissions.map((p): Interval => [p.createdAt.getTime(), (p.decidedAt ?? run.finishedAt).getTime()]),
+    // A pull request in a manual merge queue waits for the person to ask to merge; auto merging asks nobody.
+    ...(run.mergeQueuedAt && run.mergeRequestedAt ? [[run.mergeQueuedAt.getTime(), run.mergeRequestedAt.getTime()] as Interval] : []),
   ];
   const wallMs = end - start;
   const waitingMs = unionLength(open, start, end);

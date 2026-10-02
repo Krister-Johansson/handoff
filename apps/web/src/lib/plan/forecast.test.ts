@@ -29,6 +29,15 @@ test("waiting on you is the union of open questions and permission requests insi
   expect(parts.wallMs).toBe(60 * MIN);
 });
 
+test("time in a manual merge queue counts as waiting on you until the person asks to merge", () => {
+  // Queued at 09:40, merge asked for at 09:50, overlapping a question open from 09:45 to 09:55.
+  const manual = runParts({ ...run(60), mergeQueuedAt: at(40), mergeRequestedAt: at(50) }, [{ createdAt: at(45), answeredAt: at(55) }], [], []);
+  expect(manual.waitingMs).toBe(15 * MIN);
+  // Auto merging needs no request, so nobody was waited on.
+  const auto = runParts({ ...run(60), mergeQueuedAt: at(40), mergeRequestedAt: null }, [], [], []);
+  expect(auto.waitingMs).toBe(0);
+});
+
 /** An execution created at `created` minutes that spent `queued` minutes ready and not running. */
 const execution = (created: number, queued: number, costUsd: number | null = null) => ({
   createdAt: at(created),
