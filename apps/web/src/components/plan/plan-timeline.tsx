@@ -422,7 +422,7 @@ type PaneView = { left: number; width: number };
  * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
  * arrows and the rows at their other ends strong and dims the rest.
  */
-function TimelineChart({ projectId, repoUrl, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
+function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const rowsOpen = useRowsOpen(projectId, searchOpen);
   const q = useSearchQuery();
@@ -432,7 +432,7 @@ function TimelineChart({ projectId, repoUrl, project, epics, unparented, timelin
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
   const ctx: CardContext = { items, entries, projectId };
-  const flags: FlagContext = { projectId, repoUrl, items, entries, needsYou };
+  const flags: FlagContext = { projectId, items, entries, needsYou };
 
   const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
   const range = chartRange(timeline);

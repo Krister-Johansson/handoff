@@ -12,7 +12,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import type { DaySpan, TimelineItem } from "@/lib/plan/schedule";
 import { KIND_NAME, spanText } from "@/lib/plan/timeline-rows";
 import { hasActiveRun, taskColumn } from "@/lib/plan/task";
-import { runPath } from "@/lib/paths";
+import { issuePath, runPath } from "@/lib/paths";
 import { shortDay } from "@/lib/plan/timeline-scale";
 import { cn } from "@/lib/utils";
 import { KindBadge, StatusPill } from "./plan-status";
@@ -20,7 +20,6 @@ import { KindBadge, StatusPill } from "./plan-status";
 /** What the timeline knows beyond the task itself, for its flag card. */
 export type FlagContext = {
   projectId: string;
-  repoUrl: string;
   /** Every item of the plan by number. */
   items: Map<number, PlanItem>;
   /** Every item's place in time by number. */
@@ -33,12 +32,6 @@ type Window = { item: PlanItem; span: DaySpan };
 
 const numbers = (list: number[]) => list.map((n) => `#${n}`).join(", ");
 const dayCount = (days: number) => (days === 1 ? "1 day" : `${days} days`);
-
-/**
- * An issue's page. The issue page inside handoff is not on main yet, so this opens the issue on GitHub;
- * once it is, this is the one line that changes.
- */
-const issueHref = (ctx: FlagContext, n: number) => `${ctx.repoUrl}/issues/${n}`;
 
 /** The nearest story or epic above a task with both a Start and a Target, as the schedule finds it. */
 function windowOf(task: PlanTask, ctx: FlagContext): Window | undefined {
@@ -66,16 +59,16 @@ function flagsOf(task: PlanTask, entry: TimelineItem, bounds: PlanItem | undefin
   return { flags, tone };
 }
 
-/** One blocker: number and title linking to its issue, its kind, its status and whether it is open; or that it is outside the plan. */
+/** One blocker: number and title linking to its issue page, its kind, its status and whether it is open; or that it is outside the plan. */
 function Blocker({ n, task, ctx }: { n: number; task: PlanTask; ctx: FlagContext }) {
   const blocker = ctx.items.get(n);
   const open = blocker ? blocker.state === "open" : task.blockedBy.includes(n);
   return (
     <li aria-label={blocker ? `#${n} ${blocker.title}` : `#${n}`} className="flex flex-wrap items-center gap-1.5">
-      <a href={issueHref(ctx, n)} className="min-w-0 hover:underline hover:underline-offset-3">
+      <Link href={issuePath(ctx.projectId, n)} className="min-w-0 hover:underline hover:underline-offset-3">
         <span className="font-mono text-muted-foreground">#{n}</span>
         {blocker && ` ${blocker.title}`}
-      </a>
+      </Link>
       {blocker ? (
         <>
           {blocker.kind && <KindBadge kind={blocker.kind} />}
@@ -203,9 +196,9 @@ export function FlagCard({ task, entry, ctx }: { task: PlanTask; entry: Timeline
         collisionPadding={8}
         className="flex w-80 max-w-[calc(100vw-16px)] flex-col gap-2 text-xs"
       >
-        <a href={issueHref(ctx, task.number)} className="text-[13px] leading-snug font-semibold hover:underline hover:underline-offset-3">
+        <Link href={issuePath(ctx.projectId, task.number)} className="text-[13px] leading-snug font-semibold hover:underline hover:underline-offset-3">
           #{task.number} {task.title}
-        </a>
+        </Link>
         <dl className="grid grid-cols-[74px_minmax(0,1fr)] gap-x-2.5 gap-y-1.5">
           <TimeRows task={task} entry={entry} bounds={bounds} />
           <BlockerRows task={task} entry={entry} ctx={ctx} />

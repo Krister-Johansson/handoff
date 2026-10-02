@@ -112,7 +112,7 @@ test("under 640 px the warning icon opens the same card on focus, with the block
   const card = await screen.findByRole("group", { name: "Flags of #57 Add the migration" });
   expect(within(card).getAllByRole("definition")[0]).toHaveTextContent("Start was Oct 1; waits on #55");
   const blocker = within(card).getByRole("listitem", { name: "#55 Shaping tools" });
-  expect(within(blocker).getByRole("link", { name: "#55 Shaping tools" })).toHaveAttribute("href", `${REPO_URL}/issues/55`);
+  expect(within(blocker).getByRole("link", { name: "#55 Shaping tools" })).toHaveAttribute("href", "/projects/p1/issues/55");
   expect(within(blocker).getByText("Running")).toBeInTheDocument();
   expect(within(blocker).getByText("Open")).toBeInTheDocument();
 

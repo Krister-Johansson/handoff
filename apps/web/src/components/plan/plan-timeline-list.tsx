@@ -62,11 +62,11 @@ function MiniBar({ row, entry, scale, todayX }: { row: ListRow; entry: TimelineI
  * waits on, and whether it is late or overdue.
 
  */
-export function PlanTimelineList({ projectId, repoUrl, project, epics, unparented, timeline, zoom, readAt, needsYou }: TimelineProps) {
+export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, readAt, needsYou }: TimelineProps) {
   const [scheduling, setScheduling] = useState<PlanItem>();
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
-  const flags: FlagContext = { projectId, repoUrl, items, entries, needsYou };
+  const flags: FlagContext = { projectId, items, entries, needsYou };
   const range = chartRange(timeline);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());

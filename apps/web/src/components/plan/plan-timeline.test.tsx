@@ -214,20 +214,21 @@ test("the warning icon opens a card on focus with each blocker's kind, title, st
   fireEvent.focus(icon);
   const card = await screen.findByRole("group", { name: "Flags of #57 Add the migration" });
   const blocker = (n: number) => within(card).getByRole("listitem", { name: new RegExp(`^#${n}\\b`) });
+  expect(within(card).getByRole("link", { name: "#57 Add the migration" })).toHaveAttribute("href", "/projects/p1/issues/57");
   expect(within(card).getAllByRole("term").map((t) => t.textContent)).toEqual(["Late", "Blocked by"]);
   expect(within(card).getAllByRole("definition")[0]).toHaveTextContent("Start was Oct 1; waits on #55, #151");
 
-  expect(within(blocker(55)).getByRole("link", { name: "#55 Shaping tools" })).toHaveAttribute("href", `${REPO_URL}/issues/55`);
+  expect(within(blocker(55)).getByRole("link", { name: "#55 Shaping tools" })).toHaveAttribute("href", "/projects/p1/issues/55");
   expect(within(blocker(55)).getByText("Task")).toBeInTheDocument();
   expect(within(blocker(55)).getByText("Running")).toBeInTheDocument();
   expect(within(blocker(55)).getByText("Open")).toBeInTheDocument();
 
-  expect(within(blocker(52)).getByRole("link", { name: "#52 Projects port" })).toHaveAttribute("href", `${REPO_URL}/issues/52`);
+  expect(within(blocker(52)).getByRole("link", { name: "#52 Projects port" })).toHaveAttribute("href", "/projects/p1/issues/52");
   expect(within(blocker(52)).getByText("Done")).toBeInTheDocument();
   expect(within(blocker(52)).getByText("Closed")).toBeInTheDocument();
 
   // #151 is not an item of the Project: its number, that it is outside the plan, and GitHub's open state.
-  expect(within(blocker(151)).getByRole("link", { name: "#151" })).toHaveAttribute("href", `${REPO_URL}/issues/151`);
+  expect(within(blocker(151)).getByRole("link", { name: "#151" })).toHaveAttribute("href", "/projects/p1/issues/151");
   expect(within(blocker(151)).getByText("Outside the plan")).toBeInTheDocument();
   expect(within(blocker(151)).getByText("Open")).toBeInTheDocument();
 
