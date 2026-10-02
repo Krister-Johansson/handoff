@@ -100,18 +100,19 @@ function suggestionsOf(state: RunState, self: string): NonNullable<ContextPacket
 const REVIEW_TYPES = new Set(["reviewer", "code_review"]);
 
 /**
- * A reviewer's own last request for changes, when it runs again: its comments, what the step it sent
- * the work back to said it changed, and the commit it reviewed, so it checks those instead of
- * reviewing everything from scratch.
+ * A reviewer's own last review with findings, when it runs again, whatever its verdict: the verdict
+ * and findings, what the step it sends work back to said it changed, and the commit it reviewed, so it
+ * checks those instead of reviewing everything from scratch.
  */
 function previousReviewOf(node: CompiledNode, state: RunState, sentBackTo: string[]): ContextPacket["previousReview"] {
   if (!REVIEW_TYPES.has(node.type)) return undefined;
   const last = obj(state.nodes[node.key]?.output);
-  if (last.verdict !== "request_changes" || !Array.isArray(last.comments) || last.comments.length === 0) return undefined;
+  if ((last.verdict !== "request_changes" && last.verdict !== "approve") || !Array.isArray(last.comments) || last.comments.length === 0) return undefined;
   const reply = sentBackTo.map((key) => obj(state.nodes[key]?.output).summary).find((s): s is string => typeof s === "string" && s.trim() !== "");
   const reviewedAt = obj(state.reviewedAt)[node.key];
   return {
-    comments: last.comments.map(obj).map((c) => ({ ...placeOf(c), body: String(c.body ?? "") })),
+    verdict: last.verdict,
+    comments: last.comments.map(obj).map((c) => ({ ...placeOf(c), body: String(c.body ?? ""), ...(typeof c.severity === "string" ? { severity: c.severity } : {}) })),
     ...(reply ? { reply } : {}),
     ...(typeof reviewedAt === "string" ? { reviewedAt } : {}),
   };

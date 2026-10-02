@@ -34,10 +34,10 @@ async function run(review: unknown) {
   return cli.requests;
 }
 
-test("the reviewer is told to request changes for every finding and to approve only without one", async () => {
+test("the reviewer is told to grade every finding, and that a blocking one sends the work back", async () => {
   const [, reviewer] = await run({ verdict: "approve", comments: [] });
-  expect(reviewer!.prompt).toMatch(/request_changes/);
-  expect(reviewer!.prompt).toMatch(/approve only when/i);
+  expect(reviewer!.prompt).toContain("Give every finding a severity");
+  expect(reviewer!.prompt).toContain("request_changes when one is blocking, approve otherwise");
 });
 
 test("comments that come with an approval reach later steps as suggestions", async () => {

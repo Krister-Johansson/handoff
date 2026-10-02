@@ -47,8 +47,16 @@ export type ContextPacket = {
   app?: { url: string };
   /** What a person will check in the running app to see the task is done. */
   acceptance?: { source: "issue" | "planner"; items: string[] };
-  /** A reviewer's own last review of this work, when it runs again: what it asked for and what came back. */
-  previousReview?: { comments: ({ body: string } & Place)[]; reply?: string | undefined; reviewedAt?: string | undefined };
+  /**
+   * A reviewer's own last review of this work, when it runs again: its verdict and findings, what the
+   * step it sent the work back to said it changed, and the commit it reviewed.
+   */
+  previousReview?: {
+    verdict?: "approve" | "request_changes" | undefined;
+    comments: ({ body: string; severity?: string | undefined } & Place)[];
+    reply?: string | undefined;
+    reviewedAt?: string | undefined;
+  };
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
   repairNote?: string;
@@ -203,18 +211,18 @@ export function renderContextPacket(packet: ContextPacket): string {
     );
   }
   if (packet.previousReview) {
-    const { comments, reply, reviewedAt } = packet.previousReview;
+    const { verdict, comments, reply, reviewedAt } = packet.previousReview;
+    const since = reviewedAt ? ` (\`git diff ${reviewedAt}..HEAD\`)` : "";
     out.push(
       "# Your previous review",
       "",
-      "You reviewed this work before and sent it back with the comments below. For each one, check whether the changes since then handle it.",
-      reviewedAt
-        ? `Then look only for new problems in lines changed since your last review (\`git diff ${reviewedAt}..HEAD\`). Do not raise findings on code you already reviewed and left alone.`
-        : "Then look only for new problems the changes since then introduced. Do not raise findings on code you already reviewed and left alone.",
+      `You reviewed this work before and ${verdict === "approve" ? "approved it" : "sent it back"} with the findings below. For each one, check whether the changes since then handle it.`,
+      "Repeat each finding that still holds, with its severity, and leave out the ones the changes fixed.",
+      `Then look for new problems in the lines changed since your last review. A new finding on a line that did not change since${since} is follow_up unless it is blocking.`,
       "",
-      "## Your comments",
+      "## Your findings",
       "",
-      ...comments.map((c) => `- ${c.path ? `${placeOf(c)}: ` : ""}${c.body}`),
+      ...comments.map((c) => `- ${c.severity ? `[${c.severity}] ` : ""}${c.path ? `${placeOf(c)}: ` : ""}${c.body}`),
       "",
     );
     if (reply) out.push("## What was changed since", "", reply, "");

@@ -26,3 +26,16 @@ test("a review's stage is plan until a coder has passed, then code", () => {
   expect(selectContext(review, withNodes({ planner: result(plan), coder: result({ status: "done", summary: "Added the board." }) }), execution).stage).toBe("code");
   expect(selectContext(node("coder", "coder"), withNodes({}), execution).stage).toBeUndefined();
 });
+
+test("a review that approved with findings gets them back with its verdict when it runs again", () => {
+  const approved = { verdict: "approve", comments: [{ path: "src/board.ts", line: 4, body: "Name the constant.", severity: "should_fix" }] };
+  const state = { ...withNodes({ review: result(approved), coder: result({ status: "done", summary: "Named it." }) }), reviewedAt: { review: "4ef4f22" } };
+  expect(selectContext(node("review", "code_review"), state, execution, ["coder"]).previousReview).toEqual({
+    verdict: "approve",
+    comments: [{ path: "src/board.ts", line: 4, body: "Name the constant.", severity: "should_fix" }],
+    reply: "Named it.",
+    reviewedAt: "4ef4f22",
+  });
+  const clean = withNodes({ review: result({ verdict: "approve", comments: [] }) });
+  expect(selectContext(node("review", "code_review"), clean, execution).previousReview).toBeUndefined();
+});
