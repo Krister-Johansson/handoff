@@ -140,3 +140,22 @@ test("a check starts no run while a run the scheduler started has no plan", asyn
   await p.check();
   expect((await p.started()).map((r) => r.issue)).toEqual([byHand, first, second]);
 });
+
+test("a refused start is skipped and the next candidate starts", async () => {
+  const p = await planned();
+  const first = await p.task("Blocked on GitHub since the Project was read");
+  const second = await p.task("Free");
+  // GitHub now records a blocker the Project read did not show yet.
+  vi.spyOn(p.github, "openBlockers").mockImplementation(async (_repo, number) => (number === first ? [99] : []));
+
+  await p.check();
+
+  const [run] = await p.started();
+  expect(run).toMatchObject({ issue: second, startedBy: "scheduler" });
+  expect((await p.events("scheduler.skipped")).map((e) => e.payload)).toEqual([
+    { issue: first, reason: `#${first} is blocked by #99 on GitHub. A run can start once they are closed.` },
+  ]);
+  expect((await p.events("scheduler.run_started")).map((e) => e.payload)).toEqual([{ runId: run!.id, issue: second, place: 2 }]);
+  expect((await p.row()).lastResult).toMatchObject({ state: "running", skipped: [{ number: first, reason: expect.stringContaining("blocked by #99") }] });
+  expect((await p.row()).startFailures).toBe(0);
+});

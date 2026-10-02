@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, projects, projectSchedulers, runs, schedulerEvents, sql, type Db, type DbExecutor, type ProjectSchedulerRow } from "@handoff/db";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
-import { startRun } from "../start-run.ts";
+import { StartRefusal, startRun } from "../start-run.ts";
 import { candidates, type Candidate, type IssueRun, type Skipped } from "./candidates.ts";
 import { projectHolds, type Hold } from "./holds.ts";
 
@@ -75,24 +75,34 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
   const repo = { owner: project.repoOwner, name: project.repoName };
   const items = await deps.projects.listItems(repo.owner, project.planProjectNumber, repo);
   const found = candidates(items, await issueRuns(db, projectId), { order: row.order, skipLabel: row.skipLabel });
-  const [first] = found.candidates;
-  if (!first) return { ...result, ...found, state: "idle", reason: found.skipped.length ? "all_skipped" : "no_ready" };
-  const place = 1;
-  const run = await startRun(
-    db,
-    {
-      projectId,
-      graphName: row.graphName,
-      task: "",
-      issues: [first.number],
-      startedBy: "scheduler",
-      items,
-      events: [{ type: "run.scheduled", payload: { place, settings: settingsOf(row) } }],
-    },
-    { github: deps.github, projects: deps.projects },
-  );
-  await record(db, projectId, "scheduler.run_started", { runId: run.id, issue: first.number, place });
-  return { ...result, ...found, state: "running", started: [{ runId: run.id, issue: first.number }] };
+  const skipped = [...found.skipped];
+  // One start per check: the run it starts has no plan yet, so the next check waits for its planner.
+  for (const [index, candidate] of found.candidates.entries()) {
+    const place = index + 1;
+    try {
+      const run = await startRun(
+        db,
+        {
+          projectId,
+          graphName: row.graphName,
+          task: "",
+          issues: [candidate.number],
+          startedBy: "scheduler",
+          items,
+          events: [{ type: "run.scheduled", payload: { place, settings: settingsOf(row) } }],
+        },
+        { github: deps.github, projects: deps.projects },
+      );
+      await record(db, projectId, "scheduler.run_started", { runId: run.id, issue: candidate.number, place });
+      return { ...result, candidates: found.candidates.slice(place), skipped, state: "running", started: [{ runId: run.id, issue: candidate.number }] };
+    } catch (error) {
+      if (!(error instanceof StartRefusal)) throw error;
+      // A refusal is about this task only: it is skipped for this check and the next candidate is tried.
+      skipped.push({ number: candidate.number, title: candidate.title, reason: error.message });
+      await record(db, projectId, "scheduler.skipped", { issue: candidate.number, reason: error.message });
+    }
+  }
+  return { ...result, skipped, state: "idle", reason: skipped.length ? "all_skipped" : "no_ready" };
 }
 
 /** Held and idle are recorded when they begin or their reasons change, not on every check. */

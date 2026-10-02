@@ -23,6 +23,14 @@ export type StartRunInput = {
   events?: NewEvent[] | undefined;
 };
 
+/**
+ * startRun refused to start a run on a task, for a reason of that task: an active run links it, it is
+ * blocked, or it is not a Ready task on the plan. Any other error is a failure to start at all.
+ */
+export class StartRefusal extends Error {
+  override readonly name = "StartRefusal";
+}
+
 export type StartRunPorts = { github?: GitHubPort | undefined; projects?: ProjectsPort | undefined };
 
 /**
@@ -75,7 +83,7 @@ async function refuseTaken(db: DbExecutor, projectId: string, issues: number[]) 
     .orderBy(desc(runs.createdAt));
   for (const number of issues) {
     const taken = active.find((run) => run.issues.some((i) => i.number === number));
-    if (taken) throw new Error(`#${number} is taken by run ${taken.id}, which is ${taken.status}. Wait for it to end or cancel it to start another run on #${number}.`);
+    if (taken) throw new StartRefusal(`#${number} is taken by run ${taken.id}, which is ${taken.status}. Wait for it to end or cancel it to start another run on #${number}.`);
   }
 }
 
@@ -91,11 +99,11 @@ function refuseUnready(planItems: PlanItem[], issues: LinkedIssue[]) {
     const item = items.get(issue.number);
     if (!item) continue;
     if (item.kind === "epic" || item.kind === "story") {
-      throw new Error(`#${issue.number} is ${item.kind === "epic" ? "an epic" : "a story"} on the plan. Runs work on tasks: start a run on one of its tasks.`);
+      throw new StartRefusal(`#${issue.number} is ${item.kind === "epic" ? "an epic" : "a story"} on the plan. Runs work on tasks: start a run on one of its tasks.`);
     }
     if (item.status === "Ready") continue;
-    if (item.status) throw new Error(`#${issue.number} is in ${item.status} on the plan. Move it to Ready to start a run on it.`);
-    throw new Error(`#${issue.number} is not Ready on the plan: its Status is not one handoff knows. Move it to Ready to start a run on it.`);
+    if (item.status) throw new StartRefusal(`#${issue.number} is in ${item.status} on the plan. Move it to Ready to start a run on it.`);
+    throw new StartRefusal(`#${issue.number} is not Ready on the plan: its Status is not one handoff knows. Move it to Ready to start a run on it.`);
   }
 }
 
@@ -103,7 +111,7 @@ function refuseUnready(planItems: PlanItem[], issues: LinkedIssue[]) {
 async function refuseBlocked(github: GitHubPort, repo: Repo, issues: LinkedIssue[]) {
   const blocked = await Promise.all(issues.map(async (i) => ({ number: i.number, by: await github.openBlockers(repo, i.number) })));
   const first = blocked.find((b) => b.by.length > 0);
-  if (first) throw new Error(`#${first.number} is blocked by ${andList(first.by.map((n) => `#${n}`))} on GitHub. A run can start once they are closed.`);
+  if (first) throw new StartRefusal(`#${first.number} is blocked by ${andList(first.by.map((n) => `#${n}`))} on GitHub. A run can start once they are closed.`);
 }
 
 /**
