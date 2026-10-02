@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
 import { and, desc, eq, events, listLibraryIndex, nodeExecutions, projects, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
-import type { GitHubPort, ProjectsPort } from "@handoff/github";
+import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
+import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
 import { projectReadiness } from "./readiness";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
@@ -10,6 +11,7 @@ import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGr
 import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
+import { createEpic, createStory, createTask, moveToReady, moveToShaping, planIssue, setupPlan } from "./shaping";
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
@@ -113,6 +115,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
   // The dashboard address of a run known only by id, under its project.
   const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
   const url = (href: string) => `${baseUrl}${href}`;
+  const shaping = { db, github, projects: plan };
 
   return {
     list_projects: async () =>
@@ -319,6 +322,50 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       const run = await runAgain(db, run_id, { projects: plan });
       return { run_id: run.id, status: run.status, url: url(runPath(run.projectId, run.id)) };
     },
+
+    list_plan: async ({ project, epic }: { project: string; epic?: number }) => {
+      const projectId = (await findProject(db, project)).id;
+      const view = await loadPlan(db, github, plan, projectId);
+      if ("error" in view) throw new Error(view.reason === "no-plan" ? `${view.error} Set one up with setup_plan.` : view.error);
+      const item = (i: PlanItem) => ({ number: i.number, kind: i.kind ?? null, title: i.title, status: i.status ?? null, state: i.state, url: i.url });
+      const task = (t: PlanTask) => ({
+        ...item(t),
+        blocked_by: t.blockedBy,
+        run: t.run ? { id: t.run.id, status: t.run.status, url: url(runPath(projectId, t.run.id)) } : null,
+        pr: t.run?.prNumber ?? t.prNumbers[0] ?? null,
+      });
+      const progress = (p: PlanProgress) => `${p.done} of ${p.total} done`;
+      return {
+        project: { number: view.project.number, title: view.project.title, url: view.project.url },
+        epics: view.epics
+          .filter((e) => epic === undefined || e.number === epic)
+          .map((e) => ({
+            ...item(e),
+            progress: progress(e.progress),
+            stories: e.stories.map((s) => ({ ...item(s), progress: progress(s.progress), tasks: s.tasks.map(task) })),
+            tasks: e.tasks.map(task),
+          })),
+        unparented: epic === undefined ? view.unparented.map((t) => ({ ...task(t), parent: t.parent ?? null })) : [],
+        unplanned: epic === undefined ? view.unplanned.map((i) => ({ number: i.number, title: i.title, url: i.url })) : [],
+      };
+    },
+
+    setup_plan: async ({ project }: { project: string }) => setupPlan(shaping, (await findProject(db, project)).id),
+
+    create_epic: async ({ project, title, goal }: { project: string; title: string; goal: string }) => createEpic(shaping, (await findProject(db, project)).id, { title, goal }),
+
+    create_story: async ({ project, ...input }: { project: string; epic: number; title: string; acceptance: string[] }) =>
+      createStory(shaping, (await findProject(db, project)).id, input),
+
+    create_task: async ({ project, blocked_by, ...input }: { project: string; story: number; title: string; brief: string; acceptance?: string[]; blocked_by?: number[] }) =>
+      createTask(shaping, (await findProject(db, project)).id, { ...input, ...(blocked_by ? { blockedBy: blocked_by } : {}) }),
+
+    move_to_ready: async ({ project, issues }: { project: string; issues: number[] }) => moveToReady(shaping, (await findProject(db, project)).id, issues),
+
+    move_to_shaping: async ({ project, issues }: { project: string; issues: number[] }) => moveToShaping(shaping, (await findProject(db, project)).id, issues),
+
+    plan_issue: async ({ project, issue, story }: { project: string; issue: number; story?: number }) =>
+      planIssue(shaping, (await findProject(db, project)).id, { issue, ...(story !== undefined ? { story } : {}) }),
 
     list_library: async () => {
       const { skills, mcp, agents, groups } = await listLibraryIndex(db);

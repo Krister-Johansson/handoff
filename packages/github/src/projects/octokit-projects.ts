@@ -2,6 +2,8 @@ import { Octokit } from "octokit";
 import {
   AddPlanBlockerDocument,
   AddPlanItemDocument,
+  AddPlanLabelsDocument,
+  AddPlanSubIssueDocument,
   CreatePlanLabelDocument,
   CreatePlanIssueDocument,
   IssueCreateRefsDocument,
@@ -136,12 +138,7 @@ export class OctokitProjects implements ProjectsPort {
       withParent: input.parent !== undefined,
     });
     if (!refs.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
-    const known = present(refs.repository.labels?.nodes);
-    const labelIds = input.labels.map((name) => {
-      const label = known.find((l) => l.name.toLowerCase() === name.toLowerCase());
-      if (!label) throw new Error(`label "${name}" does not exist on ${repo.owner}/${repo.name}`);
-      return label.id;
-    });
+    const labelIds = labelIdsOf(present(refs.repository.labels?.nodes), input.labels, repo);
     if (input.parent !== undefined && !refs.repository.parent) throw new Error(`parent issue #${input.parent} not found`);
     // Look the blockers up before creating, so a wrong number creates nothing.
     const blockerIds = [];
@@ -159,6 +156,22 @@ export class OctokitProjects implements ProjectsPort {
     for (const blockingIssueId of blockerIds) await this.octokit.graphql(AddPlanBlockerDocument.toString(), { issueId: issue.id, blockingIssueId });
     await this.setStatus(repo, input.project, issue.number, "Shaping", { add: true });
     return { number: issue.number, url: issue.url };
+  }
+
+  async addIssue(repo: RepoRef, input: { project: number; issue: number; labels: string[]; parent?: number }): Promise<void> {
+    const refs = await this.octokit.graphql<IssueCreateRefsQuery>(IssueCreateRefsDocument.toString(), {
+      owner: repo.owner,
+      name: repo.name,
+      parent: input.parent ?? 0,
+      withParent: input.parent !== undefined,
+    });
+    if (!refs.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
+    const labelIds = labelIdsOf(present(refs.repository.labels?.nodes), input.labels, repo);
+    if (input.parent !== undefined && !refs.repository.parent) throw new Error(`parent issue #${input.parent} not found`);
+    const issueId = await this.issueNodeId(repo, input.issue);
+    if (labelIds.length) await this.octokit.graphql(AddPlanLabelsDocument.toString(), { labelableId: issueId, labelIds });
+    if (refs.repository.parent) await this.octokit.graphql(AddPlanSubIssueDocument.toString(), { issueId: refs.repository.parent.id, subIssueId: issueId });
+    await this.setStatus(repo, input.project, input.issue, "Shaping", { add: true });
   }
 
   async lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
@@ -194,7 +207,16 @@ export class OctokitProjects implements ProjectsPort {
   }
 }
 
-type StatusFieldConfig = { __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
+/** The ids of the named labels among the repository's; throws for a name the repository does not have. */
+function labelIdsOf(known: { id: string; name: string }[], names: string[], repo: RepoRef): string[] {
+  return names.map((name) => {
+    const label = known.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    if (!label) throw new Error(`label "${name}" does not exist on ${repo.owner}/${repo.name}`);
+    return label.id;
+  });
+}
+
+type StatusFieldConfig ={ __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
 
 /** A GraphQL answer whose only errors are NOT_FOUND, as for a Project number nobody has. */
 function isNotFound(error: unknown): boolean {

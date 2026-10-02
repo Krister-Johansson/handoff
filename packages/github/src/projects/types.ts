@@ -61,6 +61,11 @@ export interface ProjectsPort {
     repo: RepoRef,
     input: { project: number; title: string; body: string; labels: string[]; parent?: number; blockedBy?: number[] },
   ): Promise<{ number: number; url: string }>;
+  /**
+   * Brings an existing issue into the plan: adds its labels, makes it a sub-issue of `parent` when
+   * given, and adds it to the Project in Shaping.
+   */
+  addIssue(repo: RepoRef, input: { project: number; issue: number; labels: string[]; parent?: number }): Promise<void>;
   /** The parent and the grandparent of an issue, nearest first, each with title, body and kind. */
   lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]>;
   /** Whether the token can write Projects: `project` among a classic token's scopes. */

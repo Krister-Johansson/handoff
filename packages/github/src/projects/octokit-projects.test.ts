@@ -306,6 +306,28 @@ test("createIssue refuses a label the repository does not have, before creating 
   expect(operations.map((o) => o.operation)).toEqual(["IssueCreateRefs"]);
 });
 
+test("addIssue labels an existing issue, makes it a sub-issue of the parent and adds it to the Project in Shaping", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] }, parent: { id: "I_11" } } }),
+    IssueNodeId: (v) => ({ repository: { issue: { id: `I_${v.number}` } } }),
+    AddPlanLabels: () => ({ addLabelsToLabelable: { clientMutationId: null } }),
+    AddPlanSubIssue: () => ({ addSubIssue: { issue: { id: "I_11" } } }),
+    IssuePlan: () => issuePlan(30, []),
+    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    AddPlanItem: () => ({ addProjectV2ItemById: { item: { id: "PVTI_30" } } }),
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_30" } } }),
+  });
+  const projects = port(fetch);
+
+  await projects.addIssue(repo, { project: 3, issue: 30, labels: ["task"], parent: 11 });
+
+  const sent = (name: string) => operations.filter((o) => o.operation === name).map((o) => o.variables);
+  expect(sent("AddPlanLabels")).toEqual([{ labelableId: "I_30", labelIds: ["L_task"] }]);
+  expect(sent("AddPlanSubIssue")).toEqual([{ issueId: "I_11", subIssueId: "I_30" }]);
+  expect(sent("SetPlanStatus")).toEqual([{ projectId: "PVT_3", itemId: "PVTI_30", fieldId: "F_status", optionId: "o_shaping" }]);
+  expect(operations.at(-1)!.operation).toBe("SetPlanStatus");
+});
+
 test("lineage walks parent then grandparent with their bodies and kinds", async () => {
   const ancestor = (number: number, over: Record<string, unknown>) => ({ number, title: `Issue ${number}`, body: "", labels: { nodes: [] }, issueType: null, parent: null, ...over });
   const { fetch, operations } = fakeGraphql({

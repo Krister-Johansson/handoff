@@ -283,6 +283,22 @@ export type AddPlanBlockerMutationVariables = Exact<{
 
 export type AddPlanBlockerMutation = { addBlockedBy: { issue: { id: string } | null } | null };
 
+export type AddPlanLabelsMutationVariables = Exact<{
+  labelableId: string | number;
+  labelIds: Array<string | number> | string | number;
+}>;
+
+
+export type AddPlanLabelsMutation = { addLabelsToLabelable: { clientMutationId: string | null } | null };
+
+export type AddPlanSubIssueMutationVariables = Exact<{
+  issueId: string | number;
+  subIssueId: string | number;
+}>;
+
+
+export type AddPlanSubIssueMutation = { addSubIssue: { issue: { id: string } | null } | null };
+
 export type CreatePlanLabelMutationVariables = Exact<{
   repositoryId: string | number;
   name: string;
@@ -732,6 +748,22 @@ export const AddPlanBlockerDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<AddPlanBlockerMutation, AddPlanBlockerMutationVariables>;
+export const AddPlanLabelsDocument = new TypedDocumentString(`
+    mutation AddPlanLabels($labelableId: ID!, $labelIds: [ID!]!) {
+  addLabelsToLabelable(input: { labelableId: $labelableId, labelIds: $labelIds }) {
+    clientMutationId
+  }
+}
+    `) as unknown as TypedDocumentString<AddPlanLabelsMutation, AddPlanLabelsMutationVariables>;
+export const AddPlanSubIssueDocument = new TypedDocumentString(`
+    mutation AddPlanSubIssue($issueId: ID!, $subIssueId: ID!) {
+  addSubIssue(input: { issueId: $issueId, subIssueId: $subIssueId }) {
+    issue {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<AddPlanSubIssueMutation, AddPlanSubIssueMutationVariables>;
 export const CreatePlanLabelDocument = new TypedDocumentString(`
     mutation CreatePlanLabel($repositoryId: ID!, $name: String!, $color: String!, $description: String!) {
   createLabel(

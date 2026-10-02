@@ -127,6 +127,15 @@ export class FakeProjects implements ProjectsPort {
     return { number, url };
   }
 
+  async addIssue(repo: RepoRef, input: { project: number; issue: number; labels: string[]; parent?: number }): Promise<void> {
+    const issue = this.github.issues.get(input.issue);
+    if (!issue) throw new Error(`issue #${input.issue} not found`);
+    if (input.parent !== undefined && !this.github.issues.has(input.parent)) throw new Error(`parent issue #${input.parent} not found`);
+    issue.labels = [...new Set([...(issue.labels ?? []), ...input.labels])];
+    if (input.parent !== undefined) this.parents.set(input.issue, input.parent);
+    await this.setStatus(repo, input.project, input.issue, "Shaping", { add: true });
+  }
+
   async lineage(_repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
     return this.github.ancestorsOf(issue);
   }
