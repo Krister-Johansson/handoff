@@ -69,6 +69,20 @@ function localDay(iso: string): { day: string; fraction: number } {
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+/** "Fri Oct 2", the day a drag lands on. */
+export const longDay = (day: string) => `${WEEKDAYS[weekday(day)]} ${shortDay(day)}`;
+
+/** The day under a point of the time pane, x pixels from its left; undefined outside the range. */
+export function dayAt(scale: TimeScale, x: number): string | undefined {
+  if (x < 0 || x >= scale.width) return undefined;
+  let day = scale.range.start;
+  while (day < scale.range.end && scale.x(addDays(day, 1)) <= x) day = addDays(day, 1);
+  return day;
+}
+
+/** The width of a day at a scale: 96 px at Days, 14 px at Weeks, a month's share of 120 px at Months. */
+export const dayWidthAt = (scale: TimeScale, day: string) => scale.x(addDays(day, 1)) - scale.x(day);
+
 /** A column a day over whole ISO weeks: day cells at Days, week cells at Weeks, under month cells. */
 function dayColumnsScale(span: DaySpan, zoom: "days" | "weeks"): TimeScale {
   const width = zoom === "days" ? DAYS_DAY_WIDTH : DAY_WIDTH;

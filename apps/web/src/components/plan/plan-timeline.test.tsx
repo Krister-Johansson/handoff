@@ -10,7 +10,8 @@ import { parseZoom } from "@/lib/project-tab";
 import { PlanTimeline } from "./plan-timeline";
 import { TimelineControls } from "./timeline-parts";
 import { Sizing } from "./plan-context";
-import { epic, planView, PROJECT, REPO_URL, run, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
+import { epic, planView, PROJECT, REPO_URL, run, sizedTimelineOf, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
+import { Toaster } from "@/components/ui/sonner";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -23,6 +24,7 @@ const actions = vi.hoisted(() => ({
   addDateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   addEstimateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   setSizeAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+  moveItemAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
@@ -474,4 +476,87 @@ test("the Days zoom lives in the URL", () => {
   renderTimeline({ zoom: "days" });
   expect(screen.getByText("Thu 1")).toBeInTheDocument();
   expect(within(row(/Task #57/)).getByRole("link", { name: /^Task #57/ })).toHaveStyle({ left: `${24 * 96}px`, width: `${9 * 96}px` });
+});
+
+/**
+ * Epic #120 at 6 hours a day, as the design draws it: #141 (Done, S) and #142 (Running, M) on Oct 1, #143 (L with a
+ * manual 9 hours) from Oct 2, #145 and #146 (M) on Oct 3 after #143, #149 (L, its 2h default) on Oct 4, and in
+ * Unscheduled #152 without a size and #153 sized S.
+ */
+const sized = planView([
+  epic(120, "Refined product redesign", [
+    story(125, "Redesign foundations in code", 120, [
+      task(141, "R1 Redesign tokens", "Done", { state: "closed", start: "2026-10-01", target: "2026-10-01", size: "S" }),
+      task(142, "R2 Geist type", "Running", { start: "2026-10-01", target: "2026-10-01", size: "M", run: run("r142", "running") }),
+    ]),
+    story(126, "Restyle the shell", 120, [
+      task(143, "R3 Restyle the sidebar", "Ready", { start: "2026-10-02", target: "2026-10-03", size: "L", estimate: 9, blockedBy: [142] }),
+      task(145, "R5 Restyle board columns", "Shaping", { start: "2026-10-03", target: "2026-10-03", size: "M", blockedBy: [143] }),
+      task(146, "R6 Restyle the list view", "Shaping", { start: "2026-10-03", target: "2026-10-03", size: "M", blockedBy: [143] }),
+      task(149, "R9 Restyle dialogs", "Shaping", { start: "2026-10-04", target: "2026-10-04", size: "L" }),
+      task(152, "Document the workflow", "Shaping"),
+      task(153, "Restyle the help page", "Shaping", { size: "S" }),
+    ]),
+  ]),
+]);
+
+/** The sized plan at the Days zoom with the Plan page's sizing and its toasts. The chart opens on Monday Sep 14, so Oct 1 is 17 days of 96 px in. */
+function renderSized(over: { plan?: typeof sized; runs?: TimelineRun[]; zoom?: Zoom } = {}) {
+  const plan = over.plan ?? sized;
+  const timeline = sizedTimelineOf(plan, over.runs ?? [], NOW);
+  const spans = new Map(timeline.items.map((i) => [i.number, i.planned]));
+  return render(
+    <Sizing value={sizingOf({ spanOf: (n) => spans.get(n) })}>
+      <PlanTimeline
+        projectId="p1"
+        repoUrl={REPO_URL}
+        project={{ ...PROJECT_WITH_DATES, estimateFields: SIZE_FIELDS }}
+        epics={plan.epics}
+        unparented={plan.unparented}
+        timeline={timeline}
+        zoom={over.zoom ?? "days"}
+        filters={parsePlanFilters({})}
+        needsYou={[]}
+        graphs={["loop"]}
+        graphName="loop"
+        readAt={NOW.getTime()}
+      />
+      <Toaster />
+    </Sizing>,
+    { wrapper: TooltipProvider },
+  );
+}
+
+const DAY = 96;
+const OCT_1 = 17 * DAY;
+const barOf = (n: number) => within(row(new RegExp(`^Task #${n} `))).getByRole("link", { name: new RegExp(`^Task #${n} `) });
+const leftOf = (el: HTMLElement) => parseFloat(el.style.left);
+const widthOf = (el: HTMLElement) => parseFloat(el.style.width);
+const dragTip = () => within(screen.getByRole("grid", { name: "Timeline" })).queryByRole("status");
+
+test("dragging a bar moves its Start a day at a time and the tooltip names the Target that follows", () => {
+  renderSized();
+  const bar = barOf(146);
+  // #146 sits after #145's 50 minutes on Oct 3: 50 minutes is 13.3 px at 16 px an hour.
+  expect(leftOf(bar)).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  expect(widthOf(bar)).toBeCloseTo(13.33, 1);
+
+  fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 500 });
+  fireEvent.pointerMove(bar, { pointerId: 1, clientX: 540 });
+  expect(dragTip()).toHaveTextContent("Sat Oct 3M, forecast ~50m. Target Oct 3");
+
+  // Past half a day it snaps to Sunday, where nothing comes before it.
+  fireEvent.pointerMove(bar, { pointerId: 1, clientX: 560 });
+  expect(dragTip()).toHaveTextContent("Sun Oct 4M, forecast ~50m. Target Oct 4");
+  expect(leftOf(bar)).toBe(OCT_1 + 3 * DAY);
+  fireEvent.pointerMove(bar, { pointerId: 1, clientX: 700 });
+  expect(dragTip()).toHaveTextContent("Mon Oct 5M, forecast ~50m. Target Oct 5");
+  expect(leftOf(bar)).toBe(OCT_1 + 4 * DAY);
+
+  // Escape puts it back and saves nothing.
+  fireEvent.keyDown(bar, { key: "Escape" });
+  expect(dragTip()).not.toBeInTheDocument();
+  expect(leftOf(bar)).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  fireEvent.pointerUp(bar, { pointerId: 1, clientX: 700 });
+  expect(actions.moveItemAction).not.toHaveBeenCalled();
 });

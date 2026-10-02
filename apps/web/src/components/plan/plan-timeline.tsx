@@ -1,18 +1,24 @@
 "use client";
 
-import { Fragment, use, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, startTransition, use, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, ChevronRightIcon, ExternalLinkIcon, MoreHorizontalIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, ChevronRightIcon, ExternalLinkIcon, GripVerticalIcon, KeyboardIcon, MoreHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
-import type { PlanStory, PlanTask } from "@/server/plan";
+import type { PlanEpic, PlanStory, PlanTask } from "@/server/plan";
+import { moveItemAction } from "@/app/projects/actions";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import type { DaySpan, TimelineItem } from "@/lib/plan/schedule";
-import { BAR_TONE, prNumberOf, taskColumn } from "@/lib/plan/task";
+import { formatDuration } from "@/lib/plan/duration";
+import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
+import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
+import { durationInWords, hoursInWords } from "@/lib/plan/size-text";
+import { BAR_TONE, hasActiveRun, prNumberOf, taskColumn } from "@/lib/plan/task";
 import {
   arrowPath,
   chartRange,
@@ -29,7 +35,7 @@ import {
   type TimelineRow,
 } from "@/lib/plan/timeline-rows";
 import { matchesQuery } from "@/lib/plan/search";
-import { addDays, defaultZoom, shortDay, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
+import { addDays, dayAt, dayWidthAt, defaultZoom, shortDay, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
 import { runPath } from "@/lib/paths";
 import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
@@ -42,7 +48,7 @@ import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
 import { FlagCard, type FlagContext } from "./timeline-flag-card";
 import { DateFieldsBanner, EstimateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
-
+import { useBarDrag, type BarDrag, type DragBar } from "./use-bar-drag";
 import { useRowsOpen } from "./use-collapsed";
 
 const LABEL_WIDTH = 280;
@@ -73,8 +79,21 @@ function extent(scale: TimeScale, span: DaySpan) {
   return { left, width: scale.x(addDays(span.end, 1)) - left };
 }
 
+/** Pixels an hour of work takes on a day: the day's width over the person's hours a day. */
+const hourWidthAt = (scale: TimeScale, day: string, capacity: number) => dayWidthAt(scale, day) / capacity;
+
+/**
+ * Where a bar sits: a sized task's from its Start day after its offset, as long as its hours at the
+ * capacity; any other span over its whole days.
+ */
+function barBox(scale: TimeScale, span: DaySpan & Partial<PlannedSpan>, capacity: number | undefined) {
+  if (span.hours === undefined || capacity === undefined) return extent(scale, span);
+  const hour = hourWidthAt(scale, span.start, capacity);
+  return { left: scale.x(span.start) + (span.offsetHours ?? 0) * hour, width: span.hours * hour };
+}
+
 /** What the chart knows about one item, for its hover card. */
-type CardContext = { items: Map<number, PlanItem>; entries: Map<number, TimelineItem>; projectId: string };
+type CardContext = { items: Map<number, PlanItem>; entries: Map<number, TimelineItem>; projectId: string; move: MoveContext };
 
 /** The hover card of a bar or a row title: kind, status, dates and where they come from, blockers, latest run and pull request. */
 function ItemCard({ row, entry, ctx, children }: { row: TimelineRow; entry: TimelineItem; ctx: CardContext; children: ReactNode }) {
@@ -165,16 +184,57 @@ const openEdges = (entry: TimelineItem) => cn(entry.planned?.openStart && "[bord
 
 type BarProps = { row: TimelineRow; entry: TimelineItem; span: DaySpan; scale: TimeScale; ctx: CardContext };
 
-/** A task's bar in its status colour, with a red left edge when late and a hatched tail to today when overdue. */
-function TaskBar({ row, entry, span, scale, todayX, ctx }: BarProps & { todayX: number }) {
-  const item = row.item!;
-  const column = taskColumn(row.task!);
-  const { left, width } = extent(scale, span);
+/** The drag's tooltip under the bar: the day, the duration with its Target, and the blockers it starts before. */
+type Tip = { title: string; line: string; warnings: string[] };
+
+/** How a task's bar moves: its handlers, its end handle, and while it moves where it was and what the tooltip says. */
+type BarMove = {
+  bar: Partial<ReturnType<ReturnType<typeof useBarDrag>["barProps"]>>;
+  end: ReturnType<ReturnType<typeof useBarDrag>["endProps"]> | undefined;
+  origin: { left: number; width: number } | undefined;
+  tip: Tip | undefined;
+  onFocus: () => void;
+};
+
+/** A task's size and duration in words for its bar's name: "size M, forecast 50 minutes", "manual estimate 9 hours". */
+function durationName(task: PlanTask, ctx: CardContext): string {
+  const duration = durationIn(ctx.move, task);
+  if (!duration) return "";
+  const size = task.size ? `size ${task.size}, ` : "";
+  switch (duration.source) {
+    case "estimate":
+      return `, ${size}manual estimate ${hoursInWords(duration.hours)}`;
+    case "proposal":
+      return `, size ${task.proposal?.size} proposed by the planner, forecast ${durationInWords(duration.hours)}`;
+    default:
+      return `, ${size}${duration.source === "default" ? "default forecast" : "forecast"} ${durationInWords(duration.hours)}`;
+  }
+}
+
+/** The bar's text: a sized bar's duration ("1.5d", "~2h"), or the title on a wide bar without one. */
+function barText(task: PlanTask, ctx: CardContext, width: number): string | undefined {
+  const duration = durationIn(ctx.move, task);
+  if (duration && ctx.move.capacity !== undefined) return width >= 28 ? `${duration.source === "estimate" ? "" : "~"}${formatDuration(duration.hours, ctx.move.capacity)}` : undefined;
+  return width > TITLE_INSIDE ? task.title : undefined;
+}
+
+/**
+ * A task's bar in its status colour, with a red left edge when late or when it starts before a blocker ends,
+ * and a hatched tail to today when overdue. A forecast fades at its end; a manual estimate is solid. A bar
+ * that moves drags by its body and, with a duration, sets a manual estimate by its end.
+ */
+function TaskBar({ row, entry, span, scale, todayX, ctx, move }: BarProps & { todayX: number; move: BarMove | undefined }) {
+  const task = row.task!;
+  const column = taskColumn(task);
+  const { left, width } = barBox(scale, span, ctx.move.capacity);
   const blocked = entry.waitingOn.length ? `, blocked by ${entry.waitingOn.map((n) => `#${n}`).join(", ")}` : "";
   const overdue = entry.overdueDays !== undefined && todayX > left + width;
+  const duration = durationIn(ctx.move, task);
+  const early = entry.startsBeforeBlocker.length > 0;
+  const text = barText(task, ctx, width);
   return (
     <>
-      {overdue && (
+      {overdue && !move?.tip && (
         <span
           aria-hidden
           data-bar
@@ -182,26 +242,57 @@ function TaskBar({ row, entry, span, scale, todayX, ctx }: BarProps & { todayX: 
           style={{ left: left + width - 3, width: todayX - (left + width) + 3 }}
         />
       )}
+      {move?.origin && <span aria-hidden data-ghost className="absolute top-1.5 z-[1] h-5 rounded-[5px] border-[1.5px] border-dashed border-muted-foreground bg-foreground/5" style={move.origin} />}
       <ItemCard row={row} entry={entry} ctx={ctx}>
         <a
-          href={item.url}
+          href={task.url}
           data-bar
           data-column={column}
           data-late={entry.late}
-          aria-label={`Task #${item.number} ${item.title}, ${column}, ${spanText(span)}${blocked}`}
+          data-early={early || undefined}
+          aria-label={`Task #${task.number} ${task.title}, ${column}${durationName(task, ctx)}, ${spanText(span)}${blocked}`}
+          aria-keyshortcuts={move ? "ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight E Escape" : undefined}
+          {...move?.bar}
+          onFocus={move?.onFocus}
           className={cn(
-            "absolute top-1.5 z-[2] flex h-5 items-center overflow-hidden rounded-[5px] border-2 px-1.5 text-[11px] font-medium whitespace-nowrap text-foreground",
+            "absolute top-1.5 z-[2] flex h-5 min-w-1 items-center overflow-hidden rounded-[5px] border-2 px-1.5 text-[11px] font-medium whitespace-nowrap text-foreground",
             FOCUS,
             BAR_TONE[column],
             openEdges(entry),
-            entry.late && "border-l-[5px] border-l-danger-dot",
+            duration && "justify-center px-0.5",
+            duration && duration.source !== "estimate" && "[border-right-style:dotted] [mask-image:linear-gradient(90deg,#000_55%,rgb(0_0_0/0.45))]",
+            (entry.late || early) && "border-l-[4px] border-l-danger-dot",
+            move && "cursor-grab touch-none select-none hover:ring-1 hover:ring-foreground/60",
+            move?.tip && "z-[7] cursor-grabbing shadow-lg ring-1 ring-foreground/60",
           )}
           style={{ left, width }}
         >
-          {width > TITLE_INSIDE && <span className="truncate">{item.title}</span>}
+          {text && <span className="truncate">{text}</span>}
+          {move?.end && width >= 12 && <span aria-hidden data-end {...move.end} className="absolute inset-y-0.5 right-px w-1 cursor-ew-resize rounded-[2px] bg-foreground/45" />}
         </a>
       </ItemCard>
+      {move?.tip && <DragTip tip={move.tip} left={left} />}
     </>
+  );
+}
+
+/** What a drag says while it moves: the day it lands on, the Target that follows, and a warning when it starts before a blocker ends. */
+function DragTip({ tip, left }: { tip: Tip; left: number }) {
+  return (
+    <div
+      role="status"
+      className="pointer-events-none absolute top-7 z-[12] flex flex-col gap-0.5 rounded-md border bg-popover px-2.5 py-1.5 text-[11.5px] leading-snug whitespace-nowrap text-muted-foreground shadow-md"
+      style={{ left: Math.max(0, left) + 6 }}
+    >
+      <b className="font-semibold text-foreground">{tip.title}</b>
+      {tip.line && <span>{tip.line}</span>}
+      {tip.warnings.map((w) => (
+        <span key={w} className="mt-0.5 flex items-center gap-1.5 font-medium text-danger">
+          <TriangleAlertIcon aria-hidden className="size-3" />
+          {w}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -240,10 +331,10 @@ function SpanBar({ row, entry, span, scale, ctx }: BarProps) {
 }
 
 /** A row's planned bar: a task's in its status colour, an epic's or a story's in neutral, a derived span as a dashed bracket. */
-function PlannedBar(props: Omit<BarProps, "span"> & { todayX: number }) {
+function PlannedBar({ move, ...props }: Omit<BarProps, "span"> & { todayX: number; move: BarMove | undefined }) {
   const span = props.entry.planned ?? props.entry.derived;
   if (!span) return null;
-  return props.row.task ? <TaskBar {...props} span={span} /> : <SpanBar {...props} span={span} />;
+  return props.row.task ? <TaskBar {...props} span={span} move={move} /> : <SpanBar {...props} span={span} />;
 }
 
 /** One strip per run that linked the task, newest at the top, each opening its run. */
@@ -437,27 +528,162 @@ function Unscheduled({ groups, undated, onSchedule }: { groups: UnscheduledGroup
 /** The part of the time pane in view, for the marker that points to today when it is out of view. */
 type PaneView = { left: number; width: number };
 
+const NO_MOVES: ReadonlyMap<number, MovePlan> = new Map();
+
+/** A task with a saved move's Start, Target and estimate, as GitHub will have them. */
+function movedTask<T extends PlanItem>(task: T, plan: MovePlan | undefined): T {
+  if (!plan) return task;
+  return { ...task, start: plan.start ?? undefined, target: plan.target ?? undefined, ...(plan.estimate !== undefined ? { estimate: plan.estimate ?? undefined } : {}) };
+}
+
+/** The plan with the saved moves applied to its tasks, until the next read from GitHub brings them. */
+function movedPlan(epics: PlanEpic[], unparented: PlanTask[], moves: ReadonlyMap<number, MovePlan>) {
+  if (moves.size === 0) return { epics, unparented };
+  const task = (t: PlanTask) => movedTask(t, moves.get(t.number));
+  return {
+    epics: epics.map((e) => ({ ...e, tasks: e.tasks.map(task), stories: e.stories.map((s) => ({ ...s, tasks: s.tasks.map(task) })) })),
+    unparented: unparented.map(task),
+  };
+}
+
+/** An item's place in time after a move: its new bar, and the blockers it starts before. */
+const movedEntry = (entry: TimelineItem, plan: MovePlan): TimelineItem => ({
+  ...entry,
+  planned: plan.span,
+  unscheduled: !plan.span && !entry.derived,
+  startsBeforeBlocker: plan.startsBefore.map((b) => b.number),
+});
+
+/** Every item's place in time with the saved moves applied. */
+function movedEntries(timeline: Timeline, moves: ReadonlyMap<number, MovePlan>): Map<number, TimelineItem> {
+  return new Map(timeline.items.map((i) => [i.number, moves.has(i.number) ? movedEntry(i, moves.get(i.number)!) : i]));
+}
+
+const numbers = (list: readonly { number: number }[]) => list.map((b) => `#${b.number}`).join(" and ");
+
+/** The toast after a saved move: what moved, with the estimate it set and the blockers it starts before. */
+function savedText(task: PlanTask, plan: MovePlan, capacity: number | undefined): { title: string; description: string } {
+  const n = task.number;
+  const hours = typeof plan.estimate === "number" ? formatDuration(plan.estimate, capacity ?? Infinity) : undefined;
+  const early = plan.startsBefore.length ? ` It starts before ${numbers(plan.startsBefore)} ends.` : "";
+  if (plan.start === (task.start ?? null) && plan.estimate !== undefined) {
+    return hours
+      ? { title: `#${n} has a manual estimate of ${hours}`, description: `Saved to GitHub.${task.size ? ` Its size stays ${task.size}.` : ""}${early}` }
+      : { title: `#${n} uses the forecast again`, description: "Saved to GitHub. The Estimate field is cleared." };
+  }
+  if (!plan.start) return { title: `#${n} is unscheduled again`, description: "Saved to GitHub. Start and Target are cleared." };
+  return { title: `Moved #${n} to ${shortDay(plan.start)}`, description: `Saved to GitHub.${hours ? ` Manual estimate ${hours}.` : ""}${early}` };
+}
+
+const where = (start: string | null) => (start ? `on ${shortDay(start)}` : "in Unscheduled");
+
+/**
+ * The timeline's writes: a drop, the keys' move and their Undo each write at once, with a saving toast, then
+ * one that names the change with Undo, or one that says GitHub refused it with Try again. The bar shows where
+ * it was dropped until the next read from GitHub, and goes back when the write is refused.
+ */
+function useMoves(projectId: string, timeline: Timeline) {
+  const router = useRouter();
+  const sizing = use(Sizing);
+  const [state, setState] = useState<{ timeline: Timeline; moves: ReadonlyMap<number, MovePlan> }>({ timeline, moves: NO_MOVES });
+  const moves = state.timeline === timeline ? state.moves : NO_MOVES;
+
+  const put = (issue: number, plan: MovePlan | undefined) =>
+    setState((s) => {
+      const next = new Map(s.timeline === timeline ? s.moves : NO_MOVES);
+      if (plan) next.set(issue, plan);
+      else next.delete(issue);
+      return { timeline, moves: next };
+    });
+
+  /** Writes a move of `task`, whose bar is `entry` before it; `undo` marks the write that puts it back. */
+  const save = (task: PlanTask, entry: TimelineItem | undefined, plan: MovePlan, undo = false) => {
+    const n = task.number;
+    const was = moves.get(n);
+    const back = moveBack(task, entry, plan);
+    const estimate = typeof plan.estimate === "number" ? `, manual estimate ${formatDuration(plan.estimate, sizing?.capacity ?? Infinity)}` : "";
+    const dates = plan.start ? `Start ${shortDay(plan.start)}, Target ${shortDay(plan.target ?? plan.start)}${estimate}` : "Start and Target cleared";
+    const id = toast.loading(`Saving #${n} to GitHub`, { description: dates });
+    put(n, plan);
+    startTransition(async () => {
+      const result = await moveItemAction({ projectId, issue: n, start: plan.start, target: plan.target, ...(plan.estimate !== undefined ? { estimate: plan.estimate } : {}) });
+      if (result.ok) {
+        const moved = movedTask(task, plan);
+        const text = undo ? { title: plan.start ? `Put #${n} back ${where(plan.start)}` : `#${n} is unscheduled again`, description: "Saved to GitHub." } : savedText(task, plan, sizing?.capacity);
+        toast.success(text.title, { id, description: text.description, ...(undo ? {} : { action: { label: "Undo", onClick: () => save(moved, entry && movedEntry(entry, plan), back, true) } }) });
+        startTransition(() => router.refresh());
+        return;
+      }
+      put(n, was);
+      toast.error("GitHub did not take the date", {
+        id,
+        description: `#${n} is back ${where(back.start)}.${result.error ? ` ${result.error}` : ""}`,
+        action: { label: "Try again", onClick: () => save(task, entry, plan, undo) },
+      });
+    });
+  };
+  return { moves, save };
+}
+
 /**
  * The plan as a Gantt chart: a fixed column of row labels in the tree's order and a time pane that
  * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
  * arrows and the rows at their other ends strong and dims the rest.
  */
-function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
+function TimelineChart({ projectId, project, epics: planEpics, unparented: planUnparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
   const rowsOpen = useRowsOpen(projectId, searchOpen);
   const q = useSearchQuery();
+  const sizing = use(Sizing);
   const [scheduling, setScheduling] = useState<PlanItem>();
   const [hovered, setHovered] = useState<number>();
   const [pane, setPane] = useState<PaneView>();
-  const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
+  const [focused, setFocused] = useState<number>();
+  const [sizeOpen, setSizeOpen] = useState<number>();
+  const { moves, save } = useMoves(projectId, timeline);
+  const { epics, unparented } = useMemo(() => movedPlan(planEpics, planUnparented, moves), [planEpics, planUnparented, moves]);
+  const saved = useMemo(() => movedEntries(timeline, moves), [timeline, moves]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
-  const ctx: CardContext = { items, entries, projectId };
-  const flags: FlagContext = { projectId, items, entries, needsYou };
+  const move: MoveContext = { capacity: sizing?.capacity, forecasts: sizing?.forecasts, items, entries: saved };
 
-  const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
   const range = chartRange(timeline);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
+
+  const { drag, barProps, endProps, gripProps } = useBarDrag({
+    onDrop: (done) => {
+      const task = items.get(done.issue) as PlanTask | undefined;
+      const plan = task && planMove(move, task, done);
+      if (task && plan) save(task, saved.get(task.number), plan);
+    },
+    onSize: setSizeOpen,
+  });
+  const dragged = drag && (items.get(drag.issue) as PlanTask | undefined);
+  const draft = dragged ? planMove(move, dragged, drag) : undefined;
+  const entries = draft && dragged ? new Map(saved).set(dragged.number, movedEntry(saved.get(dragged.number)!, draft)) : saved;
+  const ctx: CardContext = { items, entries, projectId, move };
+  const flags: FlagContext = { projectId, items, entries, needsYou };
+
+  /** How a task's bar moves: not at all when Done or Running, or when it has no dates and no duration. */
+  const moveOf = (task: PlanTask, entry: TimelineItem): BarMove | undefined => {
+    const span = entry.planned;
+    if (!span || taskColumn(task) === "Done" || taskColumn(task) === "Running" || hasActiveRun(task)) return undefined;
+    const hours = sizing && span.hours !== undefined ? span.hours : undefined;
+    const dayWidth = dayWidthAt(scale, span.start);
+    const bar: DragBar = { issue: task.number, dayWidth, hourWidth: sizing ? dayWidth / sizing.capacity : dayWidth, hours };
+    const moving = drag?.issue === task.number && draft && dragged ? draft : undefined;
+    const before = saved.get(task.number)?.planned;
+    return {
+      bar: barProps(bar),
+      end: hours !== undefined ? endProps(bar) : undefined,
+      origin: moving && before ? barBox(scale, before, sizing?.capacity) : undefined,
+      tip: moving && dragged ? moveTip(move, dragged, drag!, moving, drag!.via) : undefined,
+      onFocus: () => setFocused(task.number),
+    };
+  };
+
+  const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
 
   const measure = () => {
     const el = scroller.current;
@@ -487,7 +713,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
   const barOf = (n: number) => {
     const span = entries.get(n)?.planned ?? entries.get(n)?.derived;
     if (!span) return undefined;
-    const { left, width } = extent(scale, span);
+    const { left, width } = barBox(scale, span, sizing?.capacity);
     return { left, right: left + width };
   };
   const stripsOf = (n: number) => {
@@ -580,7 +806,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
                       onSchedule={setScheduling}
                     />
                     <div role="gridcell" className={cn("relative flex-1 border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ minWidth: scale.width }}>
-                      {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} ctx={ctx} />}
+                      {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} ctx={ctx} move={row.task && moveOf(row.task, entry)} />}
                       {entry && row.task && <Strips row={row} entry={entry} scale={scale} projectId={projectId} />}
                     </div>
                   </div>
