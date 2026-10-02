@@ -32,11 +32,11 @@ const STATUS_ICON: Record<NonNullable<Status>["tone"], ReactNode> = {
   plain: null,
 };
 
-/** The height of the dashboard's sticky header (and the transcript strip in it), so the sheet starts below it. */
+/** The height of the top bar (and the transcript strip in it), so the sheet starts below it. */
 function useHeaderHeight() {
   const [height, setHeight] = useState(53);
   useEffect(() => {
-    const header = document.querySelector("body header");
+    const header = document.querySelector("[data-slot=top-bar]");
     if (!header) return;
     const observer = new ResizeObserver(([entry]) => setHeight(Math.round(entry!.target.getBoundingClientRect().height)));
     observer.observe(header);
@@ -88,7 +88,7 @@ function Off({ reason, onNavigate }: { reason: "no-token" | "off"; onNavigate: (
 }
 
 /**
- * The assistant panel: a sheet on the right, below the header so the Assistant button, the microphone
+ * The assistant panel: a sheet on the right, below the top bar so the Assistant button, the microphone
  * and the transcript strip stay in view. It stays open while the page behind it changes and is not
  * modal, so the person can keep using the page.
  */

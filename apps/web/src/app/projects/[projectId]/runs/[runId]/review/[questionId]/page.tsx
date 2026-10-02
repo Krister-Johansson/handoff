@@ -7,7 +7,7 @@ import { ListIcon, MessageSquareIcon } from "lucide-react";
 import type { DiffFile } from "@handoff/core";
 import { PageHeader } from "@/components/page-header";
 import { CodeReview } from "@/components/review/code-review";
-import { projectCrumbs, projectRunsCrumb, runCrumb } from "@/server/crumbs";
+import { projectCrumb, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { PlanReview } from "@/components/review/plan-review";
 import { CARD, PROSE } from "@/components/review/styles";
 import { StatusBadge } from "@/components/runs/status-badge";
@@ -134,7 +134,7 @@ export default async function ReviewPage({ params }: { params: Promise<{ project
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <PageHeader
         crumbs={[
-          ...(await projectCrumbs(getDb(), { id: review.projectId, name: review.projectName })),
+          projectCrumb({ id: review.projectId, name: review.projectName }),
           projectRunsCrumb(review.projectId),
           await runCrumb(getDb(), review.projectId, { id: runId, task: review.task }),
           { label: review.review.kind === "code" ? "Code review" : "Review" },

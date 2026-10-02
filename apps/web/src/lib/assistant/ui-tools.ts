@@ -15,6 +15,7 @@ const PAGES = [
   "/",
   "/projects",
   `/projects/${S}`,
+  `/projects/${S}/(runs|plan|issues|pulls|graphs|settings)`,
   `/projects/${S}/graphs/${S}`,
   `/projects/${S}/runs/${S}`,
   `/projects/${S}/runs/${S}/(review|try)/${S}`,
@@ -72,14 +73,15 @@ export function planUiTool(name: string, args: unknown, origin: string): UiPlan 
     case "go_to_notifications":
       return navigate(a.filter ? `/notifications?${new URLSearchParams({ show: a.filter })}` : "/notifications");
     case "set_project_tab": {
-      const query = new URLSearchParams({ tab: a.tab! });
+      const query = new URLSearchParams();
       if (a.filter) {
         const filters = TAB_FILTERS[a.tab!];
         if (!filters) throw new UiToolError(`The ${a.tab} tab has no filter.`);
         if (!filters.values.includes(a.filter)) throw new UiToolError(`The ${a.tab} tab filters by ${filters.values.slice(0, -1).join(", ")} or ${filters.values.at(-1)}.`);
         query.set(filters.param, a.filter);
       }
-      return navigate(`/projects/${id(a.project_id!, "project")}?${query}`);
+      const search = query.toString();
+      return navigate(`/projects/${id(a.project_id!, "project")}/${a.tab}${search ? `?${search}` : ""}`);
     }
     case "go_to_run":
       return navigate(`/runs/${id(a.run_id!, "run")}`);

@@ -49,7 +49,7 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
           <LinkDependenciesButton projectId={projectId} />
           <FilterLinks
             label="Issue state"
-            links={FILTERS.map((f) => ({ href: `?tab=issues&issues=${f.value}`, label: f.label, count: counts[f.value], current: f.value === filter }))}
+            links={FILTERS.map((f) => ({ href: `?issues=${f.value}`, label: f.label, count: counts[f.value], current: f.value === filter }))}
           />
         </>
       }

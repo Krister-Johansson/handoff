@@ -5,7 +5,7 @@ import { TryReview } from "@/components/review/try-review";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { getDb } from "@/lib/db";
 import { tryPath } from "@/lib/paths";
-import { projectCrumbs, projectRunsCrumb, runCrumb } from "@/server/crumbs";
+import { projectCrumb, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { getTryReview } from "@/server/try-review";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +26,7 @@ export default async function TryPage({ params }: { params: Promise<{ projectId:
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <PageHeader
         crumbs={[
-          ...(await projectCrumbs(getDb(), { id: review.projectId, name: review.projectName })),
+          projectCrumb({ id: review.projectId, name: review.projectName }),
           projectRunsCrumb(review.projectId),
           await runCrumb(getDb(), review.projectId, { id: runId, task: review.task }),
           { label: "Try it" },

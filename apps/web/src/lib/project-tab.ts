@@ -1,10 +1,23 @@
-export const PROJECT_TABS = ["runs", "issues", "pulls", "graphs", "settings"] as const;
-export type ProjectTab = (typeof PROJECT_TABS)[number];
+/** A project's pages under /projects/<id>, in the order the sidebar lists them. */
+export const PROJECT_SECTIONS = ["runs", "plan", "issues", "pulls", "graphs", "settings"] as const;
+export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
 
-/** The project page tab from its search params; runs unless another known tab is asked for. */
-export function parseProjectTab(params: Record<string, string | string[] | undefined>): ProjectTab {
-  const tab = params.tab;
-  return typeof tab === "string" && (PROJECT_TABS as readonly string[]).includes(tab) ? (tab as ProjectTab) : "runs";
+/** The tabs of the project page before each became its own route; old links still carry them as ?tab=. */
+const OLD_TABS: readonly string[] = ["runs", "issues", "pulls", "graphs", "settings"];
+
+/**
+ * Where an old project link (/projects/<id>?tab=...) goes now: the tab's route with the other
+ * search params kept, or Runs when it names no tab.
+ */
+export function oldTabPath(projectId: string, params: Record<string, string | string[] | undefined>): string {
+  const tab = typeof params.tab === "string" && OLD_TABS.includes(params.tab) ? params.tab : "runs";
+  const rest = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "tab" || value === undefined) continue;
+    for (const v of Array.isArray(value) ? value : [value]) rest.append(key, v);
+  }
+  const query = rest.toString();
+  return `/projects/${projectId}/${tab}${query ? `?${query}` : ""}`;
 }
 
 /** The Issues tab filter from ?issues=; to do unless another known filter is asked for. */
