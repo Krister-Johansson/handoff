@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { loadGraphVersionAction } from "@/app/projects/actions";
 import { GraphEditor } from "./graph-editor";
 
 vi.mock("@/app/projects/actions", () => ({ loadGraphVersionAction: vi.fn(), saveGraphAction: vi.fn() }));
@@ -64,4 +65,20 @@ test("the Version history button on the canvas controls opens a drawer that list
   expect(within(items[0]!).getByRole("button", { name: "Restore" })).toBeEnabled();
   expect(items[1]).toHaveTextContent("v3");
   expect(items[1]).toHaveTextContent("current");
+});
+
+test("Restore in the drawer closes it and loads that version onto the canvas, unsaved", async () => {
+  vi.mocked(loadGraphVersionAction).mockResolvedValue({
+    attributes: { startNode: "planner" },
+    nodes: [{ key: "planner", attributes: { type: "planner", label: "Old planner", config: {} } }],
+    edges: [],
+  });
+  renderEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Version history" }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Version history" })).getByRole("button", { name: "Restore" }));
+  await waitFor(() => expect(screen.getByText("Showing v4, not saved yet")).toBeInTheDocument());
+  expect(loadGraphVersionAction).toHaveBeenCalledWith("p1", "plan-review", 4);
+  expect(screen.queryByRole("dialog", { name: "Version history" })).not.toBeInTheDocument();
+  expect(screen.getByText("Old planner")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save as v5" })).toBeEnabled());
 });

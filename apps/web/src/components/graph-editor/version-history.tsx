@@ -1,6 +1,7 @@
 "use client";
 
 import { ControlButton } from "@xyflow/react";
+import { useState } from "react";
 import { HistoryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -21,8 +22,14 @@ type Props = {
 
 /** A button for the canvas controls that opens the graph's saved versions in a drawer on the right. */
 export function VersionHistory({ versions, version, restoring, pending, onRestore }: Props) {
+  const [open, setOpen] = useState(false);
+  // Restoring closes the drawer, so the restored version shows on the canvas and Save is in reach.
+  const restore = (v: number) => {
+    setOpen(false);
+    onRestore(v);
+  };
   return (
-    <Sheet>
+    <Sheet open={open} onOpenChange={setOpen}>
       <Tooltip>
         <TooltipTrigger asChild>
           <SheetTrigger asChild>
@@ -47,7 +54,7 @@ export function VersionHistory({ versions, version, restoring, pending, onRestor
                 <span className="tabular-nums">
                   <span className="font-mono text-xs">v{v.version}</span> <span className="text-xs text-muted-foreground">{v.createdAt.slice(0, 16).replace("T", " ")}</span>
                 </span>
-                <Button variant="ghost" size="xs" disabled={pending || v.version === version} onClick={() => onRestore(v.version)}>
+                <Button variant="ghost" size="xs" disabled={pending || v.version === version} onClick={() => restore(v.version)}>
                   {v.version === version ? "current" : "Restore"}
                 </Button>
               </li>
