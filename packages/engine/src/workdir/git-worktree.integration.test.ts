@@ -38,6 +38,11 @@ test("release removes the worktree and keeps the branch", async () => {
   expect(git(provider.mirrorPath(spec.remoteUrl), "branch", "--list", "handoff/run-1")).toContain("handoff/run-1");
 });
 
+test("releasing a run whose clone was never made does nothing", async () => {
+  const { provider, spec } = setup();
+  await expect(provider.release(spec)).resolves.toBeUndefined();
+});
+
 test("GitWorktreeProvider hands the remote's git config to git through the environment", async () => {
   const origin = createOriginRepo();
   const provider = new GitWorktreeProvider({

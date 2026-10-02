@@ -57,6 +57,8 @@ export class GitWorktreeProvider implements WorkdirProvider {
     return this.serial(spec.remoteUrl, async () => {
       const mirror = this.mirrorPath(spec.remoteUrl);
       const path = this.worktreePath(spec.runId);
+      // Nothing was ever checked out from a clone that does not exist.
+      if (!existsSync(mirror)) return;
       if (existsSync(path)) await this.git(mirror, ["worktree", "remove", "--force", path]);
       await this.git(mirror, ["worktree", "prune"]);
     });
