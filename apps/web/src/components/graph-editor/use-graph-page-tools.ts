@@ -65,7 +65,15 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
         select({});
         return "Cleared the selection.";
       },
-      page_get_node: undefined,
+      page_get_node: ({ key }) => {
+        const node = nodeOf(graph, key);
+        const { nodeType, label, isStart, config, library, contract, notify } = node.data;
+        const edges = {
+          in: graph.edges.filter((e) => e.target === key).map((e) => ({ id: e.id, from: e.source, port: e.data.port ?? null, input: e.data.input ?? "in" })),
+          out: graph.edges.filter((e) => e.source === key).map((e) => ({ id: e.id, to: e.target, port: e.data.port ?? null })),
+        };
+        return JSON.stringify({ key, type: nodeType, label, isStart, config, library: library ?? null, contract: contract ?? null, notify: notify ?? {}, edges });
+      },
       page_get_edge: undefined,
       page_update_node: undefined,
       page_rename_node: undefined,

@@ -250,3 +250,40 @@ test("page_select selects a node and the inspector shows it", async () => {
   expect(await call("page_select", {})).toEqual({ text: "Cleared the selection.", isError: false });
   expect(inspector()).toHaveTextContent("Select a node or an edge to edit it");
 });
+
+/** A Planner, a Coder with instructions, and a Reviewer that sends changes back to the Coder. */
+const reviewed = {
+  attributes: { startNode: "planner" },
+  nodes: [
+    { key: "planner", attributes: { type: "planner", label: "Planner", x: 0, y: 0, config: {} } },
+    { key: "coder", attributes: { type: "coder", label: "Coder", x: 300, y: 0, config: { instructions: "Keep commits small.", maxTurns: 40 }, notify: { failed: false } } },
+    { key: "reviewer", attributes: { type: "reviewer", label: "Review", x: 600, y: 0, config: {} } },
+  ],
+  edges: [
+    { key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done", input: "in" } },
+    { key: "coder->reviewer", source: "coder", target: "reviewer", attributes: { port: "done", input: "in" } },
+    { key: "reviewer->coder", source: "reviewer", target: "coder", attributes: { port: "changes", input: "feedback", loop: true, maxAttempts: 3 } },
+  ],
+};
+
+test("page_get_node returns the node's label, type, config and edges", async () => {
+  const { call } = await withAssistant(reviewed);
+  const { text, isError } = await call("page_get_node", { key: "coder" });
+  expect(isError).toBe(false);
+  expect(JSON.parse(text)).toMatchObject({
+    key: "coder",
+    type: "coder",
+    label: "Coder",
+    isStart: false,
+    config: { instructions: "Keep commits small.", maxTurns: 40 },
+    notify: { failed: false },
+    edges: {
+      in: [
+        { id: "planner->coder", from: "planner", port: "done", input: "in" },
+        { id: "reviewer->coder", from: "reviewer", port: "changes", input: "feedback" },
+      ],
+      out: [{ id: "coder->reviewer", to: "reviewer", port: "done" }],
+    },
+  });
+  expect(await call("page_get_node", { key: "tester" })).toEqual({ text: "There is no node tester. The nodes are: planner, coder, reviewer.", isError: true });
+});
