@@ -29,6 +29,7 @@ import {
   type IssueNodeIdQuery,
   type IssuePlanQuery,
   type PlanDateFieldsFragment,
+  type PlanEstimateFieldsFragment,
   type PlanItemsQuery,
   type PlanOwnerIdsQuery,
   type PlanProjectChoiceFragment,
@@ -39,9 +40,9 @@ import {
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
-import { kindOf, PLAN_KINDS, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
+import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "./types.ts";
+import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -83,6 +84,7 @@ export class OctokitProjects implements ProjectsPort {
       statusOptions: optionIds(statusField(project.field)),
       dateFields: dateFieldIds(project),
       priorityOptions: project.priority?.__typename === "ProjectV2SingleSelectField" ? project.priority.options.map((o) => o.name) : undefined,
+      estimateFields: estimateFieldIds(project),
     };
   }
 
@@ -445,13 +447,28 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
 const DATE_KEYS = ["start", "target"] as const;
 /** The names of the date fields on GitHub, the pair the roadmap layout reads once a person picks them. */
 const DATE_FIELD_NAMES = { start: "Start", target: "Target" } as const;
-/** The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`, also inside IssuePlan's items) and Priority (`PlanProject`). */
-const OPTIONAL_FIELD_ALIASES = new Set<string>([...Object.keys(DATE_FIELD_NAMES), "priority"]);
+/** The names of the estimate fields on GitHub. */
+const ESTIMATE_FIELD_NAMES = { size: "Size", estimate: "Estimate" } as const;
+/**
+ * The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`),
+ * Size and Estimate (`PlanEstimateFields`), both also inside IssuePlan's items, and Priority (`PlanProject`).
+ */
+const OPTIONAL_FIELD_ALIASES = new Set<string>([...Object.keys(DATE_FIELD_NAMES), ...Object.keys(ESTIMATE_FIELD_NAMES), "priority"]);
 
 /** The ids of a Project's Start and Target fields, each undefined when missing or not a date field. */
 function dateFieldIds(project: PlanDateFieldsFragment): PlanDateFieldIds {
   const id = (field: PlanDateFieldsFragment["start"]) => (field?.__typename === "ProjectV2Field" && field.dataType === "DATE" ? field.id : undefined);
   return { start: id(project.start), target: id(project.target) };
+}
+
+/** The ids of a Project's Size single select field with its S, M and L options and of its Estimate number field; undefined for a field it lacks or of another type. */
+function estimateFieldIds(project: PlanEstimateFieldsFragment): PlanEstimateFieldIds {
+  const size = project.size?.__typename === "ProjectV2SingleSelectField" ? project.size : undefined;
+  const optionId = (name: PlanSize) => size?.options.find((o) => o.name === name)?.id;
+  return {
+    size: size ? { id: size.id, options: { S: optionId("S"), M: optionId("M"), L: optionId("L") } } : undefined,
+    estimate: project.estimate?.__typename === "ProjectV2Field" && project.estimate.dataType === "NUMBER" ? project.estimate.id : undefined,
+  };
 }
 
 /** The day of a date field's value; undefined when the item has none or the field is not a date field. */

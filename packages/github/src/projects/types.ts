@@ -70,10 +70,22 @@ export type PlanProject = {
    * undefined when the Project has no such field. Optional like `dateFields`.
    */
   priorityOptions?: string[] | undefined;
+  /** The Size and Estimate field ids, each undefined while the Project lacks it. Optional like `dateFields`. */
+  estimateFields?: PlanEstimateFieldIds | undefined;
 };
 
 /** The field ids of a Project's Start and Target date fields; undefined for one it lacks. */
 export type PlanDateFieldIds = { start: string | undefined; target: string | undefined };
+
+/**
+ * The Size single select field's id with the ids of its S, M and L options (undefined for one it lacks),
+ * and the Estimate number field's id. Each field is undefined while the Project lacks it or has a field
+ * of that name of another type.
+ */
+export type PlanEstimateFieldIds = {
+  size: { id: string; options: Record<PlanSize, string | undefined> } | undefined;
+  estimate: string | undefined;
+};
 
 /** One ancestor of an issue, as `lineage` returns it. */
 export type PlanAncestor = { number: number; title: string; body: string; kind: PlanKind | undefined };

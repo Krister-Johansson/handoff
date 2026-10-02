@@ -606,6 +606,7 @@ test("getProject reads a user's Project with its Status option ids and date fiel
     title: "sample plan",
     statusOptions: { Shaping: "o_shaping", Ready: "o_ready", Running: "o_running", "In review": "o_review", Done: "o_done" },
     dateFields: { start: "F_start", target: "F_target" },
+    estimateFields: { size: undefined, estimate: undefined },
   });
   expect(await projects.getProject("octo", 99)).toBeUndefined();
 });
@@ -668,6 +669,34 @@ test("a Project without Start and Target fields is still read, with no date fiel
 
   expect(await projects.getProject("octo", 5)).toMatchObject({ number: 5, title: "older plan", dateFields: { start: undefined, target: undefined } });
   expect((await projects.listProjects("octo", repo)).map((p) => p.number)).toEqual([5]);
+});
+
+/** How GitHub answers `field(name: "Size")` and `field(name: "Estimate")` on a Project without those fields: a NOT_FOUND per field next to the data. */
+const missingEstimateFields = (path: string[]) =>
+  [
+    ["size", "Size"],
+    ["estimate", "Estimate"],
+  ].map(([alias, name]) => ({ type: "NOT_FOUND", path: [...path, alias!], message: `Could not resolve to a Unions::ProjectV2FieldConfiguration with the name ${name}` }));
+
+/** A Size single select field with the named options, ids o_<name>, each with a colour and description. */
+const sizeField = (...names: string[]) => ({
+  __typename: "ProjectV2SingleSelectField",
+  id: "F_size",
+  options: names.map((name) => ({ id: `o_${name}`, name, color: "GRAY", description: "" })),
+});
+
+test("a Project without Size and Estimate fields is read with no estimate field ids", async () => {
+  const bare = { ...planProject(5), url: "https://github.com/users/octo/projects/5", title: "todooverkill plan", closed: false, repositories: { nodes: [] } };
+  const sized = { ...planProject(1), url: "https://github.com/users/octo/projects/1", title: "sized", size: sizeField("🐋 X-Large", "S", "M", "L"), estimate: projectField("F_estimate", "NUMBER") };
+  const { fetch } = fakeGraphql({
+    PlanProject: (v) => (v.number === 5 ? new GraphqlErrors({ user: { projectV2: bare } }, missingEstimateFields(["user", "projectV2"])) : { user: { projectV2: sized } }),
+    PlanProjects: () => new GraphqlErrors({ user: { projectsV2: { nodes: [bare] } } }, missingEstimateFields(["user", "projectsV2", "nodes", "0"])),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getProject("octo", 5)).toMatchObject({ number: 5, dateFields: { start: "F_start", target: "F_target" }, estimateFields: { size: undefined, estimate: undefined } });
+  expect((await projects.listProjects("octo", repo)).map((p) => p.number)).toEqual([5]);
+  expect((await projects.getProject("octo", 1))?.estimateFields).toEqual({ size: { id: "F_size", options: { S: "o_S", M: "o_M", L: "o_L" } }, estimate: "F_estimate" });
 });
 
 test("a Project without a Priority field gives every item no priority", async () => {
