@@ -41,6 +41,19 @@ function datesText(dates: { start?: string | null | undefined; target?: string |
   return parts.length ? parts.join(", ") : "no change";
 }
 
+/**
+ * start_scheduler's approval sentence: "Let handoff start up to 2 runs at a time on Ready tasks in
+ * todooverkill, in Project order, with graph master". A setting left out keeps its stored value, or
+ * its default the first time, and the sentence says so.
+ */
+function schedulerText(a: { project: string; max_runs?: number | undefined; order?: "project" | "priority" | undefined; graph?: string | undefined }) {
+  const limit = a.max_runs ? `up to ${a.max_runs} ${a.max_runs === 1 ? "run" : "runs"} at a time` : "runs";
+  const given = [...(a.order ? [a.order === "priority" ? "by the Priority field" : "in Project order"] : []), ...(a.graph ? [`with graph ${a.graph}`] : [])];
+  const defaults = [...(a.max_runs ? [] : ["1 run at a time"]), ...(a.order ? [] : ["Project order"]), ...(a.graph ? [] : ["the default graph"])];
+  const rest = defaults.length === 0 ? "" : `, with its ${defaults.length === 3 ? "settings" : "other settings"} as they are (at first: ${defaults.join(", ")})`;
+  return `Let handoff start ${limit} on Ready tasks in ${a.project}${given.map((g) => `, ${g}`).join("")}${rest}`;
+}
+
 /** Every tool handoff offers to an agent, once: the source of truth for MCP, the assistant and WebMCP. */
 export const CATALOG: ToolSpec[] = [
   spec({
@@ -503,7 +516,7 @@ export const CATALOG: ToolSpec[] = [
     confirm: true,
     readOnly: false,
     openWorld: true,
-    summarize: (a) => `Let handoff start ${a.max_runs ? `up to ${a.max_runs} ${a.max_runs === 1 ? "run" : "runs"} at a time` : "runs"} on Ready tasks in ${a.project}`,
+    summarize: (a) => schedulerText(a),
   }),
   spec({
     name: "pause_scheduler",

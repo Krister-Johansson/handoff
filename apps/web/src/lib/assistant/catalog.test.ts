@@ -33,6 +33,7 @@ test("tools that change state are marked confirm and never read only", () => {
     "schedule",
     "setup_plan",
     "start_run",
+    "start_scheduler",
   ]);
   for (const spec of CATALOG) if (spec.confirm) expect(spec.readOnly).toBe(false);
   expect(toolSpec("dismiss_attention")).toMatchObject({ confirm: false, readOnly: false });
@@ -101,4 +102,23 @@ test("schedule is confirm and its summary names every issue with its dates", () 
   // The input refuses a date that is not a calendar day written YYYY-MM-DD.
   expect(toolSpec("schedule").input.safeParse({ project: "handoff", items: [{ issue: 57, start: "2026-02-31" }] }).success).toBe(false);
   expect(toolSpec("schedule").input.safeParse({ project: "handoff", items: [] }).success).toBe(false);
+});
+
+test("start_scheduler is confirm and its summary names the project, the limit, the order and the graph", () => {
+  expect(toolSpec("start_scheduler")).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true });
+  expect(toolSpec("start_scheduler").summarize({ project: "todooverkill", max_runs: 2, order: "project", graph: "master" })).toBe(
+    "Let handoff start up to 2 runs at a time on Ready tasks in todooverkill, in Project order, with graph master",
+  );
+  expect(toolSpec("start_scheduler").summarize({ project: "todooverkill", max_runs: 1, order: "priority", graph: "master" })).toBe(
+    "Let handoff start up to 1 run at a time on Ready tasks in todooverkill, by the Priority field, with graph master",
+  );
+  // A setting left out keeps its stored value, or its default the first time.
+  expect(toolSpec("start_scheduler").summarize({ project: "todooverkill", max_runs: 3 })).toBe(
+    "Let handoff start up to 3 runs at a time on Ready tasks in todooverkill, with its other settings as they are (at first: Project order, the default graph)",
+  );
+  expect(toolSpec("start_scheduler").summarize({ project: "todooverkill" })).toBe(
+    "Let handoff start runs on Ready tasks in todooverkill, with its settings as they are (at first: 1 run at a time, Project order, the default graph)",
+  );
+  expect(toolSpec("start_scheduler").input.safeParse({ project: "todooverkill", max_runs: 11 }).success).toBe(false);
+  expect(toolSpec("pause_scheduler")).toMatchObject({ kind: "data", confirm: false, readOnly: false, idempotent: true });
 });
