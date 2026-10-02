@@ -62,7 +62,14 @@ test("the handoff skill says start_run assigns the user and assign marks who wor
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   expect(skill).toMatch(/`start_run`[^\n]*assign/);
   expect(skill).toMatch(/`assign`[^\n]*`me`/);
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.10.0");
+});
+
+test("the handoff skill says get_run has the whole command of a permission prompt, and how a review and a Try it gate are answered", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  expect(skill).toMatch(/permission prompt[^\n]*whole command[^\n]*`answer_permission`/);
+  expect(skill).toMatch(/approve, changes or fix/);
+  expect(skill).toMatch(/Try it gate[^\n]*`criteria`/);
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.11.0");
 });
 
 test("the plugin ships a setup skill that walks through setup_project", () => {
