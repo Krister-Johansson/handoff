@@ -1,10 +1,10 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { asc, eq, projects, projectSchedulers, schedulerEvents } from "@handoff/db";
+import { asc, eq, graphVersions, projects, projectSchedulers, runs, schedulerEvents } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion } from "./graphs";
-import { startScheduler, stopScheduler } from "./scheduler";
+import { releaseTask, startScheduler, stopScheduler } from "./scheduler";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -77,4 +77,34 @@ test("saving settings while paused keeps the pause; only a resume resumes", asyn
   await startScheduler(deps(), projectId, {}, "dashboard");
   expect(await row()).toMatchObject({ maxRuns: 3, pausedAt: null, pauseReason: null });
   expect((await log()).map((e) => e.type)).toEqual(["scheduler.started", "scheduler.changed", "scheduler.resumed"]);
+});
+
+/** A task on the plan with one run of the given status, as a person started it. */
+async function taskWithRun(status: "cancelled" | "failed" | "waiting") {
+  const created = await plan.createIssue(repo, { project: [...plan.plans.values()][0]!.project.number, title: "Add the migration", body: "", labels: ["task"] });
+  plan.itemsOf(repo).get(created.number)!.status = "Ready";
+  const [run] = await db
+    .insert(runs)
+    .values({ projectId, graphVersionId: (await db.select().from(graphVersions))[0]!.id, task: "Add the migration", status, state: {}, baseBranch: "main", branchName: "handoff/x", issues: [{ number: created.number, title: "Add the migration", url: "" }] })
+    .returning();
+  return { issue: created.number, runId: run!.id };
+}
+
+test("letting the scheduler take a task records scheduler.released for its cancelled run and checks soon", async () => {
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  await db.update(projectSchedulers).set({ nextCheckAt: new Date(Date.now() + 60_000), lastCheckAt: new Date(Date.now() - 60_000) }).where(eq(projectSchedulers.projectId, projectId));
+  const { issue, runId } = await taskWithRun("cancelled");
+
+  await releaseTask(db, projectId, issue, "dashboard");
+
+  expect((await log()).at(-1)).toEqual({ type: "scheduler.released", payload: { issue, runId, by: "dashboard" } });
+  expect((await row())!.nextCheckAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+});
+
+test("only a task whose latest run was cancelled can be let to the scheduler", async () => {
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  const failed = await taskWithRun("failed");
+  await expect(releaseTask(db, projectId, failed.issue, "dashboard")).rejects.toThrow(`#${failed.issue} is not waiting for a person after a cancelled run: its latest run ${failed.runId.slice(0, 8)} is failed.`);
+  await expect(releaseTask(db, projectId, 999, "dashboard")).rejects.toThrow("#999 has no run, so the scheduler can take it already.");
+  expect((await log()).filter((e) => e.type === "scheduler.released")).toEqual([]);
 });

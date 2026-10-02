@@ -17,7 +17,7 @@ import {
   type DbExecutor,
   type ProjectSchedulerRow,
 } from "@handoff/db";
-import { nudgeScheduler, overlapKey, projectHolds, type Candidate, type CheckResult, type Hold, type Skipped } from "@handoff/engine/backlog-scheduler";
+import { issueRuns, nudgeScheduler, overlapKey, projectHolds, type Candidate, type CheckResult, type Hold, type Skipped } from "@handoff/engine/backlog-scheduler";
 import type { ProjectsPort } from "@handoff/github";
 import { getProjectDetail } from "./graphs";
 import { projectsAccessProblem } from "./plan";
@@ -132,6 +132,21 @@ export async function stopScheduler(db: Db, projectId: string, actor: string) {
     await record(tx, projectId, "scheduler.stopped", { by: actor });
   });
   return { state: "off" as const };
+}
+
+/**
+ * Lets the scheduler take a task again after a person cancelled its run: records scheduler.released
+ * for that run and brings the next check forward. A later cancel needs a new release. Refuses a task
+ * whose latest run was not cancelled, since nothing then keeps the scheduler from it.
+ */
+export async function releaseTask(db: Db, projectId: string, issue: number, actor: string) {
+  const run = (await issueRuns(db, projectId)).get(issue);
+  if (!run) throw new Error(`#${issue} has no run, so the scheduler can take it already.`);
+  if (run.status !== "cancelled") throw new Error(`#${issue} is not waiting for a person after a cancelled run: its latest run ${short(run.id)} is ${run.status}.`);
+  await db.transaction(async (tx) => {
+    await record(tx, projectId, "scheduler.released", { issue, runId: run.id, by: actor });
+    await nudgeScheduler(tx, projectId);
+  });
 }
 
 export type SchedulerState = "off" | "paused" | "held" | "idle" | "running";
