@@ -15,8 +15,9 @@ import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, m
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
-import { reviewPath, runPath, tryPath } from "../lib/paths";
+import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
+import { getScheduler, pauseScheduler, startScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
 
 /**
@@ -33,6 +34,8 @@ const INSTRUCTIONS = `handoff runs graphs of coding agents on GitHub repositorie
 To work on issues: list_backlog, then start_run with the issue numbers (the task can stay empty), then get_run to follow the run. Every result links to the dashboard.
 
 A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order. Each of these writes asks the person first.
+
+Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, and pause_scheduler stops new starts.
 
 A run may stop to ask a question (a Human gate) or fail. Tell the user what it asks or why it failed. Answer a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
 
@@ -387,6 +390,40 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       planIssue(shaping, (await findProject(db, project)).id, { issue, ...(story !== undefined ? { story } : {}) }),
 
     schedule: async ({ project, items }: { project: string; items: ScheduleItem[] }) => schedule(shaping, (await findProject(db, project)).id, items),
+
+    start_scheduler: async ({ project, max_runs, order, graph }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string }) => {
+      const { id } = await findProject(db, project);
+      return { ...(await startScheduler({ db, projects: plan }, id, { maxRuns: max_runs, order, graph }, actor)), url: url(planPath(id)) };
+    },
+
+    pause_scheduler: async ({ project, reason }: { project: string; reason?: string }) => {
+      const { id } = await findProject(db, project);
+      return { ...(await pauseScheduler(db, id, actor, reason)), url: url(planPath(id)) };
+    },
+
+    get_scheduler: async ({ project }: { project: string }) => {
+      const { id } = await findProject(db, project);
+      const s = await getScheduler(db, id);
+      return {
+        state: s.state,
+        settings: s.settings ? { max_runs: s.settings.maxRuns, order: s.settings.order, graph: s.settings.graphName, skip_label: s.settings.skipLabel } : null,
+        ...(s.paused ? { paused: { by: s.paused.by, reason: s.paused.reason, at: s.paused.at.toISOString() } } : {}),
+        summary: s.summary,
+        active: s.active,
+        claude_slots: s.claudeSlots,
+        active_runs: s.activeRuns.map((r) => ({ id: r.id, status: r.status, started_by: r.startedBy, issues: r.issues, url: url(r.href) })),
+        holds: s.holds.map((h) => ({ kind: h.kind, run_id: h.runId, text: h.text, url: url(h.href) })),
+        overlap_held: s.overlapHeld.map((h) => ({ run_id: h.runId, node: h.nodeKey, waits_for: h.waitsFor, paths: h.paths, text: h.text, url: url(h.href) })),
+        ...(s.idle ? { idle: s.idle } : {}),
+        ...(s.error ? { error: s.error } : {}),
+        next: s.next,
+        skipped: s.skipped,
+        checked_at: s.checkedAt?.toISOString() ?? null,
+        next_check_at: s.nextCheckAt?.toISOString() ?? null,
+        events: s.events.map((e) => ({ type: e.type, payload: e.payload, at: e.at.toISOString() })),
+        url: url(planPath(id)),
+      };
+    },
 
     list_library: async () => {
       const { skills, mcp, agents, groups } = await listLibraryIndex(db);

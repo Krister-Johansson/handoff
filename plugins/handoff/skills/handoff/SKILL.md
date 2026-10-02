@@ -20,9 +20,19 @@ A project can keep its plan on a GitHub Project: epics, stories under them and t
 3. `list_plan` shows the tree with each item's status, run and pull request, and the open issues outside the plan. `plan_issue` brings one of those into the plan as a task.
 4. When a story is shaped and the user agrees, `move_to_ready` with its tasks. `move_to_shaping` takes a task back out of the backlog.
 5. Dates, only when the user asks to plan the timeline: `schedule` sets each item's Start and Target (`YYYY-MM-DD`, `null` clears one), for epics, stories and tasks. Read `list_plan` first, order the tasks by their blocked-by links, and propose one `schedule` call per story with its tasks. `create_story` and `create_task` also take `start` and `target` when the user gives dates.
-6. Then `list_backlog` and `start_run` as below. A run moves its task to Running, its pull request to In review, and the merge to Done; cancelling the run puts the task back in Ready. Epics and stories never run.
+6. Then `list_backlog` and `start_run` as below, or let the scheduler start runs on Ready tasks (next section). A run moves its task to Running, its pull request to In review, and the merge to Done; cancelling the run puts the task back in Ready. Epics and stories never run.
 
 Without the `project` scope on the dashboard's `GITHUB_TOKEN` the plan tools refuse and say how to fix it; the `handoff-setup` skill covers it.
+
+## Let the scheduler start runs
+
+A project with a plan can have a scheduler. Once the user turns it on, handoff starts runs on its own on Ready tasks without open blockers, in Project order or by the Priority field, until a limit of active runs is reached. The user decides what is Ready: the scheduler never moves a task to Ready, never requests a merge and never starts a task whose last run was cancelled.
+
+- `get_scheduler` shows whether it is off, paused, held, idle or running, what holds it (a failed run, a question, a review, a pull request waiting for review or a permission request), each with its link, the active runs against the limit with the worker's Claude slots, and the next tasks it will start with the reasons it skips others.
+- `start_scheduler` turns it on, resumes it after a pause, or changes `max_runs` (1 to 10), `order` (`project` or `priority`) and `graph`. It asks the user first. It refuses a project without a plan, so run `setup_plan` before it.
+- `pause_scheduler` stops new starts until `start_scheduler` resumes it. Active runs go on.
+
+While something holds the project, the scheduler starts nothing, and it goes on by itself once the user answers, repairs or cancels. Tell the user what holds it rather than acting for them.
 
 ## Plan work as issues, then hand it off
 

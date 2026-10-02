@@ -41,6 +41,19 @@ function datesText(dates: { start?: string | null | undefined; target?: string |
   return parts.length ? parts.join(", ") : "no change";
 }
 
+/**
+ * start_scheduler's approval sentence: "Let handoff start up to 2 runs at a time on Ready tasks in
+ * todooverkill, in Project order, with graph master". A setting left out keeps its stored value, or
+ * its default the first time, and the sentence says so.
+ */
+function schedulerText(a: { project: string; max_runs?: number | undefined; order?: "project" | "priority" | undefined; graph?: string | undefined }) {
+  const limit = a.max_runs ? `up to ${a.max_runs} ${a.max_runs === 1 ? "run" : "runs"} at a time` : "runs";
+  const given = [...(a.order ? [a.order === "priority" ? "by the Priority field" : "in Project order"] : []), ...(a.graph ? [`with graph ${a.graph}`] : [])];
+  const defaults = [...(a.max_runs ? [] : ["1 run at a time"]), ...(a.order ? [] : ["Project order"]), ...(a.graph ? [] : ["the default graph"])];
+  const rest = defaults.length === 0 ? "" : `, with its ${defaults.length === 3 ? "settings" : "other settings"} as they are (at first: ${defaults.join(", ")})`;
+  return `Let handoff start ${limit} on Ready tasks in ${a.project}${given.map((g) => `, ${g}`).join("")}${rest}`;
+}
+
 /** Every tool handoff offers to an agent, once: the source of truth for MCP, the assistant and WebMCP. */
 export const CATALOG: ToolSpec[] = [
   spec({
@@ -487,6 +500,46 @@ export const CATALOG: ToolSpec[] = [
     openWorld: true,
     idempotent: false,
     summarize: (a) => `Plan #${a.issue} as a task${a.story ? ` under story #${a.story}` : ""} in ${a.project}`,
+  }),
+  spec({
+    name: "get_scheduler",
+    title: "Show the scheduler",
+    description:
+      "A project's scheduler: off, paused, held, idle or running; what holds it (failed runs, questions, reviews, pull requests waiting for review, permission requests), each with its link; active runs of max_runs and the worker's Claude slots; runs waiting before their coder because their plan shares paths with another run; the next tasks it will start and the Ready tasks it skips with the reason; and its recent events.",
+    input: z.object({ project }),
+    kind: "data",
+    confirm: false,
+    readOnly: true,
+    untrusted: true,
+    summarize: (a) => `Show the scheduler of ${a.project}`,
+  }),
+  spec({
+    name: "start_scheduler",
+    title: "Start the scheduler",
+    description:
+      "Turns on a project's scheduler, or resumes it after a pause, and changes the settings given. The scheduler starts runs on its own on the plan's Ready tasks without open blockers, in Project order or by the Priority field, until max_runs runs of the project are active, and starts nothing while a run failed or a question, review or permission waits for a person. A person decides what is Ready. Refuses a project without a plan, priority order without a Priority field, and missing access to GitHub Projects.",
+    input: z.object({
+      project,
+      max_runs: z.number().int().min(1).max(10).optional().describe("The most runs of the project active at once, 1 to 10; 1 when first turned on"),
+      order: z.enum(["project", "priority"]).optional().describe("project for Project order, priority for the Priority field first; project when first turned on"),
+      graph: z.string().optional().describe("The graph its runs use; the project's default graph when first turned on"),
+    }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    openWorld: true,
+    summarize: (a) => schedulerText(a),
+  }),
+  spec({
+    name: "pause_scheduler",
+    title: "Pause the scheduler",
+    description: "Pauses a project's scheduler: it starts no new runs until start_scheduler resumes it. Active runs go on.",
+    input: z.object({ project, reason: z.string().optional().describe("Why, shown with the paused scheduler") }),
+    kind: "data",
+    confirm: false,
+    readOnly: false,
+    idempotent: true,
+    summarize: (a) => `Pause the scheduler of ${a.project}${a.reason ? `: ${a.reason}` : ""}`,
   }),
   spec({
     name: "go_to",

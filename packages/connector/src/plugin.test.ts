@@ -41,6 +41,15 @@ test("the handoff skill schedules Start and Target only when the user asks to pl
   expect(section).toMatch(/only when the user asks/);
 });
 
+test("the handoff skill says a person decides what is Ready and names start_scheduler, pause_scheduler and get_scheduler", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const start = skill.indexOf("## Let the scheduler start runs");
+  expect(start).toBeGreaterThan(skill.indexOf("## Shape first"));
+  const section = skill.slice(start, skill.indexOf("\n## ", start + 1));
+  expect(section).toMatch(/the user decides what is Ready/i);
+  for (const tool of ["start_scheduler", "pause_scheduler", "get_scheduler"]) expect(section).toContain(tool);
+});
+
 test("the plugin ships a setup skill that walks through setup_project", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
   expect(skill).toMatch(/^---\nname: handoff-setup\ndescription: /);
