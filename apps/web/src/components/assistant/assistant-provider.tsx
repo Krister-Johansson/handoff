@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { toolSpec } from "@/lib/assistant/catalog";
+import { isPageToolName } from "@/lib/assistant/page-tools";
+import { runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
 import { runUiTool } from "@/lib/assistant/run-ui-tool";
 import { registerWebMcp } from "@/lib/assistant/webmcp";
 import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
@@ -30,6 +32,15 @@ type PanelState = {
 
 const PortContext = createContext<AssistantPort | undefined>(undefined);
 const PanelContext = createContext<PanelState | undefined>(undefined);
+
+/** Registers the open page's tools with the provider; returns the function that removes them. */
+type RegisterPage = (page: OpenPage) => () => void;
+const PageRegistryContext = createContext<RegisterPage | undefined>(undefined);
+
+/** How usePageTools reaches the provider; undefined outside one, as in a page's own tests. */
+export function useOptionalPageRegistry(): RegisterPage | undefined {
+  return useContext(PageRegistryContext);
+}
 
 /** The assistant, for any part of the dashboard: the panel, the header button, and later voice. */
 export function useAssistant(): AssistantPort {
@@ -155,6 +166,15 @@ export function AssistantProvider({
   const turnId = useRef<string | undefined>(undefined);
   const replyListeners = useRef(new Set<(reply: ReplyUpdate) => void>());
   const requestListeners = useRef(new Set<(request: PendingRequest) => void>());
+  // The open page's tools. The last registration wins; removing one clears it only if it is still the open page.
+  const pageRef = useRef<OpenPage | undefined>(undefined);
+  const registerPage = useCallback<RegisterPage>((page) => {
+    pageRef.current = page;
+    return () => {
+      if (pageRef.current === page) pageRef.current = undefined;
+    };
+  }, []);
+  const openPage = useCallback(() => pageRef.current, []);
 
   const focusComposer = useCallback(() => setTimeout(() => composerRef.current?.focus(), 0), []);
   const open = useCallback(() => {
@@ -217,9 +237,12 @@ export function AssistantProvider({
             for (const listener of requestListeners.current) listener(request);
           }
           if (event.type === "ui_call") {
-            // UI tools run here, in the page, while the conversation stays on screen.
+            // UI tools run here, in the page, while the conversation stays on screen; page tools run in the page that is open now.
             const turn = turnId.current;
-            void runUiTool(event, (href) => router.push(href)).then(async (outcome) => {
+            const running: Promise<{ text: string; isError: boolean; note?: string }> = isPageToolName(event.name)
+              ? runPageTool(openPage(), event)
+              : runUiTool(event, { push: (href) => router.push(href), page: openPage });
+            void running.then(async (outcome) => {
               if (outcome.note) {
                 const note = { id: event.requestId, text: outcome.note };
                 setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? { ...m, notes: [...(m.notes ?? []), note] } : m)));
@@ -235,7 +258,7 @@ export function AssistantProvider({
         setStreaming(false);
       }
     },
-    [available, conversationId, streaming, transport, router],
+    [available, conversationId, streaming, transport, router, openPage],
   );
 
   const stop = useCallback(async () => {
@@ -291,7 +314,7 @@ export function AssistantProvider({
       context,
       {
         approve: (call) => approveForAgent(call),
-        runUi: (call) => runUiTool(call, (href) => router.push(href)),
+        runUi: (call) => runUiTool(call, { push: (href) => router.push(href), page: openPage }),
         activity: setAgentActivity,
       },
       { available, signal: controller.signal },
@@ -299,7 +322,7 @@ export function AssistantProvider({
       // A browser that refuses a registration keeps the dashboard working without WebMCP.
     });
     return () => controller.abort();
-  }, [available, webMcpEnabled, router]);
+  }, [available, webMcpEnabled, router, openPage]);
 
   const port = useMemo<AssistantPort>(
     () => ({ available, status: streaming ? "streaming" : "idle", send, stop, onReply, onRequest, respond, composerRef, open, close, isOpen }),
@@ -327,7 +350,9 @@ export function AssistantProvider({
 
   return (
     <PortContext.Provider value={port}>
-      <PanelContext.Provider value={panel}>{children}</PanelContext.Provider>
+      <PanelContext.Provider value={panel}>
+        <PageRegistryContext.Provider value={registerPage}>{children}</PageRegistryContext.Provider>
+      </PanelContext.Provider>
     </PortContext.Provider>
   );
 }

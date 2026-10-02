@@ -29,6 +29,12 @@ test("summarize names the run and the project for request_merge and cancel_run",
   expect(toolSpec("answer_permission").summarize({ request_id: "x", decision: "deny", message: "use Read" })).toBe("Deny the permission request: use Read");
 });
 
+test("toolSpec also finds a page tool by name, so a stored page tool call keeps its title and summary", () => {
+  expect(toolSpec("page_submit_review")).toMatchObject({ kind: "page", title: "Submit the review", confirm: true });
+  expect(toolSpec("page_show_view").summarize({ view: "graph" })).toBe("Show the graph view");
+  expect(() => toolSpec("page_nothing")).toThrow("There is no tool page_nothing.");
+});
+
 test("results that carry text from runs or GitHub are marked untrusted", () => {
   expect(CATALOG.filter((t) => t.untrusted).map((t) => t.name).sort()).toEqual(["get_run", "get_run_events", "list_attention", "list_backlog", "list_inbox", "list_notifications"]);
 });
