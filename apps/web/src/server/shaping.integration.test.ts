@@ -1,11 +1,11 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { afterAll, beforeEach, expect, test } from "vitest";
+import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { eq, events, projectSchedulers, runs, sql } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cancelRun } from "@handoff/engine/operations";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
-import { addEstimateFields, moveToReady, planIssue, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
+import { addEstimateFields, moveItem, moveToReady, planIssue, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -228,4 +228,30 @@ test("setup_plan creates Size and Estimate on a new Project and adds them when a
   // The timeline banner's Add the fields does the same on a plan that has none.
   plan.plans.get("octo/sample")!.project.estimateFields = undefined;
   await expect(addEstimateFields(deps, projectId)).resolves.toEqual({ estimate_fields: expect.objectContaining({ estimate: "field-estimate" }) });
+});
+
+test("moveItem writes Start, Target and Estimate in one request and refuses a Target before Start", async () => {
+  const items = await sizedPlan();
+  const listItems = vi.spyOn(plan, "listItems");
+  const writes = vi.spyOn(plan, "setPlanFields");
+
+  // A drop: the dashboard computed the Target; the server writes what it is given, without reading the whole plan.
+  // It reads no old values either: the dashboard keeps them for Undo.
+  expect(await moveItem(deps, projectId, { issue: 22, start: "2026-10-06", target: "2026-10-07", estimate: 9 })).toEqual({ issue: 22, start: "2026-10-06", target: "2026-10-07", estimate: 9 });
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(writes).toHaveBeenLastCalledWith(repo, 1, 22, { start: "2026-10-06", target: "2026-10-07", estimate: 9 });
+  expect(listItems).not.toHaveBeenCalled();
+  expect(items.get(22)).toMatchObject({ start: "2026-10-06", target: "2026-10-07", estimate: 9 });
+
+  // Undo writes the old values back: null clears the estimate, and the dates of an unscheduled task.
+  await moveItem(deps, projectId, { issue: 22, start: "2026-10-04", target: "2026-10-04", estimate: null });
+  expect(items.get(22)).toMatchObject({ start: "2026-10-04", target: "2026-10-04" });
+  expect(items.get(22)?.estimate).toBeUndefined();
+  await moveItem(deps, projectId, { issue: 21, start: null, target: null });
+  expect(items.get(21)).toEqual({ status: "Shaping", size: "L" });
+
+  await expect(moveItem(deps, projectId, { issue: 22, start: "2026-10-06", target: "2026-10-05" })).rejects.toThrow("#22: Target 2026-10-05 is before its Start 2026-10-06.");
+  await expect(moveItem(deps, projectId, { issue: 22, start: "2026-10-06", target: "2026-10-06", estimate: -2 })).rejects.toThrow("An estimate is hours from 0 to 1000.");
+  await expect(moveItem(deps, projectId, { issue: 99, start: "2026-10-06", target: "2026-10-06" })).rejects.toThrow("#99 could not be moved: it is not in the Project.");
+  expect(writes).toHaveBeenCalledTimes(4);
 });

@@ -384,6 +384,30 @@ export async function setSize(deps: ShapingDeps, projectId: string, input: SizeI
   };
 }
 
+/** A drop on the timeline: the new Start and Target (null clears), and a manual estimate in hours when the drop set or cleared one. */
+export type MoveInput = { issue: number; start: string | null; target: string | null; estimate?: number | null };
+
+/**
+ * Writes a task's Start and Target, and its manual estimate when given, as one write after one read of the
+ * item: the timeline's drop, its keyboard moves and their Undo. The dashboard computes the Target that
+ * follows; this checks the dates and refuses a Target before Start, and reads no other item of the plan.
+ */
+export async function moveItem(deps: ShapingDeps, projectId: string, input: MoveInput) {
+  checkDates(`#${input.issue}`, input.start, input.target);
+  if (input.estimate !== undefined && input.estimate !== null && !(Number.isFinite(input.estimate) && input.estimate >= 0 && input.estimate <= MAX_ESTIMATE)) {
+    throw new Error(`An estimate is hours from 0 to ${MAX_ESTIMATE}.`);
+  }
+  const { plan, repo, number } = await plannedProject(deps, projectId);
+  const estimate = input.estimate === undefined ? undefined : input.estimate || null;
+  const fields: PlanFields = { start: input.start, target: input.target, ...(estimate !== undefined ? { estimate } : {}) };
+  const result = await plan.setPlanFields(repo, number, input.issue, fields);
+  if (result !== "set") {
+    const why = { "not-in-project": "it is not in the Project", "no-field": "the Project lacks a field; run setup_plan", "no-option": "the Project lacks a field; run setup_plan" }[result];
+    throw new Error(`#${input.issue} could not be moved: ${why}.`);
+  }
+  return { issue: input.issue, start: input.start, target: input.target, ...(estimate !== undefined ? { estimate } : {}) };
+}
+
 /**
  * The Target that follows from a task's Start and duration, with the tasks that start the same day before it
  * in blocker order; undefined for a task without a duration, which keeps its dates.
