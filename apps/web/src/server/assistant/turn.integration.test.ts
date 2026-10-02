@@ -22,6 +22,7 @@ const github = new FakeGitHub();
 let server: Server;
 let baseUrl = "";
 let approvalTimeoutMs = 10_000;
+let uiTimeoutMs = 10_000;
 
 // The dashboard's /api/assistant/mcp route, served for the fake CLI to call.
 beforeAll(async () => {
@@ -30,7 +31,7 @@ beforeAll(async () => {
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const headers = new Headers(Object.entries(req.headers).flatMap(([k, v]) => (typeof v === "string" ? [[k, v] as [string, string]] : [])));
     const request = new Request(`${baseUrl}${req.url}`, { method: req.method!, headers, ...(req.method === "POST" ? { body: Buffer.concat(chunks) } : {}) });
-    const response = await handleTurnMcpRequest(request, { db, github, baseUrl, approvalTimeoutMs });
+    const response = await handleTurnMcpRequest(request, { db, github, baseUrl, approvalTimeoutMs, uiTimeoutMs });
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   });
@@ -44,6 +45,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await truncateAll(db);
   approvalTimeoutMs = 10_000;
+  uiTimeoutMs = 10_000;
 });
 
 function deps(scenario: FakeScenario): TurnDeps & { home: string; fake: ReturnType<typeof fakeClaude> } {
@@ -168,6 +170,32 @@ test("an approval nobody answers in time is denied", async () => {
   expect((await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id)))[0]!.status).toBe("queued");
 });
 
+test("a UI tool the model calls is sent to the browser and its answer returned to the model, and an unanswered one errors after the timeout", async () => {
+  uiTimeoutMs = 300;
+  const d = deps({
+    lines: [lines.init(), { $mcp: { tool: "go_to_inbox", arguments: { project_id: "p1" } } }, { $mcp: { tool: "where_am_i", arguments: {} } }, lines.result()],
+  });
+  const conversation = await createConversation(db, "Open the inbox");
+  const turn = await startTurn(d, conversation.id, { text: "Open the inbox", source: "typed" });
+  const events: TurnEvent[] = [];
+  turn.subscribe((e) => {
+    events.push(e);
+    if (e.type === "ui_call" && e.name === "go_to_inbox") setTimeout(() => turn.answerUi(e.requestId, { text: "Opened Inbox (/inbox?project=p1).", isError: false }), 20);
+  });
+  await turn.done;
+  expect(events.filter((e) => e.type === "ui_call")).toEqual([
+    { type: "ui_call", requestId: expect.any(String), name: "go_to_inbox", args: { project_id: "p1" } },
+    { type: "ui_call", requestId: expect.any(String), name: "where_am_i", args: {} },
+  ]);
+  const results = events.filter((e) => e.type === "tool_result");
+  expect(results[0]).toMatchObject({ isError: false, result: "Opened Inbox (/inbox?project=p1)." });
+  expect(results[1]).toMatchObject({ isError: true, result: expect.stringContaining("The page did not answer") });
+  expect(events.find((e) => e.type === "tool_call")).toMatchObject({ name: "go_to_inbox", title: "Open the Inbox" });
+  // UI tools run without an approval card.
+  const argv = d.fake.invocations()[0]!.argv;
+  expect(argv[argv.indexOf("--allowedTools") + 1]).toContain("mcp__handoff__go_to_inbox");
+});
+
 test("stopping a turn denies its open approvals and stores the turn as interrupted", async () => {
   const run = await sandboxRun();
   const d = deps({ lines: [lines.init(), delta("On it. "), { $mcp: { tool: "cancel_run", arguments: { run_id: run.id }, approve: true } }], hangAfterLine: 3 });
@@ -197,6 +225,7 @@ test("the staging directory and the turn token are gone when the turn ends", asy
     github,
     baseUrl,
     approvalTimeoutMs,
+    uiTimeoutMs,
   });
   expect(late.status).toBe(401);
 });

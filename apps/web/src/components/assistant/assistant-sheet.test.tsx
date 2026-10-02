@@ -5,12 +5,15 @@ import { AssistantButton } from "./assistant-button";
 import { AssistantProvider } from "./assistant-provider";
 import { AssistantSheet } from "./assistant-sheet";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => "/projects" }));
+const push = vi.hoisted(() => vi.fn());
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => "/projects" }));
 
 let transport: FakeAssistantTransport;
 beforeEach(() => {
   transport = new FakeAssistantTransport();
   Element.prototype.scrollIntoView = vi.fn();
+  push.mockReset();
+  window.history.replaceState({}, "", "/projects");
 });
 
 function App({ page = "Projects", available = true }: { page?: string; available?: boolean }) {
@@ -157,4 +160,41 @@ test("without a token the button explains that the assistant is off", async () =
   expect(await within(panel()).findByText(/The assistant is off/)).toBeInTheDocument();
   expect(within(panel()).getByText(/CLAUDE_CODE_OAUTH_TOKEN/)).toBeInTheDocument();
   expect(within(panel()).queryByLabelText("Message the assistant")).not.toBeInTheDocument();
+});
+
+test("after a navigation tool the page heading has focus and the panel says where it went", async () => {
+  const { rerender } = render(<App page="Projects" />);
+  await openAndSend("Open the inbox for sandbox");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  push.mockImplementation((href: string) => window.history.pushState({}, "", href));
+  act(() => transport.emit({ type: "tool_call", id: "u1", name: "go_to_inbox", title: "Open the Inbox", summary: "Open the Inbox for project p1", args: { project_id: "p1" } }));
+  act(() => transport.emit({ type: "ui_call", requestId: "r1", name: "go_to_inbox", args: { project_id: "p1" } }));
+  await waitFor(() => expect(push).toHaveBeenCalledWith("/inbox?project=p1"));
+  rerender(<App page="Inbox" />);
+  await waitFor(() => expect(transport.uiReplies).toEqual([{ turnId: "t1", requestId: "r1", text: "Opened Inbox (/inbox?project=p1).", isError: false }]));
+  expect(screen.getByRole("heading", { level: 1, name: "Inbox" })).toHaveFocus();
+  expect(within(panel()).getByText("Opened Inbox")).toBeInTheDocument();
+  expect(panel()).toBeInTheDocument();
+});
+
+test("where_am_i reports the current path and title", async () => {
+  window.history.replaceState({}, "", "/projects?tab=runs");
+  document.title = "handoff";
+  render(<App page="Projects" />);
+  await openAndSend("What am I looking at?");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "ui_call", requestId: "r1", name: "where_am_i", args: {} }));
+  await waitFor(() => expect(transport.uiReplies).toHaveLength(1));
+  expect(transport.uiReplies[0]).toMatchObject({ requestId: "r1", isError: false });
+  expect(JSON.parse(transport.uiReplies[0]!.text)).toEqual({ path: "/projects?tab=runs", title: "handoff", heading: "Projects" });
+});
+
+test("a UI tool call to another site is refused without navigating", async () => {
+  render(<App />);
+  await openAndSend("Open example.com");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "ui_call", requestId: "r1", name: "go_to", args: { path: "https://example.com/" } }));
+  await waitFor(() => expect(transport.uiReplies).toHaveLength(1));
+  expect(transport.uiReplies[0]).toMatchObject({ isError: true, text: expect.stringContaining("only opens pages of this dashboard") });
+  expect(push).not.toHaveBeenCalled();
 });

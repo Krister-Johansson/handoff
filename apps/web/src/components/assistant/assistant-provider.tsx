@@ -1,7 +1,9 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { toolSpec } from "@/lib/assistant/catalog";
+import { runUiTool } from "@/lib/assistant/run-ui-tool";
 import type { AssistantPort, ChatMessage, PendingRequest, ReplyUpdate, ToolCallView } from "@/lib/assistant/port";
 import { httpTransport, type AssistantTransport, type ConversationSummary, type StoredMessage, type TurnStreamEvent } from "@/lib/assistant/transport";
 
@@ -102,6 +104,7 @@ export function AssistantProvider({ children, available, transport = httpTranspo
   const [conversationId, setConversationId] = useState<string>();
   const [conversations, setConversations] = useState<ConversationSummary[]>();
   const [streaming, setStreaming] = useState(false);
+  const router = useRouter();
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const turnId = useRef<string | undefined>(undefined);
   const replyListeners = useRef(new Set<(reply: ReplyUpdate) => void>());
@@ -153,6 +156,17 @@ export function AssistantProvider({ children, available, transport = httpTranspo
             const request: PendingRequest = { requestId: event.requestId, toolUseId: event.toolUseId, name: event.name, title: event.title, summary: event.summary, args: event.args, status: "open" };
             for (const listener of requestListeners.current) listener(request);
           }
+          if (event.type === "ui_call") {
+            // UI tools run here, in the page, while the conversation stays on screen.
+            const turn = turnId.current;
+            void runUiTool(event, (href) => router.push(href)).then(async (outcome) => {
+              if (outcome.note) {
+                const note = { id: event.requestId, text: outcome.note };
+                setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? { ...m, notes: [...(m.notes ?? []), note] } : m)));
+              }
+              if (turn) await transport.uiReply(turn, event.requestId, { text: outcome.text, isError: outcome.isError });
+            });
+          }
         });
       } catch (error) {
         setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? { ...m, status: "error", error: (error as Error).message } : m)));
@@ -161,7 +175,7 @@ export function AssistantProvider({ children, available, transport = httpTranspo
         setStreaming(false);
       }
     },
-    [available, conversationId, streaming, transport],
+    [available, conversationId, streaming, transport, router],
   );
 
   const stop = useCallback(async () => {

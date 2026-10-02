@@ -16,6 +16,8 @@ export type AssistantTransport = {
   /** Starts a turn and calls `onEvent` for each event of its stream; settles when the stream ends. */
   turn(conversationId: string, text: string, source: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void>;
   reply(turnId: string, requestId: string, decision: { approved: boolean; note?: string }): Promise<void>;
+  /** The page's answer to a UI tool call. */
+  uiReply(turnId: string, requestId: string, result: { text: string; isError: boolean }): Promise<void>;
   stop(turnId: string): Promise<void>;
 };
 
@@ -62,6 +64,9 @@ export const httpTransport: AssistantTransport = {
   },
   async reply(turnId, requestId, decision) {
     await post(`/api/assistant/turns/${turnId}/replies`, { requestId, ...decision });
+  },
+  async uiReply(turnId, requestId, result) {
+    await post(`/api/assistant/turns/${turnId}/replies`, { requestId, result: result.text, isError: result.isError });
   },
   async stop(turnId) {
     await post(`/api/assistant/turns/${turnId}/stop`, {});
