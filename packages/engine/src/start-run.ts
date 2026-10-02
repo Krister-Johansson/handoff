@@ -49,7 +49,7 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   const run = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, issues);
-    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues });
+    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");

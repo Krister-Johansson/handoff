@@ -33,6 +33,8 @@ export const runs = pgTable(
     mergeRequestedAt: tstz("merge_requested_at"),
     /** Set when the user archives a finished run; hides its pull request from the dashboard's lists. */
     archivedAt: tstz("archived_at"),
+    /** Who started the run: dashboard, claude-code, assistant, webmcp, cli or scheduler; null for runs from before it was recorded. */
+    startedBy: text("started_by"),
     startedAt: tstz("started_at"),
     finishedAt: tstz("finished_at"),
     createdAt: createdAt(),

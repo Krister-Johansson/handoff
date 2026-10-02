@@ -4,7 +4,7 @@ import { runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
 import { startRun } from "./start-run.ts";
-import { seedGraph } from "./testing/harness.ts";
+import { inspect, seedGraph } from "./testing/harness.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -37,4 +37,12 @@ test("two concurrent starts on one issue create one run", async () => {
     expect.stringContaining("#11 is taken by run"),
   ]);
   expect(await db.select().from(runs)).toHaveLength(1);
+});
+
+test("startRun records startedBy on the run and in run.created", async () => {
+  const { start } = await project();
+  const run = await start([11], "scheduler");
+  expect(run.startedBy).toBe("scheduler");
+  const { events } = await inspect(db, run.id);
+  expect(events.find((e) => e.type === "run.created")?.payload).toMatchObject({ issues: [11], startedBy: "scheduler" });
 });
