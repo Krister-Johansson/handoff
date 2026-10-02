@@ -2,9 +2,11 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TimelineRun } from "@/lib/plan/schedule";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
+
 import { PlanTimeline } from "./plan-timeline";
-import { epic, planView, PROJECT, REPO_URL, story, task, timelineOf } from "./testing/plan-fixtures";
+import { epic, planView, PROJECT, REPO_URL, run, story, task, timelineOf } from "./testing/plan-fixtures";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -49,7 +51,7 @@ const view = planView([
   ]),
 ]);
 
-function renderTimeline(over: { runs?: TimelineRun[]; zoom?: "weeks" | "months"; project?: typeof PROJECT; plan?: typeof view } = {}) {
+function renderTimeline(over: { runs?: TimelineRun[]; zoom?: "weeks" | "months"; project?: typeof PROJECT; plan?: typeof view; needsYou?: string[] } = {}) {
   const plan = over.plan ?? view;
   return render(
     <PlanTimeline
@@ -61,11 +63,12 @@ function renderTimeline(over: { runs?: TimelineRun[]; zoom?: "weeks" | "months";
       timeline={timelineOf(plan, over.runs ?? [], NOW)}
       zoom={over.zoom}
       filters={parsePlanFilters({})}
-      needsYou={[]}
+      needsYou={over.needsYou ?? []}
       graphs={["loop"]}
       graphName="loop"
       readAt={NOW.getTime()}
     />,
+    { wrapper: TooltipProvider },
   );
 }
 
@@ -148,28 +151,42 @@ test("actual strips render one per run under the planned bar and link to the run
   expect(within(row(/Task #58/)).queryByRole("link", { name: /^Run / })).not.toBeInTheDocument();
 });
 
-test("a late task shows Late: waiting on its blockers with a red arrow and an overdue task shows Overdue by n days", () => {
+test("a late, blocked or overdue task shows a warning icon after its title that names what it flags, and a late one has a red arrow", async () => {
   const { container } = renderTimeline({ zoom: "weeks" });
   const arrow = (from: number, to: number) => container.querySelector(`[data-arrow="${from}-${to}"]`);
+  const label = (name: RegExp) => within(row(name)).getByRole("rowheader");
 
   // #57 was due to start Oct 1 while #55 still runs.
-  expect(within(row(/Task #57/)).getByText("Late: waiting on #55")).toBeInTheDocument();
+  expect(within(label(/Task #57/)).getByRole("button", { name: "Late: waiting on #55" })).toBeInTheDocument();
+  expect(within(label(/Task #57/)).queryByText("Late: waiting on #55")).not.toBeInTheDocument();
   expect(within(row(/Task #57/)).getByRole("link", { name: /^Task #57/ })).toHaveAttribute("data-late", "true");
   expect(arrow(55, 57)).toHaveAttribute("data-late", "true");
 
-  // #72 waits on #70 but starts Oct 12, so it is blocked, not late.
-  expect(within(row(/Task #72/)).getByText("Blocked by #70")).toBeInTheDocument();
-  expect(within(row(/Task #72/)).queryByText(/Late/)).not.toBeInTheDocument();
+  // #72 waits on #70 but starts Oct 12, so it is blocked, not late; the chip under the title is gone.
+  expect(within(label(/Task #72/)).getByRole("button", { name: "Blocked by #70" })).toBeInTheDocument();
+  expect(within(label(/Task #72/)).queryByText("Blocked by #70")).not.toBeInTheDocument();
   expect(arrow(70, 72)).toHaveAttribute("data-late", "false");
 
-  // #56 ended Sep 29 and is not done.
-  expect(within(row(/Task #56/)).getByText("Overdue by 3 days")).toBeInTheDocument();
-  expect(within(row(/Task #55/)).queryByText(/Overdue/)).not.toBeInTheDocument();
+  // #56 ended Sep 29 and is not done; #55 has nothing to flag.
+  const overdue = within(label(/Task #56/)).getByRole("button", { name: "Overdue by 3 days" });
+  expect(within(label(/Task #55/)).queryByRole("button", { name: /Overdue|Blocked|Late/ })).not.toBeInTheDocument();
+
+  // Focus shows the list in a tooltip.
+  fireEvent.focus(overdue);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Overdue by 3 days");
 
   // Both ends inside a collapsed epic: the arrow goes with them.
   fireEvent.click(within(row(/Epic #10/)).getByRole("button", { name: "Collapse Epic #10 Voice" }));
   expect(arrow(70, 72)).toBeNull();
   expect(arrow(55, 57)).not.toBeNull();
+});
+
+test("one warning icon names every flag of a task, a run that waits on you among them", () => {
+  const waiting = planView([
+    epic(12, "Project management", [story(41, "Shaping", 12, [task(56, "Approval cards", "Running", { start: "2026-09-24", target: "2026-09-29", run: run("r6", "waiting") })])]),
+  ]);
+  renderTimeline({ plan: waiting, zoom: "weeks", needsYou: ["r6"] });
+  expect(within(row(/Task #56/)).getByRole("button", { name: "Overdue by 3 days. Waiting on you" })).toBeInTheDocument();
 });
 
 test("an unscheduled item appears in the Unscheduled block with a Schedule button", () => {
@@ -259,6 +276,7 @@ test("the chart opens on today with Weeks under ten weeks of dates, its Today bu
       readAt={NOW.getTime()}
       todayRef={todayRef}
     />,
+    { wrapper: TooltipProvider },
   );
   expect(screen.getByText("W40")).toBeInTheDocument();
   expect(scrollTo).toHaveBeenCalledTimes(1);

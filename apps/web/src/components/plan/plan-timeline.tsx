@@ -37,7 +37,8 @@ import { useSearchQuery } from "./plan-search";
 import { IssueTitle } from "./plan-task-parts";
 import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
-import { DateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
+import { DateFieldsBanner, TimeChips, TimeFlags, useNarrow, type TimelineProps } from "./timeline-parts";
+
 import { useRowsOpen } from "./use-collapsed";
 
 const LABEL_WIDTH = 280;
@@ -317,6 +318,7 @@ type RowLabelProps = {
   window: "story" | "epic";
   projectId: string;
   start: StartRunContext;
+  needsYou: readonly string[];
   onToggle: () => void;
   onSchedule: (item: PlanItem) => void;
 };
@@ -339,8 +341,8 @@ function RowMenu({ row, projectId, start, onSchedule }: Pick<RowLabelProps, "row
 
 const INDENT: Record<TimelineRow["level"], string> = { 1: "pl-2.5", 2: "pl-[26px]", 3: "pl-11" };
 
-/** The fixed left cell of a row: chevron, status pill or kind badge, number and title, the menu, then a task's chips. */
-function RowLabel({ row, entry, window, projectId, start, onToggle, onSchedule }: RowLabelProps) {
+/** The fixed left cell of a row: chevron, status pill or kind badge, number and title with a task's warning icon, then the menu. */
+function RowLabel({ row, entry, window, projectId, start, needsYou, onToggle, onSchedule }: RowLabelProps) {
   const { item, task } = row;
   return (
     <div
@@ -358,19 +360,14 @@ function RowLabel({ row, entry, window, projectId, start, onToggle, onSchedule }
         {row.expanded !== undefined && <Chevron expanded={row.expanded} label={rowLabel(row)} onToggle={onToggle} />}
         <RowMark row={row} />
         {item ? <IssueTitle item={item} className={cn("text-xs", !task && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}
+        {task && entry && <TimeFlags task={task} entry={entry} window={window} needsYou={needsYou} />}
         <span className="ml-auto shrink-0">
           <RowMenu row={row} projectId={projectId} start={start} onSchedule={onSchedule} />
         </span>
       </div>
-      {task && entry && (
-        <div className="flex min-w-0 gap-1.5 overflow-hidden empty:hidden">
-          <TimeChips task={task} entry={entry} window={window} />
-        </div>
-      )}
     </div>
   );
 }
-
 
 type UnscheduledGroup = { title: string; items: PlanItem[] };
 
@@ -425,7 +422,7 @@ type PaneView = { left: number; width: number };
  * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
  * arrows and the rows at their other ends strong and dims the rest.
  */
-function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, todayRef, searchOpen }: TimelineProps) {
+function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const rowsOpen = useRowsOpen(projectId, searchOpen);
   const q = useSearchQuery();
@@ -557,6 +554,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
                       window={row.item?.parent !== undefined && stories.has(row.item.parent) ? "story" : "epic"}
                       projectId={projectId}
                       start={{ graphs, graphName }}
+                      needsYou={needsYou}
                       onToggle={() => rowsOpen.toggle(row.key)}
 
                       onSchedule={setScheduling}
