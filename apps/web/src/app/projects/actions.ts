@@ -9,7 +9,7 @@ import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
-import { addDateFields, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ShapingDeps } from "@/server/shaping";
+import { addDateFields, addEstimateFields, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { deleteProject, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
@@ -315,6 +315,31 @@ export async function scheduleAction(input: z.input<typeof ScheduleSchema>): Pro
   if (!parsed.success) return { ok: false, error: "Give the dates as YYYY-MM-DD, or clear them." };
   const { projectId, issue, start, target } = parsed.data;
   return onPlan(projectId, (deps) => schedule(deps, projectId, [{ issue, start, target }]));
+}
+
+const SetSizeSchema = z.object({
+  projectId: z.string().uuid(),
+  issue: z.number().int().positive(),
+  size: z.enum(["S", "M", "L"]).nullable().optional(),
+  estimate: z.number().min(0).max(1000).nullable().optional(),
+});
+
+/**
+ * The size chip's save: a task's Size, its manual estimate in hours (0 or null clears it), or both, written
+ * to the plan's GitHub Project with the Target of a dated task moved to match. A person's pick, so no approval card.
+ */
+export async function setSizeAction(input: z.input<typeof SetSizeSchema>): Promise<ActionState> {
+  const parsed = SetSizeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Give a size of S, M or L, or an estimate from 0 to 1000 hours." };
+  const { projectId, issue, size, estimate } = parsed.data;
+  return onPlan(projectId, (deps) => setSize(deps, projectId, { issue, ...(size !== undefined ? { size } : {}), ...(estimate !== undefined ? { estimate } : {}) }));
+}
+
+/** The timeline banner's Add the fields: creates Size and Estimate on the plan's GitHub Project. */
+export async function addEstimateFieldsAction(input: { projectId: string }): Promise<ActionState> {
+  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project has no plan to add fields to." };
+  return onPlan(parsed.data.projectId, (deps) => addEstimateFields(deps, parsed.data.projectId));
 }
 
 /** The timeline banner's Add date fields: creates the Start and Target fields on the plan's GitHub Project. */

@@ -1,8 +1,22 @@
 import { eq, projects, type Db } from "@handoff/db";
-import { STATUS_OPTIONS, type GitHubPort, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
+import {
+  PLAN_SIZES,
+  STATUS_OPTIONS,
+  type GitHubPort,
+  type PlanFields,
+  type PlanItem,
+  type PlanKind,
+  type PlanProject,
+  type PlanSize,
+  type PlanStatus,
+  type ProjectsPort,
+} from "@handoff/github";
 import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import { recordPlanStatus } from "@handoff/engine/plan-status";
+import { durationOf } from "../lib/plan/forecast.ts";
+import { sizedBars } from "../lib/plan/schedule.ts";
 import { latestRuns, type BacklogRun } from "./backlog.ts";
+import { latestProposals, loadForecasts, type Proposal } from "./forecasts.ts";
 import { projectsAccessProblem } from "./plan.ts";
 
 /**
@@ -60,10 +74,13 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
   const store = (number: number) => deps.db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
 
   // The Start and Target date fields a Project lacks, created; the roadmap layout reads them once a person picks them.
+  // Size and Estimate likewise, with S, M and L added to a Size field that lacks them.
   const dateFields = async (found: PlanProject) => {
     const missing = DATE_FIELDS.filter(([key]) => !found.dateFields?.[key]).map(([, name]) => name);
     if (missing.length) await plan.ensureDateFields(repo.owner, found.number);
-    return { added_date_fields: missing, roadmap: ROADMAP_NOTE };
+    const missingEstimate = missingEstimateFields(found);
+    if (missingEstimate.length) await plan.ensureEstimateFields(repo.owner, found.number);
+    return { added_date_fields: missing, added_estimate_fields: missingEstimate, roadmap: ROADMAP_NOTE };
   };
 
   if (stored !== null) {
@@ -292,6 +309,87 @@ const shown = (date: string | null | undefined) => date ?? "none";
 export async function addDateFields(deps: ShapingDeps, projectId: string) {
   const { plan, repo, number } = await plannedProject(deps, projectId);
   return { date_fields: await plan.ensureDateFields(repo.owner, number), roadmap: ROADMAP_NOTE };
+}
+
+/** The Size and Estimate fields a Project lacks: a Size field without S, M or L counts as missing. */
+function missingEstimateFields(project: PlanProject): ("Size" | "Estimate")[] {
+  const fields = project.estimateFields;
+  const size = fields?.size && PLAN_SIZES.every((s) => fields.size?.options[s]);
+  return [...(size ? [] : (["Size"] as const)), ...(fields?.estimate ? [] : (["Estimate"] as const))];
+}
+
+/** Gives the plan's Project its Size and Estimate fields when it lacks them, as the timeline's banner asks. */
+export async function addEstimateFields(deps: ShapingDeps, projectId: string) {
+  const { plan, repo, number } = await plannedProject(deps, projectId);
+  return { estimate_fields: await plan.ensureEstimateFields(repo.owner, number) };
+}
+
+/** The most hours a manual estimate may hold. */
+const MAX_ESTIMATE = 1000;
+
+/** One change of a task's size: a value sets Size or Estimate (hours; 0 clears it), null clears it, a missing key leaves it. */
+export type SizeInput = { issue: number; size?: PlanSize | null; estimate?: number | null };
+
+/**
+ * Sets or clears a task's Size and its manual estimate in hours, and moves the Target of a task with a
+ * Start to the day its new duration ends, after the hours of the tasks before it on its first day. All of
+ * it is one write. Refuses an issue outside the plan, a story or an epic (they sum their tasks), an
+ * estimate outside 0 to 1000 hours and a Project without the fields. Returns what changed.
+ */
+export async function setSize(deps: ShapingDeps, projectId: string, input: SizeInput) {
+  if (input.estimate !== undefined && input.estimate !== null && !(Number.isFinite(input.estimate) && input.estimate >= 0 && input.estimate <= MAX_ESTIMATE)) {
+    throw new Error(`An estimate is hours from 0 to ${MAX_ESTIMATE}.`);
+  }
+  const planned = await plannedProject(deps, projectId);
+  const { plan, repo, number, project } = planned;
+  const [items, found, proposals] = await Promise.all([plan.listItems(repo.owner, number, repo), plan.getProject(repo.owner, number), latestProposals(deps.db, project.id)]);
+  const item = items.find((i) => i.number === input.issue);
+  if (!item) throw new Error(`#${input.issue} is not in the plan of ${project.name}. Add it with plan_issue first.`);
+  if (item.kind === "story" || item.kind === "epic") throw new Error(`#${input.issue} is ${article(item.kind)}. Only tasks have a size; stories and epics sum their tasks.`);
+  const fields = found?.estimateFields;
+  if (!fields?.size || !fields.estimate) {
+    throw new Error(`GitHub Project #${number} has no Size and no Estimate field. Add them with Add the fields on the Plan timeline, or run setup_plan.`);
+  }
+
+  const estimate = input.estimate === undefined ? undefined : input.estimate || null;
+  const changed = {
+    ...item,
+    size: input.size === undefined ? item.size : (input.size ?? undefined),
+    estimate: estimate === undefined ? item.estimate : (estimate ?? undefined),
+  };
+  const target = item.start ? await followingTarget(deps.db, project.id, items.map((i) => (i.number === item.number ? changed : i)), item.number, proposals) : undefined;
+  const writes: PlanFields = {
+    ...(input.size !== undefined ? { size: input.size } : {}),
+    ...(estimate !== undefined ? { estimate } : {}),
+    ...(target && target !== item.target ? { target } : {}),
+  };
+  const result = await plan.setPlanFields(repo, number, item.number, writes);
+  if (result !== "set") {
+    const why = { "not-in-project": "it is not in the Project", "no-field": "the Project lacks a field; run setup_plan", "no-option": "the Size field has no such option; run setup_plan" }[result];
+    throw new Error(`#${item.number} could not be sized: ${why}.`);
+  }
+  return {
+    issue: item.number,
+    ...(writes.size !== undefined ? { size: { from: item.size ?? null, to: writes.size } } : {}),
+    ...(writes.estimate !== undefined ? { estimate: { from: item.estimate ?? null, to: writes.estimate } } : {}),
+    ...(writes.target ? { target: { from: item.target ?? null, to: writes.target } } : {}),
+  };
+}
+
+/**
+ * The Target that follows from a task's Start and duration, with the tasks that start the same day before it
+ * in blocker order; undefined for a task without a duration, which keeps its dates.
+ */
+async function followingTarget(db: Db, projectId: string, items: PlanItem[], issue: number, proposals: Map<number, Proposal>) {
+  const byNumber = new Map(items.map((i) => [i.number, i]));
+  const { forecasts, capacity } = await loadForecasts(db, projectId, (n) => byNumber.get(n)?.size);
+  const durations = new Map(
+    items.flatMap((i) => {
+      const duration = i.kind !== "story" && i.kind !== "epic" ? durationOf(i, forecasts, proposals.get(i.number)?.size) : undefined;
+      return duration ? [[i.number, duration] as const] : [];
+    }),
+  );
+  return sizedBars(items, { durations, capacity }).get(issue)?.end;
 }
 
 /**
