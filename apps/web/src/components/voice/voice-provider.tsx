@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useOptionalAssistant, useOptionalAssistantPanel } from "@/components/assistant/assistant-provider";
+import { setNotificationVoice } from "@/lib/notify";
 import { approvalAnswer } from "@/lib/voice/approval-answer";
 import { isTyping } from "@/lib/voice/is-typing";
 import { readVoicePrefs, useVoicePrefs } from "@/lib/voice/prefs";
@@ -139,6 +140,27 @@ export function VoiceProvider({
   const supported = Boolean(support.recognition) && (support.onDeviceCheck || prefs.allowServerRecognition);
   const { start: startInput, stop, abort, install, state } = input;
 
+  // Speech nobody asked for just now (a notification, a reply in the panel) waits while the microphone
+  // is open, so the dashboard never talks over the person, and is said once listening ends.
+  const micOpen = state === "listening" || state === "starting";
+  const quiet = useRef({ micOpen, waiting: [] as { text: string; priority: SpeechPriority }[] });
+  const sayWhenQuiet = useCallback((text: string, priority: SpeechPriority) => {
+    if (quiet.current.micOpen) quiet.current.waiting.push({ text, priority });
+    else latest.current.speaker?.speak(text, { priority });
+  }, []);
+  useEffect(() => {
+    quiet.current.micOpen = micOpen;
+    if (micOpen || !quiet.current.waiting.length) return;
+    const due = quiet.current.waiting;
+    quiet.current.waiting = [];
+    for (const { text, priority } of due) speaker?.speak(text, { priority });
+  }, [micOpen, speaker]);
+  // New notifications are spoken here while the dashboard can speak; notify() decides which.
+  useEffect(() => {
+    if (!speaker) return;
+    return setNotificationVoice((text) => sayWhenQuiet(text, "notification"));
+  }, [speaker, sayWhenQuiet]);
+
   const start = useCallback(async () => {
     if (!supported) return;
     // Never listen while speaking: asking to listen stops the speech first, so the microphone never hears the dashboard.
@@ -170,7 +192,10 @@ export function VoiceProvider({
     if (!onReply || !onRequest) return;
     const offReply = onReply((reply) => {
       const shown = latest.current.bubble;
-      if (reply.done && shown.open && shown.question && reply.text) say(spokenReply(reply.text));
+      // A streaming reply is spoken only when it is done; its text stays on screen.
+      if (!reply.done || !reply.text) return;
+      if (shown.open && shown.question) say(spokenReply(reply.text));
+      else if (readVoicePrefs().speakReplies) sayWhenQuiet(spokenReply(reply.text), "reply");
     });
     const offRequest = onRequest((request) => {
       if (!latest.current.bubble.open) return;
@@ -193,7 +218,7 @@ export function VoiceProvider({
       offReply();
       offRequest();
     };
-  }, [onReply, onRequest, say, startInput]);
+  }, [onReply, onRequest, say, sayWhenQuiet, startInput]);
 
   const closeBubble = useCallback(() => {
     abort();
