@@ -36,7 +36,7 @@
         "type": "reviewer",
         "label": "Review the plan",
         "config": {
-          "instructions": "Review the plan in the run state, not code: nothing has been written yet. Check that it covers the task and every linked issue, that the steps are in a workable order and small enough to test, and that it names the files it will change. Request changes with a comment per problem, using path \"plan\"; approve when a coder could follow it without guessing."
+          "instructions": "Check that the plan covers the task and every linked issue, that the steps are in a workable order and small enough to test, and that it names the files it will change. Write a comment per problem, using path \"plan\"; a gap a coder could not get past without guessing is blocking."
         },
         "x": 300,
         "y": 0

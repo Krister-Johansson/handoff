@@ -185,6 +185,19 @@ test("a code review node asks for Claude Code's code-review skill on the run's b
   expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "coder")?.status).toBe("passed");
 });
 
+test("a review is asked for a severity per finding, with blocking defined, and a plan review is asked about the plan", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { verdict: "approve", comments: [] } }]);
+  const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
+  doc.nodes.find((n) => n.key === "coder")!.attributes.type = "reviewer";
+  await startRun(db, doc);
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), reviewer: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr: stopAfterCoder } as unknown as ExecutorRegistry));
+  const prompt = cli.requests[1]!.prompt;
+  expect(prompt).toContain("Review the plan in the run state against the task.");
+  expect(prompt).toContain("blocking for a defect a user can hit on the main path of the change, a security hole, a broken accessibility requirement the project states, or a failing acceptance criterion");
+  expect(prompt).toContain("The verdict follows the findings: request_changes when one is blocking, approve otherwise.");
+  expect(cli.requests[1]!.systemPrompt).toContain("Stage: plan.");
+});
+
 test("the planner is asked for a short plan, and the coder for a PR title and description written for a reviewer", async () => {
   const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
   await startRun(db, linear);
@@ -289,7 +302,12 @@ test("a max-turns failure stores the subtype, turn count, cost and last message"
   });
 });
 
-test("code review is skipped with the earlier verdict when the fingerprint matches", async () => {
+test("code review is skipped with the earlier verdict when the fingerprint matches", () => heldReview("code_review"));
+
+test("a reviewer after a coder has passed is skipped the same way, since it reviews the change", () => heldReview("reviewer"));
+
+/** A review approves the change, main is merged in, and the review runs again with the same change. */
+async function heldReview(type: "code_review" | "reviewer") {
   const origin = createOriginRepo({ "notes.txt": "one\ntwo\nthree\n" });
   // The first attempt changes the notes; the second only merges main, as a coder resolving a conflict would.
   const coder: NodeExecutor = {
@@ -318,7 +336,7 @@ test("code review is skipped with the earlier verdict when the fingerprint match
     attributes: { startNode: "coder" },
     nodes: [
       { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
-      { key: "review", attributes: { type: "code_review", x: 300, y: 0 } },
+      { key: "review", attributes: { type, x: 300, y: 0 } },
       { key: "pr", attributes: { type: "pr", x: 600, y: 0 } },
     ],
     edges: [
@@ -328,11 +346,11 @@ test("code review is skipped with the earlier verdict when the fingerprint match
       { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix" } },
     ],
   };
-  const verdict = { verdict: "approve", comments: [{ path: "notes.txt", line: 2, body: "Consider a full stop." }] };
+  const verdict = { verdict: "approve", comments: [{ path: "notes.txt", line: 2, body: "Consider a full stop.", severity: "should_fix" }] };
   const cli = new FakeCliExecutor([{ output: verdict }]);
   const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Change the notes" });
-  const executors = { coder, code_review: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr } as unknown as ExecutorRegistry;
+  const executors = { coder, [type]: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr } as unknown as ExecutorRegistry;
   await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
 
   const { executions, events } = await inspect(db, run.id);
@@ -348,4 +366,72 @@ test("code review is skipped with the earlier verdict when the fingerprint match
   expect(executions.find((e) => e.nodeKey === "review" && e.attempt === 2)!.output).toEqual(verdict);
   const held = events.find((e) => e.type === "approval.held");
   expect((held?.payload as { message?: string } | undefined)?.message).toMatch(/^Unchanged since your approval at .+; only main was merged in$/);
+}
+
+/**
+ * A coder that commits a change to the notes and stops the run when it is sent back, a code review in
+ * Claude, and a PR node that stops the run.
+ */
+async function reviewOnRepo(cli: FakeCliExecutor) {
+  const origin = createOriginRepo({ "notes.txt": "one\n" });
+  const coder: NodeExecutor = {
+    needsWorkdir: true,
+    execute: async (ctx) => {
+      if (ctx.execution.attempt > 1) return { kind: "waiting", wait: { kind: "github_pr", key: "sent-back" } };
+      writeFileSync(join(ctx.workdir!.path, "notes.txt"), "one\ntwo\n");
+      git(ctx.workdir!.path, "commit", "-qam", "Add two");
+      return { kind: "completed", output: { status: "done", summary: "Changed the notes." } };
+    },
+  };
+  const graph = {
+    attributes: { startNode: "coder" },
+    nodes: [
+      { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "review", attributes: { type: "code_review", x: 300, y: 0 } },
+      { key: "pr", attributes: { type: "pr", x: 600, y: 0 } },
+    ],
+    edges: [
+      { key: "coder->review", source: "coder", target: "review", attributes: { port: "done" } },
+      { key: "review->coder", source: "review", target: "coder", attributes: { port: "changes" } },
+      { key: "review->pr", source: "review", target: "pr", attributes: { port: "approve" } },
+    ],
+  };
+  const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Change the notes" });
+  const executors = { coder, code_review: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr: stopAfterCoder } as unknown as ExecutorRegistry;
+  await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+  return inspect(db, run.id);
+}
+
+const approvalsOf = (state: unknown) => (state as { approvals?: Record<string, unknown> }).approvals ?? {};
+
+test("a review that says approve with a blocking finding routes as request_changes", async () => {
+  const blocking = { verdict: "approve", comments: [{ path: "notes.txt", line: 2, body: "Loses the user's notes on save.", severity: "blocking" }] };
+  const { executions, run, events } = await reviewOnRepo(new FakeCliExecutor([{ output: blocking }]));
+  expect(executions.map((e) => [e.nodeKey, e.attempt, e.status])).toEqual([
+    ["coder", 1, "passed"],
+    ["review", 1, "passed"],
+    ["coder", 2, "waiting"],
+  ]);
+  expect(executions[1]!.output).toEqual({ ...blocking, verdict: "request_changes" });
+  expect(approvalsOf(run.state).review).toBeUndefined();
+  expect(events.find((e) => e.type === "review.verdict_derived")?.payload).toEqual({ said: "approve", verdict: "request_changes", blocking: 1 });
+});
+
+test("a review that says request_changes with no blocking finding routes as approve", async () => {
+  const minor = {
+    verdict: "request_changes",
+    comments: [
+      { path: "notes.txt", line: 2, body: "Name the constant.", severity: "should_fix" },
+      { path: "notes.txt", body: "Add a test later.", severity: "follow_up" },
+    ],
+  };
+  const { executions, run } = await reviewOnRepo(new FakeCliExecutor([{ output: minor }]));
+  expect(executions.map((e) => [e.nodeKey, e.attempt, e.status])).toEqual([
+    ["coder", 1, "passed"],
+    ["review", 1, "passed"],
+    ["pr", 1, "waiting"],
+  ]);
+  expect(executions[1]!.output).toEqual({ ...minor, verdict: "approve" });
+  expect(approvalsOf(run.state).review).toBeDefined();
 });

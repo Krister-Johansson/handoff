@@ -246,6 +246,12 @@ export class OctokitGitHub implements GitHubPort {
     await octokit.rest.issues.update({ owner: repo.owner, repo: repo.name, issue_number: number, state: "closed", state_reason: "completed" });
   }
 
+  async createIssue(repo: RepoRef, input: { title: string; body: string }): Promise<{ number: number; url: string }> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.issues.create({ owner: repo.owner, repo: repo.name, title: input.title, body: input.body });
+    return { number: data.number, url: data.html_url };
+  }
+
   async getRepoId(repo: RepoRef): Promise<number> {
     const octokit = await this.clientFor(repo);
     const { data } = await octokit.rest.repos.get({ owner: repo.owner, repo: repo.name });

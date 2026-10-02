@@ -173,6 +173,13 @@ export class FakeGitHub implements GitHubPort {
     this.closedIssues.push({ number, comment });
   }
 
+  async createIssue(repo: RepoRef, input: { title: string; body: string }) {
+    const number = Math.max(0, ...this.issues.keys(), ...this.prs.keys()) + 1;
+    const url = `https://github.com/${repo.owner}/${repo.name}/issues/${number}`;
+    this.issues.set(number, { number, title: input.title, url, body: input.body, state: "open", updatedAt: new Date().toISOString() });
+    return { number, url };
+  }
+
   async listRepos() {
     return structuredClone(this.repos);
   }

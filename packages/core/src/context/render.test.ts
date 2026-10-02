@@ -180,6 +180,31 @@ test("a reviewer's second look shows its earlier comments, the coder's reply, an
   expect(md).toContain("git diff 4ef4f22..HEAD");
 });
 
+test("a later review gets the earlier findings after an approve verdict too", () => {
+  const md = renderContextPacket({
+    ...packet,
+    previousReview: {
+      verdict: "approve",
+      comments: [
+        { path: "src/env.ts", line: 5, body: "Name the constant.", severity: "should_fix" },
+        { body: "Add a test for an empty list.", severity: "follow_up" },
+      ],
+      reviewedAt: "4ef4f22",
+    },
+  });
+  expect(md).toContain("You reviewed this work before and approved it with the findings below.");
+  expect(md).toContain("- [should_fix] src/env.ts:5: Name the constant.");
+  expect(md).toContain("- [follow_up] Add a test for an empty list.");
+  expect(md).toContain("Repeat each finding that still holds, with its severity, and leave out the ones the changes fixed.");
+  expect(md).toContain("A new finding on a line that did not change since (`git diff 4ef4f22..HEAD`) is follow_up unless it is blocking.");
+});
+
+test("a reviewer before any coder has passed is told it reviews a plan and must not ask for code", () => {
+  const md = renderContextPacket({ ...packet, nodeKey: "plan-review", outputContract: "reviewer_output", stage: "plan" });
+  expect(md).toContain("Stage: plan. No code exists for this run yet; review the plan in the run state and never ask for an implementation.");
+  expect(renderContextPacket({ ...packet, outputContract: "reviewer_output", stage: "code" })).not.toContain("Stage: plan.");
+});
+
 test("a conflict with main asks the coder to merge it in, keep both changes and leave lockfiles to the package manager", () => {
   const md = renderContextPacket({ ...packet, conflict: { base: "main", baseSha: "abc1234def", files: ["package.json", "pnpm-lock.yaml"] } });
   expect(md).toContain("# Merge conflict with main");

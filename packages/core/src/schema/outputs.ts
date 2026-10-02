@@ -58,10 +58,30 @@ export function extraPathsOf(output: unknown): { path: string; reason: string }[
   });
 }
 
+/**
+ * How much a review finding matters: blocking sends the work back, should_fix is worth doing in this
+ * change, follow_up can wait for another issue. Findings from before severities read as should_fix.
+ */
+export const FindingSeveritySchema = z.enum(["blocking", "should_fix", "follow_up"]);
+export type FindingSeverity = z.infer<typeof FindingSeveritySchema>;
+
 export const ReviewerOutputSchema = z.object({
   verdict: z.enum(["approve", "request_changes"]),
-  comments: z.array(z.object({ path: z.string(), line: z.number().int().optional(), body: z.string() })),
+  comments: z.array(
+    z.object({
+      path: z.string(),
+      line: z.number().int().optional(),
+      body: z.string(),
+      severity: FindingSeveritySchema.default("should_fix").describe(
+        "blocking: a defect a user can hit on the main path of the change, a security hole, a broken accessibility requirement the project states, or a failing acceptance criterion. should_fix: worth fixing in this change. follow_up: can wait for another issue.",
+      ),
+    }),
+  ),
 });
+
+/** The verdict a review's findings call for, whatever the reviewer wrote: request_changes with any blocking finding, approve otherwise. */
+export const verdictOf = (comments: readonly { severity: FindingSeverity }[]): "approve" | "request_changes" =>
+  comments.some((c) => c.severity === "blocking") ? "request_changes" : "approve";
 
 export const TesterOutputSchema = z.object({
   passed: z.boolean(),

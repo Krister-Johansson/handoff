@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, type NodeType } from "@handoff/core";
+import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, verdictOf, type NodeType, type ReviewerOutput } from "@handoff/core";
 import type { Db } from "@handoff/db";
 import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
@@ -38,11 +38,25 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
   demo:
     "Walk through the running app described in the system prompt with the playwright tools, as a person checking the acceptance criteria would. " +
     "Take a screenshot that shows each criterion, and report each one in shots. Do not edit files.",
-  reviewer:
-    "Review the work against the task: the changes on this branch, unless the step's instructions name something else, such as the plan. Do not edit files. " +
-    "Return request_changes with one comment per finding that leaves the work wrong or incomplete against the task. " +
-    "Approve only when you have no such finding; comments you add to an approval reach the later steps as suggestions.",
 };
+
+/**
+ * How a review grades its findings. The engine sets the verdict from them, so a reviewer that labels a
+ * finding blocking sends the work back whatever verdict it wrote.
+ */
+const SEVERITIES =
+  "Give every finding a severity: blocking for a defect a user can hit on the main path of the change, a security hole, a broken accessibility requirement the project states, or a failing acceptance criterion; " +
+  "should_fix for a problem worth fixing in this change that is not blocking; follow_up for what can wait for another issue. " +
+  "The verdict follows the findings: request_changes when one is blocking, approve otherwise. Findings that are not blocking reach the later steps and the pull request as suggestions.";
+
+/** A reviewer's role: the plan before any coder has passed in the run, the branch's changes after. */
+function reviewerPrompt(ctx: ExecutorContext): string {
+  const what =
+    ctx.packet.stage === "plan"
+      ? "Review the plan in the run state against the task. No code exists yet: never ask for an implementation."
+      : "Review the work against the task: the changes on this branch, unless the step's instructions name something else.";
+  return `${what} Do not edit files. Return one comment per finding. ${SEVERITIES}`;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -68,13 +82,17 @@ function codeReviewPrompt(ctx: ExecutorContext): string {
   const level = typeof ctx.node.config.level === "string" ? ctx.node.config.level : DEFAULT_REVIEW_LEVEL;
   return [
     `Review this branch's changes against ${ctx.run.baseBranch} with the code-review skill: invoke it with the Skill tool, skill code-review, args "${level} ${ctx.run.branchName}".`,
-    "Do not edit files. Then return request_changes only for a finding that makes the change wrong, insecure, or misses the task, with one comment per such finding (path, line, body). " +
-      "Approve otherwise, and put every other finding as a comment on the approval: those reach the later steps and the pull request as suggestions.",
+    `Do not edit files. Then return one comment per finding (path, line, body, severity). ${SEVERITIES}`,
   ].join(" ");
 }
 
 function firstPrompt(ctx: ExecutorContext): string {
-  const role = ctx.node.type === "code_review" ? codeReviewPrompt(ctx) : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
+  const role =
+    ctx.node.type === "code_review"
+      ? codeReviewPrompt(ctx)
+      : ctx.node.type === "reviewer"
+        ? reviewerPrompt(ctx)
+        : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
   return [
     role,
     ...(ctx.packet.instructions ? ["Follow the instructions for this step in the system prompt."] : []),
@@ -139,7 +157,23 @@ function textOf(payload: unknown): string | undefined {
   return text || undefined;
 }
 
-const RESUME_PROMPT = "Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
+const isReview = (ctx: ExecutorContext) => ctx.node.type === "reviewer" || ctx.node.type === "code_review";
+
+/** A code review, or a reviewer after a coder has passed: both review the run's change, so an approval of it can hold. */
+const reviewsCode = (ctx: ExecutorContext) => ctx.node.type === "code_review" || (ctx.node.type === "reviewer" && ctx.packet.stage === "code");
+
+/**
+ * A review whose verdict follows its findings: request_changes with a blocking finding, approve
+ * without one, whatever the reviewer wrote. Records `review.verdict_derived` when the two differ.
+ */
+function followFindings(ctx: ExecutorContext, review: ReviewerOutput): ReviewerOutput {
+  const verdict = verdictOf(review.comments);
+  if (verdict === review.verdict) return review;
+  ctx.emit("review.verdict_derived", { said: review.verdict, verdict, blocking: review.comments.filter((c) => c.severity === "blocking").length });
+  return { ...review, verdict };
+}
+
+const RESUME_PROMPT ="Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
 
 /** Planner, Coder and Reviewer: one Claude CLI turn per execution, validated against the node's contract. */
 export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
@@ -149,8 +183,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "cli nodes need a workdir" } };
       const contractName = ctx.node.contract.output;
       if (!isContractName(contractName)) return { kind: "failed", error: { code: "unknown_contract", message: contractName } };
-      // A code review that approved this same change, with at most the base merged in since, keeps its verdict.
-      if (ctx.node.type === "code_review" && (await heldApproval(ctx))) return { kind: "completed", output: ctx.state.nodes[ctx.node.key]!.output };
+      // A review of the code that approved this same change, with at most the base merged in since, keeps its verdict.
+      if (reviewsCode(ctx) && (await heldApproval(ctx))) return { kind: "completed", output: ctx.state.nodes[ctx.node.key]!.output };
 
       const answer = answerToResume(ctx);
       const session: CliSession = ctx.execution.executorSessionId
@@ -278,15 +312,16 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       }
       switch (result.outcome) {
         case "success": {
+          const output = isReview(ctx) ? followFindings(ctx, result.validated as ReviewerOutput) : result.validated;
           const statePatch: Record<string, unknown> = {
             // A planner's question is not a plan: the run keeps no plan until the answer comes back.
-            ...(ctx.node.type === "planner" && (result.validated as { status?: string }).status !== "needs_input" ? { plan: result.validated } : {}),
+            ...(ctx.node.type === "planner" && (output as { status?: string }).status !== "needs_input" ? { plan: output } : {}),
             // A review remembers the commit it looked at, so its next round can look only at what changed since.
             ...(reviewedAt ? { reviewedAt: { ...(ctx.state.reviewedAt as Record<string, string> | undefined), [ctx.node.key]: reviewedAt } } : {}),
-            // A code review's approval holds until the run's own change changes.
-            ...(ctx.node.type === "code_review" && (result.validated as { verdict?: string }).verdict === "approve" ? await recordApproval(ctx, { at: new Date().toISOString() }) : {}),
+            // A review of the code holds its approval until the run's own change changes.
+            ...(reviewsCode(ctx) && (output as { verdict?: string }).verdict === "approve" ? await recordApproval(ctx, { at: new Date().toISOString() }) : {}),
           };
-          return { kind: "completed", output: result.validated, cost, ...(Object.keys(statePatch).length ? { statePatch } : {}) };
+          return { kind: "completed", output, cost, ...(Object.keys(statePatch).length ? { statePatch } : {}) };
         }
         case "interrupted":
           return { kind: "interrupted" };
