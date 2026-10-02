@@ -6,9 +6,10 @@ import { TopBar, TopBarCrumbsProvider } from "@/components/top-bar";
 
 /**
  * The frame of every page: a Skip to content link first in the tab order, the sidebar, then the top
- * bar and the page beside it. `sidebarOpen` comes from the sidebar's cookie, so a reload keeps it.
+ * bar and the page beside it. `panel` sits beside the page column under the top bar, where the
+ * assistant docks on a wide screen. `sidebarOpen` comes from the sidebar's cookie, so a reload keeps it.
  */
-export function AppShell({ sidebarOpen, sidebar, children }: { sidebarOpen: boolean; sidebar: ReactNode; children: ReactNode }) {
+export function AppShell({ sidebarOpen, sidebar, panel, children }: { sidebarOpen: boolean; sidebar: ReactNode; panel?: ReactNode; children: ReactNode }) {
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
       <a
@@ -21,8 +22,11 @@ export function AppShell({ sidebarOpen, sidebar, children }: { sidebarOpen: bool
       <TopBarCrumbsProvider>
         <SidebarInset className="min-w-0">
           <TopBar />
-          <div id="content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
-            {children}
+          <div className="flex min-w-0 flex-1">
+            <div id="content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
+              {children}
+            </div>
+            {panel}
           </div>
         </SidebarInset>
       </TopBarCrumbsProvider>

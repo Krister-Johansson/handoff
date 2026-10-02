@@ -10,6 +10,8 @@ import { VoiceButton } from "@/components/voice/voice-button";
 import { VoiceProvider } from "@/components/voice/voice-provider";
 import type { RecognitionCtor } from "@/lib/voice/support";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
+import { AppShell } from "@/components/app-shell";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => "/projects" }));
@@ -387,4 +389,78 @@ test("the composer shows Dictating while dictation goes into it", async () => {
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
   act(() => FakeSpeechRecognition.instances[0]!.emitStart());
   expect(within(panel()).getByText("Dictating")).toBeInTheDocument();
+});
+
+/** A window of the given width: media queries with min-width and max-width match against it, and listeners hear a resize. */
+function windowWidth(initial: number) {
+  let width = initial;
+  const lists = new Set<{ listeners: Set<() => void> }>();
+  const matches = (query: string) => {
+    const min = /min-width:\s*(\d+)px/.exec(query);
+    const max = /max-width:\s*(\d+)px/.exec(query);
+    return (!min || width >= Number(min[1])) && (!max || width <= Number(max[1]));
+  };
+  vi.stubGlobal("matchMedia", (query: string) => {
+    const entry = { listeners: new Set<() => void>() };
+    lists.add(entry);
+    return {
+      get matches() {
+        return matches(query);
+      },
+      media: query,
+      addEventListener: (_: string, fn: () => void) => entry.listeners.add(fn),
+      removeEventListener: (_: string, fn: () => void) => entry.listeners.delete(fn),
+    };
+  });
+  return {
+    set(next: number) {
+      width = next;
+      for (const entry of lists) for (const fn of entry.listeners) fn();
+    },
+  };
+}
+
+vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => <button type="button">Notifications</button> }));
+vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
+
+test("from 1280 px the panel docks and the page narrows; below it is a sheet", async () => {
+  const width = windowWidth(1440);
+  try {
+    render(
+      <AssistantProvider transport={transport} available>
+        <VoiceProvider support={{ recognition: undefined, onDeviceCheck: false }}>
+          <TooltipProvider>
+            <AppShell sidebarOpen sidebar={null} panel={<AssistantSheet />}>
+              <main>
+                <h1>Inbox</h1>
+              </main>
+            </AppShell>
+          </TooltipProvider>
+        </VoiceProvider>
+      </AssistantProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    // Docked, the panel is a column beside the page under the top bar, not a dialog over it.
+    const docked = await screen.findByRole("complementary", { name: "Assistant" });
+    expect(screen.queryByRole("dialog", { name: "Assistant" })).not.toBeInTheDocument();
+    const page = document.getElementById("content")!;
+    expect(docked.parentElement).toContainElement(page);
+    expect(docked).not.toContainElement(page);
+    expect(document.querySelector("[data-slot=top-bar]")).not.toContainElement(docked);
+    expect(within(docked).getByLabelText("Message the assistant")).toBeInTheDocument();
+    fireEvent.click(within(docked).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("complementary", { name: "Assistant" })).not.toBeInTheDocument();
+
+    // Narrower than 1280 px it overlays the page as a sheet.
+    act(() => width.set(1100));
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    expect(await screen.findByRole("dialog", { name: "Assistant" })).toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Assistant" })).not.toBeInTheDocument();
+    // Widening the window docks the open panel.
+    act(() => width.set(1300));
+    expect(await screen.findByRole("complementary", { name: "Assistant" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Assistant" })).not.toBeInTheDocument();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
