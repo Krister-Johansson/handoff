@@ -5,6 +5,29 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@theme {
+    /* The voice waveform and the bubble's progress line, from the Claude Design voice bubble. */
+    --animate-voice-wave: voice-wave 1s ease-in-out infinite;
+    --animate-voice-progress: voice-progress 1.4s ease-in-out infinite;
+    @keyframes voice-wave {
+        0%,
+        100% {
+            transform: scaleY(0.5);
+        }
+        50% {
+            transform: scaleY(1);
+        }
+    }
+    @keyframes voice-progress {
+        0% {
+            left: -30%;
+        }
+        100% {
+            left: 100%;
+        }
+    }
+}
+
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: var(--font-sans);

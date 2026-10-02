@@ -10,21 +10,24 @@ const FOLD_AFTER_MS = 10_000;
 function line(voice: ReturnType<typeof useVoice>): { label: string; text?: string } | undefined {
   const { speech } = voice;
   if (speech.speaking) {
-    return speech.priority === "read"
-      ? { label: `Reading: ${speech.title ?? "this page"}, sentence ${speech.sentence} of ${speech.total}` }
-      : { label: "Speaking" };
+    if (speech.priority === "read") return { label: `Reading: ${speech.title ?? "this page"}, sentence ${speech.sentence} of ${speech.total}` };
+    // The voice bubble shows its own speaking state.
+    return voice.bubble.open ? undefined : { label: "Speaking" };
   }
   if (speech.error && voice.state === "idle") return { label: speech.error };
   switch (voice.state) {
     case "starting":
-      return { label: "Starting" };
+      return voice.mode === "dictation" ? { label: "Starting" } : undefined;
     case "listening":
-      return { label: voice.mode === "dictation" ? "Dictating" : "Listening", ...(voice.interim ? { text: voice.interim } : {}) };
+      // A question said with V shows in the voice bubble; the strip is for dictation.
+      return voice.mode === "dictation" ? { label: "Dictating", ...(voice.interim ? { text: voice.interim } : {}) } : undefined;
     case "downloadable":
       return { label: `${voice.languageName} can be installed for offline use. Press the download button in the header.` };
     case "downloading":
       return { label: `${voice.languageName} is downloading for offline use` };
     case "blocked":
+      // A blocked question shows in the bubble.
+      return voice.error && (voice.mode === "dictation" || !voice.bubble.open) ? { label: voice.error } : undefined;
     case "unavailable":
       return voice.error ? { label: voice.error } : undefined;
     default:
