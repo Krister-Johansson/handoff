@@ -9,6 +9,7 @@ import { addDays } from "./timeline-scale";
 export type ArrangeTask = { number: number; blockers: readonly number[]; start?: string | undefined; target?: string | undefined; hours: number | undefined };
 
 export type Placement = { issue: number; start: string; target: string };
+/** Where Arrange puts each task, and the tasks it cannot place: "no-duration" has neither a size nor an estimate. */
 export type Arrangement = { placements: Placement[]; leftOut: { issue: number; reason: "no-duration" }[] };
 
 /** Hours a float may miss by and still count as whole. */
@@ -67,5 +68,8 @@ export function arrange(tasks: readonly ArrangeTask[], planned: readonly Arrange
     }
   }
   const bars = stackBars([...fixed, ...placed], capacity);
-  return { placements: placed.map((t) => ({ issue: t.number, start: t.start, target: bars.get(t.number)!.end })), leftOut: [] };
+  return {
+    placements: placed.map((t) => ({ issue: t.number, start: t.start, target: bars.get(t.number)!.end })),
+    leftOut: tasks.filter((t) => t.hours === undefined).map((t) => ({ issue: t.number, reason: "no-duration" as const })),
+  };
 }

@@ -57,3 +57,15 @@ test("a task starts no earlier than its placed blockers end", () => {
     { issue: 34, start: "2026-10-11", target: "2026-10-11" },
   ]);
 });
+
+test("tasks without a duration are left out with the reason", () => {
+  // #41 waits on #40, which Arrange cannot place, so nothing holds #41 back.
+  const tasks = [task(40, undefined), task(41, 2, { blockers: [40] }), task(42, undefined)];
+  expect(arrange(tasks, [], 6, TODAY)).toEqual({
+    placements: [{ issue: 41, start: "2026-10-10", target: "2026-10-10" }],
+    leftOut: [
+      { issue: 40, reason: "no-duration" },
+      { issue: 42, reason: "no-duration" },
+    ],
+  });
+});
