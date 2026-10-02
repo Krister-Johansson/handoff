@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import type { ReactNode } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { Assigning, type AssignControl } from "./assignee-button";
+import { Assigning, type AssignControl } from "./plan-context";
 import { PlanBoard } from "./plan-board";
 import { PlanTree } from "./plan-tree";
 import { epic, PROJECT, planView, REPO_URL, story, task } from "./testing/plan-fixtures";

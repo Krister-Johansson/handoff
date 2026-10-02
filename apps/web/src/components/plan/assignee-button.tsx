@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, use, useState, useTransition } from "react";
+import { use, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { UserRoundPlusIcon } from "lucide-react";
 import type { PlanTask } from "@/server/plan";
@@ -10,24 +10,7 @@ import { FieldError } from "@/components/ui/field";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { taskColumn } from "@/lib/plan/task";
 import { cn } from "@/lib/utils";
-
-/** A person who can be assigned issues in the project's repository. */
-export type AssignablePerson = { login: string };
-
-/**
- * What the assignee control needs from the server: who "me" is, the people the repository can assign,
- * and a way to set an issue's assignees on GitHub. Assigning never changes the plan's Status.
- */
-export type AssignControl = {
-  /** The login of the token handoff uses; undefined with a GitHub App, which acts as no person. */
-  me: string | undefined;
-  people: () => Promise<AssignablePerson[]>;
-  /** Replaces the issue's assignees with `logins`, plus the token's user with `me`. */
-  assign: (issue: number, change: { logins: string[]; me?: boolean }) => Promise<{ ok: true } | { ok: false; error: string }>;
-};
-
-/** The assignee control's server side; without one, rows and cards only show who is assigned. */
-export const Assigning = createContext<AssignControl | undefined>(undefined);
+import { Assigning, type AssignablePerson, type AssignControl } from "./plan-context";
 
 const initials = (login: string) => login.slice(0, 2).toUpperCase();
 
@@ -87,6 +70,7 @@ function AssignPopover({ task, control }: { task: PlanTask; control: AssignContr
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
   const assigned = task.assignees;
+  const isAssigned = new Set(assigned);
   const me = control.me;
   const name = nameOf(task);
 
@@ -102,7 +86,8 @@ function AssignPopover({ task, control }: { task: PlanTask; control: AssignContr
       setOpen(false);
       router.refresh();
     });
-  const toggle = (login: string) => change(assigned.includes(login) ? assigned.filter((a) => a !== login) : [...assigned, login]);
+  const toggle = (login: string) => change(isAssigned.has(login)
+ ? assigned.filter((a) => a !== login) : [...assigned, login]);
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -139,7 +124,7 @@ function AssignPopover({ task, control }: { task: PlanTask; control: AssignContr
             {people && people.length > 0 && (
               <CommandGroup heading="People who can be assigned">
                 {people.map((p) => (
-                  <CommandItem key={p.login} value={p.login} disabled={pending} data-checked={assigned.includes(p.login) ? "true" : undefined} onSelect={() => toggle(p.login)}>
+                  <CommandItem key={p.login} value={p.login} disabled={pending} data-checked={isAssigned.has(p.login) ? "true" : undefined} onSelect={() => toggle(p.login)}>
                     <Initials login={p.login} me={p.login === me} />
                     <span className="truncate font-mono text-xs">{p.login}</span>
                   </CommandItem>

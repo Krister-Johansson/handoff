@@ -1,33 +1,45 @@
 "use client";
 
-import { createContext, use, useEffect, useEffectEvent, useRef, type KeyboardEvent } from "react";
+import { useEffect, useEffectEvent, useRef, type KeyboardEvent } from "react";
 import { SearchIcon, XIcon } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { Kbd } from "@/components/ui/kbd";
-import { matchParts } from "@/lib/plan/search";
+import { matchParts, type MatchPart } from "@/lib/plan/search";
 import { cn } from "@/lib/utils";
+import { useSearchQuery } from "./plan-context";
 
-/** The Plan page's search text, for the titles that mark what it found. */
-export const SearchQuery = createContext("");
-export const useSearchQuery = () => use(SearchQuery);
+/** Each part's offset in the text, which keys it. */
+function offsets(parts: MatchPart[]): number[] {
+  const starts: number[] = [];
+  let at = 0;
+  for (const part of parts) {
+    starts.push(at);
+    at += part.text.length;
+  }
+  return starts;
+}
 
 /** Text with what the search found in it marked in yellow. */
 export function Highlight({ text }: { text: string }) {
   const q = useSearchQuery();
-  if (!q) return text;
-  let at = 0;
-  return matchParts(text, q).map((part) => {
-    const key = at;
-    at += part.text.length;
-    return part.hit ? (
-      <mark key={key} className="-mx-px rounded-[2px] bg-highlight px-px text-foreground">
-        {part.text}
-      </mark>
-    ) : (
-      <span key={key}>{part.text}</span>
-    );
-  });
+  if (!q) return <>{text}</>;
+  const parts = matchParts(text, q);
+  const starts = offsets(parts);
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.hit ? (
+          <mark key={starts[i]} className="-mx-px rounded-[2px] bg-highlight px-px text-foreground">
+            {part.text}
+          </mark>
+        ) : (
+          <span key={starts[i]}>{part.text}</span>
+        ),
+      )}
+    </>
+  );
 }
+
 
 const countText = (n: number) => (n === 0 ? "No match" : n === 1 ? "1 match" : `${n} matches`);
 

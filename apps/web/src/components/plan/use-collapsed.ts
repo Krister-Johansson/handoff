@@ -61,7 +61,13 @@ export function useCollapsed(projectId: string) {
   );
   const collapseAll = useCallback((more: string[]) => write(key, new Set([...rows, ...more])), [key, rows]);
   /** Opens these rows, or every row when none are named. */
-  const expand = useCallback((open?: string[]) => write(key, open ? new Set([...rows].filter((r) => !open.includes(r))) : new Set()), [key, rows]);
+  const expand = useCallback(
+    (open?: string[]) => {
+      const opened = new Set(open);
+      write(key, open ? new Set([...rows].filter((r) => !opened.has(r))) : new Set());
+    },
+    [key, rows],
+  );
   return { has: (row: string) => rows.has(row), toggle, collapseAll, expand };
 }
 

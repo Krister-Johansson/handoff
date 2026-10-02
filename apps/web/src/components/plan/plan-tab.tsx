@@ -17,12 +17,12 @@ import { searchPlan, type SearchResult } from "@/lib/plan/search";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import type { PlanViewName } from "@/lib/project-tab";
 import type { StartRunContext } from "./plan-actions";
-import { Assigning, type AssignControl } from "./assignee-button";
+import { Assigning, SearchQuery, type AssignControl } from "./plan-context";
 import { PlanBoard } from "./plan-board";
 import { PlanEmpty } from "./plan-empty";
 import { FilterChips, PlanFilters } from "./plan-filters";
 import { PlanRefresher } from "./plan-refresher";
-import { PlanSearchField, SearchQuery } from "./plan-search";
+import { PlanSearchField } from "./plan-search";
 import { PlanTimeline } from "./plan-timeline";
 import { ExpandCollapse, PlanToolbar } from "./plan-toolbar";
 import { PlanTree } from "./plan-tree";
@@ -97,17 +97,33 @@ type BodyProps = Omit<PlanTabProps, "activity" | "me" | "assign"> & {
   todayRef: RefObject<(() => void) | null>;
 };
 
-/** The chosen view of the plan narrowed by the filters and the search, or what to say when there is nothing to show. */
-function PlanBody({ project, plan, view, zoom, filters, narrowed, found, signals, start, readAt, onClearSearch, timeline, todayRef }: BodyProps) {
+/** What to show in place of the view when there is nothing in it: an empty plan, filters or a search that leave nothing. */
+function nothingToShow({ project, plan, view, filters, narrowed, found, onClearSearch }: BodyProps) {
   if (plan.epics.length === 0 && plan.unparented.length === 0 && plan.unplanned.length === 0) {
     return <PlanEmpty reason="empty" project={{ id: project.id, name: project.name, repo: `${project.repoOwner}/${project.repoName}` }} />;
   }
-  const shared = { projectId: project.id, repoUrl: `https://github.com/${project.repoOwner}/${project.repoName}`, needsYou: signals.needsYou, skipped: signals.skipped, ...start };
   // The board shows its columns whatever the filters leave; the timeline has no place for unplanned issues.
   const count = (p: Pick<NarrowedPlan, "epics" | "unparented" | "unplanned">) => p.epics.length + p.unparented.length + (view === "timeline" ? 0 : p.unplanned.length);
   if (view !== "board" && count(narrowed) === 0 && isFiltered(filters)) return <NoMatches projectId={project.id} view={view} q={filters.q} />;
   if (found.active && (view === "board" ? found.matches.board : count(found)) === 0) return <NoSearchMatch q={filters.q.trim()} onClear={onClearSearch} />;
+  return undefined;
+}
+
+/** How many tasks of each epic the filters and the search hide, and which of them hides them. */
+function hiddenTasks(narrowed: NarrowedPlan, found: SearchResult) {
+  if (!found.active) return { hidden: narrowed.hidden, by: "filters" as const };
+  const hidden = Object.fromEntries(found.epics.map((e) => [e.number, (narrowed.hidden[e.number] ?? 0) + (found.hidden[e.number] ?? 0)]));
+  return { hidden, by: Object.keys(narrowed.hidden).length > 0 ? ("filters and search" as const) : ("search" as const) };
+}
+
+/** The chosen view of the plan narrowed by the filters and the search, or what to say when there is nothing to show. */
+function PlanBody(props: BodyProps) {
+  const { project, plan, view, zoom, filters, narrowed, found, signals, start, readAt, timeline, todayRef } = props;
+  const nothing = nothingToShow(props);
+  if (nothing) return nothing;
+  const shared = { projectId: project.id, repoUrl: `https://github.com/${project.repoOwner}/${project.repoName}`, needsYou: signals.needsYou, skipped: signals.skipped, ...start };
   const shown = found.active ? found : narrowed;
+  const searchOpen = found.active ? found.open : undefined;
   switch (view) {
     case "board":
       return <PlanBoard {...shared} project={plan.project} board={shown.board} epics={plan.epics} now={readAt} searching={found.active} />;
@@ -123,26 +139,16 @@ function PlanBody({ project, plan, view, zoom, filters, narrowed, found, signals
           filters={filters}
           readAt={readAt}
           todayRef={todayRef}
-          searchOpen={found.active ? found.open : undefined}
+          searchOpen={searchOpen}
         />
       );
     default: {
-      const filtered = Object.keys(narrowed.hidden).length > 0;
-      const hidden = found.active ? Object.fromEntries(found.epics.map((e) => [e.number, (narrowed.hidden[e.number] ?? 0) + (found.hidden[e.number] ?? 0)])) : narrowed.hidden;
-      return (
-        <PlanTree
-          {...shared}
-          epics={shown.epics}
-          unparented={shown.unparented}
-          unplanned={shown.unplanned}
-          hidden={hidden}
-          hiddenBy={found.active ? (filtered ? "filters and search" : "search") : "filters"}
-          searchOpen={found.active ? found.open : undefined}
-        />
-      );
+      const { hidden, by } = hiddenTasks(narrowed, found);
+      return <PlanTree {...shared} epics={shown.epics} unparented={shown.unparented} unplanned={shown.unplanned} hidden={hidden} hiddenBy={by} searchOpen={searchOpen} />;
     }
   }
 }
+
 
 /** Everyone assigned to a task in the plan other than me, by login. */
 function peopleOf(plan: PlanView, me: string | undefined): string[] {

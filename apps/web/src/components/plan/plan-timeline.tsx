@@ -33,7 +33,7 @@ import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { KindBadge, StatusPill } from "./plan-status";
-import { useSearchQuery } from "./plan-search";
+import { useSearchQuery } from "./plan-context";
 import { IssueTitle } from "./plan-task-parts";
 import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";

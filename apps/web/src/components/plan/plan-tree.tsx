@@ -19,7 +19,7 @@ import { AssigneeButton } from "./assignee-button";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
 
 import { matchesQuery } from "@/lib/plan/search";
-import { useSearchQuery } from "./plan-search";
+import { useSearchQuery } from "./plan-context";
 import { useRowsOpen } from "./use-collapsed";
 
 type Props = StartRunContext & {
