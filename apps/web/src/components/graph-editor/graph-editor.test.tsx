@@ -44,7 +44,6 @@ const renderEditor = (graph: unknown = document) =>
         document={graph}
         library={{ skills: [], mcp: [], agents: [], groups: [] }}
         versions={versions}
-        trail={<nav>Projects</nav>}
       />
     </TooltipProvider>,
   );
@@ -74,20 +73,20 @@ test("an unsaved edit offers to save as the version after the newest one", () =>
   // The new Coder is not connected yet, so the graph has an issue and cannot be saved until it is.
   expect(screen.getByRole("button", { name: "Save as v5" })).toBeDisabled();
   expect(screen.getByRole("toolbar", { name: "Graph" })).toHaveTextContent(/\d+ issues?/);
+  // With nothing selected, the inspector still opens to list the issues.
+  expect(within(screen.getByRole("complementary", { name: "Inspector" })).getByText("Issues")).toBeInTheDocument();
 });
 
-test("the editor opens locked: the controls offer to unlock, the palette is disabled and the Graph help says how to unlock", () => {
+test("the editor opens locked: the controls offer to unlock and the palette is disabled", () => {
   renderEditor();
   expect(screen.getByRole("button", { name: "Unlock editing" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Add Coder" })).toHaveAttribute("aria-disabled", "true");
-  const inspector = screen.getByRole("complementary", { name: "Inspector" });
-  expect(inspector).toHaveTextContent("The graph is locked");
-  expect(inspector).toHaveTextContent("lock button");
 });
 
-test("the trail says when the shown version was saved and by whom", () => {
+test("no strip above the canvas says when the shown version was saved; the toolbar has the version", () => {
   renderEditor();
-  expect(screen.getByText(/^v3 saved .+ by cli$/)).toBeInTheDocument();
+  expect(screen.queryByText(/saved .+ by cli/)).not.toBeInTheDocument();
+  expect(screen.getByRole("toolbar", { name: "Graph" })).toHaveTextContent("v3");
 });
 
 test("the Version history button on the canvas controls opens a drawer that lists each version", () => {
@@ -112,7 +111,7 @@ test("Restore in the drawer closes it and loads that version onto the canvas, un
   renderEditor();
   fireEvent.click(screen.getByRole("button", { name: "Version history" }));
   fireEvent.click(within(screen.getByRole("dialog", { name: "Version history" })).getByRole("button", { name: "Restore" }));
-  await waitFor(() => expect(screen.getByText("Showing v4, not saved yet")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("Old planner")).toBeInTheDocument());
   expect(loadGraphVersionAction).toHaveBeenCalledWith("p1", "plan-review", 4);
   expect(screen.queryByRole("dialog", { name: "Version history" })).not.toBeInTheDocument();
   expect(screen.getByText("Old planner")).toBeInTheDocument();
@@ -132,13 +131,19 @@ test("Escape closes the drawer and puts focus back on the Version history button
   expect(button).toHaveFocus();
 });
 
-test("the inspector keeps the Graph help and no longer lists the versions", () => {
-  renderEditor();
+test("with nothing selected there is no inspector, locked or unlocked; selecting a node shows it", () => {
+  const { container } = renderEditor();
+  expect(screen.queryByRole("complementary", { name: "Inspector" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Select a node or an edge/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
+  expect(screen.queryByRole("complementary", { name: "Inspector" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Select a node or an edge/)).not.toBeInTheDocument();
+
+  fireEvent.click(canvasNode(container, "planner"));
   const inspector = screen.getByRole("complementary", { name: "Inspector" });
-  expect(inspector).toHaveTextContent("Select a node or an edge to edit it");
+  expect(within(inspector).getByLabelText("Label")).toHaveValue("Planner");
   expect(within(inspector).queryByText(/history/i)).not.toBeInTheDocument();
   expect(within(inspector).queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
-  expect(within(inspector).queryByText("v4")).not.toBeInTheDocument();
 });
 
 const canvasNode = (container: HTMLElement, id: string) => container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)!;
@@ -256,7 +261,7 @@ test("page_select selects a node and the inspector shows it", async () => {
   expect(await call("page_select", { edge: "coder->planner" })).toEqual({ text: "There is no edge coder->planner. The edges are: planner->coder.", isError: true });
 
   expect(await call("page_select", {})).toEqual({ text: "Cleared the selection.", isError: false });
-  expect(inspector()).toHaveTextContent("Select a node or an edge to edit it");
+  expect(screen.queryByRole("complementary", { name: "Inspector" })).not.toBeInTheDocument();
 });
 
 /** A Planner, a Coder with instructions, and a Reviewer that sends changes back to the Coder. */
@@ -310,7 +315,6 @@ test("page_update_node changes a coder's instructions and marks the graph unsave
   // The inspector shows the new text even though the coder was already open in it.
   expect(within(inspector()).getByLabelText("Instructions")).toHaveValue("Keep commits small and focused.");
   expect(within(inspector()).getByLabelText("Effort")).toHaveValue("high");
-  expect(screen.getByText("· edited, not saved")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Save as v5" })).toBeEnabled();
 
   // null clears a setting, as emptying its field does.
@@ -360,7 +364,7 @@ test("page_connect adds an edge the rules allow and refuses one they do not", as
     { id: "coder->reviewer", source: "coder", target: "reviewer", port: "done", loop: false },
     { id: "reviewer->coder", source: "reviewer", target: "coder", port: "changes", loop: false },
   ]);
-  expect(screen.getByText("· edited, not saved")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^Save as v\d+$/ })).toBeInTheDocument();
 
   expect(await call("page_connect", { source: "reviewer", target: "finish" })).toEqual({ text: "reviewer has several outputs: approve, changes. Say which with port.", isError: true });
   expect(await call("page_connect", { source: "reviewer", target: "finish", port: "done" })).toEqual({ text: "reviewer has no output done. Its outputs are: approve, changes.", isError: true });
@@ -380,7 +384,7 @@ test("page_remove removes nodes and their edges", async () => {
   expect(nodeCount(container)).toBe(2);
   expect(await edgesOf(whereAmI)).toEqual([{ id: "planner->coder", source: "planner", target: "coder", port: "done", loop: false }]);
   // The inspector let go of the removed node.
-  expect(inspector()).toHaveTextContent("Select a node or an edge to edit it");
+  expect(screen.queryByLabelText("Label")).not.toBeInTheDocument();
 
   expect(await call("page_remove", { ids: ["planner->coder"] })).toEqual({ text: "Removed planner->coder. The graph is not saved yet.", isError: false });
   expect(await edgesOf(whereAmI)).toEqual([]);
@@ -467,7 +471,7 @@ test("page_issues lists what keeps the graph from being saved, and page_tidy_lay
   expect(screen.getByRole("toolbar", { name: "Graph" })).toHaveTextContent(/\d+ issues?/);
 
   expect(await call("page_tidy_layout")).toEqual({ text: "Laid the graph out again. The graph is not saved yet.", isError: false });
-  expect(screen.getByText("· edited, not saved")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save as v5" })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
   await call("page_remove", { ids: ["reviewer", "finish"] });
@@ -498,7 +502,7 @@ test("page_save_graph is refused with the issues while the graph is invalid, and
     expect.objectContaining({ nodes: [expect.objectContaining({ key: "planner", attributes: expect.objectContaining({ label: "Plan the work" }) }), expect.objectContaining({ key: "coder" })] }),
   );
   expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
-  expect(screen.getByText(/^v5 saved/)).toBeInTheDocument();
+  expect(screen.getByRole("toolbar", { name: "Graph" })).toHaveTextContent("v5");
 
   // A save the server refuses says why.
   vi.mocked(saveGraphAction).mockResolvedValue({ ok: false, errors: [{ code: "invalid_document", message: "The graph changed on the server." }] });

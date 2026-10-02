@@ -900,15 +900,6 @@ export function Inspector({
   const edge = selection.edgeId ? graph.edges.find((e) => e.id === selection.edgeId) : undefined;
   if (node) return <NodeInspector key={node.id} node={node} graph={graph} locked={locked} library={library} dispatch={dispatch} onSelect={onSelect} />;
   if (edge) return <EdgeInspector key={edge.id} edge={edge} graph={graph} locked={locked} dispatch={dispatch} />;
-  return (
-    <InspectorSection title="Graph">
-      {locked ? (
-        <FieldDescription>
-          The graph is locked. Select a node or an edge to edit its properties. To add, delete, connect or move nodes, unlock it with the lock button in the canvas controls at the bottom left.
-        </FieldDescription>
-      ) : (
-        <FieldDescription>Select a node or an edge to edit it. Drag from a node&apos;s right handle to another node to connect them. Press Backspace to delete the selection.</FieldDescription>
-      )}
-    </InspectorSection>
-  );
+  // Nothing selected: the editor hides the inspector, unless it lists the graph's issues.
+  return null;
 }
