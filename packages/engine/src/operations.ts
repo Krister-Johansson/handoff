@@ -45,7 +45,7 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
  * Cancels a run: stops claiming its work, fails queued and waiting nodes, signals the running one, and stops its apps.
  * With the Projects port, the run's tasks go back to Ready on the plan, so they return to the backlog.
  */
-export async function cancelRun(db: Db, runId: string, opts: { reason?: string; projects?: ProjectsPort } = {}) {
+export async function cancelRun(db: Db, runId: string, opts: { reason?: string; projects?: ProjectsPort | undefined } = {}) {
   const cancelled = await db.transaction(async (tx) => {
     const [run] = await tx
       .update(runs)
@@ -165,11 +165,12 @@ export async function stuckLoop(db: Db, runId: string): Promise<StuckLoop | unde
 /**
  * A person's decision for a run stuck on a loop that ran out: another round (the loop starts over and
  * the work goes back once more), go on as if the step approved (its forward edges are taken), or stop.
+ * Stopping cancels the run, so with the Projects port its tasks go back to Ready on the plan.
  */
-export async function resolveExhaustedLoop(db: Db, runId: string, action: "retry" | "continue" | "stop") {
+export async function resolveExhaustedLoop(db: Db, runId: string, action: "retry" | "continue" | "stop", opts: { projects?: ProjectsPort | undefined } = {}) {
   const stuck = await stuckLoop(db, runId);
   if (!stuck) throw new Error("This run was not stopped by a loop that ran out of attempts.");
-  if (action === "stop") return cancelRun(db, runId, { reason: `stopped after ${stuck.edgeKey} ran out of attempts` });
+  if (action === "stop") return cancelRun(db, runId, { reason: `stopped after ${stuck.edgeKey} ran out of attempts`, projects: opts.projects });
   await db.transaction(async (tx) => {
     const [run] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
     const graph = await loadCompiledGraph(tx, run!.graphVersionId);

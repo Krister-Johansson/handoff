@@ -22,6 +22,17 @@ test("the plugin starts the bundled bridge with its settings and declares it a c
   expect(readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8")).toMatch(/^---\nname: handoff\ndescription: /);
 });
 
+test("the handoff skill shapes before it starts runs and names setup_plan, create_epic, create_story, create_task and move_to_ready", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const shape = skill.indexOf("## Shape first");
+  expect(shape).toBeGreaterThan(0);
+  const section = skill.slice(shape, skill.indexOf("\n## ", shape + 1));
+  for (const tool of ["setup_plan", "create_epic", "create_story", "create_task", "move_to_ready"]) expect(section).toContain(tool);
+  expect(section.indexOf("move_to_ready")).toBeLessThan(section.indexOf("start_run"));
+  expect(shape).toBeLessThan(skill.indexOf("start_run"));
+  expect(readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8")).toContain("A plan on GitHub Projects");
+});
+
 test("the plugin ships a setup skill that walks through setup_project", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
   expect(skill).toMatch(/^---\nname: handoff-setup\ndescription: /);

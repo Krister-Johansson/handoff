@@ -32,7 +32,7 @@ export type PlanView = {
 /** Why a project's plan cannot be shown, with a sentence that says what to do. */
 export type PlanUnavailable = { reason: "not-found" | "no-scope" | "no-plan" | "unreachable"; error: string };
 
-const SCOPE_FIX = "Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).";
+export const SCOPE_FIX ="Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).";
 const NEEDS_TOKEN = `The plan needs GITHUB_TOKEN, a classic token with the project scope; a GitHub App cannot reach a user-owned Project. ${SCOPE_FIX}`;
 
 /** What keeps handoff from GitHub Projects, as a sentence; undefined when the token can read and write them. */

@@ -6,7 +6,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { eq, graphVersions, nodeExecutions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { runCli } from "./cli.ts";
 
 const db = createTestDb();
@@ -113,6 +113,23 @@ test("handoff run cancel marks the run cancelled", async () => {
   const [row] = await db.select().from(runs).where(eq(runs.id, run.id));
   expect(row?.status).toBe("cancelled");
   expect(lines.at(-1)).toContain("cancelled");
+});
+
+test("handoff run cancel sets the run's task back to Ready on the plan", async () => {
+  const { out } = capture();
+  const repo = { owner: "octo", name: "sample" };
+  const github = new FakeGitHub();
+  const plan = new FakeProjects(github);
+  const { number } = await plan.createProject("octo", repo, "scratch plan");
+  const task = await plan.createIssue(repo, { project: number, title: "Add the migration", body: "Add the column.", labels: ["task"] });
+  plan.itemsOf(repo).get(task.number)!.status = "Running";
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.name, "scratch"));
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
+  await runCli(["run", "--project", "scratch", "--graph", "linear", "--issue", String(task.number)], { db, out, github });
+  const [run] = await db.select().from(runs);
+  await runCli(["run", "cancel", run!.id], { db, out, github: null, projects: plan });
+  expect(await plan.getStatus(repo, number, task.number)).toBe("Ready");
 });
 
 test("handoff run repair requires a failed node", async () => {

@@ -2,7 +2,8 @@ import { beforeEach, expect, test, vi } from "vitest";
 
 const runTool = vi.hoisted(() => vi.fn<(deps: unknown, name: string, args: unknown) => Promise<unknown>>(async () => [{ name: "sandbox", runs: 15 }]));
 vi.mock("@/lib/db", () => ({ getDb: () => ({}) }));
-vi.mock("@/lib/github", () => ({ getGitHub: () => undefined }));
+const plan = vi.hoisted(() => ({ name: "the Projects port" }));
+vi.mock("@/lib/github", () => ({ getGitHub: () => undefined, getProjects: () => plan }));
 vi.mock("@/server/agent-mcp", () => ({ runTool }));
 
 beforeEach(() => runTool.mockClear());
@@ -30,6 +31,11 @@ test("runs a read tool and returns its JSON", async () => {
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ result: [{ name: "sandbox", runs: 15 }] });
   expect(runTool).toHaveBeenCalledWith(expect.objectContaining({ actor: "webmcp", baseUrl: "http://127.0.0.1:3000" }), "list_runs", { project: "sandbox", status: "active" });
+});
+
+test("a tool reaches the plan on GitHub Projects through the dashboard's Projects port", async () => {
+  await call("start_run", { project: "sandbox", issues: [12] });
+  expect(runTool).toHaveBeenCalledWith(expect.objectContaining({ projects: plan }), "start_run", { project: "sandbox", issues: [12] });
 });
 
 test("a tool that fails answers with its message", async () => {

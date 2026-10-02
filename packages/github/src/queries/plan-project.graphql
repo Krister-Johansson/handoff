@@ -7,6 +7,53 @@ query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
   }
 }
 
+fragment PlanProjectChoice on ProjectV2 {
+  id
+  number
+  title
+  url
+  closed
+  field(name: "Status") {
+    __typename
+    ... on ProjectV2SingleSelectField {
+      id
+      options {
+        id
+        name
+        color
+        description
+      }
+    }
+  }
+  repositories(first: 50) {
+    nodes {
+      id
+      name
+      owner {
+        login
+      }
+    }
+  }
+}
+
+query PlanProjects($login: String!) {
+  user(login: $login) {
+    projectsV2(first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes {
+        ...PlanProjectChoice
+      }
+    }
+  }
+}
+
+query PlanProjectSetup($login: String!, $number: Int!) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      ...PlanProjectChoice
+    }
+  }
+}
+
 query PlanProject($login: String!, $number: Int!) {
   user(login: $login) {
     projectV2(number: $number) {

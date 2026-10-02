@@ -12,6 +12,13 @@ test("a voice question carries the short spoken answer instruction in its own pr
   expect(turnPrompt("what failed today", "typed")).toBe("what failed today");
 });
 
+test("the system prompt tells the assistant to shape a plan with the person before tasks reach the backlog", () => {
+  const shaping = SYSTEM_PROMPT.split("\n\n").find((p) => p.includes("create_epic"));
+  expect(shaping).toBeDefined();
+  for (const tool of ["list_plan", "setup_plan", "create_story", "create_task", "move_to_ready"]) expect(shaping).toContain(tool);
+  expect(shaping).toMatch(/Ready/);
+});
+
 test("a prompt that starts with a dash is not read as a CLI flag", () => {
   expect(turnPrompt("-v please", "typed")).toBe(" -v please");
 });

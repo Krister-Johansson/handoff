@@ -39,6 +39,12 @@ export type PlanAncestor = { number: number; title: string; body: string; kind: 
 
 export type SetStatusResult = "set" | "not-in-project" | "no-option";
 
+/** One of a user's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
+export type PlanProjectChoice = { number: number; title: string; url: string; linked: boolean; missingStatusOptions: PlanStatus[] };
+
+/** What adopting a Project changed: Status options renamed to handoff's names and those added. */
+export type AdoptedProject = { project: PlanProject; renamed: { from: string; to: PlanStatus }[]; added: PlanStatus[] };
+
 /**
  * The plan on a user-owned GitHub Project (v2). OctokitProjects in production, FakeProjects in tests.
  * `project` is a Project number of the repository's owner.
@@ -52,6 +58,14 @@ export interface ProjectsPort {
   getStatus(repo: RepoRef, project: number, issue: number): Promise<PlanStatus | undefined>;
   /** Sets Status; adds the issue to the Project first when `add` is true; returns what it did. */
   setStatus(repo: RepoRef, project: number, issue: number, status: PlanStatus, opts?: { add?: boolean }): Promise<SetStatusResult>;
+  /** A user's open Projects, those linked to `repo` first, most recently updated first within each group. */
+  listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]>;
+  /**
+   * Makes an existing user Project the plan of `repo`: links it to the repository and gives its Status
+   * field handoff's options, renaming an option whose name matches apart from case and decoration
+   * (an emoji, extra spaces) and adding the missing ones. Other options stay, so no item loses its value.
+   */
+  adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject>;
   /** Creates a user Project with handoff's Status options, linked to the repository. */
   createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject>;
   /** Creates the kind labels epic, story and task on the repository when they are missing. */
@@ -61,6 +75,11 @@ export interface ProjectsPort {
     repo: RepoRef,
     input: { project: number; title: string; body: string; labels: string[]; parent?: number; blockedBy?: number[] },
   ): Promise<{ number: number; url: string }>;
+  /**
+   * Brings an existing issue into the plan: adds its labels, makes it a sub-issue of `parent` when
+   * given, and adds it to the Project in Shaping.
+   */
+  addIssue(repo: RepoRef, input: { project: number; issue: number; labels: string[]; parent?: number }): Promise<void>;
   /** The parent and the grandparent of an issue, nearest first, each with title, body and kind. */
   lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]>;
   /** Whether the token can write Projects: `project` among a classic token's scopes. */

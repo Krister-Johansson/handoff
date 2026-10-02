@@ -2,6 +2,8 @@ import { Octokit } from "octokit";
 import {
   AddPlanBlockerDocument,
   AddPlanItemDocument,
+  AddPlanLabelsDocument,
+  AddPlanSubIssueDocument,
   CreatePlanLabelDocument,
   CreatePlanIssueDocument,
   IssueCreateRefsDocument,
@@ -12,6 +14,8 @@ import {
   PlanItemsDocument,
   PlanOwnerIdsDocument,
   PlanProjectDocument,
+  PlanProjectsDocument,
+  PlanProjectSetupDocument,
   SetPlanStatusDocument,
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
@@ -22,14 +26,17 @@ import {
   type IssuePlanQuery,
   type PlanItemsQuery,
   type PlanOwnerIdsQuery,
+  type PlanProjectChoiceFragment,
   type PlanProjectQuery,
+  type PlanProjectSetupQuery,
+  type PlanProjectsQuery,
   type ProjectV2SingleSelectFieldOptionInput,
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
 import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import type { PlanAncestor, PlanItem, PlanKind, PlanProject, PlanStatus, ProjectsPort, SetStatusResult } from "./types.ts";
+import type { AdoptedProject, PlanAncestor, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -108,6 +115,36 @@ export class OctokitProjects implements ProjectsPort {
     return "set";
   }
 
+  async listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]> {
+    const data = await this.octokit.graphql<PlanProjectsQuery>(PlanProjectsDocument.toString(), { login });
+    const choices = present(data.user?.projectsV2.nodes)
+      .filter((p) => !p.closed)
+      .map((p) => {
+        const options = optionIds(choiceStatusField(p));
+        return { number: p.number, title: p.title, url: p.url, linked: isLinked(p, repo), missingStatusOptions: STATUS_OPTIONS.filter((s) => !options[s]) };
+      });
+    return [...choices.filter((c) => c.linked), ...choices.filter((c) => !c.linked)];
+  }
+
+  async adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject> {
+    const data = await this.octokit.graphql<PlanProjectSetupQuery>(PlanProjectSetupDocument.toString(), { login, number });
+    const project = data.user?.projectV2;
+    const field = project ? choiceStatusField(project) : undefined;
+    if (!project || !field) throw new Error(`GitHub Project #${number} of ${login} does not exist or has no Status field`);
+    const { options, renamed, added } = adoptedOptions(field.options);
+    let ids = optionIds(field);
+    if (renamed.length || added.length) {
+      const updated = await this.octokit.graphql<SetStatusOptionsMutation>(SetStatusOptionsDocument.toString(), { fieldId: field.id, options });
+      ids = optionIds(statusField(updated.updateProjectV2Field?.projectV2Field));
+    }
+    if (!isLinked(project, repo)) {
+      const owner = await this.octokit.graphql<PlanOwnerIdsQuery>(PlanOwnerIdsDocument.toString(), { login, owner: repo.owner, name: repo.name });
+      if (!owner.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
+      await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: owner.repository.id });
+    }
+    return { project: { number: project.number, url: project.url, title: project.title, statusOptions: ids }, renamed, added };
+  }
+
   async createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject> {
     const ids = await this.octokit.graphql<PlanOwnerIdsQuery>(PlanOwnerIdsDocument.toString(), { login, owner: repo.owner, name: repo.name });
     if (!ids.user || !ids.repository) throw new Error(`user ${login} or repository ${repo.owner}/${repo.name} not found`);
@@ -136,12 +173,7 @@ export class OctokitProjects implements ProjectsPort {
       withParent: input.parent !== undefined,
     });
     if (!refs.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
-    const known = present(refs.repository.labels?.nodes);
-    const labelIds = input.labels.map((name) => {
-      const label = known.find((l) => l.name.toLowerCase() === name.toLowerCase());
-      if (!label) throw new Error(`label "${name}" does not exist on ${repo.owner}/${repo.name}`);
-      return label.id;
-    });
+    const labelIds = labelIdsOf(present(refs.repository.labels?.nodes), input.labels, repo);
     if (input.parent !== undefined && !refs.repository.parent) throw new Error(`parent issue #${input.parent} not found`);
     // Look the blockers up before creating, so a wrong number creates nothing.
     const blockerIds = [];
@@ -159,6 +191,22 @@ export class OctokitProjects implements ProjectsPort {
     for (const blockingIssueId of blockerIds) await this.octokit.graphql(AddPlanBlockerDocument.toString(), { issueId: issue.id, blockingIssueId });
     await this.setStatus(repo, input.project, issue.number, "Shaping", { add: true });
     return { number: issue.number, url: issue.url };
+  }
+
+  async addIssue(repo: RepoRef, input: { project: number; issue: number; labels: string[]; parent?: number }): Promise<void> {
+    const refs = await this.octokit.graphql<IssueCreateRefsQuery>(IssueCreateRefsDocument.toString(), {
+      owner: repo.owner,
+      name: repo.name,
+      parent: input.parent ?? 0,
+      withParent: input.parent !== undefined,
+    });
+    if (!refs.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
+    const labelIds = labelIdsOf(present(refs.repository.labels?.nodes), input.labels, repo);
+    if (input.parent !== undefined && !refs.repository.parent) throw new Error(`parent issue #${input.parent} not found`);
+    const issueId = await this.issueNodeId(repo, input.issue);
+    if (labelIds.length) await this.octokit.graphql(AddPlanLabelsDocument.toString(), { labelableId: issueId, labelIds });
+    if (refs.repository.parent) await this.octokit.graphql(AddPlanSubIssueDocument.toString(), { issueId: refs.repository.parent.id, subIssueId: issueId });
+    await this.setStatus(repo, input.project, input.issue, "Shaping", { add: true });
   }
 
   async lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
@@ -194,7 +242,54 @@ export class OctokitProjects implements ProjectsPort {
   }
 }
 
-type StatusFieldConfig = { __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
+type ChoiceOption = { id: string; name: string; color: ProjectV2SingleSelectFieldOptionInput["color"]; description: string };
+
+/** The Status field of a Project as setup reads it, with each option's look. */
+function choiceStatusField(project: PlanProjectChoiceFragment): { id: string; options: ChoiceOption[] } | undefined {
+  const field = project.field;
+  return field?.__typename === "ProjectV2SingleSelectField" ? { id: field.id, options: field.options } : undefined;
+}
+
+/** Whether a Project is linked to the repository. */
+const isLinked = (project: PlanProjectChoiceFragment, repo: RepoRef) =>
+  present(project.repositories.nodes).some((r) => r.owner.login.toLowerCase() === repo.owner.toLowerCase() && r.name.toLowerCase() === repo.name.toLowerCase());
+
+/** An option's name without case, emoji or extra spaces, so "✅ ready" matches Ready. */
+const bareName = (name: string) => name.replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * The Status options a Project gets when handoff adopts it: handoff's five in board order, each
+ * keeping the id and look of an option whose bare name matches (renamed when the name differs), new
+ * ones for the rest, then every other option unchanged so no item loses its value.
+ */
+function adoptedOptions(current: ChoiceOption[]) {
+  const used = new Set<string>();
+  const renamed: { from: string; to: PlanStatus }[] = [];
+  const added: PlanStatus[] = [];
+  const ours: ProjectV2SingleSelectFieldOptionInput[] = STATUS_OPTIONS.map((status) => {
+    const match = current.find((o) => o.name === status) ?? current.find((o) => !used.has(o.id) && bareName(o.name) === bareName(status));
+    if (!match) {
+      added.push(status);
+      return { name: status, ...STATUS_STYLE[status] };
+    }
+    used.add(match.id);
+    if (match.name !== status) renamed.push({ from: match.name, to: status });
+    return { id: match.id, name: status, color: match.color, description: match.description };
+  });
+  const others = current.filter((o) => !used.has(o.id)).map((o) => ({ id: o.id, name: o.name, color: o.color, description: o.description }));
+  return { options: [...ours, ...others], renamed, added };
+}
+
+/** The ids of the named labels among the repository's; throws for a name the repository does not have. */
+function labelIdsOf(known: { id: string; name: string }[], names: string[], repo: RepoRef): string[] {
+  return names.map((name) => {
+    const label = known.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    if (!label) throw new Error(`label "${name}" does not exist on ${repo.owner}/${repo.name}`);
+    return label.id;
+  });
+}
+
+type StatusFieldConfig ={ __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
 
 /** A GraphQL answer whose only errors are NOT_FOUND, as for a Project number nobody has. */
 function isNotFound(error: unknown): boolean {
