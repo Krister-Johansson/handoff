@@ -15,6 +15,13 @@ test("waiting says what for: CI and reviews on the PR, or a person", () => {
   expect(describeNow({ ...base, status: "waiting", questions: 1, reviews: 1, executions: [exec("gate", "waiting")] }).text).toBe("Ask a person waits for your review");
 });
 
+test("a step waiting on a permission request says what it asks to do, though it is still running", () => {
+  expect(describeNow({ ...base, executions: [exec("coder", "running")], permissions: [{ nodeKey: "coder", action: "asks to run a command" }] })).toEqual({
+    tone: "attention",
+    text: "Code asks to run a command",
+  });
+});
+
 test("a queued node says it is queued", () => {
   expect(describeNow({ ...base, status: "queued", executions: [exec("coder", "pending")] }).text).toBe("Queued: Code");
 });
