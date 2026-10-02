@@ -54,6 +54,9 @@ export function shortDay(day: string): string {
   return `${MONTHS[month]} ${date}`;
 }
 
+/** The local calendar day of an instant, YYYY-MM-DD. */
+export const dayOfInstant = (iso: string) => localDay(iso).day;
+
 /** The local calendar day and the fraction of it gone of an instant. */
 function localDay(iso: string): { day: string; fraction: number } {
   const at = new Date(iso);
