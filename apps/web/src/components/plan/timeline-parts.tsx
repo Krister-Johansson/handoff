@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore, useTransition, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClockIcon, CalendarIcon, CircleAlertIcon, ClockAlertIcon, InfoIcon,
+import { CalendarClockIcon, CalendarIcon, ClockAlertIcon, InfoIcon,
  LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
@@ -195,47 +195,6 @@ export function TimeChips({ task, entry, window }: { task: PlanTask; entry: Time
   ].filter(Boolean);
   if (chips.length === 0) return null;
   return <>{chips}</>;
-}
-
-/** What a task's warning says, one line each, with the tone of the most urgent. */
-function timeFlags(task: PlanTask, entry: TimelineItem, window: "story" | "epic", waitingOnYou: boolean) {
-  const done = taskColumn(task) === "Done";
-  const flags = [
-    entry.late && `Late: waiting on ${numbers(entry.waitingOn)}`,
-    !entry.late && !done && entry.waitingOn.length > 0 && `Blocked by ${numbers(entry.waitingOn)}`,
-    entry.overdueDays !== undefined && `Overdue by ${entry.overdueDays === 1 ? "1 day" : `${entry.overdueDays} days`}`,
-    entry.outsideParent && `Outside ${window} window`,
-    waitingOnYou && "Waiting on you",
-  ].filter((f): f is string => Boolean(f));
-  const tone = entry.late ? "text-danger" : entry.overdueDays !== undefined || waitingOnYou ? "text-attention" : "text-muted-foreground";
-  return { flags, tone };
-}
-
-/**
- * A small warning icon after a task's title on the timeline, in place of a row of chips: blocked by which
- * issues, late, overdue, outside its story's or epic's window, or waiting on you. Its accessible name and
- * its tooltip list them; a tap or a click opens the tooltip too, for touch screens.
- */
-export function TimeFlags({ task, entry, window, needsYou }: { task: PlanTask; entry: TimelineItem; window: "story" | "epic"; needsYou: readonly string[] }) {
-  const [open, setOpen] = useState(false);
-  const { flags, tone } = timeFlags(task, entry, window, task.run !== null && needsYou.includes(task.run.id));
-  if (flags.length === 0) return null;
-  return (
-    <Tooltip open={open} onOpenChange={setOpen}>
-      <TooltipTrigger asChild>
-        <Button variant="ghost" size="icon-xs" aria-label={flags.join(". ")} className={cn("-mx-0.5 size-5 shrink-0", tone)} onClick={() => setOpen((o) => !o)}>
-          <CircleAlertIcon />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side="top" align="start">
-        <ul className="flex flex-col gap-0.5">
-          {flags.map((f) => (
-            <li key={f}>{f}</li>
-          ))}
-        </ul>
-      </TooltipContent>
-    </Tooltip>
-  );
 }
 
 const NARROW = "(max-width: 639px)";

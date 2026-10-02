@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
@@ -78,4 +78,44 @@ test("under 640 px the timeline lists items with their dates, and a warning icon
   expect(within(item(/Task #72/)).getByRole("button", { name: "Blocked by #70" })).toBeInTheDocument();
   expect(within(item(/Task #58/)).getByText("No dates")).toBeInTheDocument();
   expect(within(item(/Task #58/)).getByRole("button", { name: "Schedule #58 Plan page tree and board" })).toBeInTheDocument();
+});
+
+test("under 640 px the warning icon opens the same card on focus, with the blocker linked to its issue, and Escape closes it", async () => {
+  const view = planView([
+    epic(12, "Project management", [
+      story(41, "Shaping with the assistant", 12, [
+        task(55, "Shaping tools", "Running", { start: "2026-09-30", target: "2026-10-07" }),
+        task(57, "Add the migration", "Shaping", { start: "2026-10-01", target: "2026-10-09", blockedBy: [55] }),
+      ]),
+    ]),
+  ]);
+  render(
+    <PlanTimeline
+      projectId="p1"
+      repoUrl={REPO_URL}
+      project={{ ...PROJECT, dateFields: { start: "s", target: "t" } }}
+      epics={view.epics}
+      unparented={[]}
+      timeline={timelineOf(view, [], NOW)}
+      zoom={undefined}
+      filters={parsePlanFilters({})}
+      needsYou={[]}
+      graphs={["loop"]}
+      graphName="loop"
+      readAt={NOW.getTime()}
+    />,
+    { wrapper: TooltipProvider },
+  );
+  const icon = within(screen.getByRole("listitem", { name: "Task #57 Add the migration" })).getByRole("button", { name: "Late: waiting on #55" });
+
+  fireEvent.focus(icon);
+  const card = await screen.findByRole("group", { name: "Flags of #57 Add the migration" });
+  expect(within(card).getAllByRole("definition")[0]).toHaveTextContent("Start was Oct 1; waits on #55");
+  const blocker = within(card).getByRole("listitem", { name: "#55 Shaping tools" });
+  expect(within(blocker).getByRole("link", { name: "#55 Shaping tools" })).toHaveAttribute("href", `${REPO_URL}/issues/55`);
+  expect(within(blocker).getByText("Running")).toBeInTheDocument();
+  expect(within(blocker).getByText("Open")).toBeInTheDocument();
+
+  fireEvent.keyDown(icon, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("group", { name: /^Flags of/ })).not.toBeInTheDocument());
 });

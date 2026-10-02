@@ -15,7 +15,8 @@ import { cn } from "@/lib/utils";
 import { KindBadge, StatusPill } from "./plan-status";
 import { IssueTitle } from "./plan-task-parts";
 import { ScheduleDialog } from "./schedule-dialog";
-import { DateFieldsBanner, TimeFlags, type TimelineProps } from "./timeline-parts";
+import { FlagCard, type FlagContext } from "./timeline-flag-card";
+import { DateFieldsBanner, type TimelineProps } from "./timeline-parts";
 
 type ListRow = { item: PlanItem; kind: "epic" | "story" | "task"; task: PlanTask | undefined; level: 1 | 2 | 3 };
 
@@ -61,11 +62,11 @@ function MiniBar({ row, entry, scale, todayX }: { row: ListRow; entry: TimelineI
  * waits on, and whether it is late or overdue.
 
  */
-export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, readAt, needsYou }: TimelineProps) {
+export function PlanTimelineList({ projectId, repoUrl, project, epics, unparented, timeline, zoom, readAt, needsYou }: TimelineProps) {
   const [scheduling, setScheduling] = useState<PlanItem>();
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
-  const stories = new Set(epics.flatMap((e) => e.stories.map((s) => s.number)));
+  const flags: FlagContext = { projectId, repoUrl, items, entries, needsYou };
   const range = chartRange(timeline);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
@@ -89,7 +90,7 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
               <div className="flex min-w-0 items-center gap-2">
                 {row.task ? <StatusPill column={taskColumn(row.task)} /> : <KindBadge kind={row.kind === "story" ? "story" : "epic"} />}
                 <IssueTitle item={row.item} className="text-xs font-medium" />
-                {row.task && <TimeFlags task={row.task} entry={entry} window={row.item.parent !== undefined && stories.has(row.item.parent) ? "story" : "epic"} needsYou={needsYou} />}
+                {row.task && <FlagCard task={row.task} entry={entry} ctx={flags} />}
               </div>
               <MiniBar row={row} entry={entry} scale={scale} todayX={todayX} />
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

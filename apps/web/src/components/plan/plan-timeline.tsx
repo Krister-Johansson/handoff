@@ -37,7 +37,8 @@ import { useSearchQuery } from "./plan-context";
 import { IssueTitle } from "./plan-task-parts";
 import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
-import { DateFieldsBanner, TimeChips, TimeFlags, useNarrow, type TimelineProps } from "./timeline-parts";
+import { FlagCard, type FlagContext } from "./timeline-flag-card";
+import { DateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
 
 import { useRowsOpen } from "./use-collapsed";
 
@@ -315,10 +316,9 @@ function ItemMenu({ item, onSchedule }: { item: PlanItem; onSchedule: () => void
 type RowLabelProps = {
   row: TimelineRow;
   entry: TimelineItem | undefined;
-  window: "story" | "epic";
   projectId: string;
   start: StartRunContext;
-  needsYou: readonly string[];
+  flags: FlagContext;
   onToggle: () => void;
   onSchedule: (item: PlanItem) => void;
 };
@@ -342,7 +342,7 @@ function RowMenu({ row, projectId, start, onSchedule }: Pick<RowLabelProps, "row
 const INDENT: Record<TimelineRow["level"], string> = { 1: "pl-2.5", 2: "pl-[26px]", 3: "pl-11" };
 
 /** The fixed left cell of a row: chevron, status pill or kind badge, number and title with a task's warning icon, then the menu. */
-function RowLabel({ row, entry, window, projectId, start, needsYou, onToggle, onSchedule }: RowLabelProps) {
+function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule }: RowLabelProps) {
   const { item, task } = row;
   return (
     <div
@@ -360,7 +360,7 @@ function RowLabel({ row, entry, window, projectId, start, needsYou, onToggle, on
         {row.expanded !== undefined && <Chevron expanded={row.expanded} label={rowLabel(row)} onToggle={onToggle} />}
         <RowMark row={row} />
         {item ? <IssueTitle item={item} className={cn("text-xs", !task && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}
-        {task && entry && <TimeFlags task={task} entry={entry} window={window} needsYou={needsYou} />}
+        {task && entry && <FlagCard task={task} entry={entry} ctx={flags} />}
         <span className="ml-auto shrink-0">
           <RowMenu row={row} projectId={projectId} start={start} onSchedule={onSchedule} />
         </span>
@@ -422,7 +422,7 @@ type PaneView = { left: number; width: number };
  * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
  * arrows and the rows at their other ends strong and dims the rest.
  */
-function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
+function TimelineChart({ projectId, repoUrl, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const rowsOpen = useRowsOpen(projectId, searchOpen);
   const q = useSearchQuery();
@@ -431,8 +431,8 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
   const [pane, setPane] = useState<PaneView>();
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
-  const stories = useMemo(() => new Set(epics.flatMap((e) => e.stories.map((s) => s.number))), [epics]);
   const ctx: CardContext = { items, entries, projectId };
+  const flags: FlagContext = { projectId, repoUrl, items, entries, needsYou };
 
   const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
   const range = chartRange(timeline);
@@ -551,12 +551,10 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
                     <RowLabel
                       row={row}
                       entry={entry}
-                      window={row.item?.parent !== undefined && stories.has(row.item.parent) ? "story" : "epic"}
                       projectId={projectId}
                       start={{ graphs, graphName }}
-                      needsYou={needsYou}
+                      flags={flags}
                       onToggle={() => rowsOpen.toggle(row.key)}
-
                       onSchedule={setScheduling}
                     />
                     <div role="gridcell" className={cn("relative flex-1 border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ minWidth: scale.width }}>
