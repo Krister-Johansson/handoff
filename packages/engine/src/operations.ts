@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
 import { remember, RunStateSchema, type RunState } from "@handoff/core";
-import type { ProjectsPort } from "@handoff/github";
+import type { PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { recordPlanStatus } from "./plan-status.ts";
@@ -55,7 +55,8 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
 
 /**
  * Cancels a run: stops claiming its work, fails queued and waiting nodes, signals the running one, and stops its apps.
- * With the Projects port, the run's tasks go back to Ready on the plan, so they return to the backlog.
+ * With the Projects port, each task the run moved on the plan goes back to the Status it had before
+ * (Ready for a task the run started on), unless a newer run links it.
  */
 export async function cancelRun(db: Db, runId: string, opts: { reason?: string; projects?: ProjectsPort | undefined } = {}) {
   const cancelled = await db.transaction(async (tx) => {
@@ -78,7 +79,35 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
   await stopRunPreviews(db, runId);
   const [project] = await db.select().from(projectRows).where(eq(projectRows.id, cancelled.projectId));
   if (!project || project.planProjectNumber === null || cancelled.issues.length === 0) return;
-  await recordPlanStatus(db, runId, opts.projects, project, await issuesItOwns(db, cancelled), "Ready");
+  // Each task the run moved goes back to the Status it had; a task the run never moved keeps its Status.
+  const before = await statusesBeforeRun(db, runId);
+  const byStatus = new Map<PlanStatus, number[]>();
+  for (const issue of await issuesItOwns(db, cancelled)) {
+    const status = before.get(issue);
+    if (status) byStatus.set(status, [...(byStatus.get(status) ?? []), issue]);
+  }
+  for (const [status, issues] of byStatus) await recordPlanStatus(db, runId, opts.projects, project, issues, status);
+}
+
+/**
+ * The Status each task the run moved had before the run moved it, from the `from` of the run's first
+ * plan.status for the task that records one. A task the run moved before runs recorded `from` came from
+ * Ready, the gate every start passed. A task the run never moved has no entry.
+ */
+async function statusesBeforeRun(db: Db, runId: string): Promise<Map<number, PlanStatus>> {
+  const moves = await db
+    .select({ payload: events.payload })
+    .from(events)
+    .where(and(eq(events.runId, runId), eq(events.type, "plan.status")))
+    .orderBy(events.seq);
+  const moved = new Set<number>();
+  const recorded = new Map<number, PlanStatus>();
+  for (const { payload } of moves) {
+    const { issue, from } = payload as { issue: number; from?: PlanStatus };
+    moved.add(issue);
+    if (from && !recorded.has(issue)) recorded.set(issue, from);
+  }
+  return new Map([...moved].map((issue) => [issue, recorded.get(issue) ?? "Ready"]));
 }
 
 /** The run's issues no newer run of the project links: a newer run owns the status of its issues. */
@@ -188,7 +217,7 @@ export async function stuckLoop(db: Db, runId: string): Promise<StuckLoop | unde
 /**
  * A person's decision for a run stuck on a loop that ran out: another round (the loop starts over and
  * the work goes back once more), go on as if the step approved (its forward edges are taken), or stop.
- * Stopping cancels the run, so with the Projects port its tasks go back to Ready on the plan.
+ * Stopping cancels the run, so with the Projects port its tasks go back to the Status they had before it.
  */
 export async function resolveExhaustedLoop(db: Db, runId: string, action: "retry" | "continue" | "stop", opts: { projects?: ProjectsPort | undefined } = {}) {
   const stuck = await stuckLoop(db, runId);

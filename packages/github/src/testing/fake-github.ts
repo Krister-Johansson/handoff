@@ -2,17 +2,20 @@ import { execFileSync } from "node:child_process";
 import { kindOf } from "../projects/kinds.ts";
 import type { PlanAncestor } from "../projects/types.ts";
 import { GitHubReadError } from "../errors.ts";
-import type { Assignable, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
+import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
 type FakePr = PrSnapshot & { base: string; body: string };
 
-/** An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set. */
+/**
+ * An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set.
+ * Assignees are logins; the reads give each one an avatar.
+ */
 export type FakeIssue = Pick<IssueDetail, "number" | "title" | "url" | "body" | "state"> &
-  Partial<Omit<IssueDetail, "number" | "title" | "url" | "body" | "state" | "parents">> &
-  Partial<Pick<IssueSummary, "blockedBy">>;
+  Partial<Omit<IssueDetail, "number" | "title" | "url" | "body" | "state" | "parents" | "assignees">> &
+  Partial<Pick<IssueSummary, "blockedBy">> & { assignees?: string[] };
 
 /** An issue as getIssue gives it, with GitHub's defaults for the facts a test left out. */
-function detailOf(issue: FakeIssue): IssueDetail {
+function detailOf(issue: FakeIssue, person: (login: string) => Assignee): IssueDetail {
   return {
     number: issue.number,
     title: issue.title,
@@ -21,7 +24,7 @@ function detailOf(issue: FakeIssue): IssueDetail {
     state: issue.state,
     stateReason: issue.stateReason ?? (issue.state === "closed" ? "completed" : null),
     labels: [...(issue.labels ?? [])],
-    assignees: [...(issue.assignees ?? [])],
+    assignees: (issue.assignees ?? []).map(person),
     author: issue.author ?? null,
     authorAssociation: issue.authorAssociation ?? "NONE",
     createdAt: issue.createdAt ?? issue.updatedAt ?? "",
@@ -89,9 +92,9 @@ export class FakeGitHub implements GitHubPort {
     if (this.unreachable) throw new GitHubReadError("unreachable", `GitHub did not answer for #${number}.`);
     const issue = this.issues.get(number);
     const pr = issue ? undefined : this.prs.get(number);
-    if (pr) return { ...detailOf({ number, title: pr.title, url: pr.url, body: pr.body, state: pr.state === "open" ? "open" : "closed", updatedAt: pr.updatedAt }), pullRequest: true };
+    if (pr) return { ...detailOf({ number, title: pr.title, url: pr.url, body: pr.body, state: pr.state === "open" ? "open" : "closed", updatedAt: pr.updatedAt }, (login) => this.person(login)), pullRequest: true };
     if (!issue) throw new GitHubReadError("not-found", `no issue ${number}`);
-    return { ...detailOf(issue), ...(opts.parents ? { parents: this.ancestorsOf(number) } : {}) };
+    return { ...detailOf(issue, (login) => this.person(login)), ...(opts.parents ? { parents: this.ancestorsOf(number) } : {}) };
   }
 
   async dependencies(_repo: RepoRef, number: number): Promise<IssueDependencies> {
@@ -130,14 +133,19 @@ export class FakeGitHub implements GitHubPort {
     return structuredClone(this.assignable);
   }
 
-  async setAssignees(_repo: RepoRef, number: number, logins: string[]): Promise<string[]> {
+  /** A login with its avatar: the one `assignable` lists for it, else one made from the login. */
+  person(login: string): Assignee {
+    return { login, avatarUrl: this.assignable.find((a) => a.login === login)?.avatarUrl ?? `https://avatars.githubusercontent.com/${login}` };
+  }
+
+  async setAssignees(_repo: RepoRef, number: number, logins: string[]): Promise<Assignee[]> {
     const issue = this.issues.get(number);
     if (!issue) throw new Error(`no issue ${number}`);
     // GitHub drops a login it cannot assign rather than failing.
     const kept = logins.filter((login) => this.assignable.some((a) => a.login === login));
     issue.assignees = kept;
     this.assigned.push({ number, logins: kept });
-    return [...kept];
+    return kept.map((login) => this.person(login));
   }
 
   /** The parent and the grandparent of an issue, nearest first, with their kinds as GitHub would tell them. */

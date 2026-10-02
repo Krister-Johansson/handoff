@@ -40,13 +40,16 @@ test("Start run on the issue page starts a run on the issue, stays on the page a
   expect(await startIssueRunAction({ projectId: p.id, issue: 66, graphName: "linear" })).toEqual({ ok: false, error: expect.stringContaining("#66 is taken by run") });
 });
 
-test("the Plan's assignee control lists the people by login and assigns on GitHub, the token's user for me, without moving the Status", async () => {
+test("the Plan's assignee control lists the people by login with their avatars and assigns on GitHub, the token's user for me, without moving the Status", async () => {
   const { github, project: p } = await project();
   github.assignable = [
     { login: "ann", avatarUrl: "a1" },
     { login: "octocat", avatarUrl: "a2" },
   ];
-  expect(await planPeopleAction(p.id)).toEqual([{ login: "octocat" }, { login: "ann" }]);
+  expect(await planPeopleAction(p.id)).toEqual([
+    { login: "octocat", avatarUrl: "a2" },
+    { login: "ann", avatarUrl: "a1" },
+  ]);
   expect(await planAssignAction(p.id, 66, { logins: ["ann"], me: true })).toEqual({ ok: true });
   expect(github.issues.get(66)!.assignees).toEqual(["ann", "octocat"]);
   expect(env.revalidated).toContain(`/projects/${p.id}/plan`);
@@ -69,8 +72,14 @@ test("the assignee picker lists who can be assigned with you first, and assignin
       { login: "ann", avatarUrl: "a1", you: false },
     ],
   });
-  expect(await assignAction({ projectId: p.id, issue: 66, logins: [], me: true })).toEqual({ ok: true, assignees: ["octocat"] });
-  expect(await assignAction({ projectId: p.id, issue: 66, logins: ["ann", "octocat"] })).toEqual({ ok: true, assignees: ["ann", "octocat"] });
+  expect(await assignAction({ projectId: p.id, issue: 66, logins: [], me: true })).toEqual({ ok: true, assignees: [{ login: "octocat", avatarUrl: "a2" }] });
+  expect(await assignAction({ projectId: p.id, issue: 66, logins: ["ann", "octocat"] })).toEqual({
+    ok: true,
+    assignees: [
+      { login: "ann", avatarUrl: "a1" },
+      { login: "octocat", avatarUrl: "a2" },
+    ],
+  });
   expect(await assignAction({ projectId: p.id, issue: 66, logins: [] })).toEqual({ ok: true, assignees: [] });
   expect(env.revalidated).toContain(`/projects/${p.id}/issues/66`);
   expect(await assignAction({ projectId: p.id, issue: 66, logins: ["stranger"] })).toEqual({ ok: false, error: expect.stringContaining("stranger cannot be assigned") });

@@ -28,11 +28,13 @@ Without the `project` scope on the dashboard's `GITHUB_TOKEN` the plan tools ref
 
 A project with a plan can have a scheduler. Once the user turns it on, handoff starts runs on its own on Ready tasks without open blockers, in Project order or by the Priority field, until a limit of active runs is reached. The user decides what is Ready: the scheduler never moves a task to Ready, never requests a merge and never starts a task whose last run was cancelled.
 
-- `get_scheduler` shows whether it is off, paused, held, idle or running, what holds it (a failed run, a question, a review, a pull request waiting for review or a permission request), each with its link, the active runs against the limit with the worker's Claude slots, and the next tasks it will start with the reasons it skips others.
+- `get_scheduler` shows whether it is off, paused, held, idle or running, what holds it (a failed run, including a stuck loop, or a permission request), each with its link, the active runs against the limit with the worker's Claude slots, and the next tasks it will start with the reasons it skips others.
 - `start_scheduler` turns it on, resumes it after a pause, or changes `max_runs` (1 to 10), `order` (`project` or `priority`) and `graph`. It asks the user first. It refuses a project without a plan, so run `setup_plan` before it.
 - `pause_scheduler` stops new starts until `start_scheduler` resumes it. Active runs go on.
 
-While something holds the project, the scheduler starts nothing, and it goes on by itself once the user answers, repairs or cancels. Tell the user what holds it rather than acting for them.
+While a failed run or a permission request holds the project, the scheduler starts nothing, and it goes on by itself once the user repairs, cancels or decides. Tell the user what holds it rather than acting for them.
+
+A run waiting on a question, a plan or code review, Try it or a pull request review does not hold the project. It stays active and counts toward the limit, so with `max_runs` 1 nothing new starts while it waits, and with a higher limit the other slots keep working.
 
 ## Plan work as issues, then hand it off
 

@@ -7,7 +7,7 @@ import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { checkProject } from "@handoff/engine/backlog-scheduler";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG } from "../lib/assistant/catalog";
-import { reviewPath, runPath } from "../lib/paths";
+import { runPath } from "../lib/paths";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createHandoffMcpServer, registerDataTools } from "./agent-mcp";
 import { createProject, saveGraphVersion } from "./graphs";
@@ -330,7 +330,7 @@ test("start_run over MCP sets the task to Running on the plan", async () => {
   const ready = await task("Add the migration", "Ready");
   const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
   expect(await statusOf(ready)).toBe("Running");
-  expect(await planEvents(run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running" } }]);
+  expect(await planEvents(run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running", from: "Ready" } }]);
 });
 
 test("list_backlog over MCP lists the plan's Ready tasks and the unplanned issues", async () => {
@@ -586,6 +586,52 @@ test("list_plan returns the tree with statuses, dates and runs, wrapped as data"
   expect((await call("list_plan", { project: "sandbox", epic: 999 })).epics).toEqual([]);
 });
 
+test("list_plan returns sizes, estimates, durations, forecasts and the capacity", async () => {
+  const { number, story } = await epicAndStory();
+  await plan.ensureEstimateFields("octo", number);
+  const create = async (title: string) => (await call("create_task", { project: "sandbox", story, title, brief: `${title}.` })).number as number;
+  const sized = await create("Sized");
+  const proposed = await create("Proposed");
+  const bare = await create("Bare");
+  Object.assign(plan.itemsOf(repo).get(sized)!, { size: "M", estimate: 4 });
+
+  // The planner of a finished run on the unsized task proposed S.
+  await call("move_to_ready", { project: "sandbox", issues: [proposed] });
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [proposed] });
+  const [run] = await db.select().from(runs).where(eq(runs.id, run_id));
+  await db
+    .update(runs)
+    .set({ status: "succeeded", state: { ...run!.state, plan: { plan: "p", steps: ["a"], ownedPaths: ["b"], size: "S" } } })
+    .where(eq(runs.id, run_id));
+  // Five succeeded M runs of 90 minutes on other tasks give M a forecast of its own.
+  for (const issue of [50, 51, 52, 53, 54]) {
+    await db.insert(runs).values({
+      ...run!,
+      id: crypto.randomUUID(),
+      status: "succeeded",
+      issues: [{ number: issue, title: `#${issue}`, url: `https://github.com/octo/sample/issues/${issue}` }],
+      size: "M",
+      branchName: `handoff/m-${issue}`,
+      startedAt: new Date("2026-10-01T09:00:00Z"),
+      finishedAt: new Date("2026-10-01T10:30:00Z"),
+    });
+  }
+
+  const listed = await call("list_plan", { project: "sandbox" });
+  expect(listed.capacity_hours).toBe(6);
+  expect(listed.forecasts).toEqual({
+    S: { source: "default", minutes: 30, parts: null, cost_usd: null, runs: 0, measured_minutes: null },
+    M: { source: "runs", minutes: 90, parts: { agent: 90, queue: 0, waiting: 0 }, cost_usd: 0, runs: 5, measured_minutes: 90 },
+    L: { source: "default", minutes: 120, parts: null, cost_usd: null, runs: 0, measured_minutes: null },
+  });
+  const tasks = listed.epics[0].stories[0].tasks as Record<string, unknown>[];
+  expect(tasks.map((t) => [t.number, t.size, t.estimate_hours, t.proposal, t.duration])).toEqual([
+    [sized, "M", 4, null, { hours: 4, source: "estimate" }],
+    [proposed, null, null, { size: "S", run_id }, { hours: 0.5, source: "proposal" }],
+    [bare, null, null, null, null],
+  ]);
+});
+
 /** The Start and Target an issue has on the sandbox plan. */
 const datesOf = (issue: number) => {
   const item = plan.itemsOf(repo).get(issue);
@@ -794,12 +840,12 @@ test("get_scheduler reports holds with their links, active runs of max_runs, Cla
   await call("start_scheduler", { project: "sandbox", max_runs: 3 });
   const started = (await checkProject({ db, github, projects: plan, owner: "worker-1" }, projectId))!.started[0]!.runId;
 
-  // The run a person started failed; the scheduler's run waits for a plan review and holds its coder on overlap.
+  // The run a person started failed and holds; the scheduler's run waits for a plan review, which does not hold, and holds its coder on overlap.
   await db.update(runs).set({ status: "failed" }).where(eq(runs.id, manual));
   await db.transaction((tx) => appendEvents(tx, manual, [{ type: "run.failed", payload: { nodeKey: "coder-1" } }]));
   await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, started));
   const gate = await seedExecution(db, started, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  const [review] = await db.insert(questions).values({ runId: started, nodeExecutionId: gate.id, question: "Review the plan from planner", options: ["approve", "changes"], context: { review: { markdown: "# Plan" } } }).returning();
+  await db.insert(questions).values({ runId: started, nodeExecutionId: gate.id, question: "Review the plan from planner", options: ["approve", "changes"], context: { review: { markdown: "# Plan" } } });
   const coder = await seedExecution(db, started, { nodeKey: "coder", status: "waiting", waitKey: `overlap:${projectId}` });
   await db.transaction((tx) => appendEvents(tx, started, [{ type: "run.overlap_held", payload: { nodeKey: "coder", runId: manual, paths: ["src/a.ts"] }, nodeExecutionId: coder.id }]));
 
@@ -812,10 +858,7 @@ test("get_scheduler reports holds with their links, active runs of max_runs, Cla
     active: 1,
     claude_slots: 2,
     active_runs: [{ id: started, status: "waiting", started_by: "scheduler", issues: [first], url: `${BASE}${runPath(projectId, started)}` }],
-    holds: [
-      { kind: "failed", run_id: manual, text: `Run ${short(manual)} failed at coder-1`, url: `${BASE}${runPath(projectId, manual)}` },
-      { kind: "review", run_id: started, text: `Run ${short(started)} waits for your review at gate`, url: `${BASE}${reviewPath(projectId, started, review!.id)}` },
-    ],
+    holds: [{ kind: "failed", run_id: manual, text: `Run ${short(manual)} failed at coder-1`, url: `${BASE}${runPath(projectId, manual)}` }],
     overlap_held: [{ run_id: started, node: "coder", waits_for: manual, paths: ["src/a.ts"], text: `Run ${short(started)} waits before coder: shares src/a.ts with run ${short(manual)}`, url: `${BASE}${runPath(projectId, started)}` }],
     next: [{ number: second, title: "Add the endpoint" }],
     skipped: [{ number: blocked, title: "Add the page", reason: "blocked by #11" }],

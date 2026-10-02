@@ -153,7 +153,7 @@ function PlanBody(props: BodyProps) {
 
 /** Everyone assigned to a task in the plan other than me, by login. */
 function peopleOf(plan: PlanView, me: string | undefined): string[] {
-  const logins = new Set(Object.values(plan.board).flatMap((tasks) => tasks.flatMap((t) => t.assignees)));
+  const logins = new Set(Object.values(plan.board).flatMap((tasks) => tasks.flatMap((t) => t.assignees.map((a) => a.login))));
   return [...logins].filter((l) => l.toLowerCase() !== me?.toLowerCase()).toSorted((a, b) => a.localeCompare(b));
 }
 

@@ -127,6 +127,8 @@ Read on `main` at commit `22ec4bb` on 2026-10-02, with read-only `gh` calls and 
 
 ## Decisions
 
+Decision 5 and open question 2 changed on 2026-10-02 at the user's request (#452): only failed runs and pending permission requests hold new starts.
+
 ### 1. The scheduler runs in the worker
 
 A new loop in the worker process, next to `startWorker`, checks projects whose scheduler is on. The shared start logic moves out of the dashboard into `packages/engine/src/start-run.ts`, so the dashboard's `start_run` and the scheduler call the same function.
@@ -168,13 +170,13 @@ The scheduler uses one graph, stored on its settings, defaulting to the project'
 Before it starts anything, a check computes the project's holds from Postgres:
 
 - a failed run, including a loop that ran out of rounds;
-- an open question that is not a review;
-- a review waiting: a review gate's question (plan review, code review, Try it), or a pull request whose PR node waits for an approving review;
 - a pending permission request.
 
-Any hold stops new starts. Holds count every run of the project, whoever started it, and failed runs from before the scheduler was turned on. A pull request waiting in a manual merge queue for a person to merge it is not a hold: its run already counts toward N.
+Any hold stops new starts. Holds count every run of the project, whoever started it, and failed runs from before the scheduler was turned on.
 
-Holds clear on their own. The action that clears one (a repair, a cancel, an answer, a permission decision) nudges the scheduler, and the next check starts runs again. Nothing else is needed from the person.
+A run waiting on a person for anything else is not a hold: an open question, a review gate's question (plan review, code review, Try it), a pull request whose PR node waits for an approving review, and a pull request waiting in a manual merge queue for a person to merge it. Such a run stays active and counts toward N. With N = 1 nothing new starts while it waits; with a higher N the other slots keep working.
+
+Holds clear on their own. The action that clears one (a repair, a cancel, a permission decision) nudges the scheduler, and the next check starts runs again. Nothing else is needed from the person.
 
 A person can also pause the scheduler (`pause_scheduler`, or Pause on the dashboard). A pause stops new starts until the person resumes (`start_scheduler`, or Start). Pausing never touches active runs.
 
@@ -241,7 +243,7 @@ packages/engine/src/
   start-run.ts                 startRun(db, input, ports): the body of startRunFromGraph, plus refuseTaken and startedBy
   backlog-scheduler/
     candidates.ts              candidates(items, latestRuns, opts): ordered list with skip reasons; pure
-    holds.ts                   projectHolds(db, projectId): failed runs, questions, reviews, waiting PR reviews, permissions
+    holds.ts                   projectHolds(db, projectId): failed runs, stuck loops, pending permissions
     overlap.ts                 overlaps(paths, others): shared paths; pure
     tick.ts                    checkProject(deps, projectId): holds, count, one Project read, starts, events, last_result
     nudge.ts                   nudgeScheduler(db | tx, projectId); schedulerKey and overlapKey
@@ -291,7 +293,7 @@ Each PR is one GitHub issue, one branch, CI green, a red-green slice per test na
 
 2. **Port: Project order and Priority.** Files: `packages/github/src/queries/plan-items.graphql` (Priority by name), `plan-project.graphql` (the Priority field's options), `projects/types.ts` (`position`, `priority`), `projects/octokit-projects.ts`, `testing/fake-projects.ts`. First tests: `projects/octokit-projects.test.ts` additions "listItems numbers items by their position across pages"; "listItems reads the Priority option and getProject returns the Priority options in field order"; "a Project without a Priority field gives every item no priority". Manual step recorded on the PR: the `rateLimit { cost }` of the query with Priority, and whether moving an item in the table view changes its position.
 
-3. **Scheduler core.** Files: the two tables and a migration, `packages/engine/src/backlog-scheduler/{candidates,holds,tick,nudge}.ts`. First tests: `candidates.test.ts` (pure) "only open Ready tasks without open blockers and without an active run are candidates, in Project order"; "epics, stories, Shaping tasks and unplanned issues are never candidates"; "priority order puts the first option first, items without a value last, and keeps Project order within a priority"; "a task whose latest run was cancelled is skipped with the reason". `holds.integration.test.ts` "a failed run, a loop out of rounds, an open question, a review gate, a pull request waiting for review and a pending permission each hold the project"; "a pull request waiting in a manual merge queue does not hold"; "holds count runs a person started". `tick.integration.test.ts` (real Postgres, `FakeGitHub`, `FakeProjects`) "a check starts runs in order until max_runs runs are active"; "runs a person started count toward max_runs"; "a check with a hold starts nothing and reads nothing from GitHub"; "a check starts no run while a run the scheduler started has no plan"; "a refused start is skipped and the next candidate starts"; "held is recorded once until the reasons change"; "three failed starts in a row pause the scheduler with the reason"; "two checks of one project at once start each task once".
+3. **Scheduler core.** Files: the two tables and a migration, `packages/engine/src/backlog-scheduler/{candidates,holds,tick,nudge}.ts`. First tests: `candidates.test.ts` (pure) "only open Ready tasks without open blockers and without an active run are candidates, in Project order"; "epics, stories, Shaping tasks and unplanned issues are never candidates"; "priority order puts the first option first, items without a value last, and keeps Project order within a priority"; "a task whose latest run was cancelled is skipped with the reason". `holds.integration.test.ts` "a failed run, a loop out of rounds and a pending permission each hold the project"; "an open question, a plan or code review, Try it and a pull request waiting for review do not hold"; "a pull request waiting in a manual merge queue does not hold"; "holds count runs a person started". `tick.integration.test.ts` (real Postgres, `FakeGitHub`, `FakeProjects`) "a check starts runs in order until max_runs runs are active"; "runs a person started count toward max_runs"; "a check with a hold starts nothing and reads nothing from GitHub"; "a check starts no run while a run the scheduler started has no plan"; "a refused start is skipped and the next candidate starts"; "held is recorded once until the reasons change"; "three failed starts in a row pause the scheduler with the reason"; "two checks of one project at once start each task once".
 
 4. **Worker loop and wakes.** Files: `backlog-scheduler/loop.ts`, `apps/worker/src/app.ts`, `scheduler/complete.ts`, `operations.ts`, `executors/github.ts`, `apps/web/src/server/shaping.ts`. First tests: `loop.integration.test.ts` "a project is checked again 60 seconds after its last check"; "a nudge brings the check forward but never closer than 10 seconds after the last"; "a paused or disabled project is never checked". `lifecycle.integration.test.ts` addition "a run that ends nudges its project's scheduler". `merge-queue.integration.test.ts` addition "a merge that closes a task nudges the scheduler, and the next check starts the task whose last blocker it closed". `packages/engine/src/operations.integration.test.ts` (new) "answering a question, deciding a permission, repairing, resolving a loop and cancelling nudge the scheduler". `apps/worker/src/scheduler-access.test.ts` "the worker starts the scheduler only with Projects access and logs why not".
 
@@ -310,7 +312,7 @@ Each PR is one GitHub issue, one branch, CI green, a red-green slice per test na
 | The scheduler restarts a task a person cancelled, because cancel writes Ready back | A task whose latest run was cancelled is skipped until a person starts it (Decision 3). |
 | A person's `start_run` and the scheduler start the same task | `refuseTaken` under a per-project advisory lock in the insert transaction (Decision 4). |
 | A failed run from weeks ago holds the project forever | The card and `get_scheduler` name the failed run with its link; cancelling or repairing it clears the hold. Recorded as open question 4. |
-| Reviews hold every start on a graph with a plan review gate, so the scheduler runs one plan approval at a time | That is the rule the user asked for; the card says which review holds it. Open question 2 covers relaxing it. |
+| Runs waiting on reviews fill every slot, so nothing new starts until a person answers | A waiting run counts toward N and the card lists it among the active runs; a person raises N or answers the reviews. |
 | Two runs edit the same files | One run planning at a time, then the overlap hold before the coder (Decision 6). |
 | A planner's owned paths are too wide (`apps/web`), so runs hold each other for long | The hold names the paths; a person can cancel or narrow; the planner budget in `docs/plans/run-feedback.md` Decision 10 keeps plans small. |
 | GitHub rate limit shared with the Plan page and runs | A check reads the Project only with a free slot and no hold, at most once a minute plus nudges spaced by 10 seconds; 4 points per read. |
@@ -326,7 +328,7 @@ Each PR is one GitHub issue, one branch, CI green, a red-green slice per test na
 Each has a recommended answer; unanswered, the implementation takes the recommendation.
 
 1. Default `max_runs`? Recommended: 1. With `HANDOFF_CAP_CLI=1` and a plan review per run, a higher default mostly adds runs waiting on a person. A person raises it in Project settings.
-2. Should a review gate on a run hold new starts? Recommended: yes, as asked. With todooverkill's `master` graph this means the scheduler waits for each plan approval before the next start. If that proves too slow, a later setting can exempt plan reviews.
+2. Should a review gate on a run hold new starts? Decided: no. Only failed runs and pending permission requests hold. A run waiting on a question, a plan or code review, Try it or a pull request review stays active and counts toward N, so with todooverkill's `master` graph and N above 1, the other slots keep starting tasks while a plan waits for approval.
 3. Should a pull request waiting for a person to merge it (manual merge queue) hold new starts? Recommended: no. It already counts toward N, and holding would stop the project for every ready pull request.
 4. Should failed runs from before the scheduler was turned on hold it? Recommended: yes. The card lists them, and one cancel or repair clears each.
 5. Should the scheduler skip tasks with a given label? Recommended: yes, a setting "Skip tasks labelled" with `human` as the default, since todooverkill marks #46 "Screen reader pass (human task)" that way.
@@ -351,10 +353,10 @@ pnpm doctor:react
 By hand on todooverkill, with `pnpm dev:web`, `pnpm dev:worker` (from a separate worktree, since `tsx watch` restarts the worker on edits) and `pnpm dev:webhooks Krister-Johansson/todoOverKill`:
 
 1. Fix the dashboard's access first: `list_plan` for todooverkill must return the tree. Today it fails with "GitHub Project #5 of Krister-Johansson does not exist or GITHUB_TOKEN cannot see it."
-2. `get_scheduler todooverkill`: expect Off. `start_scheduler` with `max_runs: 2`: expect the approval card naming todooverkill, 2 runs, Project order and graph `master`. Approve. Expect Held with one reason, the plan review of run `64fde8ef` on #16, if it is still open; resolve it on the review page. Expect the hold to clear within 10 seconds of the answer.
+2. `get_scheduler todooverkill`: expect Off. `start_scheduler` with `max_runs: 2`: expect the approval card naming todooverkill, 2 runs, Project order and graph `master`. Approve. If the plan review of run `64fde8ef` on #16 is still open, expect it not to hold: that run counts as 1 of the 2 active runs.
 3. With every task in Shaping, expect Idle, "No task is Ready", and `gh api rate_limit` showing at most one Project read per minute from the worker.
 4. Move the tasks of story #125 (#141, #142, #152) to Ready with `move_to_ready`. Expect a check within 10 seconds that starts #141 (first in Project order, no open blocker), with the Scheduler tag, `run.scheduled` and `scheduler.run_started`. Expect #152 not to start while #141's planner runs, and after that only when a slot is free (#16's run also counts toward the 2), and #142 to be listed as skipped, blocked by #141.
-5. At #141's plan review, expect Held naming that review. Approve it. Expect the next start within 10 seconds when a slot is free.
+5. While #141's plan review waits, expect no hold and the next start when a slot is free. Approve it.
 6. Let #141's run open its pull request and merge (request the merge if the queue is manual). Expect #141 closed and Done, a nudge, and #142 started on the next check, since its last blocker closed.
 7. Move the tasks of story #126 (#143, #144) to Ready while #142 is open. Expect both skipped, blocked by #142. After #142 merges, expect #143 to start and, with a free slot and #143 planned, #144. If their plans share files, expect the second run to wait before its coder with `run.overlap_held` naming the first run and the paths, and to go on when the first run ends.
 8. Fail a run on purpose (repair with a bad setup command, or cancel a CI fix by hand): expect Held naming the failed run, nothing new starting, and the hold clearing after a repair or a cancel. After a cancel, expect that task to be skipped with "cancelled run; start it by hand".

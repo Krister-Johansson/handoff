@@ -1,5 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { person } from "@/components/plan/testing/plan-fixtures";
+import { loadImages } from "@/components/testing/images";
 import { Toaster } from "@/components/ui/sonner";
 import { Assignees } from "./assignees";
 import { StartRunButton } from "./issue-actions";
@@ -15,11 +17,12 @@ beforeEach(() => {
   actions.assignableAction.mockResolvedValue({
     repo: "Krister-Johansson/todoOverKill",
     users: [
-      { login: "Krister-Johansson", avatarUrl: "a1", you: true },
-      { login: "ann", avatarUrl: "a2", you: false },
+      { ...person("Krister-Johansson"), you: true },
+      { ...person("ann"), you: false },
     ],
   });
 });
+afterEach(() => vi.unstubAllGlobals());
 
 /** Under a full test run the transitions take a while; the waits allow for it. */
 const SLOW = { timeout: 8000 };
@@ -31,7 +34,7 @@ const open = async (name: string) => {
 };
 
 test("the picker lists who can be assigned with you marked, and picking someone assigns them on GitHub", async () => {
-  actions.assignAction.mockResolvedValue({ ok: true, assignees: ["ann"] });
+  actions.assignAction.mockResolvedValue({ ok: true, assignees: [person("ann")] });
   render(<Assignees projectId="p1" issue={66} assignees={[]} viewer="Krister-Johansson" assignMe />);
   const picker = await open("No assignee. Change assignees");
   expect(within(picker).getByPlaceholderText("Filter people")).toBeInTheDocument();
@@ -45,8 +48,8 @@ test("the picker lists who can be assigned with you marked, and picking someone 
 });
 
 test("Assign me assigns the token's user beside whoever has the issue, and Clear assignees removes everyone", async () => {
-  actions.assignAction.mockResolvedValueOnce({ ok: true, assignees: ["ann", "Krister-Johansson"] }).mockResolvedValueOnce({ ok: true, assignees: [] });
-  render(<Assignees projectId="p1" issue={66} assignees={["ann"]} viewer="Krister-Johansson" assignMe />);
+  actions.assignAction.mockResolvedValueOnce({ ok: true, assignees: [person("ann"), person("Krister-Johansson")] }).mockResolvedValueOnce({ ok: true, assignees: [] });
+  render(<Assignees projectId="p1" issue={66} assignees={[person("ann")]} viewer="Krister-Johansson" assignMe />);
   fireEvent.click(screen.getByRole("button", { name: "Assign me" }));
   await waitFor(() => expect(actions.assignAction).toHaveBeenCalledWith({ projectId: "p1", issue: 66, logins: ["ann"], me: true }), SLOW);
   expect(await screen.findByRole("button", { name: "Assignees: ann, Krister-Johansson. Change assignees" }, SLOW)).toBeInTheDocument();
@@ -84,4 +87,25 @@ test("Start run on the page starts the run, stays, and the toast says the issue 
   expect(screen.getByText("#66 had no assignee, so it is assigned to you.")).toBeInTheDocument();
   expect(router.refresh).toHaveBeenCalled();
   expect(router.push).not.toHaveBeenCalled();
+});
+
+test("assignees and the people in the picker show their GitHub avatars, with the login as the image's text, and initials without one", async () => {
+  loadImages();
+  actions.assignableAction.mockResolvedValue({ repo: "Krister-Johansson/todoOverKill", users: [{ ...person("Krister-Johansson"), you: true }, { ...person("ann", ""), you: false }] });
+  actions.assignAction.mockResolvedValue({ ok: true, assignees: [person("Krister-Johansson"), person("bob")] });
+  render(<Assignees projectId="p1" issue={66} assignees={[person("Krister-Johansson")]} viewer="Krister-Johansson" assignMe />);
+  const button = screen.getByRole("button", { name: "Assignee: Krister-Johansson. Change assignees" });
+  expect(within(button).getByRole("img", { name: "Krister-Johansson" })).toHaveAttribute("src", "https://avatars.githubusercontent.com/Krister-Johansson");
+
+  const picker = await open("Assignee: Krister-Johansson. Change assignees");
+  const you = await within(picker).findByRole("option", { name: /you/ }, SLOW);
+  expect(within(you).getByRole("img", { name: "Krister-Johansson" })).toHaveAttribute("src", "https://avatars.githubusercontent.com/Krister-Johansson");
+  const ann = within(picker).getByRole("option", { name: /ann/ });
+  expect(within(ann).queryByRole("img")).not.toBeInTheDocument();
+  expect(ann).toHaveTextContent("ANann");
+
+  // The assignees GitHub kept come back with their avatars.
+  fireEvent.click(ann);
+  const after = await screen.findByRole("button", { name: "Assignees: Krister-Johansson, bob. Change assignees" }, SLOW);
+  expect(within(after).getByRole("img", { name: "bob" })).toHaveAttribute("src", "https://avatars.githubusercontent.com/bob");
 });

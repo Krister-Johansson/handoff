@@ -3,7 +3,7 @@ import { z } from "zod";
 import { IssueParentsDocument, PullRequestSnapshotDocument, type IssueParentsQuery, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
 import { readError } from "./errors.ts";
 import { ancestorsOf } from "./projects/lineage.ts";
-import type { Assignable, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
+import type { Assignable, Assignee, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -30,6 +30,9 @@ const toSummary = (r: RestRepo): RepoSummary => ({
   pushedAt: r.pushed_at ?? null,
   archived: r.archived ?? false,
 });
+
+/** A REST user as an assignee: the login and the avatar image. */
+const toAssignee = (user: { login: string; avatar_url: string }): Assignee => ({ login: user.login, avatarUrl: user.avatar_url });
 
 const byPushed = (a: RepoSummary, b: RepoSummary) => (b.pushedAt ?? "").localeCompare(a.pushedAt ?? "");
 
@@ -186,13 +189,13 @@ export class OctokitGitHub implements GitHubPort {
   async listAssignable(repo: RepoRef): Promise<Assignable[]> {
     const octokit = await this.clientFor(repo);
     const users = await octokit.paginate(octokit.rest.issues.listAssignees, { owner: repo.owner, repo: repo.name, per_page: 100 });
-    return users.map((u) => ({ login: u.login, avatarUrl: u.avatar_url }));
+    return users.map(toAssignee);
   }
 
-  async setAssignees(repo: RepoRef, number: number, logins: string[]): Promise<string[]> {
+  async setAssignees(repo: RepoRef, number: number, logins: string[]): Promise<Assignee[]> {
     const octokit = await this.clientFor(repo);
     const { data } = await octokit.rest.issues.update({ owner: repo.owner, repo: repo.name, issue_number: number, assignees: logins });
-    return (data.assignees ?? []).map((a) => a.login);
+    return (data.assignees ?? []).map(toAssignee);
   }
 
   async addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void> {
@@ -221,7 +224,7 @@ export class OctokitGitHub implements GitHubPort {
       state: data.state === "closed" ? "closed" : "open",
       stateReason: data.state_reason ?? null,
       labels: (data.labels ?? []).flatMap((l) => (typeof l === "string" ? [l] : l.name ? [l.name] : [])),
-      assignees: (data.assignees ?? []).map((a) => a.login),
+      assignees: (data.assignees ?? []).map(toAssignee),
       author: data.user?.login ?? null,
       authorAssociation: data.author_association ?? "NONE",
       createdAt: data.created_at,

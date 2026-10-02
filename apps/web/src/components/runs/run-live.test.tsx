@@ -1,9 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, type ComponentProps } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { AssistantProvider, useAssistant } from "@/components/assistant/assistant-provider";
+import type { AssistantPort } from "@/lib/assistant/port";
+import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { RunLive } from "./run-live";
 
 const refresh = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }), usePathname: () => "/projects/p1/runs/r1" }));
 vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), cancelAction: vi.fn(), repairAction: vi.fn() }));
 const projectActions = vi.hoisted(() => ({ requestMergeAction: vi.fn(async () => ({ ok: true })) }));
 vi.mock("@/app/projects/actions", () => projectActions);
@@ -304,4 +308,157 @@ test("what the run is doing now sits in the page header, beside the run's action
   expect(within(header).getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
   expect(header).toHaveTextContent("master v12");
   expect(screen.getAllByRole("status")).toHaveLength(1);
+});
+
+function Grab({ onPort }: { onPort: (port: AssistantPort) => void }) {
+  const port = useAssistant();
+  useEffect(() => {
+    onPort(port);
+  }, [onPort, port]);
+  return null;
+}
+
+/**
+ * The run page inside the assistant, with a turn running so the test can call the page's tools as the
+ * model would: `call` emits a ui_call and resolves with the page's answer.
+ */
+async function withAssistant(props: Omit<ComponentProps<typeof RunLive>, "projectId" | "runId" | "initialEvents" | "labels" | "prNumber" | "questions"> & Partial<ComponentProps<typeof RunLive>>) {
+  const transport = new FakeAssistantTransport();
+  let port: AssistantPort | undefined;
+  const onPort = (p: AssistantPort) => (port = p);
+  render(
+    <AssistantProvider transport={transport} available>
+      <Grab onPort={onPort} />
+      <RunLive {...common} {...props} />
+    </AssistantProvider>,
+  );
+  act(() => void port!.send("what is on this page"));
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  let next = 1;
+  const call = async (name: string, args: unknown = {}) => {
+    const requestId = `u${next++}`;
+    act(() => transport.emit({ type: "ui_call", requestId, name, args }));
+    await waitFor(() => expect(transport.uiReplies.find((r) => r.requestId === requestId)).toBeDefined());
+    const { text, isError } = transport.uiReplies.find((r) => r.requestId === requestId)!;
+    return { text, isError };
+  };
+  const whereAmI = async () => JSON.parse((await call("where_am_i")).text) as { page?: { kind: string; tools: { name: string }[]; state: { data: Record<string, unknown> } } };
+  return { call, whereAmI, transport };
+}
+
+const selectedTab = () => screen.getAllByRole("tab").find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent;
+
+test("page_show_view switches to the graph and events views and where_am_i says which is shown", async () => {
+  const { call, whereAmI } = await withAssistant({ initialStatus: "running", initialExecutions: executions });
+  expect(selectedTab()).toBe("Steps");
+  expect((await whereAmI()).page).toMatchObject({ kind: "run", state: { data: { view: "steps" } } });
+
+  expect(await call("page_show_view", { view: "graph" })).toEqual({ text: "Showing the graph view.", isError: false });
+  expect(selectedTab()).toBe("Graph");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ view: "graph" });
+
+  expect(await call("page_show_view", { view: "events" })).toEqual({ text: "Showing the events view.", isError: false });
+  expect(selectedTab()).toMatch(/^Events/);
+
+  // A tab the person clicks is what where_am_i reports next.
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Steps" }));
+  await waitFor(() => expect(selectedTab()).toBe("Steps"));
+  expect((await whereAmI()).page?.state.data).toMatchObject({ view: "steps" });
+});
+
+test("where_am_i on the run page gives its ids, status, steps and open questions, and lists its five tools", async () => {
+  const { whereAmI } = await withAssistant({ labels: { gate: "Approve the plan" }, initialStatus: "waiting", initialExecutions: [gate], questions: [question(false)] });
+  const page = (await whereAmI()).page!;
+  expect(page.tools.map((t) => t.name)).toEqual(["page_show_view", "page_open_step", "page_close_step", "page_pop_out", "page_filter_events"]);
+  expect(page.state.data).toEqual({
+    runId: "r1",
+    projectId: "p1",
+    status: "waiting",
+    view: "steps",
+    steps: [{ id: "e5", nodeKey: "gate", label: "Approve the plan", attempt: 1, status: "waiting" }],
+    openStep: null,
+    poppedOut: false,
+    events: { node: null, cli: false },
+    questions: [{ id: "q1", stepId: "e5", nodeKey: "gate", reason: "approval", question: "Review the plan from Planner", options: ["approve", "changes"] }],
+  });
+});
+
+test("page_open_step opens the latest execution of a node key, and an attempt opens that one; a key that is not a step is refused with the keys", async () => {
+  const steps = [
+    { ...executions[0]!, id: "e1" },
+    { ...looped, id: "e2" },
+    { id: "e3", nodeKey: "reviewer", attempt: 1, status: "running", costUsd: null, durationMs: null },
+  ];
+  const { call, whereAmI } = await withAssistant({ labels: { planner: "Plan", reviewer: "Review" }, initialStatus: "running", initialExecutions: steps });
+  const drawerHeading = () => within(screen.getByRole("dialog")).getByRole("heading", { level: 2 });
+
+  expect(await call("page_open_step", { step: "planner" })).toEqual({ text: "Opened Plan (planner), attempt 2.", isError: false });
+  expect(drawerHeading()).toHaveTextContent("attempt 2");
+  expect(fetchMock).toHaveBeenCalledWith("/api/runs/r1/executions/e2", expect.anything());
+
+  expect(await call("page_open_step", { step: "planner", attempt: 1 })).toEqual({ text: "Opened Plan (planner), attempt 1.", isError: false });
+  await waitFor(() => expect(drawerHeading()).not.toHaveTextContent("attempt"));
+  expect(fetchMock).toHaveBeenCalledWith("/api/runs/r1/executions/e1", expect.anything());
+
+  // An execution id from where_am_i opens that execution.
+  expect(await call("page_open_step", { step: "e3" })).toEqual({ text: "Opened Review (reviewer), attempt 1.", isError: false });
+  expect(drawerHeading()).toHaveTextContent("Review");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ openStep: { id: "e3", nodeKey: "reviewer", attempt: 1 } });
+
+  expect(await call("page_open_step", { step: "tester" })).toEqual({ text: "No step has the key or id tester. The steps are planner, reviewer.", isError: true });
+  expect(await call("page_open_step", { step: "planner", attempt: 3 })).toEqual({ text: "planner has no attempt 3. Its attempts are 1, 2.", isError: true });
+  expect(drawerHeading()).toHaveTextContent("Review");
+});
+
+test("page_close_step closes the drawer and page_pop_out needs an open step", async () => {
+  const { call, whereAmI } = await withAssistant({ initialStatus: "running", initialExecutions: executions });
+  expect(await call("page_pop_out", { open: true })).toEqual({ text: "No step is open. Open one with page_open_step first.", isError: true });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+  await call("page_open_step", { step: "planner" });
+  expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Pop out" })).toBeInTheDocument();
+  expect(await call("page_pop_out", { open: true })).toEqual({ text: "Popped out Plan (planner).", isError: false });
+  // The large window has no Pop out button of its own.
+  await waitFor(() => expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Pop out" })).not.toBeInTheDocument());
+  expect((await whereAmI()).page?.state.data).toMatchObject({ openStep: { nodeKey: "planner" }, poppedOut: true });
+
+  expect(await call("page_pop_out", { open: false })).toEqual({ text: "Put Plan (planner) back in the drawer.", isError: false });
+  await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Pop out" })).toBeInTheDocument());
+
+  await call("page_pop_out", { open: true });
+  expect(await call("page_close_step")).toEqual({ text: "Closed Plan (planner).", isError: false });
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect((await whereAmI()).page?.state.data).toMatchObject({ openStep: null, poppedOut: false });
+  expect(await call("page_close_step")).toEqual({ text: "No step was open.", isError: false });
+});
+
+test("page_filter_events narrows the events to a node and shows the events view", async () => {
+  const steps = [executions[0]!, { id: "e2", nodeKey: "coder", attempt: 1, status: "running", costUsd: null, durationMs: null }];
+  const at = "2026-10-02T10:00:00Z";
+  const initialEvents = [
+    { seq: 1, type: "node.claimed", payload: { nodeKey: "planner", attempt: 1 }, nodeExecutionId: "e1", createdAt: at },
+    { seq: 2, type: "node.failed", payload: { nodeKey: "coder", attempt: 1 }, nodeExecutionId: "e2", createdAt: at },
+    { seq: 3, type: "cli.tool_use", payload: { name: "Edit" }, nodeExecutionId: "e2", createdAt: at },
+  ];
+  const { call, whereAmI } = await withAssistant({ initialStatus: "running", initialExecutions: steps, initialEvents });
+  expect(screen.getByText("node.claimed")).toBeInTheDocument();
+  expect(screen.queryByText("cli.tool_use")).not.toBeInTheDocument();
+
+  expect(await call("page_filter_events", { node: "coder" })).toEqual({ text: "Showing the events of Code (coder).", isError: false });
+  expect(selectedTab()).toMatch(/^Events/);
+  expect(screen.getByRole("combobox", { name: "Node" })).toHaveValue("coder");
+  expect(screen.getByText("node.failed")).toBeInTheDocument();
+  expect(screen.queryByText("node.claimed")).not.toBeInTheDocument();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ view: "events", events: { node: "coder", cli: false } });
+
+  // cli alone keeps the node; node null shows every node again.
+  expect(await call("page_filter_events", { cli: true })).toEqual({ text: "Showing the events of Code (coder), with the Claude CLI's events.", isError: false });
+  expect(screen.getByRole("switch", { name: "Claude CLI events" })).toBeChecked();
+  expect(screen.getByText("cli.tool_use")).toBeInTheDocument();
+  expect(await call("page_filter_events", { node: null })).toEqual({ text: "Showing the events of every node, with the Claude CLI's events.", isError: false });
+  expect(screen.getByText("node.claimed")).toBeInTheDocument();
+
+  expect(await call("page_filter_events", { node: "tester" })).toEqual({ text: "No step has the key tester. The steps are planner, coder.", isError: true });
+  expect(screen.getByRole("combobox", { name: "Node" })).toHaveValue("");
 });
