@@ -13,6 +13,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { cn } from "@/lib/utils";
 import { CARD } from "./styles";
 
@@ -37,6 +38,28 @@ type Props = {
 
 const isTyping = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 const sectionId = (index: number) => `try-criterion-${index}`;
+
+/** How a refusal lists the criteria a page tool can take. */
+const criteriaList = (acceptance: string[]) => `The criteria are: ${acceptance.map((text, i) => `${i + 1}. ${text}`).join("; ")}.`;
+
+/**
+ * The criterion a page tool names, from 0: by its index from 1, or by its text, matched without
+ * regard to case or surrounding space, or by a part only one criterion has. Throws a refusal that says
+ * what there is to choose from.
+ */
+function findCriterion(acceptance: string[], which: { index?: number | undefined; criterion?: string | undefined }): number {
+  if (which.index !== undefined) {
+    if (which.index > acceptance.length) throw new Error(`There is no criterion ${which.index}. ${acceptance.length ? `The criteria run from 1 to ${acceptance.length}.` : "This run has no acceptance criteria."}`);
+    return which.index - 1;
+  }
+  if (which.criterion === undefined) throw new Error("Name the criterion by its index or its text.");
+  const wanted = which.criterion.trim().toLowerCase();
+  const exact = acceptance.findIndex((text) => text.trim().toLowerCase() === wanted);
+  if (exact >= 0) return exact;
+  const partial = acceptance.flatMap((text, i) => (wanted && text.toLowerCase().includes(wanted) ? [i] : []));
+  if (partial.length === 1) return partial[0]!;
+  throw new Error(`No criterion reads "${which.criterion}". ${criteriaList(acceptance)}`);
+}
 
 /** Moves between criteria with prev and next, the [ and ] keys, and the list of every criterion. */
 function useCursor(count: number) {
@@ -301,18 +324,47 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
       else next.add(index);
       return next;
     });
-  const mark = (index: number, works: boolean | undefined) => {
-    const next = checks.map((c, i) => (i === index ? { ...c, works } : c));
+  /** Marks a criterion, with what is wrong when a note comes with it; returns the criterion the cursor moved to. */
+  const mark = (index: number, works: boolean | undefined, note?: string) => {
+    const next = checks.map((c, i) => (i === index ? { ...c, works, ...(note === undefined ? {} : { note }) } : c));
     setChecks(next);
     setOpen(index, works !== true);
-    if (works === true) {
-      // On to the next criterion still to check, after this one first.
-      const after = next.findIndex((c, i) => i > index && c.works === undefined);
-      const anywhere = next.findIndex((c) => c.works === undefined);
-      const to = after >= 0 ? after : anywhere;
-      if (to >= 0) go(to);
-    }
+    if (works !== true) return undefined;
+    // On to the next criterion still to check, after this one first.
+    const after = next.findIndex((c, i) => i > index && c.works === undefined);
+    const anywhere = next.findIndex((c) => c.works === undefined);
+    const to = after >= 0 ? after : anywhere;
+    if (to >= 0) go(to);
+    return to >= 0 ? to : undefined;
   };
+
+  usePageTools(
+    "try",
+    {
+      page_mark_criterion: readOnly
+        ? undefined
+        : ({ index, criterion, works, note }) => {
+            const at = findCriterion(acceptance, { index, criterion });
+            const moved = mark(at, works ?? undefined, note);
+            if (works === null) return `Unchecked criterion ${at + 1}.`;
+            if (!works) return `Marked criterion ${at + 1} as not working${note?.trim() ? ", with the note" : ""}.`;
+            return `Marked criterion ${at + 1} as working.${moved === undefined ? " Every criterion is checked." : ` Now on criterion ${moved + 1}.`}`;
+          },
+      page_go_to_criterion: undefined,
+      page_set_note: undefined,
+      page_submit: undefined,
+      page_restart_app: undefined,
+      page_expand_criteria: undefined,
+    },
+    () => ({
+      questionId,
+      runId,
+      from,
+      current: acceptance.length ? current + 1 : null,
+      criteria: acceptance.map((text, i) => ({ index: i + 1, text, works: checks[i]?.works ?? null, note: checks[i]?.note ?? "" })),
+      readOnly,
+    }),
+  );
 
   return (
     <div className="flex flex-col gap-4">
