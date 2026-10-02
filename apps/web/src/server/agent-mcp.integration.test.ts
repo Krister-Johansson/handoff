@@ -315,6 +315,19 @@ test("get_run on a Try it gate has the app URL, the criteria and the demo's note
   });
 });
 
+test("get_run on a Try it gate has the demo's warnings from the server log and the console, marked new", async () => {
+  const runId = await startedRun();
+  const gate = await seedExecution(db, runId, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const warnings = [
+    { source: "server", level: "error", text: "Error: could not load tasks", new: true },
+    { source: "console", level: "warning", text: "Each child in a list should have a unique key prop", new: false },
+  ];
+  const context = { reason: "try", acceptance: ["A user can create a task"], preview: { status: "failed", error: "no launch file" }, warnings };
+  await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Try the app and check each acceptance criterion.", options: ["approve", "changes"], context });
+  const [asked] = (await call("get_run", { run_id: runId })).questions;
+  expect(asked.try.warnings).toEqual(warnings);
+});
+
 test("get_run has the cost, the failure code and the answered gates", async () => {
   const runId = await startedRun();
   await db.update(nodeExecutions).set({ status: "passed", costUsd: "0.250000" }).where(eq(nodeExecutions.runId, runId));

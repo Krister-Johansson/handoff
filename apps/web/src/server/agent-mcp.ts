@@ -95,6 +95,8 @@ type TryContext = {
   acceptance?: string[];
   preview?: { url?: string; status?: string; error?: string };
   shots?: { id: string; caption: string; works: boolean; criterion?: string }[];
+  /** The demo's warnings and errors from the server log and the browser console, each marked new when the project's previous demo did not have it. */
+  warnings?: { source: string; level: string; text: string; new: boolean }[];
 };
 
 /**
@@ -102,7 +104,7 @@ type TryContext = {
  * what the demo's screenshots showed of it, and the page where a person can try it.
  */
 function tryItOf(deps: HandoffMcpDeps, run: { id: string; projectId: string }, q: { id: string; context: unknown }, demoSummary: string | null) {
-  const { acceptance = [], preview, shots = [] } = q.context as TryContext;
+  const { acceptance = [], preview, shots = [], warnings = [] } = q.context as TryContext;
   const demo = (s: NonNullable<TryContext["shots"]>[number]) => ({ note: s.caption, works: s.works, screenshot_url: `${deps.baseUrl}/api/screenshots/${s.id}` });
   const criteria = new Set(acceptance);
   const loose = shots.filter((s) => !s.criterion || !criteria.has(s.criterion));
@@ -113,6 +115,7 @@ function tryItOf(deps: HandoffMcpDeps, run: { id: string; projectId: string }, q
     demo_summary: demoSummary,
     criteria: acceptance.map((criterion) => ({ criterion, demo: shots.filter((s) => s.criterion === criterion).map(demo) })),
     ...(loose.length ? { other_screenshots: loose.map(demo) } : {}),
+    ...(warnings.length ? { warnings } : {}),
     url: `${deps.baseUrl}${tryPath(run.projectId, run.id, q.id)}`,
   };
 }
