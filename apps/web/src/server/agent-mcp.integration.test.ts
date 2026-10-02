@@ -713,3 +713,15 @@ test("start_scheduler refuses priority order on a Project without a Priority fie
   expect(await schedulerRow()).toBeUndefined();
   expect(await call("start_scheduler", { project: "sandbox", order: "project" })).toMatchObject({ state: "on", order: "project" });
 });
+
+test("start_scheduler refuses without access to GitHub Projects and refuses a demo project", async () => {
+  await withPlan();
+  plan.scopesAnswer = { project: false, classic: true };
+  expect((await call("start_scheduler", { project: "sandbox" })).error).toBe(
+    "The scheduler reads Ready tasks from GitHub Projects. GITHUB_TOKEN lacks the project scope. Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).",
+  );
+  plan.scopesAnswer = { project: true, classic: true };
+  await db.update(projects).set({ isDemo: true }).where(eq(projects.id, projectId));
+  expect((await call("start_scheduler", { project: "sandbox" })).error).toBe("sandbox is a demo project: its runs are simulated, so the scheduler cannot start any.");
+  expect(await schedulerRow()).toBeUndefined();
+});

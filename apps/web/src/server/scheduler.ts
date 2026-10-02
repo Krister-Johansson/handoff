@@ -2,6 +2,7 @@ import { and, eq, graphs, projects, projectSchedulers, schedulerEvents, type Db,
 import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import type { ProjectsPort } from "@handoff/github";
 import { getProjectDetail } from "./graphs";
+import { projectsAccessProblem } from "./plan";
 
 export type SchedulerDeps = { db: Db; projects: ProjectsPort | undefined };
 
@@ -33,9 +34,12 @@ async function record(db: DbExecutor, projectId: string, type: string, payload: 
 export async function startScheduler(deps: SchedulerDeps, projectId: string, settings: SchedulerSettings, actor: string) {
   const { db } = deps;
   const project = await projectOf(db, projectId);
+  if (project.isDemo) throw new Error(`${project.name} is a demo project: its runs are simulated, so the scheduler cannot start any.`);
   if (project.planProjectNumber === null) {
     throw new Error(`${project.name} has no plan: the scheduler starts runs on the plan's Ready tasks. Link a GitHub Project to it with setup_plan first.`);
   }
+  const access = await projectsAccessProblem(deps.projects);
+  if (access) throw new Error(`The scheduler reads Ready tasks from GitHub Projects. ${access}`);
   const [stored] = await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId));
   const graphName = settings.graph ?? stored?.graphName ?? (await getProjectDetail(db, projectId))?.defaultGraph;
   if (!graphName) throw new Error(`${project.name} has no graph yet. Create one on its Graphs page.`);
