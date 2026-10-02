@@ -1,6 +1,19 @@
 import type { PlanStatus } from "@handoff/github";
 import type { RunFilter } from "./plan/filters";
-import type { PlanViewName } from "./project-tab";
+import { PROJECT_SECTIONS, type PlanViewName, type ProjectSection } from "./project-tab";
+
+/** A project's page: its Overview without a section, else the section's route. */
+export const projectPath = (projectId: string, section?: ProjectSection) => `/projects/${projectId}${section ? `/${section}` : ""}`;
+
+/**
+ * The project and its section a dashboard path is under, such as p1 and runs for /projects/p1/runs/r1;
+ * undefined outside a project. The section is undefined on the project's Overview.
+ */
+export function projectAt(pathname: string): { projectId: string; section?: ProjectSection } | undefined {
+  const [, root, projectId, section] = pathname.split("/");
+  if (root !== "projects" || !projectId) return undefined;
+  return { projectId, section: (PROJECT_SECTIONS as readonly string[]).includes(section ?? "") ? (section as ProjectSection) : undefined };
+}
 
 /** A project's Plan page, with the view (the tree unless given), an epic (or the unplanned issues), statuses and a run filter to narrow it to. */
 export function planPath(projectId: string, opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter } = {}) {

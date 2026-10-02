@@ -25,7 +25,7 @@ test("the activity line shows the latest issues, sub_issues or issue_dependencie
     <PlanTab {...props} activity={{ event: "issues", action: "closed", issue: 57, summary: "Issue #57 closed", receivedAt: new Date(READ_AT - 3 * 60_000) }} />,
   );
   expect(screen.getByText("Last from GitHub: Issue #57 closed, 3 minutes ago")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "1 Ready task in the backlog" })).toHaveAttribute("href", "/projects/p1?tab=issues");
+  expect(screen.getByRole("link", { name: "1 Ready task in the backlog" })).toHaveAttribute("href", "/projects/p1/issues");
   expect(within(screen.getByRole("tree")).getByRole("treeitem", { name: /Task #57/ })).toBeInTheDocument();
   unmount();
 

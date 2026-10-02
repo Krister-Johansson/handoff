@@ -1,58 +1,80 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { expect, test, vi } from "vitest";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { PageHeader } from "./page-header";
+import { TopBar, TopBarCrumbsProvider } from "./top-bar";
 
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
+vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => null }));
+vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => null }));
+vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 
-test("the header shows where you are as a trail of links, the page title, its description and actions", () => {
-  render(
+/** The page under the top bar, as the layout puts it. */
+function renderInShell(page: ReactNode) {
+  return render(
+    <TooltipProvider>
+      <SidebarProvider>
+        <TopBarCrumbsProvider>
+          <TopBar />
+          <main>{page}</main>
+        </TopBarCrumbsProvider>
+      </SidebarProvider>
+    </TooltipProvider>,
+  );
+}
+
+test("the header shows the page title, its description and actions, and puts its trail of links in the top bar", () => {
+  const { container } = renderInShell(
     <PageHeader
-      crumbs={[{ label: "Projects", href: "/projects" }, { label: "todooverkill", href: "/projects/p1" }, { label: "Runs" }]}
-      title="Runs"
-      description="Every run of this project."
-      actions={<button type="button">New run</button>}
+      crumbs={[{ label: "todooverkill", href: "/projects/p1" }, { label: "Runs", href: "/projects/p1/runs" }, { label: "#3 F03 Prisma" }]}
+      title="#3 F03 Prisma"
+      description="Every step of this run."
+      actions={<button type="button">Cancel run</button>}
     />,
   );
-  const trail = screen.getByRole("navigation", { name: "breadcrumb" });
-  expect(within(trail).getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/projects");
+  const trail = within(container.querySelector<HTMLElement>("[data-slot=top-bar]")!).getByRole("navigation", { name: "breadcrumb" });
   expect(within(trail).getByRole("link", { name: "todooverkill" })).toHaveAttribute("href", "/projects/p1");
-  expect(within(trail).getByText("Runs")).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("heading", { level: 1, name: "Runs" })).toBeInTheDocument();
-  expect(screen.getByText("Every run of this project.")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "New run" })).toBeInTheDocument();
+  expect(within(trail).getByRole("link", { name: "Runs" })).toHaveAttribute("href", "/projects/p1/runs");
+  expect(within(trail).getByText("#3 F03 Prisma")).toHaveAttribute("aria-current", "page");
+  expect(screen.getByRole("heading", { level: 1, name: "#3 F03 Prisma" })).toBeInTheDocument();
+  expect(screen.getByText("Every step of this run.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
 });
 
 test("a crumb with siblings opens a searchable list to switch to one of them", () => {
-  render(
+  renderInShell(
     <PageHeader
       crumbs={[
-        { label: "Projects", href: "/projects" },
+        { label: "todooverkill", href: "/projects/p1" },
         {
-          label: "todooverkill",
-          href: "/projects/p1",
-          menuLabel: "projects",
+          label: "master",
+          href: "/projects/p1/graphs/master",
+          menuLabel: "graphs",
           menu: [
-            { label: "todooverkill", href: "/projects/p1", current: true },
-            { label: "sandbox", href: "/projects/p2" },
-            { label: "demo", href: "/projects/p3" },
+            { label: "master", href: "/projects/p1/graphs/master", current: true },
+            { label: "quick", href: "/projects/p1/graphs/quick" },
+            { label: "review", href: "/projects/p1/graphs/review" },
           ],
         },
       ]}
-      title="todooverkill"
+      title="master"
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Switch from todooverkill" }));
-  const search = screen.getByPlaceholderText("Search projects");
-  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["todooverkill", "sandbox", "demo"]);
-  fireEvent.change(search, { target: { value: "sand" } });
-  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["sandbox"]);
-  fireEvent.click(screen.getByRole("option", { name: "sandbox" }));
-  expect(push).toHaveBeenCalledWith("/projects/p2");
+  fireEvent.click(screen.getByRole("button", { name: "Switch from master" }));
+  const search = screen.getByPlaceholderText("Search graphs");
+  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["master", "quick", "review"]);
+  fireEvent.change(search, { target: { value: "qui" } });
+  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["quick"]);
+  fireEvent.click(screen.getByRole("option", { name: "quick" }));
+  expect(push).toHaveBeenCalledWith("/projects/p1/graphs/quick");
 });
 
 test("a run in the list shows its status", () => {
-  render(
+  renderInShell(
     <PageHeader
       crumbs={[{ label: "#3 F03 Prisma", href: "/projects/p1/runs/r3", menuLabel: "runs", menu: [{ label: "#3 F03 Prisma", href: "/projects/p1/runs/r3", current: true, status: "succeeded" }] }]}
       title="#3 F03 Prisma"
@@ -60,11 +82,4 @@ test("a run in the list shows its status", () => {
   );
   fireEvent.click(screen.getByRole("button", { name: "Switch from #3 F03 Prisma" }));
   expect(within(screen.getByRole("option")).getByText("succeeded")).toBeInTheDocument();
-});
-
-test("a top-level page shows its title without a trail that only repeats it", () => {
-  render(<PageHeader crumbs={[{ label: "Settings" }]} title="Settings" description="Settings for this dashboard." />);
-  expect(screen.queryByRole("navigation", { name: /breadcrumb/i })).not.toBeInTheDocument();
-  expect(screen.getAllByText("Settings")).toHaveLength(1);
-  expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
 });

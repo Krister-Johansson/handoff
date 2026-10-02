@@ -1,4 +1,4 @@
-import { and, desc, eq, graphs, projects, runs, type Db } from "@handoff/db";
+import { and, desc, eq, graphs, runs, type Db } from "@handoff/db";
 import type { Crumb, CrumbMenuItem } from "../components/page-header";
 import { runPath } from "../lib/paths";
 
@@ -7,18 +7,14 @@ const short = (text: string, max = 60) => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
 
-/** "Projects › <project>", the project crumb opening the other projects to switch to. */
-export async function projectCrumbs(db: Db, project: { id: string; name: string }): Promise<Crumb[]> {
-  const all = await db.select({ id: projects.id, name: projects.name }).from(projects).orderBy(projects.name);
-  return [
-    { label: "Projects", href: "/projects" },
-    { label: project.name, href: `/projects/${project.id}`, menuLabel: "projects", menu: all.map((p) => ({ label: p.name, href: `/projects/${p.id}`, current: p.id === project.id })) },
-  ];
+/** The project's crumb, leading to the project. The sidebar's project switcher changes projects, so it has no menu. */
+export function projectCrumb(project: { id: string; name: string }): Crumb {
+  return { label: project.name, href: `/projects/${project.id}` };
 }
 
-/** The project's Runs tab, the parent of a run. The tabs themselves sit under the page header. */
+/** The project's Runs page, the parent of a run. */
 export function projectRunsCrumb(projectId: string): Crumb {
-  return { label: "Runs", href: `/projects/${projectId}?tab=runs` };
+  return { label: "Runs", href: `/projects/${projectId}/runs` };
 }
 
 /** A graph's crumb, opening the project's other graphs. */

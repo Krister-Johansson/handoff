@@ -83,7 +83,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       <PageHeader
         crumbs={[{ label: "Settings" }]}
         title="Settings"
-        description="Settings for this dashboard. Project settings are on each project's Settings tab."
+        description="Settings for this dashboard. Each project's own settings are under Project settings in the sidebar."
       />
       <div className="grid items-start gap-6 md:grid-cols-[200px_minmax(0,1fr)]">
         <SettingsNav active={tab} />

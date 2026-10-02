@@ -25,10 +25,15 @@ test("go_to_inbox narrows to a project by id", () => {
   expect(plan("go_to_inbox", { project_id: "0b6c-1" })).toEqual({ kind: "navigate", href: "/inbox?project=0b6c-1" });
 });
 
-test("set_project_tab builds the tab and filter query the project page reads", () => {
-  expect(plan("set_project_tab", { project_id: "p1", tab: "runs" })).toEqual({ kind: "navigate", href: "/projects/p1?tab=runs" });
-  expect(plan("set_project_tab", { project_id: "p1", tab: "issues", filter: "started" })).toEqual({ kind: "navigate", href: "/projects/p1?tab=issues&issues=started" });
-  expect(plan("set_project_tab", { project_id: "p1", tab: "pulls", filter: "merged" })).toEqual({ kind: "navigate", href: "/projects/p1?tab=pulls&pr=merged" });
+test("set_project_tab navigates to the tab's route", () => {
+  expect(plan("set_project_tab", { project_id: "p1", tab: "runs" })).toEqual({ kind: "navigate", href: "/projects/p1/runs" });
+  expect(plan("set_project_tab", { project_id: "p1", tab: "plan" })).toEqual({ kind: "navigate", href: "/projects/p1/plan" });
+  expect(plan("set_project_tab", { project_id: "p1", tab: "settings" })).toEqual({ kind: "navigate", href: "/projects/p1/settings" });
+  expect(plan("set_project_tab", { project_id: "p1", tab: "issues", filter: "started" })).toEqual({ kind: "navigate", href: "/projects/p1/issues?issues=started" });
+  expect(plan("set_project_tab", { project_id: "p1", tab: "pulls", filter: "merged" })).toEqual({ kind: "navigate", href: "/projects/p1/pulls?pr=merged" });
+  for (const path of ["/projects/p1/runs", "/projects/p1/plan", "/projects/p1/issues?issues=all", "/projects/p1/pulls", "/projects/p1/graphs", "/projects/p1/settings"]) {
+    expect(plan("go_to", { path })).toEqual({ kind: "navigate", href: path });
+  }
   expect(() => plan("set_project_tab", { project_id: "p1", tab: "issues", filter: "merged" })).toThrow(/The issues tab filters by todo, started or all/);
   expect(() => plan("set_project_tab", { project_id: "p1", tab: "graphs", filter: "all" })).toThrow(/The graphs tab has no filter/);
 });

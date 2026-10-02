@@ -61,7 +61,7 @@ export function PlanTab({
         unplanned={plan.unplanned.length}
         aside={
           <Button variant="link" size="sm" className="px-0" asChild>
-            <Link href={`/projects/${project.id}?tab=issues`}>
+            <Link href={`/projects/${project.id}/issues`}>
               {ready === 1 ? "1 Ready task in the backlog" : `${ready} Ready tasks in the backlog`}
               <ArrowRightIcon data-icon="inline-end" />
             </Link>

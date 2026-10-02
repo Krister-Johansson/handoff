@@ -9,7 +9,7 @@ import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { parsePlanView } from "@/lib/project-tab";
-import { projectCrumbs } from "@/server/crumbs";
+import { projectCrumb } from "@/server/crumbs";
 import { getProjectDetail } from "@/server/graphs";
 import { loadPlan } from "@/server/plan";
 import { lastGitHubActivity } from "@/server/plan-activity";
@@ -22,7 +22,7 @@ async function loadPlanPage(projectId: string) {
   const db = getDb();
   const [detail, plan, activity] = await Promise.all([getProjectDetail(db, projectId), loadPlan(db, getGitHub(), getProjects(), projectId), lastGitHubActivity(db, projectId)]);
   const signals = detail && !("reason" in plan) ? await planSignals(db, projectId, Object.values(plan.board).flat()) : { needsYou: [], skipped: {} };
-  const crumbs = detail ? [...(await projectCrumbs(db, detail.project)), { label: "Plan" }] : [];
+  const crumbs = detail ? [projectCrumb(detail.project), { label: "Plan" }] : [];
   return { detail, plan, activity, signals, crumbs, readAt: Date.now() };
 }
 

@@ -18,8 +18,8 @@ test("parsePullFilter defaults to open and ignores unknown values", () => {
 test("the filters link to each state with their counts and mark the current one", () => {
   render(<PullFilters active="open" counts={{ open: 1, merged: 6, closed: 0, all: 7, archived: 2 }} />);
   expect(screen.getByRole("link", { name: "Open 1" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("link", { name: "Merged 6" })).toHaveAttribute("href", "?tab=pulls&pr=merged");
-  expect(screen.getByRole("link", { name: "Archived 2" })).toHaveAttribute("href", "?tab=pulls&pr=archived");
+  expect(screen.getByRole("link", { name: "Merged 6" })).toHaveAttribute("href", "?pr=merged");
+  expect(screen.getByRole("link", { name: "Archived 2" })).toHaveAttribute("href", "?pr=archived");
 });
 
 test("archiving and unarchiving send the run", async () => {

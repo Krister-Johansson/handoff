@@ -47,7 +47,7 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "add_project",
     title: "Add a project",
-    description: "Adds a GitHub repository as a handoff project. Runs branch off its default branch; new projects have no graph until one is created on the project's Settings tab.",
+    description: "Adds a GitHub repository as a handoff project. Runs branch off its default branch; new projects have no graph until one is created on the project's Graphs page.",
     input: z.object({
       repo: z.string().describe("owner/name on GitHub"),
       name: z.string().optional().describe("Project name; defaults to the repository's"),
@@ -475,17 +475,18 @@ export const CATALOG: ToolSpec[] = [
   }),
   spec({
     name: "set_project_tab",
-    title: "Open a project tab",
-    description: "Opens a tab of a project's page. The issues tab filters by todo, started or all; the pulls tab by open, merged, closed, all or archived.",
+    title: "Open a project page",
+    description:
+      "Opens one of a project's pages: runs, plan, issues, pull requests (pulls), graphs or project settings. The issues page filters by todo, started or all; the pulls page by open, merged, closed, all or archived.",
     input: z.object({
       project_id: z.string().describe("The project's id from list_projects"),
-      tab: z.enum(["runs", "issues", "pulls", "graphs", "settings"]),
+      tab: z.enum(["runs", "plan", "issues", "pulls", "graphs", "settings"]),
       filter: z.string().optional(),
     }),
     kind: "ui",
     confirm: false,
     readOnly: true,
-    summarize: (a) => `Open the ${a.tab} tab of project ${short(a.project_id)}${a.filter ? ` (${a.filter})` : ""}`,
+    summarize: (a) => `Open the ${a.tab} page of project ${short(a.project_id)}${a.filter ? ` (${a.filter})` : ""}`,
   }),
   spec({
     name: "go_to_plan",

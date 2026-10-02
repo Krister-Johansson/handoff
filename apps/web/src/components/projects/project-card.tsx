@@ -230,7 +230,7 @@ export function ProjectCard({ project, attention, latest, now = new Date() }: { 
               </Link>
             )}
             {attention.reviews > 0 && (
-              <Link href={`/projects/${project.id}?tab=pulls`} className={ATTENTION_LINK}>
+              <Link href={`/projects/${project.id}/pulls`} className={ATTENTION_LINK}>
                 {plural(attention.reviews, "PR to review", "PRs to review")}
               </Link>
             )}
