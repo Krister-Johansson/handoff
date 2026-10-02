@@ -1,6 +1,7 @@
 import type { Overview } from "@/server/overview";
 import { FeaturesInProgress } from "./features";
 import { NeedsYou } from "./needs-you";
+import { ReadyToStart } from "./ready";
 import { FinishedRuns, RunningNow } from "./overview-runs";
 
 /** The project the Overview is about, with its repository as owner/name. */
@@ -14,7 +15,7 @@ export type OverviewStart = { graphs: string[]; graphName: string | undefined };
  * features move, what is ready to start, and what finished in the last day. From 1024 px the runs sit
  * in the left column and the plan's work in the right; narrower, the sections stack in that order.
  */
-export function ProjectOverview({ project, overview, now = new Date() }: { project: OverviewProject; overview: Overview; start: OverviewStart; now?: Date }) {
+export function ProjectOverview({ project, overview, start, now = new Date() }: { project: OverviewProject; overview: Overview; start: OverviewStart; now?: Date }) {
   const repoUrl = `https://github.com/${project.repo}`;
   const { work } = overview;
   return (
@@ -29,7 +30,12 @@ export function ProjectOverview({ project, overview, now = new Date() }: { proje
           </div>
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-7">
-          {work.kind === "plan" && <FeaturesInProgress features={work.features} projectId={project.id} repoUrl={repoUrl} />}
+          {work.kind === "plan" && (
+            <>
+              <FeaturesInProgress features={work.features} projectId={project.id} repoUrl={repoUrl} />
+              <ReadyToStart ready={work.ready} unplannedToDo={work.unplannedToDo} projectId={project.id} repoUrl={repoUrl} start={start} />
+            </>
+          )}
         </div>
       </div>
     </div>

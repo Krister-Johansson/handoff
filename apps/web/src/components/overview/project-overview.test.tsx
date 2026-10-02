@@ -185,6 +185,39 @@ test("with no epic moving, Features in progress says so in one line", () => {
   expect(within(features).getByText("No feature in progress")).toBeInTheDocument();
 });
 
+test("Ready to start lists the Ready tasks with their epic: Start run on one that can start, its blocker on one that cannot", () => {
+  if (QUIET.work.kind !== "plan") throw new Error("expected the plan");
+  show({
+    ...QUIET,
+    work: {
+      ...QUIET.work,
+      ready: [
+        { ...task(58, "Plan page tree and board"), epic: "Project management" },
+        { ...task(72, "Voice picker with local voices first", { blockedBy: [70] }), epic: "Voice" },
+      ],
+      unplannedToDo: 2,
+    },
+  });
+  const ready = section("Ready to start");
+  expect(within(ready).getByRole("heading", { level: 2 })).toHaveTextContent("Ready to start2");
+  expect(within(ready).getByRole("link", { name: "Open Issues" })).toHaveAttribute("href", "/projects/p1/issues");
+  const [tree, picker] = within(ready).getAllByRole("listitem", { name: /^#/ });
+  expect(tree).toHaveTextContent("Project management");
+  expect(within(tree!).getByRole("button", { name: "Start run" })).toBeEnabled();
+  expect(picker).toHaveTextContent("Voice");
+  expect(picker).toHaveTextContent("Blocked by#70");
+  expect(within(picker!).queryByRole("button", { name: "Start run" })).not.toBeInTheDocument();
+  expect(within(ready).getByRole("link", { name: "2 unplanned issues" })).toHaveAttribute("href", "/projects/p1/issues");
+  expect(ready).toHaveTextContent("2 unplanned issues outside the plan can start too.");
+});
+
+test("with no Ready task, Ready to start says so in one line", () => {
+  show(QUIET);
+  const ready = section("Ready to start");
+  expect(within(ready).getByRole("heading", { level: 2 })).toHaveTextContent(/^Ready to start$/);
+  expect(within(ready).getByText("No task is ready")).toBeInTheDocument();
+});
+
 test("with nothing waiting, Needs you keeps its heading without a count and says so in one line", () => {
   show(QUIET);
   const needsYou = section("Needs you");
