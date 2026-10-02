@@ -13,12 +13,9 @@ const actions = vi.hoisted(() => ({
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
-const assistant = vi.hoisted(() => ({ open: vi.fn(), available: true, composerRef: { current: null as HTMLTextAreaElement | null } }));
-vi.mock("@/components/assistant/assistant-provider", () => ({ useOptionalAssistant: () => assistant }));
-
 const project = { id: "p1", name: "handoff", repo: "o/handoff" };
 
-test("no plan offers Set up the plan, a missing scope shows the commands, an empty plan offers Shape with the assistant", async () => {
+test("no plan offers Set up the plan, a missing scope shows the commands, an empty plan points to the assistant without a button of its own", async () => {
   const { unmount } = render(<PlanEmpty reason="no-plan" project={project} />);
   expect(screen.getByText("No plan on GitHub yet")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Set up the plan" }));
@@ -46,16 +43,8 @@ test("no plan offers Set up the plan, a missing scope shows the commands, an emp
   expect(screen.queryByRole("button", { name: "Set up the plan" })).not.toBeInTheDocument();
   scope.unmount();
 
-  const composer = document.createElement("textarea");
-  document.body.append(composer);
-  assistant.composerRef.current = composer;
   render(<PlanEmpty reason="empty" project={project} />);
   expect(screen.getByText("Nothing shaped yet")).toBeInTheDocument();
-  vi.useFakeTimers();
-  fireEvent.click(screen.getByRole("button", { name: "Shape with the assistant" }));
-  vi.runAllTimers();
-  vi.useRealTimers();
-  expect(assistant.open).toHaveBeenCalled();
-  expect(composer.value).toBe("Shape work in handoff: ");
-  composer.remove();
+  expect(screen.getByText(/Shape the first epic with the assistant/)).toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });

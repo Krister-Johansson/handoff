@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChartGanttIcon, ChevronDownIcon, KanbanIcon, ListTreeIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, XIcon } from "lucide-react";
 import type { PlanStatus } from "@handoff/github";
 import type { PlanColumn, PlanEpic } from "@/server/plan";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,11 @@ import {
 import { Field, FieldContent, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { planPath } from "@/lib/paths";
-import { isFiltered, PLAN_STATUSES, type PlanFilters as Filters, type RunFilter } from "@/lib/plan/filters";
+import { PLAN_STATUSES, type AssigneeFilter, type PlanFilters as Filters, type RunFilter } from "@/lib/plan/filters";
 import type { PlanViewName } from "@/lib/project-tab";
 import { COLUMN_TONE } from "@/lib/plan/task";
+import { cn } from "@/lib/utils";
 
 const RUNS: { value: RunFilter; label: string; text?: string }[] = [
   { value: "any", label: "Any" },
@@ -34,198 +34,216 @@ const RUNS: { value: RunFilter; label: string; text?: string }[] = [
 ];
 const RUN_LABEL = Object.fromEntries(RUNS.map((r) => [r.value, r.label])) as Record<RunFilter, string>;
 
-/** A filter's button: its name in muted text, then what it is set to. */
-function FilterButton({ name, value, ...props }: { name: string; value: string } & React.ComponentProps<typeof Button>) {
+/** A filter's button: its name, then in muted text what it is set to; an unset filter shows only its name. */
+function FilterButton({ name, value, ...props }: { name: string; value: string | undefined } & React.ComponentProps<typeof Button>) {
   return (
-    <Button variant="outline" size="sm" className="max-w-72" {...props}>
-      <span className="text-muted-foreground">{name}</span> <span className="truncate">{value}</span>
+    <Button variant="outline" size="sm" className="max-w-72 gap-1 px-2.5" {...props}>
+      {name}
+      {value !== undefined && " "}
+      {value !== undefined && <span className="truncate text-muted-foreground">{value}</span>}
       <ChevronDownIcon data-icon="inline-end" />
     </Button>
   );
 }
 
+/** What the Epic and Assignee filters say they are set to. */
+const epicLabel = (epics: PlanEpic[], n: Filters["epic"]) => (n === "unplanned" ? "Unplanned" : (epics.find((e) => e.number === n)?.title ?? `#${n}`));
+const assigneeLabel = (a: AssigneeFilter) => (a === "me" ? "Me" : a === "none" ? "Unassigned" : a);
+
 type Props = {
   projectId: string;
   view: PlanViewName;
+  /** The filters with the search as it stands, so a filter link keeps the search. */
   filters: Filters;
   epics: PlanEpic[];
   /** Tasks per board column, for the Status filter. */
   counts: Record<PlanColumn, number>;
   /** Open issues outside the plan, for the Epic filter. */
   unplanned: number;
-  /** On the right of the toolbar, such as the link to the Ready tasks in the backlog. */
-  aside?: ReactNode;
+  /** The login of the token handoff uses; without one there is no Me. */
+  me?: string | undefined;
+  /** Everyone else assigned to a task in the plan, for the Assignee filter. */
+  people: string[];
 };
 
-/**
- * The Plan page's toolbar: Tree, Board or Timeline, then the Epic, Status and Run filters. Every choice lives in
- * the URL, so a link or a refresh keeps it; with a filter set, a chip row undoes one or all of them.
- */
-export function PlanFilters({ projectId, view, filters, epics, counts, unplanned, aside }: Props) {
+/** The Plan page's filters: Epic, Status, Run and Assignee. Every choice lives in the URL, so a link or a refresh keeps it. */
+export function PlanFilters({ projectId, view, filters, epics, counts, unplanned, me, people }: Props) {
   const router = useRouter();
   const [epicOpen, setEpicOpen] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
-  const href = (next: Partial<Filters> & { view?: PlanViewName }) => planPath(projectId, { view, ...filters, ...next });
-  const go = (next: Partial<Filters> & { view?: PlanViewName }) => router.replace(href(next), { scroll: false });
-  const epicTitle = (n: Filters["epic"]) => (n === "unplanned" ? "Unplanned" : (epics.find((e) => e.number === n)?.title ?? `#${n}`));
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const go = (next: Partial<Filters>) => router.replace(planPath(projectId, { view, ...filters, ...next }), { scroll: false });
   const toggleStatus = (status: PlanStatus) =>
     go({ status: filters.status.includes(status) ? filters.status.filter((s) => s !== status) : PLAN_STATUSES.filter((s) => s === status || filters.status.includes(s)) });
-  const chips = [
-    filters.epic !== undefined && { label: `Epic: ${epicTitle(filters.epic)}`, href: href({ epic: undefined }) },
-    filters.status.length > 0 && { label: `Status: ${filters.status.join(", ")}`, href: href({ status: [] }) },
-    filters.run !== "any" && { label: `Run: ${RUN_LABEL[filters.run]}`, href: href({ run: "any" }) },
-  ].filter((c): c is { label: string; href: string } => Boolean(c));
+  const assignees = [{ value: "anyone", label: "Anyone" }, ...(me ? [{ value: "me", label: "Me" }] : []), { value: "none", label: "Unassigned" }, ...people.map((p) => ({ value: p, label: p }))];
 
   return (
-    <div className="flex flex-col gap-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <ToggleGroup type="single" variant="outline" size="sm" value={view} onValueChange={(v) => v && go({ view: v as PlanViewName })} aria-label="View">
-          <ToggleGroupItem value="tree">
-            <ListTreeIcon />
-            Tree
-          </ToggleGroupItem>
-          <ToggleGroupItem value="board">
-            <KanbanIcon />
-            Board
-          </ToggleGroupItem>
-          <ToggleGroupItem value="timeline">
-            <ChartGanttIcon />
-            Timeline
-          </ToggleGroupItem>
-        </ToggleGroup>
-
-        <Popover open={epicOpen} onOpenChange={setEpicOpen}>
-          <PopoverTrigger asChild>
-            <FilterButton name="Epic" value={filters.epic === undefined ? "All" : epicTitle(filters.epic)} />
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-72 p-0">
-            <Command>
-              <CommandInput placeholder="Find an epic" />
-              <CommandList>
-                <CommandEmpty>No epic matches.</CommandEmpty>
-                <CommandGroup>
+    <div className="flex flex-wrap items-center gap-1">
+      <Popover open={epicOpen} onOpenChange={setEpicOpen}>
+        <PopoverTrigger asChild>
+          <FilterButton name="Epic" value={filters.epic === undefined ? undefined : epicLabel(epics, filters.epic)} />
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-72 p-0">
+          <Command>
+            <CommandInput placeholder="Find an epic" />
+            <CommandList>
+              <CommandEmpty>No epic matches.</CommandEmpty>
+              <CommandGroup>
+                <CommandItem
+                  value="all epics"
+                  data-checked={filters.epic === undefined ? "true" : undefined}
+                  onSelect={() => {
+                    setEpicOpen(false);
+                    go({ epic: undefined });
+                  }}
+                >
+                  All epics
+                </CommandItem>
+                {epics.map((epic) => (
                   <CommandItem
-                    value="all epics"
-                    data-checked={filters.epic === undefined ? "true" : undefined}
+                    key={epic.number}
+                    value={`#${epic.number} ${epic.title}`}
+                    data-checked={filters.epic === epic.number ? "true" : undefined}
                     onSelect={() => {
                       setEpicOpen(false);
-                      go({ epic: undefined });
+                      go({ epic: epic.number });
                     }}
                   >
-                    All epics
+                    <span className="font-mono text-xs text-muted-foreground">#{epic.number}</span> <span className="min-w-0 flex-1 truncate">{epic.title}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {epic.progress.done} of {epic.progress.total} done
+                    </span>
                   </CommandItem>
-                  {epics.map((epic) => (
+                ))}
+              </CommandGroup>
+              {unplanned > 0 && (
+                <>
+                  <CommandSeparator />
+                  <CommandGroup>
                     <CommandItem
-                      key={epic.number}
-                      value={`#${epic.number} ${epic.title}`}
-                      data-checked={filters.epic === epic.number ? "true" : undefined}
+                      value="unplanned"
+                      data-checked={filters.epic === "unplanned" ? "true" : undefined}
                       onSelect={() => {
                         setEpicOpen(false);
-                        go({ epic: epic.number });
+                        go({ epic: "unplanned" });
                       }}
                     >
-                      <span className="font-mono text-xs text-muted-foreground">#{epic.number}</span> <span className="min-w-0 flex-1 truncate">{epic.title}</span>
-                      <span className="text-xs text-muted-foreground tabular-nums">
-                        {epic.progress.done} of {epic.progress.total} done
-                      </span>
+                      <span className="flex-1">Unplanned</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{unplanned}</span>
                     </CommandItem>
-                  ))}
-                </CommandGroup>
-                {unplanned > 0 && (
-                  <>
-                    <CommandSeparator />
-                    <CommandGroup>
-                      <CommandItem
-                        value="unplanned"
-                        data-checked={filters.epic === "unplanned" ? "true" : undefined}
-                        onSelect={() => {
-                          setEpicOpen(false);
-                          go({ epic: "unplanned" });
-                        }}
-                      >
-                        <span className="flex-1">Unplanned</span>
-                        <span className="text-xs text-muted-foreground tabular-nums">{unplanned}</span>
-                      </CommandItem>
-                    </CommandGroup>
-                  </>
-                )}
-              </CommandList>
-            </Command>
-          </PopoverContent>
-        </Popover>
+                  </CommandGroup>
+                </>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <FilterButton name="Status" value={filters.status.length === 0 ? "All" : filters.status.join(", ")} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-56">
-            <DropdownMenuGroup>
-              {PLAN_STATUSES.map((status) => (
-                <DropdownMenuCheckboxItem key={status} checked={filters.status.includes(status)} onSelect={(e) => e.preventDefault()} onCheckedChange={() => toggleStatus(status)}>
-                  <span aria-hidden className={`size-2 rounded-full ${COLUMN_TONE[status].dot}`} />
-                  <span className="flex-1">{status}</span>
-                  <span className="text-xs text-muted-foreground tabular-nums">{counts[status]}</span>
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem disabled={filters.status.length === 0} onSelect={() => go({ status: [] })}>
-                <span className="flex-1 text-muted-foreground">{filters.status.length === 0 ? "All statuses" : `${filters.status.length} of ${PLAN_STATUSES.length} statuses`}</span>
-                Select all
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <Popover open={runOpen} onOpenChange={setRunOpen}>
-          <PopoverTrigger asChild>
-            <FilterButton name="Run" value={RUN_LABEL[filters.run]} />
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-72">
-            <RadioGroup
-              value={filters.run}
-              aria-label="Run"
-              onValueChange={(run) => {
-                setRunOpen(false);
-                go({ run: run as RunFilter });
-              }}
-            >
-              {RUNS.map((r) => (
-                <Field key={r.value} orientation="horizontal">
-                  <RadioGroupItem value={r.value} id={`plan-run-${r.value}`} />
-                  <FieldContent>
-                    <FieldLabel htmlFor={`plan-run-${r.value}`}>{r.label}</FieldLabel>
-                    {r.text && <FieldDescription className="text-xs">{r.text}</FieldDescription>}
-                  </FieldContent>
-                </Field>
-              ))}
-            </RadioGroup>
-          </PopoverContent>
-        </Popover>
-
-        {aside && <div className="ml-auto flex items-center">{aside}</div>}
-      </div>
-
-      {isFiltered(filters) && (
-        <div className="flex flex-wrap items-center gap-2">
-          <ul aria-label="Filters" className="flex flex-wrap items-center gap-1.5">
-            {chips.map((chip) => (
-              <li key={chip.label} className="inline-flex h-6 items-center gap-1 rounded-md bg-secondary pr-1 pl-2 text-xs">
-                {chip.label}
-                <Link href={chip.href} scroll={false} replace aria-label={`Remove ${chip.label}`} className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground">
-                  <XIcon aria-hidden className="size-3" />
-                </Link>
-              </li>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <FilterButton name="Status" value={filters.status.length === 0 ? undefined : filters.status.join(", ")} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          <DropdownMenuGroup>
+            {PLAN_STATUSES.map((status) => (
+              <DropdownMenuCheckboxItem key={status} checked={filters.status.includes(status)} onSelect={(e) => e.preventDefault()} onCheckedChange={() => toggleStatus(status)}>
+                <span aria-hidden className={cn("size-2 rounded-full", COLUMN_TONE[status].dot)} />
+                <span className="flex-1">{status}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{counts[status]}</span>
+              </DropdownMenuCheckboxItem>
             ))}
-          </ul>
-          <Button variant="ghost" size="xs" asChild>
-            <Link href={planPath(projectId, { view })} scroll={false} replace>
-              Clear filters
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem disabled={filters.status.length === 0} onSelect={() => go({ status: [] })}>
+              <span className="flex-1 text-muted-foreground">{filters.status.length === 0 ? "All statuses" : `${filters.status.length} of ${PLAN_STATUSES.length} statuses`}</span>
+              Select all
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <Popover open={runOpen} onOpenChange={setRunOpen}>
+        <PopoverTrigger asChild>
+          <FilterButton name="Run" value={filters.run === "any" ? undefined : RUN_LABEL[filters.run]} />
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-72">
+          <RadioGroup
+            value={filters.run}
+            aria-label="Run"
+            onValueChange={(run) => {
+              setRunOpen(false);
+              go({ run: run as RunFilter });
+            }}
+          >
+            {RUNS.map((r) => (
+              <Field key={r.value} orientation="horizontal">
+                <RadioGroupItem value={r.value} id={`plan-run-${r.value}`} />
+                <FieldContent>
+                  <FieldLabel htmlFor={`plan-run-${r.value}`}>{r.label}</FieldLabel>
+                  {r.text && <FieldDescription className="text-xs">{r.text}</FieldDescription>}
+                </FieldContent>
+              </Field>
+            ))}
+          </RadioGroup>
+        </PopoverContent>
+      </Popover>
+
+      <Popover open={assigneeOpen} onOpenChange={setAssigneeOpen}>
+        <PopoverTrigger asChild>
+          <FilterButton name="Assignee" value={filters.assignee === "anyone" ? undefined : assigneeLabel(filters.assignee)} />
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-60">
+          <RadioGroup
+            value={filters.assignee}
+            aria-label="Assignee"
+            onValueChange={(assignee) => {
+              setAssigneeOpen(false);
+              go({ assignee });
+            }}
+          >
+            {assignees.map((a) => (
+              <Field key={a.value} orientation="horizontal">
+                <RadioGroupItem value={a.value} id={`plan-assignee-${a.value}`} />
+                <FieldLabel htmlFor={`plan-assignee-${a.value}`} className={cn(a.value === a.label && "font-mono text-xs")}>
+                  {a.label}
+                </FieldLabel>
+              </Field>
+            ))}
+          </RadioGroup>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+/** With a filter set, a chip per filter that undoes it, and Clear filters for all of them; the search stays. */
+export function FilterChips({ projectId, view, filters, epics }: Pick<Props, "projectId" | "view" | "filters" | "epics">) {
+  const href = (next: Partial<Filters>) => planPath(projectId, { view, ...filters, ...next });
+  const chips = [
+    filters.epic !== undefined && { label: `Epic: ${epicLabel(epics, filters.epic)}`, href: href({ epic: undefined }) },
+    filters.status.length > 0 && { label: `Status: ${filters.status.join(", ")}`, href: href({ status: [] }) },
+    filters.run !== "any" && { label: `Run: ${RUN_LABEL[filters.run]}`, href: href({ run: "any" }) },
+    filters.assignee !== "anyone" && { label: `Assignee: ${assigneeLabel(filters.assignee)}`, href: href({ assignee: "anyone" }) },
+  ].filter((c): c is { label: string; href: string } => Boolean(c));
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ul aria-label="Filters" className="flex flex-wrap items-center gap-1.5">
+        {chips.map((chip) => (
+          <li key={chip.label} className="inline-flex h-6 items-center gap-1 rounded-md bg-secondary pr-1 pl-2 text-xs">
+            {chip.label}
+            <Link href={chip.href} scroll={false} replace aria-label={`Remove ${chip.label}`} className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+              <XIcon aria-hidden className="size-3" />
             </Link>
-          </Button>
-        </div>
-      )}
+          </li>
+        ))}
+      </ul>
+      <Button variant="ghost" size="xs" asChild>
+        <Link href={planPath(projectId, { view, q: filters.q })} scroll={false} replace>
+          Clear filters
+        </Link>
+      </Button>
     </div>
   );
 }
