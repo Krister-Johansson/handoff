@@ -367,6 +367,13 @@ const TOOLS = {
 /** Every page's tools, once: the source of truth for the turn's MCP server, where_am_i and WebMCP. */
 export const PAGE_TOOLS = TOOLS as unknown as Record<PageKind, PageToolSpec[]>;
 
+const BY_NAME = new Map(PAGE_KINDS.flatMap((kind) => PAGE_TOOLS[kind].map((spec) => [spec.name, spec] as const)));
+
+/** A page tool by name, from whichever page has it (a shared name means the same tool); undefined for an unknown one. */
+export function pageToolSpec(name: string): PageToolSpec | undefined {
+  return BY_NAME.get(name);
+}
+
 type ToolOf<K extends PageKind> = (typeof TOOLS)[K][number];
 
 /**

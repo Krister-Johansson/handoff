@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { pageToolSpec, type PageToolSpec } from "./page-tools";
 
 /**
  * One tool of handoff's catalog. data tools run on the server (the agent MCP server, the assistant's
@@ -386,7 +387,8 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "where_am_i",
     title: "Check the page",
-    description: "The page the person is looking at: its path, title and heading. Call it before talking about \"this page\".",
+    description:
+      "The page the person is looking at: its path, title and heading, and on pages with their own tools, the page's tools and its state (steps, criteria, files or nodes with the keys and indices the tools take). Call it before talking about this page or using a page tool.",
     input: z.object({}),
     kind: "ui",
     confirm: false,
@@ -397,9 +399,9 @@ export const CATALOG: ToolSpec[] = [
 
 const BY_NAME = new Map(CATALOG.map((t) => [t.name, t]));
 
-/** A tool of the catalog by name; throws for an unknown one. */
-export function toolSpec(name: string): ToolSpec {
-  const found = BY_NAME.get(name);
+/** A tool of the catalog, or a page's tool, by name; throws for an unknown one. */
+export function toolSpec(name: string): ToolSpec | PageToolSpec {
+  const found = BY_NAME.get(name) ?? pageToolSpec(name);
   if (!found) throw new Error(`There is no tool ${name}.`);
   return found;
 }
