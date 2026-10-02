@@ -73,7 +73,8 @@ async function route(
     let trigger: Trigger = { kind: "edge", edgeKey: edge.key, from: row.nodeKey, fromExecutionId: row.id };
     if (edge.loop) {
       const attempts = next.loops[edge.key]?.attempts ?? 0;
-      if (attempts >= (edge.maxAttempts ?? 0)) {
+      // A loop without a limit (a question gate's answers) counts its rounds but never runs out.
+      if (edge.maxAttempts !== undefined && attempts >= edge.maxAttempts) {
         events.push({ type: "edge.exhausted", payload: { edgeKey: edge.key, attempts }, nodeExecutionId: row.id });
         const gate = edge.onExhausted ?? graph.document.attributes.exhaustedGate;
         if (!gate) {

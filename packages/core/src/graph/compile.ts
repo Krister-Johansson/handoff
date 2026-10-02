@@ -89,9 +89,13 @@ function findSecret(value: unknown, path: string): string | undefined {
   return undefined;
 }
 
+/** An edge that brings a person's answer back to the step that asked. */
+const answersQuestion = (source: CompiledNode, edge: EdgeAttributes) => source.type === "human_gate" && edge.port === "answered";
+
 /**
  * An edge's routing from its ports: the source port sets on and condition (a condition given under
  * Advanced wins), and the feedback input makes it a loop of three attempts unless it says otherwise.
+ * A question gate's answered edge is a loop with no limit: a person decided each answer.
  */
 function resolvePorts(key: string, attributes: EdgeAttributes, source: CompiledNode, target: CompiledNode, errors: CompileError[]): EdgeAttributes {
   let resolved = attributes;
@@ -109,7 +113,10 @@ function resolvePorts(key: string, attributes: EdgeAttributes, source: CompiledN
     if (!FEEDBACK_TARGETS.has(target.type)) {
       errors.push({ code: "no_feedback_input", message: `${target.label} cannot take feedback: only planner, coder, reviewer and code review can`, edgeKey: key });
     }
-    resolved = { ...resolved, loop: true, maxAttempts: attributes.maxAttempts ?? 3 };
+    if (answersQuestion(source, resolved)) {
+      const { maxAttempts: _unlimited, ...rest } = resolved;
+      resolved = { ...rest, loop: true };
+    } else resolved = { ...resolved, loop: true, maxAttempts: attributes.maxAttempts ?? 3 };
   }
   return resolved;
 }
@@ -196,7 +203,7 @@ export function compileGraph(input: unknown): CompileResult {
       continue;
     }
     const resolved = resolvePorts(key, attributes, graph.getNodeAttributes(source), graph.getNodeAttributes(target), errors);
-    if (resolved.loop && resolved.maxAttempts === undefined) {
+    if (resolved.loop && resolved.maxAttempts === undefined && !answersQuestion(graph.getNodeAttributes(source), resolved)) {
       errors.push({ code: "loop_without_max_attempts", message: `loop edge ${key} needs maxAttempts`, edgeKey: key });
     }
     graph.addDirectedEdgeWithKey(key, source, target, { ...resolved, key, source, target });

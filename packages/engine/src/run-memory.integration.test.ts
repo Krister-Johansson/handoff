@@ -159,3 +159,19 @@ test("a question answer is in decisions, so the code reviewer's packet has it", 
   expect(decisions).toContain("ISO dates or US dates?");
   expect(decisions).toContain("Use ISO 8601 dates.");
 });
+
+test("a fourth answer at a question gate routes to the coder instead of exhausting the edge", async () => {
+  const cli = new FakeCliExecutor([{ output: outputs.coderAsks }]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsPass)));
+  for (let round = 1; round <= 4; round++) {
+    cli.push({ output: outputs.coderAsks });
+    await answerOpen(run.id, `Answer ${round}.`, "ISO");
+    await drain(deps);
+  }
+
+  const { run: row, executions, types } = await inspect(db, run.id);
+  expect(types).not.toContain("edge.exhausted");
+  expect(executions.filter((e) => e.nodeKey === "coder")).toHaveLength(5);
+  expect(executions.filter((e) => e.nodeKey === "ask").map((e) => e.status)).toEqual(["passed", "passed", "passed", "passed", "waiting"]);
+  expect(row.status).toBe("waiting");
+});
