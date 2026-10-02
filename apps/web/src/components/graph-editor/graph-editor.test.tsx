@@ -58,6 +58,14 @@ test("the toolbar names the graph and its version, and says it is valid", () => 
   expect(screen.getByRole("button", { name: "Fit view" })).toBeInTheDocument();
 });
 
+test("the graph's name is the page's heading, which where_am_i reports", async () => {
+  renderEditor();
+  expect(within(screen.getByRole("toolbar", { name: "Graph" })).getByRole("heading", { level: 1 })).toHaveTextContent(/^plan-review$/);
+  const { runUiTool } = await import("@/lib/assistant/run-ui-tool");
+  const where = await runUiTool({ name: "where_am_i", args: {} }, { push: vi.fn() });
+  expect(JSON.parse(where.text)).toMatchObject({ heading: "plan-review" });
+});
+
 test("an unsaved edit offers to save as the version after the newest one", () => {
   renderEditor();
   expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();

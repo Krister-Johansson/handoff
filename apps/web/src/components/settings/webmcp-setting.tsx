@@ -18,7 +18,7 @@ export function WebMcpSetting() {
         <Label htmlFor="webmcp">Expose tools to browser agents (WebMCP)</Label>
         <span className="text-xs leading-normal text-muted-foreground">
           {hasWebMcp ? (
-            "Browser agents on this page can use handoff's tools. Anything that changes something waits for your approval in the assistant."
+            "Browser agents in this tab can use handoff's tools, and the tools of the page you have open, such as a run, Try it or the Inbox. Anything that changes something waits for your approval in the assistant. Off, this browser offers none of them."
           ) : (
             <>
               Your browser has no WebMCP. In Chrome, enable <code className="rounded border bg-muted px-1 font-mono text-[11.5px] whitespace-nowrap">chrome://flags/#enable-webmcp-testing</code> to try it.

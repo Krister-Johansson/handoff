@@ -72,3 +72,39 @@ test("permission requests come first, each with its run and the answers a person
   expect(within(first!).getByRole("button", { name: "Allow once" })).toBeInTheDocument();
   expect(narrowInbox({ ...view, permissions: [request] }, "p2").permissions).toEqual([]);
 });
+
+test("every card carries the id its page tool refers to", () => {
+  const permission = { ...todo, id: "perm-1", runId: "r-perm", task: "Permission task", nodeKey: "coder", toolName: "Bash", input: { command: "ls" }, createdAt: new Date() };
+  const paths = { ...question("d", sandbox), reason: "paths", options: ["allow", "send_back", "fail"], context: { reason: "paths", from: "coder", files: ["notes.txt"] } };
+  const tryIt = { ...question("e", sandbox), reason: "try", context: { reason: "try" } };
+  render(
+    <InboxSections
+      view={{
+        ...view,
+        permissions: [permission],
+        questions: [question("c", sandbox), paths, tryIt],
+        readyToMerge: [{ ...todo, runId: "r-m", task: "Ready one", prNumber: 54, issues: [] }],
+        stuckRuns: [{ ...sandbox, runId: "r-s", task: "Stuck one", nodeKey: "reviewer", loop: "reviewer->coder", attempts: 3, finishedAt: null }],
+      }}
+    />,
+  );
+  // A question or permission by its own id, a run waiting to merge or out of rounds by the run's, and a failed step or pull request by the execution's.
+  const cards = [
+    ["perm-1", "Permission task"],
+    ["a", "Question a?"],
+    ["b", "Question b?"],
+    ["c", "Question c?"],
+    ["d", "notes.txt"],
+    ["e", "Question e?"],
+    ["r-m", "Ready one"],
+    ["x", "Broken"],
+    ["r-s", "Stuck one"],
+    ["y", "Shell"],
+  ];
+  for (const [id, text] of cards) {
+    const card = document.getElementById(id!);
+    expect(card, id).not.toBeNull();
+    expect(card).toHaveAttribute("tabindex", "-1");
+    expect(card).toHaveTextContent(text!);
+  }
+});
