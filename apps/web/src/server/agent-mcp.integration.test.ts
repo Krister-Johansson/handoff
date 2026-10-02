@@ -330,7 +330,7 @@ test("start_run over MCP sets the task to Running on the plan", async () => {
   const ready = await task("Add the migration", "Ready");
   const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
   expect(await statusOf(ready)).toBe("Running");
-  expect(await planEvents(run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running" } }]);
+  expect(await planEvents(run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running", from: "Ready" } }]);
 });
 
 test("list_backlog over MCP lists the plan's Ready tasks and the unplanned issues", async () => {
