@@ -1,0 +1,94 @@
+import { notFound } from "next/navigation";
+import { ExternalLinkIcon } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { PlanEmpty } from "@/components/plan/plan-empty";
+import { PlanTab } from "@/components/plan/plan-tab";
+import { ShapeButton } from "@/components/plan/shape-button";
+import { Button } from "@/components/ui/button";
+import { getDb } from "@/lib/db";
+import { getGitHub, getProjects } from "@/lib/github";
+import { parsePlanFilters } from "@/lib/plan/filters";
+import { parsePlanView } from "@/lib/project-tab";
+import { projectCrumbs } from "@/server/crumbs";
+import { getProjectDetail } from "@/server/graphs";
+import { loadPlan } from "@/server/plan";
+import { lastGitHubActivity } from "@/server/plan-activity";
+import { planSignals } from "@/server/plan-signals";
+
+export const dynamic = "force-dynamic";
+
+/** Everything the page shows, read together, with the moment GitHub was read for the refresh line. */
+async function loadPlanPage(projectId: string) {
+  const db = getDb();
+  const [detail, plan, activity] = await Promise.all([getProjectDetail(db, projectId), loadPlan(db, getGitHub(), getProjects(), projectId), lastGitHubActivity(db, projectId)]);
+  const signals = detail && !("reason" in plan) ? await planSignals(db, projectId, Object.values(plan.board).flat()) : { needsYou: [], skipped: {} };
+  const crumbs = detail ? [...(await projectCrumbs(db, detail.project)), { label: "Plan" }] : [];
+  return { detail, plan, activity, signals, crumbs, readAt: Date.now() };
+}
+
+/** A project's plan from its GitHub Project: epics, stories and tasks as a tree or a board. */
+export default async function PlanPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ projectId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const [{ projectId }, query] = await Promise.all([params, searchParams]);
+  const { detail, plan, activity, signals, crumbs, readAt } = await loadPlanPage(projectId);
+  if (!detail || ("reason" in plan && plan.reason === "not-found")) notFound();
+  const { project, graphs, defaultGraph } = detail;
+  const shape = <ShapeButton projectName={project.name} />;
+
+  if ("reason" in plan) {
+    return (
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+        <PageHeader crumbs={crumbs} title="Plan" description={`Epics, stories and tasks for ${project.name}, from a GitHub Project.`} />
+        <PlanEmpty
+          reason={plan.reason === "no-plan" ? "no-plan" : plan.reason === "no-scope" ? "no-scope" : "unreachable"}
+          error={plan.error}
+          project={{ id: project.id, name: project.name, repo: `${project.repoOwner}/${project.repoName}` }}
+        />
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+      <PageHeader
+        crumbs={crumbs}
+        title="Plan"
+        description={
+          <>
+            Epics, stories and tasks for {project.name}, read from the GitHub Project{" "}
+            <a href={plan.project.url} className="underline underline-offset-3 hover:text-foreground">
+              {plan.project.title}
+            </a>
+            . Only Ready tasks reach the backlog.
+          </>
+        }
+        actions={
+          <>
+            {shape}
+            <Button variant="ghost" asChild>
+              <a href={plan.project.url}>
+                <ExternalLinkIcon data-icon="inline-start" />
+                Open on GitHub
+              </a>
+            </Button>
+          </>
+        }
+      />
+      <PlanTab
+        project={project}
+        plan={plan}
+        view={parsePlanView(query)}
+        filters={parsePlanFilters(query)}
+        signals={signals}
+        start={{ graphs: graphs.map((g) => g.name), graphName: project.isDemo ? undefined : defaultGraph }}
+        readAt={readAt}
+        activity={activity}
+      />
+    </main>
+  );
+}

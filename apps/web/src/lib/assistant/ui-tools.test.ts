@@ -33,6 +33,16 @@ test("set_project_tab builds the tab and filter query the project page reads", (
   expect(() => plan("set_project_tab", { project_id: "p1", tab: "graphs", filter: "all" })).toThrow(/The graphs tab has no filter/);
 });
 
+test("go_to_plan opens the tab with a view, an epic or a status", () => {
+  expect(plan("go_to_plan", { project_id: "p1" })).toEqual({ kind: "navigate", href: "/projects/p1/plan" });
+  expect(plan("go_to_plan", { project_id: "p1", view: "board" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=board" });
+  expect(plan("go_to_plan", { project_id: "p1", epic: 12, status: ["Ready", "In review"] })).toEqual({ kind: "navigate", href: "/projects/p1/plan?epic=12&status=Ready,In%20review" });
+  expect(plan("go_to_plan", { project_id: "p1", run: "needs-you" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?run=needs-you" });
+  expect(plan("go_to", { path: "/projects/p1/plan?view=board" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=board" });
+  expect(() => plan("go_to_plan", { project_id: "p1", status: ["Blocked"] })).toThrow(/not valid/);
+  expect(() => plan("go_to_plan", { project_id: "../settings" })).toThrow(/is not an id/);
+});
+
 test("the notifications, run, review and Try it tools open their pages, and an id that is not one is refused", () => {
   expect(plan("go_to_notifications", { filter: "unread" })).toEqual({ kind: "navigate", href: "/notifications?show=unread" });
   expect(plan("go_to_notifications", {})).toEqual({ kind: "navigate", href: "/notifications" });
