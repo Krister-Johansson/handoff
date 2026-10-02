@@ -239,6 +239,16 @@ export type IssuePlanQuery = { repository: { owner:
               | { __typename: 'ProjectV2IterationField' }
               | { __typename: 'ProjectV2MultiSelectField' }
               | { __typename: 'ProjectV2SingleSelectField' }
+             | null, size:
+              | { __typename: 'ProjectV2Field' }
+              | { __typename: 'ProjectV2IterationField' }
+              | { __typename: 'ProjectV2MultiSelectField' }
+              | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+             | null, estimate:
+              | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+              | { __typename: 'ProjectV2IterationField' }
+              | { __typename: 'ProjectV2MultiSelectField' }
+              | { __typename: 'ProjectV2SingleSelectField' }
              | null }, status:
             | { __typename: 'ProjectV2ItemFieldDateValue' }
             | { __typename: 'ProjectV2ItemFieldIterationValue' }
@@ -1000,6 +1010,7 @@ export const IssuePlanDocument = new TypedDocumentString(`
               id
             }
             ...PlanDateFields
+            ...PlanEstimateFields
             field(name: "Status") {
               __typename
               ... on ProjectV2SingleSelectField {
@@ -1031,6 +1042,27 @@ export const IssuePlanDocument = new TypedDocumentString(`
     }
   }
   target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}
+fragment PlanEstimateFields on ProjectV2 {
+  size: field(name: "Size") {
+    __typename
+    ... on ProjectV2SingleSelectField {
+      id
+      options {
+        id
+        name
+        color
+        description
+      }
+    }
+  }
+  estimate: field(name: "Estimate") {
     __typename
     ... on ProjectV2Field {
       id

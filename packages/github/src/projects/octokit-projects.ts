@@ -283,7 +283,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   /**
-   * Runs a query that looks up the Start, Target or Priority field by name. A Project without one answers
+   * Runs a query that looks up the Start, Target, Size, Estimate or Priority field by name. A Project without one answers
    * with a NOT_FOUND per missing field next to complete data, which is a Project without that field, not an error.
    */
   private async withOptionalFields<T>(document: string, variables: Record<string, unknown>): Promise<T> {
@@ -309,7 +309,7 @@ export class OctokitProjects implements ProjectsPort {
 
   /** The issue and its item in the repository owner's Project `project`, if it is one. */
   private async issuePlan(repo: RepoRef, project: number | undefined, number: number) {
-    // Each of the issue's Projects that lacks Start or Target adds a NOT_FOUND, whichever Project the plan is.
+    // Each of the issue's Projects that lacks Start, Target, Size or Estimate adds a NOT_FOUND, whichever Project the plan is.
     const { repository } = await this.withOptionalFields<IssuePlanQuery>(IssuePlanDocument.toString(), { owner: repo.owner, name: repo.name, number });
     const issue = repository?.issue;
     if (!repository || !issue) throw new Error(`issue ${repo.owner}/${repo.name}#${number} not found`);
@@ -367,7 +367,7 @@ function labelIdsOf(known: { id: string; name: string }[], names: string[], repo
 
 type StatusFieldConfig ={ __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
 
-/** The data of a GraphQL answer whose only errors are the Start, Target and Priority field lookups finding no such field. */
+/** The data of a GraphQL answer whose only errors are the Start, Target, Size, Estimate and Priority field lookups finding no such field. */
 function dataDespiteMissingFields(error: unknown): unknown {
   const { errors, data } = (error ?? {}) as { errors?: { type?: string; path?: (string | number)[] }[]; data?: unknown };
   if (!data || !Array.isArray(errors) || errors.length === 0) return undefined;

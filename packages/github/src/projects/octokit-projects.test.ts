@@ -847,6 +847,25 @@ test("setDates reports no-field on a Project without Start and Target fields ins
   expect(operations.map((o) => o.operation)).toEqual(["IssuePlan"]);
 });
 
+test("status and date writes work on a Project that lacks Start, Target, Size and Estimate", async () => {
+  // Live on todoOverKill #146: a `field(name: "Size")` lookup inside projectItems answered NOT_FOUND at
+  // repository.issue.projectItems.nodes.0.project.size next to complete data.
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: () =>
+      new GraphqlErrors(issuePlan(12, [{ id: "PVTI_5", project: planProject(5, "U_octo", false), status: "Shaping" }]), [
+        ...missingDateFields(itemProjectPath(0)),
+        ...missingEstimateFields(itemProjectPath(0)),
+      ]),
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_5" } } }),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getStatus(repo, 5, 12)).toBe("Shaping");
+  expect(await projects.setStatus(repo, 5, 12, "Ready")).toBe("set");
+  expect(await projects.setDates(repo, 5, 12, { start: "2026-10-06" })).toBe("no-field");
+  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan", "SetPlanStatus", "IssuePlan"]);
+});
+
 test("setStatus still fails for an issue GitHub cannot resolve", async () => {
   const { fetch } = fakeGraphql({
     IssuePlan: (v) =>
