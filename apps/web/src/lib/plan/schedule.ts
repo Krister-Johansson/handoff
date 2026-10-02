@@ -5,8 +5,15 @@ export type TimelineRun = { id: string; status: string; issues: number[]; starte
 
 /** A span of days, YYYY-MM-DD, both ends included. */
 export type DaySpan = { start: string; end: string };
-/** An item's own dates. With only one of Start and Target it is one day long, open on the missing side. */
-export type PlannedSpan = DaySpan & { openStart: boolean; openEnd: boolean };
+/**
+ * An item's own dates. With only one of Start and Target it is one day long, open on the missing side. A task
+ * with a duration and a Start runs from its Start for its hours at the capacity per day instead, starting
+ * `offsetHours` into its first day, and keeps a Target on GitHub that disagrees as `targetOnGitHub`.
+ */
+export type PlannedSpan = DaySpan & { openStart: boolean; openEnd: boolean; hours?: number; offsetHours?: number; targetOnGitHub?: string };
+
+/** How long tasks take in hours, by issue number, and the person's hours of work a day. */
+export type SpanOptions = { durations: ReadonlyMap<number, { hours: number }>; capacity: number };
 /** The time one run worked on a task, from its start to its end (to now while active), as ISO times. */
 export type ActualStrip = { runId: string; status: string; start: string; end: string; active: boolean };
 
@@ -42,6 +49,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const dayOf = (at: Date) => `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
 /** Whole days from one YYYY-MM-DD to another. */
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
+const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
+/** Hours a float may miss by and still count as whole. */
+const EPSILON = 1e-9;
 
 /** A closed item is done whatever its Status says. */
 const isDone = (item: Pick<PlanItem, "state" | "status">) => item.state === "closed" || item.status === "Done";
@@ -55,15 +65,30 @@ function plannedOf(item: PlanItem): PlannedSpan | undefined {
 }
 
 /**
+ * A task's bar from its Start for its hours at the capacity per day, starting `offsetHours` into its first day.
+ * Its end is the day its last hour falls on; every day counts.
+ */
+function barOf(item: PlanItem, hours: number, offsetHours: number, capacity: number): PlannedSpan {
+  const start = item.start!;
+  const end = addDays(start, Math.max(0, Math.ceil((offsetHours + hours) / capacity - EPSILON) - 1));
+  return { start, end, openStart: false, openEnd: false, hours, offsetHours, ...(item.target && item.target !== end ? { targetOnGitHub: item.target } : {}) };
+}
+
+/**
  * Where each item of a plan sits in time: its planned span from the Project's Start and Target, a
  * derived span for a story or an epic without dates, the actual strips of the runs that linked it,
  * whether it is late (Start passed, a blocker not done) or overdue (Target passed, not done), and the
  * dependency arrows from blocked-by links. Nothing here is stored; `now` decides today.
  */
-export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date): Timeline {
+export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date, opts?: SpanOptions): Timeline {
   const today = dayOf(now);
   const byNumber = new Map(items.map((i) => [i.number, i]));
-  const planned = new Map(items.map((i) => [i.number, plannedOf(i)]));
+  const planned = new Map(
+    items.map((i) => {
+      const duration = opts?.durations.get(i.number);
+      return [i.number, duration && i.start ? barOf(i, duration.hours, 0, opts.capacity) : plannedOf(i)];
+    }),
+  );
   const children = new Map<number, PlanItem[]>();
   for (const i of items) if (i.parent !== undefined && byNumber.has(i.parent)) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
 

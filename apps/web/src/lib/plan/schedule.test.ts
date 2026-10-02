@@ -109,3 +109,32 @@ test("arrows run from each blocker to the blocked task and are red when the task
     { from: 1, to: 4, late: false },
   ]);
 });
+
+/** Durations by issue number, in hours. */
+const hours = (entries: Record<number, number>) => new Map(Object.entries(entries).map(([n, h]) => [Number(n), { hours: h }]));
+
+test("a sized task's bar runs from Start for its duration over the capacity", () => {
+  const items = [
+    // GitHub's Target disagrees with Start plus 9 hours: the bar follows the duration and keeps GitHub's Target for the hover.
+    item(1, { start: "2026-10-12", target: "2026-10-20" }),
+    item(2, { start: "2026-10-14" }),
+    item(3, { start: "2026-10-15", target: "2026-10-17" }),
+    // No duration: Start to Target as before.
+    item(4, { start: "2026-10-12", target: "2026-10-14" }),
+  ];
+  const durations = hours({ 1: 9, 2: 50 / 60, 3: 13 });
+  const at = (capacity: number) => deriveSpans(items, [], NOW, { durations, capacity }).items;
+  expect(at(6).map((i) => i.planned)).toEqual([
+    { start: "2026-10-12", end: "2026-10-13", openStart: false, openEnd: false, hours: 9, offsetHours: 0, targetOnGitHub: "2026-10-20" },
+    { start: "2026-10-14", end: "2026-10-14", openStart: false, openEnd: false, hours: 50 / 60, offsetHours: 0 },
+    { start: "2026-10-15", end: "2026-10-17", openStart: false, openEnd: false, hours: 13, offsetHours: 0 },
+    { start: "2026-10-12", end: "2026-10-14", openStart: false, openEnd: false },
+  ]);
+  // At 8 hours a day the 13-hour task takes two days, and GitHub's Target of the 17th no longer agrees.
+  expect(at(8)[2]!.planned).toEqual({ start: "2026-10-15", end: "2026-10-16", openStart: false, openEnd: false, hours: 13, offsetHours: 0, targetOnGitHub: "2026-10-17" });
+  // Overdue still reads GitHub's Target.
+  expect(deriveSpans([item(5, { start: "2026-10-01", target: "2026-10-07" })], [], NOW, { durations: hours({ 5: 1 }), capacity: 6 }).items[0]).toMatchObject({
+    planned: { start: "2026-10-01", end: "2026-10-01", targetOnGitHub: "2026-10-07" },
+    overdueDays: 3,
+  });
+});
