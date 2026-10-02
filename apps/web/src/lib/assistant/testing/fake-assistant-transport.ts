@@ -1,3 +1,4 @@
+import type { PageDescriptor } from "../page-tools";
 import type { AssistantTransport, ConversationSummary, StoredConversation, TurnStreamEvent } from "../transport";
 
 /**
@@ -7,7 +8,7 @@ import type { AssistantTransport, ConversationSummary, StoredConversation, TurnS
 export class FakeAssistantTransport implements AssistantTransport {
   conversations: ConversationSummary[] = [];
   stored = new Map<string, StoredConversation>();
-  readonly turns: { conversationId: string; text: string; source: string }[] = [];
+  readonly turns: { conversationId: string; text: string; source: string; page?: PageDescriptor }[] = [];
   readonly replies: { turnId: string; requestId: string; approved: boolean; note?: string }[] = [];
   readonly uiReplies: { turnId: string; requestId: string; text: string; isError: boolean }[] = [];
   readonly stops: string[] = [];
@@ -26,8 +27,8 @@ export class FakeAssistantTransport implements AssistantTransport {
   async load(id: string) {
     return this.stored.get(id) ?? { conversation: this.conversations.find((c) => c.id === id)!, messages: [] };
   }
-  turn(conversationId: string, text: string, source: string, onEvent: (event: TurnStreamEvent) => void) {
-    this.turns.push({ conversationId, text, source });
+  turn(conversationId: string, text: string, source: string, page: PageDescriptor | undefined, onEvent: (event: TurnStreamEvent) => void) {
+    this.turns.push({ conversationId, text, source, ...(page ? { page } : {}) });
     this.emitter = onEvent;
     return new Promise<void>((resolve) => (this.finish = resolve));
   }

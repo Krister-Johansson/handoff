@@ -94,6 +94,12 @@ test("the runner spawns with the assistant config dir and without ANTHROPIC_API_
   expect(invocation!.argv).not.toContain("--bare");
 });
 
+test("the runner spawns the turn with the MCP discovery cache off", async () => {
+  const { fake, runner, request, onEvent } = setup({ lines: [lines.init(), lines.result()] });
+  await runner.run(request, { signal: new AbortController().signal, onEvent });
+  expect(fake.invocations()[0]!.env.MCP_DISCOVERY_CACHE).toBe("0");
+});
+
 test("an api_retry with authentication_failed ends the turn with a readable error", async () => {
   const { runner, request, onEvent } = setup({
     lines: [lines.init(), { type: "system", subtype: "api_retry", session_id: SESSION_ID, attempt: 1, error: "authentication_failed" }],

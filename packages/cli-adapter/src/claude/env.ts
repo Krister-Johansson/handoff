@@ -19,3 +19,12 @@ export function buildClaudeEnv(input: {
   env.CLAUDE_CONFIG_DIR = input.configDir;
   return env;
 }
+
+/**
+ * The environment for one turn of the dashboard's assistant: the claude child's minimal environment,
+ * with Claude Code's MCP discovery cache off. The assistant's MCP server has the same name and URL on
+ * every turn while its tools follow the page the person has open, so a cached tool list would be stale.
+ */
+export function buildAssistantEnv(input: Parameters<typeof buildClaudeEnv>[0]): Record<string, string> {
+  return { ...buildClaudeEnv(input), MCP_DISCOVERY_CACHE: "0" };
+}

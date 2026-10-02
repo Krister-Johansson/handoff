@@ -7,7 +7,7 @@ import { parseStreamJson, type StreamJsonLine } from "../stream-json/parser.ts";
 import type { CliSession } from "../types.ts";
 import { ancestorInstructionExcludes } from "./argv.ts";
 import { buildClaudeChatArgv } from "./chat-argv.ts";
-import { buildClaudeEnv } from "./env.ts";
+import { buildAssistantEnv } from "./env.ts";
 import type { ClaudeCliExecutorOptions } from "./executor.ts";
 
 /** One turn of the dashboard's assistant: the person's message and how the CLI may answer it. */
@@ -104,7 +104,7 @@ export class ClaudeChatRunner {
       ...(request.model ? { model: request.model } : {}),
       ...(request.effort ? { effort: request.effort } : {}),
     });
-    const env = buildClaudeEnv({
+    const env = buildAssistantEnv({
       oauthToken: this.options.oauthToken,
       configDir: this.options.configDir,
       base: this.options.baseEnv ?? process.env,

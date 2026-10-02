@@ -4,7 +4,8 @@ import { join } from "node:path";
 import type { ChatEvent, ChatTurnRequest, ChatTurnResult } from "@handoff/cli-adapter";
 import type { AssistantCall, Db } from "@handoff/db";
 import type { GitHubPort } from "@handoff/github";
-import { CATALOG } from "../../lib/assistant/catalog";
+import { CATALOG, type ToolSpec } from "../../lib/assistant/catalog";
+import { pageSpecsOf, pageToolSpec, type PageDescriptor, type PageToolSpec } from "../../lib/assistant/page-tools";
 import { getConversation, setConversationSession, storeMessage } from "./conversations";
 import { SYSTEM_PROMPT, turnPrompt } from "./prompt";
 import type { AssistantConfig } from "./env";
@@ -18,13 +19,17 @@ export type TurnDeps = { db: Db; github: GitHubPort | undefined; runner: ChatRun
 
 const SPECS = new Map(CATALOG.map((t) => [t.name, t]));
 
-/** The read tools and the UI tools: they run without asking. Every other tool goes through the approval card. */
+/**
+ * The read tools and the UI tools: they run without asking. Every other tool goes through the approval
+ * card. A turn on a page adds the page's tools that need no card: view changes and drafts the person sees.
+ */
 const READ_TOOLS = CATALOG.filter((t) => t.readOnly && !t.confirm).map((t) => `${TOOL_PREFIX}${t.name}`);
 
 
-/** A tool call as the panel shows it: its catalog title and one-line summary. */
+/** A tool call as the panel shows it: its catalog or page tool title and one-line summary. */
 function describeCall(name: string, args: unknown) {
-  const spec = name.startsWith(TOOL_PREFIX) ? SPECS.get(name.slice(TOOL_PREFIX.length)) : undefined;
+  const bare = name.startsWith(TOOL_PREFIX) ? name.slice(TOOL_PREFIX.length) : undefined;
+  const spec: ToolSpec | PageToolSpec | undefined = bare === undefined ? undefined : (SPECS.get(bare) ?? pageToolSpec(bare));
   if (!spec) return { name, title: name, summary: name };
   const parsed = spec.input.safeParse(args);
   return { name: spec.name, title: spec.title, summary: parsed.success ? spec.summarize(parsed.data) : spec.title };
@@ -36,11 +41,16 @@ function describeCall(name: string, args: unknown) {
  * streams what happens to the turn's events, then stores the reply with its tool calls and approvals.
  * The staging folder and the token are gone when the turn ends. `done` settles when it is stored.
  */
-export async function startTurn(deps: TurnDeps, conversationId: string, input: { text: string; source: string }): Promise<LiveTurn & { done: Promise<void> }> {
+export async function startTurn(deps: TurnDeps, conversationId: string, input: { text: string; source: string; page?: PageDescriptor }): Promise<LiveTurn & { done: Promise<void> }> {
   const conversation = await getConversation(deps.db, conversationId);
   if (!conversation) throw new Error(`There is no conversation ${conversationId}.`);
-  const turn = openTurn(conversationId);
-  await storeMessage(deps.db, { conversationId, turnId: turn.id, role: "user", content: { text: input.text, source: input.source } });
+  const turn = openTurn(conversationId, input.page);
+  await storeMessage(deps.db, {
+    conversationId,
+    turnId: turn.id,
+    role: "user",
+    content: { text: input.text, source: input.source, ...(input.page ? { page: { kind: input.page.kind, path: input.page.path } } : {}) },
+  });
 
   const staging = join(deps.config.home, "turns", turn.id);
   const cwd = join(deps.config.home, "cwd");
@@ -77,12 +87,12 @@ export async function startTurn(deps: TurnDeps, conversationId: string, input: {
     try {
       result = await deps.runner.run(
         {
-          prompt: turnPrompt(input.text, input.source),
+          prompt: turnPrompt(input.text, input.source, input.page),
           systemPrompt: SYSTEM_PROMPT,
           cwd,
           stagingDir: staging,
           mcpConfigPath,
-          allowedTools: READ_TOOLS,
+          allowedTools: [...READ_TOOLS, ...pageSpecsOf(input.page).filter((t) => !t.confirm).map((t) => `${TOOL_PREFIX}${t.name}`)],
           permissionPromptTool: APPROVE_TOOL,
           maxTurns: deps.config.maxTurns,
           model: deps.config.model,

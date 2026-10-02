@@ -69,6 +69,29 @@ test("the page's answer to a UI tool call goes to the turn, and a body that is n
   expect((await replies.POST(post(url, { requestId: "r9", result: "late" }), params({ turnId: "t1" }))).status).toBe(410);
 });
 
+test("a turn body's page is validated: unknown kinds and names are dropped and the turn still starts", async () => {
+  const turns = await import("./conversations/[id]/turns/route");
+  const start = async (page: unknown) => {
+    assistant.startTurn.mockClear();
+    const response = await turns.POST(post("http://localhost:3000/api/assistant/conversations/c1/turns", { text: "Open graph view", page }), params({ id: "c1" }));
+    expect(response.headers.get("content-type")).toBe("text/event-stream");
+    return (assistant.startTurn.mock.calls[0] as unknown[])[2];
+  };
+  const page = { kind: "run", path: "/projects/p1/runs/r1", heading: "Add a CHANGELOG.md", tools: ["page_show_view", "page_open_step"] };
+
+  expect(await start(page)).toEqual({ text: "Open graph view", source: "typed", page });
+  // A name the kind does not have, another page's tool, a catalog tool and a repeat are dropped.
+  expect(await start({ ...page, tools: ["page_show_view", "page_invented", "page_save_graph", "cancel_run", "page_show_view", 7] })).toEqual({
+    text: "Open graph view",
+    source: "typed",
+    page: { ...page, tools: ["page_show_view"] },
+  });
+  // An unknown kind, or a page that is not a page, starts the turn without one.
+  expect(await start({ ...page, kind: "settings" })).toEqual({ text: "Open graph view", source: "typed" });
+  expect(await start("the run page")).toEqual({ text: "Open graph view", source: "typed" });
+  expect(await start({ ...page, path: "https://evil.example/x" })).toEqual({ text: "Open graph view", source: "typed" });
+});
+
 test("the turn stream starts with the turn's id in the shape the panel's transport reads", async () => {
   const turns = await import("./conversations/[id]/turns/route");
   const response = await turns.POST(post("http://localhost:3000/api/assistant/conversations/c1/turns", { text: "Hi" }), params({ id: "c1" }));

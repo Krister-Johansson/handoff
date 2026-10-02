@@ -374,6 +374,34 @@ export function pageToolSpec(name: string): PageToolSpec | undefined {
   return BY_NAME.get(name);
 }
 
+/**
+ * The page a turn was asked on, as the browser sends it with the turn: its kind, its path on the
+ * dashboard, its heading and the names of the tools it bound when the person asked. The server trusts
+ * none of it beyond which of its own names to register: an unknown kind fails, and a name that is not
+ * one of that kind's tools is dropped.
+ */
+export const PageDescriptorSchema = z
+  .object({
+    kind: z.enum(PAGE_KINDS),
+    path: z.string().max(2048).regex(/^\/(?!\/)/, "A dashboard path"),
+    heading: z.string().max(1000).catch(""),
+    tools: z.array(z.unknown()).max(64).catch([]),
+  })
+  .transform(({ kind, path, heading, tools }) => {
+    const names = new Set(tools);
+    return { kind, path, heading, tools: PAGE_TOOLS[kind].filter((spec) => names.has(spec.name)).map((spec) => spec.name) };
+  });
+
+/** The page a turn was asked on, validated. */
+export type PageDescriptor = z.output<typeof PageDescriptorSchema>;
+
+/** The specs of the tools a turn's page bound, in its kind's order: what the turn registers for the model. */
+export function pageSpecsOf(page: PageDescriptor | undefined): PageToolSpec[] {
+  if (!page) return [];
+  const bound = new Set(page.tools);
+  return PAGE_TOOLS[page.kind].filter((spec) => bound.has(spec.name));
+}
+
 type ToolOf<K extends PageKind> = (typeof TOOLS)[K][number];
 
 /**

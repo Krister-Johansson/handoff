@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { annotationsOf, CATALOG } from "../../lib/assistant/catalog";
+import { annotationsOf, CATALOG, type ToolSpec } from "../../lib/assistant/catalog";
+import { pageSpecsOf, type PageToolSpec } from "../../lib/assistant/page-tools";
 import { registerDataTools, type HandoffMcpDeps } from "../agent-mcp";
 import { turnByToken, type LiveTurn } from "./relay";
 
@@ -18,19 +19,22 @@ const decision = (value: { behavior: "allow"; updatedInput: unknown } | { behavi
 
 /**
  * The MCP server one assistant turn talks to: the catalog's data tools, answering as the assistant,
- * with untrusted results wrapped as data, its UI tools, which the panel runs in the page, and `approve`, which puts every state-changing call to the
- * person on an approval card and waits.
+ * with untrusted results wrapped as data, its UI tools and the turn's page tools, which the panel runs in
+ * the page, and `approve`, which puts every state-changing call to the person on an approval card and waits.
  */
 export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServer {
   const server = new McpServer({ name: "handoff", version: "1.0.0" });
   registerDataTools(server, { ...deps, actor: "assistant" }, { wrapUntrusted: true });
   // UI tools run in the person's browser: the call goes to the panel, and the page's answer comes back.
-  for (const spec of CATALOG.filter((t) => t.kind === "ui")) {
+  // So do the tools of the page the person asked on, the ones it bound when the turn started.
+  for (const spec of [...CATALOG.filter((t) => t.kind === "ui"), ...pageSpecsOf(turn.page)]) {
     server.registerTool(spec.name, { title: spec.title, description: spec.description, inputSchema: spec.input.shape, annotations: annotationsOf(spec) }, async (args) => {
       const result = await turn.requestUi({ name: spec.name, args }, deps.uiTimeoutMs);
       return { content: [{ type: "text" as const, text: result.text }], ...(result.isError ? { isError: true } : {}) };
     });
   }
+  // The tools approve knows: the catalog's and this turn's page tools, never another page's.
+  const specs = new Map<string, ToolSpec | PageToolSpec>([...SPECS, ...pageSpecsOf(turn.page).map((s) => [s.name, s] as const)]);
   server.registerTool(
     "approve",
     {
@@ -38,7 +42,7 @@ export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServe
       inputSchema: { tool_name: z.string(), input: z.record(z.string(), z.unknown()), tool_use_id: z.string().optional() },
     },
     async ({ tool_name, input, tool_use_id }) => {
-      const spec = tool_name.startsWith(TOOL_PREFIX) ? SPECS.get(tool_name.slice(TOOL_PREFIX.length)) : undefined;
+      const spec = tool_name.startsWith(TOOL_PREFIX) ? specs.get(tool_name.slice(TOOL_PREFIX.length)) : undefined;
       if (!spec) return decision({ behavior: "deny", message: `${tool_name} is not one of handoff's tools.` });
       if (!spec.confirm) return decision({ behavior: "allow", updatedInput: input });
       const parsed = spec.input.safeParse(input);

@@ -6,9 +6,12 @@ export const assistantRole = pgEnum("assistant_role", ["user", "assistant"]);
 /** One tool call of an assistant reply: what it asked, what came back, and the person's approval when it needed one. */
 export type AssistantCall = { id: string; name: string; args: unknown; result?: string; isError?: boolean; approval?: { approved: boolean; note?: string; at: string } };
 
-/** A message of a conversation: the person's text and where it came from, or the assistant's reply with its tool calls. */
+/**
+ * A message of a conversation: the person's text, where it came from and the dashboard page it was asked
+ * on (its kind and path), or the assistant's reply with its tool calls.
+ */
 export type AssistantContent =
-  | { text: string; source: string }
+  | { text: string; source: string; page?: { kind: string; path: string } }
   | { text: string; calls: AssistantCall[]; outcome: "done" | "interrupted" | "error"; error?: string; costUsd?: number; usage?: unknown };
 
 /** A conversation with the dashboard's assistant. Its turns resume one Claude Code session. */

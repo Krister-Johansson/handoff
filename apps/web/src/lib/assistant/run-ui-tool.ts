@@ -1,3 +1,4 @@
+import type { PageDescriptor } from "./page-tools";
 import { boundTools, type OpenPage } from "./run-page-tool";
 import { planUiTool, UiToolError } from "./ui-tools";
 
@@ -29,6 +30,12 @@ async function pageShown(href: string, before: { path: string; heading: HTMLElem
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return undefined;
+}
+
+/** The open page as a turn carries it: its kind, path, heading and the names of the tools it bound now. Undefined on a page without tools. */
+export function pageDescriptor(open: OpenPage | undefined): PageDescriptor | undefined {
+  if (!open) return undefined;
+  return { kind: open.kind, path: here(), heading: headingText(heading()), tools: boundTools(open).map((spec) => spec.name) };
 }
 
 /**

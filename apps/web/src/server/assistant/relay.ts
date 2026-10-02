@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import type { PageDescriptor } from "../../lib/assistant/page-tools";
 
 /** What a turn streams to the panel. */
 export type TurnEvent =
@@ -38,7 +39,11 @@ export class LiveTurn {
   private readonly pendingUi = new Map<string, PendingUi>();
   ended = false;
 
-  constructor(readonly conversationId: string) {}
+  /** `page` is the page the person asked on, as the turn's route validated it: its tools are the turn's page tools. */
+  constructor(
+    readonly conversationId: string,
+    readonly page?: PageDescriptor,
+  ) {}
 
   emit(event: TurnEvent) {
     this.events.push(event);
@@ -113,11 +118,11 @@ const registry = globalThis as unknown as { handoffAssistantTurns?: Map<string, 
 const turns = () => (registry.handoffAssistantTurns ??= new Map<string, LiveTurn>());
 
 /** Starts a turn of a conversation; refused while another turn of it runs. */
-export function openTurn(conversationId: string): LiveTurn {
+export function openTurn(conversationId: string, page?: PageDescriptor): LiveTurn {
   for (const turn of turns().values()) {
     if (turn.conversationId === conversationId) throw new TurnRunningError("This conversation is already answering. Wait for it, or stop it.");
   }
-  const turn = new LiveTurn(conversationId);
+  const turn = new LiveTurn(conversationId, page);
   turns().set(turn.id, turn);
   return turn;
 }
