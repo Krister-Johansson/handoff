@@ -8,6 +8,13 @@ const FOLD_AFTER_MS = 10_000;
 
 /** One line on what voice is doing, for the strip under the header. */
 function line(voice: ReturnType<typeof useVoice>): { label: string; text?: string } | undefined {
+  const { speech } = voice;
+  if (speech.speaking) {
+    return speech.priority === "read"
+      ? { label: `Reading: ${speech.title ?? "this page"}, sentence ${speech.sentence} of ${speech.total}` }
+      : { label: "Speaking" };
+  }
+  if (speech.error && voice.state === "idle") return { label: speech.error };
   switch (voice.state) {
     case "starting":
       return { label: "Starting" };
@@ -33,10 +40,10 @@ function line(voice: ReturnType<typeof useVoice>): { label: string; text?: strin
  */
 export function VoiceTranscript() {
   const voice = useVoice();
-  const current = voice.supported ? line(voice) : undefined;
+  const current = voice.supported || voice.canSpeak ? line(voice) : undefined;
   const key = current ? `${voice.state}:${current.label}:${current.text ?? ""}` : "";
   const [folded, setFolded] = useState<string>();
-  const idle = voice.state === "idle" || voice.state === "blocked" || voice.state === "unavailable";
+  const idle = !voice.speech.speaking && (voice.state === "idle" || voice.state === "blocked" || voice.state === "unavailable");
   useEffect(() => {
     if (!key || !idle) return;
     const timer = setTimeout(() => setFolded(key), FOLD_AFTER_MS);
@@ -63,8 +70,8 @@ export function VoiceTranscript() {
           <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-1.5 text-[13px] sm:px-6">
             <span className="font-medium">{shown.label}</span>{" "}
             {shown.text && <span className="min-w-0 flex-1 truncate text-muted-foreground">{shown.text}</span>}
-            {listening && (
-              <Button type="button" size="sm" variant="outline" className="ml-auto h-7" onClick={voice.abort}>
+            {(listening || voice.speech.speaking) && (
+              <Button type="button" size="sm" variant="outline" className="ml-auto h-7" onClick={voice.speech.speaking ? voice.stopSpeaking : voice.abort}>
                 Stop
               </Button>
             )}

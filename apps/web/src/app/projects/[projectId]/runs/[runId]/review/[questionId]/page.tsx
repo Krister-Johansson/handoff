@@ -1,3 +1,4 @@
+import { ReadAloudButton } from "@/components/voice/read-aloud-button";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -140,7 +141,12 @@ export default async function ReviewPage({ params }: { params: Promise<{ project
         ]}
         title={review.question}
         titleExtra={!review.answered && <StatusBadge status="waiting" label="waiting for you" />}
-        actions={review.review.kind === "code" && review.review.files ? <ChangeSize files={review.review.files} round={review.earlier.length + 1} /> : <RunSteps href={runPath(review.projectId, runId)} />}
+        actions={
+          <>
+            <ReadAloudButton title={review.review.kind === "code" ? "Review" : "Plan"} text={review.review.markdown} />
+            {review.review.kind === "code" && review.review.files ? <ChangeSize files={review.review.files} round={review.earlier.length + 1} /> : <RunSteps href={runPath(review.projectId, runId)} />}
+          </>
+        }
         description={
           review.answered
             ? "This review has been answered."
