@@ -30,6 +30,7 @@ test("tools that change state are marked confirm and never read only", () => {
     "request_merge",
     "resolve_loop",
     "run_again",
+    "schedule",
     "setup_plan",
     "start_run",
   ]);
@@ -82,4 +83,22 @@ test("shaping writes are confirm and openWorld and their summaries name the kind
   expect(toolSpec("move_to_shaping").summarize({ project: "handoff", issues: [57] })).toBe("Move task #57 back to Shaping in handoff");
   expect(toolSpec("setup_plan").summarize({ project: "handoff", use: 3 })).toMatch(/^Use GitHub Project #3 as the plan of handoff/);
   expect(toolSpec("list_plan")).toMatchObject({ confirm: false, readOnly: true, untrusted: true });
+});
+
+test("schedule is confirm and its summary names every issue with its dates", () => {
+  expect(toolSpec("schedule")).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true });
+  const items = [
+    { issue: 57, start: "2026-10-06", target: "2026-10-09" },
+    { issue: 58, target: "2026-10-16" },
+    { issue: 41, start: null },
+  ];
+  expect(toolSpec("schedule").summarize({ project: "handoff", items })).toBe(
+    "Schedule in handoff: #57 Start 2026-10-06, Target 2026-10-09; #58 Target 2026-10-16; #41 clear Start",
+  );
+  expect(toolSpec("create_task").summarize({ project: "handoff", story: 41, title: "Add the migration", brief: "b", start: "2026-10-06", target: "2026-10-09" })).toBe(
+    "Create task 'Add the migration' under story #41 in handoff, Start 2026-10-06, Target 2026-10-09",
+  );
+  // The input refuses a date that is not a calendar day written YYYY-MM-DD.
+  expect(toolSpec("schedule").input.safeParse({ project: "handoff", items: [{ issue: 57, start: "2026-02-31" }] }).success).toBe(false);
+  expect(toolSpec("schedule").input.safeParse({ project: "handoff", items: [] }).success).toBe(false);
 });

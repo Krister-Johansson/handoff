@@ -1,10 +1,18 @@
 import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "../projects/kinds.ts";
-import type { AdoptedProject, PlanAncestor, PlanItem, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetStatusResult } from "../projects/types.ts";
+import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanItem, PlanIteration, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "../projects/types.ts";
 import type { RepoRef } from "../types.ts";
 import { FakeGitHub } from "./fake-github.ts";
 
 /** An item of a fake Project. `status` is the option's name, so a test can drag a card to a column handoff does not know. */
-export type FakePlanItem = { status: string | undefined; prNumbers?: number[]; assignees?: string[] };
+export type FakePlanItem = {
+  status: string | undefined;
+  prNumbers?: number[];
+  assignees?: string[];
+  /** YYYY-MM-DD, the item's Start and Target date field values. */
+  start?: string | undefined;
+  target?: string | undefined;
+  iteration?: PlanIteration | undefined;
+};
 
 type FakePlan = { login: string; project: PlanProject; items: Map<number, FakePlanItem> };
 
@@ -62,8 +70,12 @@ export class FakeProjects implements ProjectsPort {
           assignees: item.assignees ?? [],
           subIssues: { total: children.length, completed: children.filter((c) => c?.state === "closed").length },
           blockedBy: (issue.blockedBy ?? []).filter((n) => this.github.issues.get(n)?.state !== "closed"),
+          blockers: [...(issue.blockedBy ?? [])],
           prNumbers: item.prNumbers ?? [],
           updatedAt: issue.updatedAt ?? "",
+          start: item.start,
+          target: item.target,
+          iteration: item.iteration,
         },
       ];
     });
@@ -117,6 +129,7 @@ export class FakeProjects implements ProjectsPort {
       url: `https://github.com/users/${login}/projects/${number}`,
       title,
       statusOptions: { Shaping: "opt-shaping", Ready: "opt-ready", Running: "opt-running", "In review": "opt-in-review", Done: "opt-done" },
+      dateFields: { start: "field-start", target: "field-target" },
     };
     this.plans.set(keyOf(repo), { login, project, items: new Map() });
     return structuredClone(project);
@@ -130,7 +143,7 @@ export class FakeProjects implements ProjectsPort {
 
   async createIssue(
     repo: RepoRef,
-    input: { project: number; title: string; body: string; labels: string[]; parent?: number; blockedBy?: number[] },
+    input: NewPlanIssue,
   ): Promise<{ number: number; url: string }> {
     if (input.parent !== undefined && !this.github.issues.has(input.parent)) throw new Error(`parent issue #${input.parent} not found`);
     const number = Math.max(0, ...this.github.issues.keys()) + 1;
@@ -147,6 +160,10 @@ export class FakeProjects implements ProjectsPort {
     });
     if (input.parent !== undefined) this.parents.set(number, input.parent);
     await this.setStatus(repo, input.project, number, "Shaping", { add: true });
+    if (input.start || input.target) {
+      const result = await this.setDates(repo, input.project, number, { ...(input.start ? { start: input.start } : {}), ...(input.target ? { target: input.target } : {}) });
+      if (result !== "set") throw new Error(`Created #${number}, but could not set its dates: ${result}`);
+    }
     return { number, url };
   }
 
@@ -157,6 +174,25 @@ export class FakeProjects implements ProjectsPort {
     issue.labels = [...new Set([...(issue.labels ?? []), ...input.labels])];
     if (input.parent !== undefined) this.parents.set(input.issue, input.parent);
     await this.setStatus(repo, input.project, input.issue, "Shaping", { add: true });
+  }
+
+  async setDates(repo: RepoRef, project: number, issue: number, dates: PlanDates): Promise<SetDatesResult> {
+    const plan = this.planOf(repo, project);
+    const item = plan?.items.get(issue);
+    if (!plan || !item) return "not-in-project";
+    const fields = plan.project.dateFields;
+    if ((dates.start !== undefined && !fields?.start) || (dates.target !== undefined && !fields?.target)) return "no-field";
+    if (dates.start !== undefined) item.start = dates.start ?? undefined;
+    if (dates.target !== undefined) item.target = dates.target ?? undefined;
+    return "set";
+  }
+
+  async ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds> {
+    const plan = [...this.plans.values()].find((p) => p.login === login && p.project.number === number);
+    if (!plan) throw new Error(`GitHub Project #${number} of ${login} not found`);
+    const fields = { start: plan.project.dateFields?.start ?? "field-start", target: plan.project.dateFields?.target ?? "field-target" };
+    plan.project.dateFields = fields;
+    return { ...fields };
   }
 
   async lineage(_repo: RepoRef, issue: number): Promise<PlanAncestor[]> {

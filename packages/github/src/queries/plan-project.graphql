@@ -1,3 +1,20 @@
+fragment PlanDateFields on ProjectV2 {
+  start: field(name: "Start") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+  target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}
+
 query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
   user(login: $login) {
     id
@@ -13,6 +30,7 @@ fragment PlanProjectChoice on ProjectV2 {
   title
   url
   closed
+  ...PlanDateFields
   field(name: "Status") {
     __typename
     ... on ProjectV2SingleSelectField {
@@ -61,6 +79,7 @@ query PlanProject($login: String!, $number: Int!) {
       number
       url
       title
+      ...PlanDateFields
       field(name: "Status") {
         __typename
         ... on ProjectV2SingleSelectField {

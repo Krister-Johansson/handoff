@@ -1,6 +1,7 @@
-import { eq, projects, type Db } from "@handoff/db";
+import { eq, projects, runs, type Db } from "@handoff/db";
 import { STATUS_OPTIONS, type GitHubPort, type PlanItem, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
 import { latestRuns, type BacklogIssue, type BacklogRun } from "./backlog.ts";
+import { deriveSpans, type Timeline, type TimelineRun } from "../lib/plan/schedule.ts";
 
 /** A board column: one per Status handoff knows, plus Other for an option it does not. */
 export type PlanColumn = PlanStatus | "Other";
@@ -27,6 +28,11 @@ export type PlanView = {
   board: Record<PlanColumn, PlanTask[]>;
   /** Open issues of the repository that are not items of the Project, newest activity first. */
   unplanned: BacklogIssue[];
+  /**
+   * Every item placed in time: planned and derived spans, each run's actual strip, late and overdue
+   * items and the dependency arrows. Optional so views built by hand need not name it; loadPlan sets it.
+   */
+  timeline?: Timeline | undefined;
 };
 
 /** Why a project's plan cannot be shown, with a sentence that says what to do. */
@@ -64,7 +70,13 @@ function progressOf(item: PlanItem, tasks: PlanTask[]): PlanProgress {
  * A project's plan as its GitHub Project holds it: epics with their stories with their tasks, each task
  * with its latest run, and progress rolled up. GitHub is read on every call; nothing of the plan is stored.
  */
-export async function loadPlan(db: Db, github: GitHubPort | undefined, plan: ProjectsPort | undefined, projectId: string): Promise<PlanView | PlanUnavailable> {
+export async function loadPlan(
+  db: Db,
+  github: GitHubPort | undefined,
+  plan: ProjectsPort | undefined,
+  projectId: string,
+  opts: { now?: Date } = {},
+): Promise<PlanView | PlanUnavailable> {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) return { reason: "not-found", error: "Project not found." };
   const problem = await projectsAccessProblem(plan);
@@ -72,16 +84,17 @@ export async function loadPlan(db: Db, github: GitHubPort | undefined, plan: Pro
   const number = project.planProjectNumber;
   if (number === null) return { reason: "no-plan", error: "This project has no plan on GitHub yet." };
   const repo = { owner: project.repoOwner, name: project.repoName };
-  const [planProject, items, open, runs] = await Promise.all([
+  const [planProject, items, open, latest, projectRuns] = await Promise.all([
     plan.getProject(repo.owner, number),
     plan.listItems(repo.owner, number, repo),
     github.listIssues(repo),
     latestRuns(db, projectId),
+    timelineRuns(db, projectId),
   ]);
   if (!planProject) return { reason: "unreachable", error: `GitHub Project #${number} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.` };
   const byNumber = new Map(items.map((i) => [i.number, i]));
   const sorted = [...items].sort((a, b) => a.number - b.number);
-  const task =(item: PlanItem): PlanTask => ({ ...item, status: item.state === "closed" ? "Done" : item.status, run: runs.get(item.number) ?? null });
+  const task =(item: PlanItem): PlanTask => ({ ...item, status: item.state === "closed" ? "Done" : item.status, run: latest.get(item.number) ?? null });
 
   // Each story hangs under its nearest epic, each task under its nearest story or epic; the walk stays inside the plan.
   const holderOf = (item: PlanItem): PlanItem | undefined => {
@@ -120,6 +133,21 @@ export async function loadPlan(db: Db, github: GitHubPort | undefined, plan: Pro
   for (const item of sorted) if (isTask(item.kind)) board[columnOf(item)].push(task(item));
   const unplanned = open
     .filter((i) => !byNumber.has(i.number))
-    .map((issue) => ({ ...issue, run: runs.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
-  return { project: planProject, epics, unparented, board, unplanned };
+    .map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
+  return { project: planProject, epics, unparented, board, unplanned, timeline: deriveSpans(items, projectRuns, opts.now ?? new Date()) };
+}
+
+/** Every run of a project with the issues it linked and when it ran, for the timeline's actual strips. */
+async function timelineRuns(db: Db, projectId: string): Promise<TimelineRun[]> {
+  const rows = await db
+    .select({ id: runs.id, status: runs.status, issues: runs.issues, startedAt: runs.startedAt, finishedAt: runs.finishedAt })
+    .from(runs)
+    .where(eq(runs.projectId, projectId));
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    issues: r.issues.map((i) => i.number),
+    startedAt: r.startedAt?.toISOString() ?? null,
+    finishedAt: r.finishedAt?.toISOString() ?? null,
+  }));
 }

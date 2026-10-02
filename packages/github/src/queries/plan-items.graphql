@@ -13,6 +13,28 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
               name
             }
           }
+          # Values by field name cost no points, unlike fieldValues(first:), which counts once per item.
+          start: fieldValueByName(name: "Start") {
+            __typename
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
+          }
+          target: fieldValueByName(name: "Target") {
+            __typename
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
+          }
+          # GitHub names a new iteration field "Iteration"; a renamed one is not read.
+          iteration: fieldValueByName(name: "Iteration") {
+            __typename
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+              startDate
+              duration
+            }
+          }
           content {
             __typename
             ... on Issue {

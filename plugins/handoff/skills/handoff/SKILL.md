@@ -19,7 +19,8 @@ A project can keep its plan on a GitHub Project: epics, stories under them and t
 2. Shape with the user: `create_epic` with the goal, `create_story` under the epic with its acceptance criteria, then `create_task` under each story with a brief (the goal, where in the code, how to tell it is done). Give `blocked_by` when a task must wait for another. Everything starts in Shaping.
 3. `list_plan` shows the tree with each item's status, run and pull request, and the open issues outside the plan. `plan_issue` brings one of those into the plan as a task.
 4. When a story is shaped and the user agrees, `move_to_ready` with its tasks. `move_to_shaping` takes a task back out of the backlog.
-5. Then `list_backlog` and `start_run` as below. A run moves its task to Running, its pull request to In review, and the merge to Done; cancelling the run puts the task back in Ready. Epics and stories never run.
+5. Dates, only when the user asks to plan the timeline: `schedule` sets each item's Start and Target (`YYYY-MM-DD`, `null` clears one), for epics, stories and tasks. Read `list_plan` first, order the tasks by their blocked-by links, and propose one `schedule` call per story with its tasks. `create_story` and `create_task` also take `start` and `target` when the user gives dates.
+6. Then `list_backlog` and `start_run` as below. A run moves its task to Running, its pull request to In review, and the merge to Done; cancelling the run puts the task back in Ready. Epics and stories never run.
 
 Without the `project` scope on the dashboard's `GITHUB_TOKEN` the plan tools refuse and say how to fix it; the `handoff-setup` skill covers it.
 

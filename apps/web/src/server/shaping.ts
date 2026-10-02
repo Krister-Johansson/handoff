@@ -56,10 +56,17 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
   await plan.ensureLabels(repo);
   const store = (number: number) => deps.db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
 
+  // The Start and Target date fields a Project lacks, created; the roadmap layout reads them once a person picks them.
+  const dateFields = async (found: PlanProject) => {
+    const missing = DATE_FIELDS.filter(([key]) => !found.dateFields?.[key]).map(([, name]) => name);
+    if (missing.length) await plan.ensureDateFields(repo.owner, found.number);
+    return { added_date_fields: missing, roadmap: ROADMAP_NOTE };
+  };
+
   if (stored !== null) {
     const found = await plan.getProject(repo.owner, stored);
     if (!found) throw new Error(`GitHub Project #${stored} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.`);
-    return { created: false, project: projectSummary(found), missing_status_options: missingOptions(found) };
+    return { created: false, project: projectSummary(found), missing_status_options: missingOptions(found), ...(await dateFields(found)) };
   }
   if (opts.use !== undefined) {
     const adopted = await plan.adoptProject(repo.owner, opts.use, repo);
@@ -70,12 +77,20 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
       renamed_status_options: adopted.renamed,
       added_status_options: adopted.added,
       missing_status_options: missingOptions(adopted.project),
+      ...(await dateFields(adopted.project)),
     };
   }
   const created = await plan.createProject(repo.owner, repo, `${project.name} plan`);
   await store(created.number);
-  return { created: true, project: projectSummary(created), missing_status_options: missingOptions(created) };
+  return { created: true, project: projectSummary(created), missing_status_options: missingOptions(created), ...(await dateFields(created)) };
 }
+
+const DATE_FIELDS = [
+  ["start", "Start"],
+  ["target", "Target"],
+] as const;
+const ROADMAP_NOTE =
+  'GitHub cannot be told which fields a roadmap view uses: in a Roadmap view of the Project, open "Date fields" and pick Start and Target once.';
 
 const article = (kind: PlanKind | undefined) => (kind === "epic" ? "an epic" : kind ? `a ${kind}` : "an issue without a kind label");
 const checkboxes = (items: readonly string[]) => items.map((item) => `- [ ] ${item.trim()}`).join("\n");
@@ -88,6 +103,19 @@ async function parentOf({ plan, repo, number, project }: Planned, issue: number,
   return item;
 }
 
+/** The Start and Target a new story or task may get, YYYY-MM-DD. */
+type NewDates = { start?: string | undefined; target?: string | undefined };
+
+/** The dates given, without the keys left out. */
+const datesOf = ({ start, target }: NewDates) => ({ ...(start ? { start } : {}), ...(target ? { target } : {}) });
+
+/** Refuses new dates before the issue is created: a malformed date, a Target before its Start, a Project without the date fields. */
+async function checkNewDates(planned: Planned, dates: NewDates) {
+  if (!dates.start && !dates.target) return;
+  checkDates("The new issue", dates.start, dates.target);
+  await requireDateFields(planned);
+}
+
 /** An epic: an issue labelled epic with its goal, in Shaping on the plan. */
 export async function createEpic(deps: ShapingDeps, projectId: string, input: { title: string; goal: string }) {
   const { plan, repo, number } = await plannedProject(deps, projectId);
@@ -96,21 +124,25 @@ export async function createEpic(deps: ShapingDeps, projectId: string, input: { 
 }
 
 /** A story: a sub-issue of an epic labelled story, its acceptance criteria as checkboxes, in Shaping. */
-export async function createStory(deps: ShapingDeps, projectId: string, input: { epic: number; title: string; acceptance: string[] }) {
+export async function createStory(deps: ShapingDeps, projectId: string, input: { epic: number; title: string; acceptance: string[] } & NewDates) {
   const planned = await plannedProject(deps, projectId);
-  await parentOf(planned, input.epic, "epic");
+  await Promise.all([parentOf(planned, input.epic, "epic"), checkNewDates(planned, input)]);
   const body = `## Acceptance criteria\n\n${checkboxes(input.acceptance)}`;
-  const created = await planned.plan.createIssue(planned.repo, { project: planned.number, title: input.title, body, labels: ["story"], parent: input.epic });
-  return { ...created, kind: "story" as const, status: "Shaping" as const, parent: input.epic };
+  const created = await planned.plan.createIssue(planned.repo, { project: planned.number, title: input.title, body, labels: ["story"], parent: input.epic, ...datesOf(input) });
+  return { ...created, kind: "story" as const, status: "Shaping" as const, parent: input.epic, ...datesOf(input) };
 }
 
 /**
  * A task: a sub-issue of a story labelled task, whose body is its brief and optional acceptance
  * criteria, blocked by the given issues, in Shaping. Tasks are the third and last level.
  */
-export async function createTask(deps: ShapingDeps, projectId: string, input: { story: number; title: string; brief: string; acceptance?: string[]; blockedBy?: number[] }) {
+export async function createTask(
+  deps: ShapingDeps,
+  projectId: string,
+  input: { story: number; title: string; brief: string; acceptance?: string[]; blockedBy?: number[] } & NewDates,
+) {
   const planned = await plannedProject(deps, projectId);
-  await parentOf(planned, input.story, "story");
+  await Promise.all([parentOf(planned, input.story, "story"), checkNewDates(planned, input)]);
   const criteria = input.acceptance?.length ? `\n\n## Acceptance criteria\n\n${checkboxes(input.acceptance)}` : "";
   const blockedBy = input.blockedBy ?? [];
   const created = await planned.plan.createIssue(planned.repo, {
@@ -120,8 +152,9 @@ export async function createTask(deps: ShapingDeps, projectId: string, input: { 
     labels: ["task"],
     parent: input.story,
     blockedBy,
+    ...datesOf(input),
   });
-  return { ...created, kind: "task" as const, status: "Shaping" as const, parent: input.story, blocked_by: blockedBy };
+  return { ...created, kind: "task" as const, status: "Shaping" as const, parent: input.story, blocked_by: blockedBy, ...datesOf(input) };
 }
 
 /**
@@ -172,6 +205,89 @@ export async function moveToReady(deps: ShapingDeps, projectId: string, issues: 
   if (empty) throw new Error(`#${empty.issue} has no body. Write its brief first: the agents read it.`);
   await setStatuses(planned, issues, "Ready");
   return { moved: issues, status: "Ready" as const };
+}
+
+/** One item of a schedule call: a date sets the field, null clears it, a missing key leaves it. */
+export type ScheduleItem = { issue: number; start?: string | null; target?: string | null };
+
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar day written YYYY-MM-DD. */
+const isDay = (value: string) => {
+  const at = Date.parse(`${value}T00:00:00Z`);
+  // Date rolls 2026-02-31 over to March, so the day must read back the same.
+  return DAY.test(value) && !Number.isNaN(at) && new Date(at).toISOString().startsWith(value);
+};
+
+/** Refuses a date that is not a day written YYYY-MM-DD, and a Target before its Start. */
+function checkDates(label: string, start: string | null | undefined, target: string | null | undefined) {
+  for (const [name, value] of [["Start", start], ["Target", target]] as const) {
+    if (value && !isDay(value)) throw new Error(`${label}: ${name} ${value} is not a date written YYYY-MM-DD.`);
+  }
+  if (start && target && target < start) throw new Error(`${label}: Target ${target} is before its Start ${start}.`);
+}
+
+/** Refuses before any write when the plan's Project lacks the Start or Target date field. */
+async function requireDateFields({ plan, repo, number }: Planned) {
+  const found = await plan.getProject(repo.owner, number);
+  if (!found?.dateFields?.start || !found.dateFields.target) {
+    throw new Error(`GitHub Project #${number} has no Start and Target date fields. Run setup_plan to add them, then schedule again.`);
+  }
+}
+
+const shown = (date: string | null | undefined) => date ?? "none";
+
+/** Gives the plan's Project its Start and Target date fields when it lacks them, as the timeline's banner asks. */
+export async function addDateFields(deps: ShapingDeps, projectId: string) {
+  const { plan, repo, number } = await plannedProject(deps, projectId);
+  return { date_fields: await plan.ensureDateFields(repo.owner, number), roadmap: ROADMAP_NOTE };
+}
+
+/**
+ * Sets, moves or clears the Start and Target dates of plan items, each with its own dates. Every item
+ * is checked before anything is written: a date that is not YYYY-MM-DD, a Target before its Start
+ * (counting the date an item keeps), an issue outside the plan, a Project without the date fields.
+ * Returns each item's old and new dates.
+ */
+export async function schedule(deps: ShapingDeps, projectId: string, items: ScheduleItem[]) {
+  if (!items.length) throw new Error("Give at least one issue to schedule.");
+  const seen = new Set<number>();
+  for (const { issue } of items) {
+    if (seen.has(issue)) throw new Error(`#${issue} appears twice. Give each issue once, with both of its dates.`);
+    seen.add(issue);
+  }
+  const planned = await plannedProject(deps, projectId);
+  const { plan, repo, number, project } = planned;
+  const [inPlan] = await Promise.all([plan.listItems(repo.owner, number, repo), requireDateFields(planned)]);
+  const byNumber = new Map(inPlan.map((i) => [i.number, i]));
+  const changes = items.map((change) => {
+    const item = byNumber.get(change.issue);
+    if (!item) throw new Error(`#${change.issue} is not in the plan of ${project.name}. Add it with plan_issue first.`);
+    const start = change.start === undefined ? item.start : change.start;
+    const target = change.target === undefined ? item.target : change.target;
+    checkDates(`#${change.issue}`, start, target);
+    return { change, item };
+  });
+  await Promise.all(
+    changes.map(async ({ change }) => {
+      const dates = { ...(change.start !== undefined ? { start: change.start } : {}), ...(change.target !== undefined ? { target: change.target } : {}) };
+      const result = await plan.setDates(repo, number, change.issue, dates);
+      if (result !== "set") throw new Error(`#${change.issue} could not be scheduled: ${result === "no-field" ? "the Project has no Start or Target field; run setup_plan" : "it is not in the Project"}.`);
+    }),
+  );
+  const scheduled = changes.map(({ change, item }) => ({
+    issue: item.number,
+    kind: item.kind ?? null,
+    title: item.title,
+    ...(change.start !== undefined ? { start: { from: item.start ?? null, to: change.start } } : {}),
+    ...(change.target !== undefined ? { target: { from: item.target ?? null, to: change.target } } : {}),
+  }));
+  const summary = scheduled
+    .map((s) => {
+      const moves = [s.start && `Start ${shown(s.start.from)} to ${shown(s.start.to)}`, s.target && `Target ${shown(s.target.from)} to ${shown(s.target.to)}`].filter(Boolean);
+      return `#${s.issue} ${s.title}: ${moves.length ? moves.join(", ") : "unchanged"}`;
+    })
+    .join("; ");
+  return { scheduled, summary };
 }
 
 const ACTIVE = new Set(["queued", "running", "waiting"]);

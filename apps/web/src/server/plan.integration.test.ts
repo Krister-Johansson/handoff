@@ -25,7 +25,7 @@ async function planned() {
   const status = (issue: number, value: string | undefined) => {
     plan.itemsOf(repo).get(issue)!.status = value;
   };
-  return { github, plan, project, issue, status };
+  return { github, plan, project, number, issue, status };
 }
 
 test("loadPlan nests stories under their epic and tasks under their story, with each task's status, blockers and latest run", async () => {
@@ -122,6 +122,45 @@ test("a task in an unknown status column is listed under other", async () => {
   const columns = Object.fromEntries(Object.entries(view.board).map(([column, tasks]) => [column, tasks.map((t) => t.number)]));
   expect(columns).toEqual({ Shaping: [], Ready: [ready], Running: [], "In review": [], Done: [closed], Other: [parked] });
   expect(view.epics[0]!.stories[0]!.progress.byStatus.Other).toBe(1);
+});
+
+test("loadPlan joins each task's runs into actual strips and marks late tasks from live blockers", async () => {
+  const { github, plan, project, number, issue } = await planned();
+  const epic = await issue("Project management", ["epic"]);
+  const story = await issue("Dates", ["story"], epic);
+  const migration = await issue("Add the column", ["task"], story);
+  const gate = await issue("Read the column", ["task"], story);
+  github.issues.get(gate)!.blockedBy = [migration];
+  expect(await plan.setDates(repo, number, migration, { start: "2026-10-05", target: "2026-10-07" })).toBe("set");
+  expect(await plan.setDates(repo, number, gate, { start: "2026-10-08", target: "2026-10-12" })).toBe("set");
+  const start = (task: number) => startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues: [task] }, github);
+  const first = await start(migration);
+  await db
+    .update(runs)
+    .set({ status: "cancelled", startedAt: new Date("2026-10-05T09:00:00Z"), finishedAt: new Date("2026-10-05T10:00:00Z") })
+    .where(eq(runs.id, first.id));
+  const second = await start(migration);
+  await db.update(runs).set({ status: "running", startedAt: new Date("2026-10-09T08:00:00Z") }).where(eq(runs.id, second.id));
+
+  const now = new Date(2026, 9, 10, 12);
+  const view = await loadPlan(db, github, plan, project.id, { now });
+  if ("error" in view) throw new Error(view.error);
+  const timeline = view.timeline!;
+  const of = (n: number) => timeline.items.find((i) => i.number === n)!;
+  expect(of(migration).actual).toEqual([
+    { runId: second.id, status: "running", start: "2026-10-09T08:00:00.000Z", end: now.toISOString(), active: true },
+    { runId: first.id, status: "cancelled", start: "2026-10-05T09:00:00.000Z", end: "2026-10-05T10:00:00.000Z", active: false },
+  ]);
+  expect(of(migration)).toMatchObject({ planned: { start: "2026-10-05", end: "2026-10-07" }, overdueDays: 3 });
+  expect(of(gate)).toMatchObject({ late: true, waitingOn: [migration] });
+  expect(of(story).derived).toEqual({ start: "2026-10-05", end: "2026-10-12" });
+  expect(timeline.arrows).toEqual([{ from: migration, to: gate, late: true }]);
+
+  // The blocker closes on GitHub: the next read no longer counts the task late.
+  github.issues.get(migration)!.state = "closed";
+  const later = await loadPlan(db, github, plan, project.id, { now });
+  if ("error" in later) throw new Error(later.error);
+  expect(later.timeline!.items.find((i) => i.number === gate)).toMatchObject({ late: false, waitingOn: [] });
 });
 
 test("without a plan number loadPlan says there is no plan, and without the project scope it says what is missing", async () => {

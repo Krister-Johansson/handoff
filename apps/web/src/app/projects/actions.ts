@@ -9,7 +9,7 @@ import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
-import { listGitHubProjects, moveToReady, moveToShaping, planIssue, setupPlan, type ShapingDeps } from "@/server/shaping";
+import { addDateFields, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { deleteProject, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
@@ -298,4 +298,22 @@ export async function unlinkPlanAction(input: { projectId: string }): Promise<Ac
   revalidatePath("/settings");
   revalidatePath(planPath(parsed.data.projectId));
   return { ok: true };
+}
+
+const day = z.iso.date().nullable();
+const ScheduleSchema = z.object({ projectId: z.string().uuid(), issue: z.number().int().positive(), start: day, target: day });
+
+/** The schedule dialog's save: writes one item's Start and Target to the plan's GitHub Project; null clears a date. */
+export async function scheduleAction(input: z.input<typeof ScheduleSchema>): Promise<ActionState> {
+  const parsed = ScheduleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Give the dates as YYYY-MM-DD, or clear them." };
+  const { projectId, issue, start, target } = parsed.data;
+  return onPlan(projectId, (deps) => schedule(deps, projectId, [{ issue, start, target }]));
+}
+
+/** The timeline banner's Add date fields: creates the Start and Target fields on the plan's GitHub Project. */
+export async function addDateFieldsAction(input: { projectId: string }): Promise<ActionState> {
+  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project has no plan to add dates to." };
+  return onPlan(parsed.data.projectId, (deps) => addDateFields(deps, parsed.data.projectId));
 }

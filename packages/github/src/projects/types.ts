@@ -24,7 +24,22 @@ export type PlanItem = {
   /** Pull requests GitHub links to the issue. */
   prNumbers: number[];
   updatedAt: string;
+  /*
+   * The fields below are optional so plan items built by hand (in tests and fixtures) need not name
+   * them; the readers always set them.
+   */
+  /** Every issue GitHub records as blocking this one, open or closed; `blockedBy` is the open ones. */
+  blockers?: number[] | undefined;
+  /** YYYY-MM-DD from the Project's Start date field. */
+  start?: string | undefined;
+  /** YYYY-MM-DD from the Project's Target date field. */
+  target?: string | undefined;
+  /** The item's iteration, when the Project has an iteration field named Iteration; read only. */
+  iteration?: PlanIteration | undefined;
 };
+
+/** An iteration of a Project's iteration field: its title, first day (YYYY-MM-DD) and length in days. */
+export type PlanIteration = { title: string; startDate: string; duration: number };
 
 export type PlanProject = {
   number: number;
@@ -32,12 +47,36 @@ export type PlanProject = {
   title: string;
   /** The option id of each Status handoff writes; undefined when the Project has no such option. */
   statusOptions: Record<PlanStatus, string | undefined>;
+  /**
+   * The ids of the Start and Target date fields, each undefined while the Project lacks it. Optional so
+   * Projects built by hand need not name it; the readers always set it.
+   */
+  dateFields?: PlanDateFieldIds | undefined;
 };
+
+/** The field ids of a Project's Start and Target date fields; undefined for one it lacks. */
+export type PlanDateFieldIds = { start: string | undefined; target: string | undefined };
 
 /** One ancestor of an issue, as `lineage` returns it. */
 export type PlanAncestor = { number: number; title: string; body: string; kind: PlanKind | undefined };
 
 export type SetStatusResult = "set" | "not-in-project" | "no-option";
+export type SetDatesResult = "set" | "not-in-project" | "no-field";
+
+/** An issue to create in the plan: its labels, its parent and blockers, and its Start and Target (YYYY-MM-DD). */
+export type NewPlanIssue = {
+  project: number;
+  title: string;
+  body: string;
+  labels: string[];
+  parent?: number | undefined;
+  blockedBy?: number[] | undefined;
+  start?: string | undefined;
+  target?: string | undefined;
+};
+
+/** Dates to write on an item, YYYY-MM-DD: a date sets the field, null clears it, a missing key leaves it. */
+export type PlanDates = { start?: string | null; target?: string | null };
 
 /** One of a user's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
 export type PlanProjectChoice = { number: number; title: string; url: string; linked: boolean; missingStatusOptions: PlanStatus[] };
@@ -70,10 +109,10 @@ export interface ProjectsPort {
   createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject>;
   /** Creates the kind labels epic, story and task on the repository when they are missing. */
   ensureLabels(repo: RepoRef): Promise<void>;
-  /** Creates an issue with its labels, parent and blockers, and adds it to the Project in Shaping. */
+  /** Creates an issue with its labels, parent and blockers, adds it to the Project in Shaping, then sets its Start and Target when given. */
   createIssue(
     repo: RepoRef,
-    input: { project: number; title: string; body: string; labels: string[]; parent?: number; blockedBy?: number[] },
+    input: NewPlanIssue,
   ): Promise<{ number: number; url: string }>;
   /**
    * Brings an existing issue into the plan: adds its labels, makes it a sub-issue of `parent` when
@@ -82,6 +121,16 @@ export interface ProjectsPort {
   addIssue(repo: RepoRef, input: { project: number; issue: number; labels: string[]; parent?: number }): Promise<void>;
   /** The parent and the grandparent of an issue, nearest first, each with title, body and kind. */
   lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]>;
+  /**
+   * Sets or clears (null) the Start and Target dates (YYYY-MM-DD) of an issue's item; a date left out
+   * stays as it is. "no-field" when the Project lacks a date field it would write, and then nothing changes.
+   */
+  setDates(repo: RepoRef, project: number, issue: number, dates: PlanDates): Promise<SetDatesResult>;
+  /**
+   * Creates the Start and Target date fields on a user's Project when missing and returns their ids.
+   * Throws when a field of that name exists but is not a date field.
+   */
+  ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds>;
   /** Whether the token can write Projects: `project` among a classic token's scopes. */
   scopes(): Promise<{ project: boolean; classic: boolean }>;
 }

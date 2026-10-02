@@ -92,6 +92,34 @@ mutation AddPlanItem($projectId: ID!, $contentId: ID!) {
   }
 }
 
+mutation CreatePlanDateField($projectId: ID!, $name: String!) {
+  createProjectV2Field(input: { projectId: $projectId, dataType: DATE, name: $name }) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2Field {
+        id
+        dataType
+      }
+    }
+  }
+}
+
+mutation SetPlanDate($projectId: ID!, $itemId: ID!, $fieldId: ID!, $date: Date!) {
+  updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { date: $date } }) {
+    projectV2Item {
+      id
+    }
+  }
+}
+
+mutation ClearPlanField($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
+  clearProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId }) {
+    projectV2Item {
+      id
+    }
+  }
+}
+
 mutation SetPlanStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
   updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId } }) {
     projectV2Item {
