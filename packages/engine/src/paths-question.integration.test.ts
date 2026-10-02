@@ -111,3 +111,28 @@ test("Allow for this run passes the attempt and the next attempt may change the 
   // The tester ran once per coder attempt, so the allowed attempt went on to it.
   expect(cli.requests).toHaveLength(3);
 });
+
+test("Send back gives the coder the files", async () => {
+  const cli = new FakeCliExecutor([coderWrites({ "CHANGELOG.md": "# Changelog\n", "notes.txt": "scratch\n" })]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsPass)));
+  const undo: FakeReply = async (request, options) => {
+    git(request.cwd, "rm", "-q", "notes.txt");
+    git(request.cwd, "commit", "-qm", "drop notes");
+    return (coderWrites({}) as Extract<FakeReply, (...args: never[]) => unknown>)(request, options);
+  };
+  cli.push(undo, { output: outputs.approve });
+  await answerOpen(run.id, "send_back", "Scratch files do not belong in the repository.");
+  await drain(deps);
+
+  const attempts = await coders(run.id);
+  expect(attempts.map((e) => [e.attempt, e.status])).toEqual([
+    [1, "repaired"],
+    [2, "passed"],
+  ]);
+  expect(attempts[0]!.error).toMatchObject({ code: "paths_outside_plan", detail: { files: ["notes.txt"] } });
+  const sentBack = cli.requests[1]!;
+  expect(sentBack.session.mode).toBe("new");
+  expect(sentBack.systemPrompt).toContain("`notes.txt`");
+  expect(sentBack.systemPrompt).toContain("Scratch files do not belong in the repository.");
+  expect((await inspect(db, run.id)).run.status).toBe("succeeded");
+});

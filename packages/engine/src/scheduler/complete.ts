@@ -409,6 +409,41 @@ export async function askAboutPaths(
   await yieldWaiting(tx, { row, workerId: input.workerId, wait: { kind: "human", token: question!.id } });
 }
 
+/**
+ * Fails the attempt and starts the node's next attempt at once with a note, the way a repair does,
+ * so the run goes on without routing the failure.
+ */
+async function sendBack(tx: DbTx, input: { row: NodeExecutionRow; workerId: string; error: ExecutionError; checks: CheckResult[]; note: string }) {
+  const { row, error } = input;
+  const { state } = await lockRun(tx, row.runId);
+  const [updated] = await tx
+    .update(nodeExecutions)
+    .set({ ...releasedLease, status: "failed", error, finishedAt: sql`now()` })
+    .where(owned(row, input.workerId))
+    .returning();
+  if (!updated) throw new LeaseLostError(row.id);
+  const failed: NodeResult = { output: row.output, executionId: row.id, attempt: row.attempt, lastFailure: { checks: input.checks, error } };
+  const next = rememberAttempt(mergeState(state, row.nodeKey, failed), row, row.output);
+  const [created] = await tx
+    .insert(nodeExecutions)
+    .values({
+      runId: row.runId,
+      nodeKey: row.nodeKey,
+      nodeType: row.nodeType,
+      executorKind: row.executorKind,
+      attempt: row.attempt + 1,
+      repairedFromExecutionId: row.id,
+      repairNote: input.note,
+      trigger: { kind: "repair", fromExecutionId: row.id },
+    })
+    .returning({ id: nodeExecutions.id, attempt: nodeExecutions.attempt });
+  await tx.update(runs).set({ state: next, stateVersion: sql`${runs.stateVersion} + 1`, status: "running" }).where(eq(runs.id, row.runId));
+  await appendEvents(tx, row.runId, [
+    { type: "node.failed", payload: { nodeKey: row.nodeKey, attempt: row.attempt, error }, nodeExecutionId: row.id },
+    { type: "node.created", payload: { nodeKey: row.nodeKey, attempt: created!.attempt, via: "paths" }, nodeExecutionId: created!.id },
+  ]);
+}
+
 type PathsQuestion = { option: string | null; answer: string | null; answeredBy: string | null; context: Record<string, unknown> };
 
 /**
@@ -421,6 +456,16 @@ export async function resolvePaths(tx: DbTx, input: { row: NodeExecutionRow; wor
   const by = question.answeredBy ?? "a person";
   const note = question.answer && question.answer !== question.option ? question.answer.trim() : "";
   const checks = (row.checks ?? []) as CheckResult[];
+  const listed = files.map((f) => `\`${f}\``).join(", ");
+  const error: ExecutionError = { code: "paths_outside_plan", message: `files outside the plan: ${files.join(", ")}`, detail: { files } };
+  if (question.option === "send_back") {
+    const told = [
+      `${by} sent this back because it changed files outside the plan: ${listed}.`,
+      "Undo your changes to them. If the task cannot be done without one, keep it and list it in extraPaths with the reason.",
+      ...(note ? [`They said: ${note}`] : []),
+    ].join(" ");
+    return sendBack(tx, { row, workerId: input.workerId, error, checks, note: told });
+  }
   const reason = `Allowed by ${by} for this run${note ? `: ${note}` : "."}`;
   const allowed = checks.map((c) => (c.kind === "diff_within_paths" && !c.passed ? { ...c, passed: true, detail: `files outside owned paths allowed by ${by}: ${files.join(", ")}` } : c));
   const extraPaths = files.map((path) => ({ path, reason, attempt: row.attempt, by: "person" as const }));
