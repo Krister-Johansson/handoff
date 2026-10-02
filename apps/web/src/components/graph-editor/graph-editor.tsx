@@ -235,7 +235,8 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                   ))}
                 </Panel>
                 <Panel position="top-center" role="toolbar" aria-label="Graph" className={cn(PANEL_CLASS, "flex items-center gap-2 py-1.5 pr-2 pl-3 whitespace-nowrap")}>
-                  <span className="font-mono text-[13px] font-medium">{graphName}</span>
+                  {/* The page's heading: the graph page has no other, and where_am_i reports it. */}
+                  <h1 className="font-mono text-[13px] font-medium">{graphName}</h1>
                   <Badge variant="outline" className="font-mono">
                     v{version}
                   </Badge>
