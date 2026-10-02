@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { runParts } from "./forecast";
+import { forecastOf, runParts } from "./forecast";
 
 /** An instant `minutes` after 09:00 on 1 October 2026. */
 const at = (minutes: number) => new Date(Date.UTC(2026, 9, 1, 9, minutes));
@@ -54,4 +54,23 @@ test("agent time is the wall time less waiting and queue, never below zero", () 
 
   const swamped = runParts(run(10), [{ createdAt: at(0), answeredAt: at(8) }], [], [execution(1, 5)]);
   expect(swamped).toMatchObject({ wallMs: 10 * MIN, waitingMs: 8 * MIN, queueMs: 5 * MIN, agentMs: 0 });
+});
+
+/** A measured run of `agent`, `queue` and `waiting` minutes that cost `costUsd`. */
+const sample = (agent: number, queue: number, waiting: number, costUsd: number) => ({
+  wallMs: (agent + queue + waiting) * MIN,
+  agentMs: agent * MIN,
+  queueMs: queue * MIN,
+  waitingMs: waiting * MIN,
+  costUsd,
+});
+
+test("usually is the median wall time and the parts add up to it", () => {
+  // Wall times 40, 50, 60, 70 and 100 minutes; over all five, agent 200, queue 40 and waiting 80 minutes of 320.
+  const samples = [sample(30, 10, 0, 1), sample(30, 0, 20, 2), sample(40, 10, 10, 3), sample(50, 10, 10, 4), sample(50, 10, 40, 10)];
+  const forecast = forecastOf(samples, "M");
+  expect(forecast).toEqual({ size: "M", source: "runs", minutes: 60, parts: { agent: 37.5, queue: 7.5, waiting: 15 }, costUsd: 3, runs: 5, measuredMinutes: 60 });
+
+  // An even count takes the mean of the middle two, as percentile_cont(0.5) does.
+  expect(forecastOf([...samples, sample(80, 0, 0, 5)], "M")).toMatchObject({ minutes: 65, costUsd: 3.5, runs: 6 });
 });

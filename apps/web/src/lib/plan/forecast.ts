@@ -1,3 +1,5 @@
+import type { PlanSize } from "@handoff/github";
+
 /** A finished run's times: wall time runs from its first claim to its end, nights included. */
 export type ForecastRun = { startedAt: Date; finishedAt: Date; mergeQueuedAt: Date | null; mergeRequestedAt: Date | null };
 /** A question a Human gate asked; unanswered, it stays open until the run ends. */
@@ -52,4 +54,52 @@ export function runParts(run: ForecastRun, questions: ForecastQuestion[], permis
   const waitingMs = unionLength(open, start, end);
   const queueMs = executions.reduce((sum, e) => sum + queueInRun(e, start), 0);
   return { wallMs, waitingMs, queueMs, agentMs: Math.max(0, wallMs - waitingMs - queueMs) };
+}
+
+/** A run that counts toward its size's forecast: its parts and its reported cost. */
+export type ForecastSample = RunParts & { costUsd: number };
+
+/** What a size usually takes, in minutes, from this project's succeeded runs of that size. */
+export type Forecast = {
+  size: PlanSize;
+  source: "runs" | "default";
+  /** The median wall time of the runs, or the size's default under five runs. */
+  minutes: number;
+  /** Agent, queue and waiting-on-you minutes, scaled to add up to `minutes`. */
+  parts: { agent: number; queue: number; waiting: number };
+  /** The median reported cost of a run, in US dollars. */
+  costUsd: number;
+  runs: number;
+  /** The median wall time measured over the runs. */
+  measuredMinutes: number;
+};
+
+/** The median, the mean of the middle two for an even count. */
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+/**
+ * A size's forecast: usually the median wall time, split by each part's share of the parts summed over every
+ * run, so agent, queue and waiting add up to the median shown.
+ */
+export function forecastOf(samples: ForecastSample[], size: PlanSize): Forecast {
+  const minutes = median(samples.map((s) => s.wallMs)) / 60_000;
+  const sum = (part: (s: ForecastSample) => number) => samples.reduce((total, s) => total + part(s), 0);
+  const agent = sum((s) => s.agentMs);
+  const queue = sum((s) => s.queueMs);
+  const waiting = sum((s) => s.waitingMs);
+  const whole = agent + queue + waiting;
+  const share = (part: number) => (whole > 0 ? (minutes * part) / whole : 0);
+  return {
+    size,
+    source: "runs",
+    minutes,
+    parts: { agent: share(agent), queue: share(queue), waiting: share(waiting) },
+    costUsd: median(samples.map((s) => s.costUsd)),
+    runs: samples.length,
+    measuredMinutes: minutes,
+  };
 }
