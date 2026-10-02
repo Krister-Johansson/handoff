@@ -10,6 +10,7 @@ import { parsePlanFilters } from "@/lib/plan/filters";
 import { parseZoom } from "@/lib/project-tab";
 
 import { PlanTimeline } from "./plan-timeline";
+import { KEY_DELAY } from "./use-bar-drag";
 import { TimelineControls } from "./timeline-parts";
 import { Sizing } from "./plan-context";
 import { epic, planView, PROJECT, REPO_URL, run, sizedTimelineOf, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
@@ -38,7 +39,15 @@ afterEach(() => {
   vi.clearAllMocks();
   // Sonner keeps its toasts in a module; each test starts with none.
   toast.dismiss();
+  // Drops the timeouts a test on fake timers left pending, such as a toast's auto close.
+  vi.useRealTimers();
 });
+
+/**
+ * Testing Library's waitFor and findBy advance fake timers only when they see Jest's; `vi` stands in for it, so
+ * they advance Vitest's fake clock instead of waiting on the wall clock.
+ */
+Object.assign(globalThis, { jest: { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) } });
 
 /** Friday 2026-10-02 at noon: the today of every test. */
 const NOW = new Date("2026-10-02T12:00:00Z");
@@ -506,8 +515,14 @@ const sized = planView([
   ]),
 ]);
 
-/** The sized plan at the Days zoom with the Plan page's sizing and its toasts. The chart opens on Monday Sep 14, so Oct 1 is 17 days of 96 px in. */
+/**
+ * The sized plan at the Days zoom with the Plan page's sizing and its toasts. The chart opens on Monday Sep 14, so
+ * Oct 1 is 17 days of 96 px in. Timeouts are fake: a keyboard move's save, sonner's renders and auto close, and
+ * the hover card's open delay run on the fake clock, which only waitFor, findBy and the test move, so no test
+ * depends on how fast the machine runs.
+ */
 function renderSized(over: { plan?: typeof sized; runs?: TimelineRun[]; zoom?: Zoom } = {}) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const plan = over.plan ?? sized;
   const timeline = sizedTimelineOf(plan, over.runs ?? [], NOW);
   const spans = new Map(timeline.items.map((i) => [i.number, i.planned]));
@@ -717,7 +732,11 @@ test("arrows move a focused bar a day and Shift with an arrow changes its estima
   expect(widthOf(bar)).toBe(32);
   expect(actions.moveItemAction).not.toHaveBeenCalled();
 
-  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 146, start: "2026-10-05", target: "2026-10-05", estimate: 2 }), { timeout: 2000 });
+  // Just short of the pause after the last key nothing is saved; at the pause the move is.
+  await act(() => vi.advanceTimersByTimeAsync(KEY_DELAY - 1));
+  expect(actions.moveItemAction).not.toHaveBeenCalled();
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 146, start: "2026-10-05", target: "2026-10-05", estimate: 2 });
   expect(await screen.findByText("Moved #146 to Oct 5")).toBeInTheDocument();
   expect(screen.getByText("Saved to GitHub. Manual estimate 2h.")).toBeInTheDocument();
   expect(actions.moveItemAction).toHaveBeenCalledTimes(1);
@@ -728,7 +747,7 @@ test("arrows move a focused bar a day and Shift with an arrow changes its estima
   expect(dragTip()).not.toBeInTheDocument();
   fireEvent.keyDown(bar, { key: "e" });
   expect(await screen.findByRole("dialog", { name: "Size and estimate of #146" })).toBeInTheDocument();
-  await new Promise((r) => setTimeout(r, 900));
+  await act(() => vi.advanceTimersByTimeAsync(KEY_DELAY));
   expect(actions.moveItemAction).toHaveBeenCalledTimes(1);
 });
 
