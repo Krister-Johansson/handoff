@@ -2,7 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, questions, runs, sql } from "@handoff/db";
+import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, projectSchedulers, questions, runs, schedulerEvents, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG } from "../lib/assistant/catalog";
@@ -666,4 +666,11 @@ test("run_again over MCP starts a task its failed run left in Running", async ()
   const again = await call("run_again", { run_id: first.run_id });
   expect(again).toMatchObject({ run_id: expect.any(String), status: "queued" });
   expect(await statusOf(ready)).toBe("Running");
+});
+
+test("start_scheduler refuses a project without a plan and names setup_plan", async () => {
+  const refused = await call("start_scheduler", { project: "sandbox" });
+  expect(refused).toEqual({ error: expect.stringContaining("setup_plan") });
+  expect(refused.error).toMatch(/^sandbox has no plan/);
+  expect(await db.select().from(projectSchedulers)).toEqual([]);
 });

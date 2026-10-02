@@ -489,6 +489,23 @@ export const CATALOG: ToolSpec[] = [
     summarize: (a) => `Plan #${a.issue} as a task${a.story ? ` under story #${a.story}` : ""} in ${a.project}`,
   }),
   spec({
+    name: "start_scheduler",
+    title: "Start the scheduler",
+    description:
+      "Turns on a project's scheduler, or resumes it after a pause, and changes the settings given. The scheduler starts runs on its own on the plan's Ready tasks without open blockers, in Project order or by the Priority field, until max_runs runs of the project are active, and starts nothing while a run failed or a question, review or permission waits for a person. A person decides what is Ready. Refuses a project without a plan, priority order without a Priority field, and missing access to GitHub Projects.",
+    input: z.object({
+      project,
+      max_runs: z.number().int().min(1).max(10).optional().describe("The most runs of the project active at once, 1 to 10; 1 when first turned on"),
+      order: z.enum(["project", "priority"]).optional().describe("project for Project order, priority for the Priority field first; project when first turned on"),
+      graph: z.string().optional().describe("The graph its runs use; the project's default graph when first turned on"),
+    }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    openWorld: true,
+    summarize: (a) => `Let handoff start ${a.max_runs ? `up to ${a.max_runs} ${a.max_runs === 1 ? "run" : "runs"} at a time` : "runs"} on Ready tasks in ${a.project}`,
+  }),
+  spec({
     name: "go_to",
     title: "Open a page",
     description: "Opens a page of this dashboard in the person's browser: a path such as /projects/<id>/runs/<run id>, or a dashboard URL a tool returned.",

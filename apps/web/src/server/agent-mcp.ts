@@ -17,6 +17,7 @@ import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
 import { reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
+import { startScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
 
 /**
@@ -387,6 +388,9 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       planIssue(shaping, (await findProject(db, project)).id, { issue, ...(story !== undefined ? { story } : {}) }),
 
     schedule: async ({ project, items }: { project: string; items: ScheduleItem[] }) => schedule(shaping, (await findProject(db, project)).id, items),
+
+    start_scheduler: async ({ project, max_runs, order, graph }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string }) =>
+      startScheduler({ db, projects: plan }, (await findProject(db, project)).id, { maxRuns: max_runs, order, graph }, actor),
 
     list_library: async () => {
       const { skills, mcp, agents, groups } = await listLibraryIndex(db);
