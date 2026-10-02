@@ -179,6 +179,15 @@ function readsTheApp(seen: { page?: string }) {
   ]);
 }
 
+test("a demo set to UI changes in a repository without a launch file leaves through skipped, saying so", async () => {
+  const cli = new FakeCliExecutor([]);
+  const { run } = await demoRun(cli, { document: uiGraph, files: { "README.md": "no launch file" }, writes: { "src/components/task-list.tsx": "export {};\n" } });
+  const { run: row, executions } = await inspect(db, run.id);
+  expect(row.status).toBe("succeeded");
+  expect(executions.find((e) => e.nodeKey === "demo")!.output).toMatchObject({ skipped: true, reason: expect.stringContaining(".claude/launch.json") });
+  expect(cli.requests).toHaveLength(0);
+});
+
 test("the seed command runs after services start and before the app", async () => {
   const order = join(mkdtempSync(join(tmpdir(), "handoff-order-")), "order.log");
   const docker: DockerExec = async (args) => {

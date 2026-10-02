@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { DemoOutputSchema, markNew, serverLogWarnings, uiPathsOf, type DemoWarning } from "@handoff/core";
+import { DemoOutputSchema, LAUNCH_FILE, markNew, serverLogWarnings, uiPathsOf, type DemoWarning } from "@handoff/core";
 import { and, desc, eq, ne, nodeExecutions, runs, screenshots, sql, type Db } from "@handoff/db";
 import { changedFiles, isOwned } from "../contract/checks.ts";
 import type { MaterializedLibrary } from "../library/materialize.ts";
@@ -64,7 +64,11 @@ async function skipReason(ctx: ExecutorContext, workdir: string): Promise<string
   if (ctx.node.config.when !== "ui_changes") return undefined;
   const paths = uiPathsOf(ctx.project.uiPaths);
   const files = await changedFiles(workdir, ctx.run.baseBranch);
-  if (files.some((file) => isOwned(file, paths))) return undefined;
+  if (files.some((file) => isOwned(file, paths))) {
+    // A template demos UI changes; a repository that has not said how to start its app has no demo to give.
+    if (!existsSync(join(workdir, LAUNCH_FILE))) return `This repository has no ${LAUNCH_FILE}, so handoff cannot start the app to show the change. Add one to demo UI changes.`;
+    return undefined;
+  }
   if (!files.length) return "The change has no files, so there is nothing new to show in the app.";
   const listed = files.slice(0, LISTED_FILES).join(", ") + (files.length > LISTED_FILES ? ` and ${files.length - LISTED_FILES} more` : "");
   return `The change touches no file under the project's UI paths (${paths.join(", ")}), so there is nothing new to show in the app. It changes ${listed}.`;

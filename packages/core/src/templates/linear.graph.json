@@ -1,0 +1,160 @@
+{
+  "attributes": {
+    "name": "linear",
+    "startNode": "planner"
+  },
+  "options": {
+    "type": "directed",
+    "multi": false,
+    "allowSelfLoops": false
+  },
+  "nodes": [
+    {
+      "key": "planner",
+      "attributes": {
+        "type": "planner",
+        "label": "Plan",
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "key": "coder",
+      "attributes": {
+        "type": "coder",
+        "label": "Code",
+        "x": 340,
+        "y": 0,
+        "config": {
+          "maxTurns": "auto"
+        }
+      }
+    },
+    {
+      "key": "demo",
+      "attributes": {
+        "type": "demo",
+        "label": "Demo",
+        "x": 680,
+        "y": 0,
+        "config": {
+          "when": "ui_changes"
+        }
+      }
+    },
+    {
+      "key": "try",
+      "attributes": {
+        "type": "human_gate",
+        "label": "Try it",
+        "x": 1020,
+        "y": 0,
+        "config": {
+          "mode": "try"
+        }
+      }
+    },
+    {
+      "key": "pr",
+      "attributes": {
+        "type": "pr",
+        "label": "Pull request",
+        "x": 1360,
+        "y": 0
+      }
+    },
+    {
+      "key": "merge",
+      "attributes": {
+        "type": "merge",
+        "label": "Merge",
+        "x": 1700,
+        "y": 0
+      }
+    }
+  ],
+  "edges": [
+    {
+      "key": "planner->coder",
+      "source": "planner",
+      "target": "coder",
+      "attributes": {
+        "loop": false
+      }
+    },
+    {
+      "key": "coder->demo",
+      "source": "coder",
+      "target": "demo",
+      "attributes": {
+        "port": "done"
+      }
+    },
+    {
+      "key": "demo->try",
+      "source": "demo",
+      "target": "try",
+      "attributes": {
+        "port": "done"
+      }
+    },
+    {
+      "key": "demo->pr",
+      "source": "demo",
+      "target": "pr",
+      "attributes": {
+        "port": "skipped"
+      }
+    },
+    {
+      "key": "try->pr",
+      "source": "try",
+      "target": "pr",
+      "attributes": {
+        "port": "approve"
+      }
+    },
+    {
+      "key": "try->coder",
+      "source": "try",
+      "target": "coder",
+      "attributes": {
+        "port": "changes"
+      }
+    },
+    {
+      "key": "pr->merge",
+      "source": "pr",
+      "target": "merge",
+      "attributes": {
+        "loop": false,
+        "condition": {
+          "all": [
+            {
+              "eq": [
+                "node.output.feedback.ci.status",
+                "success"
+              ]
+            },
+            {
+              "neq": [
+                "node.output.feedback.review.decision",
+                "changes_requested"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "key": "merge->pr",
+      "source": "merge",
+      "target": "pr",
+      "attributes": {
+        "port": "update",
+        "loop": true,
+        "maxAttempts": 3
+      }
+    }
+  ]
+}
