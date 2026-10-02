@@ -1,6 +1,6 @@
 # 7. GitHub Projects is the plan store
 
-Date: 2026-10-02. Status: accepted.
+Date: 2026-10-02. Status: accepted. ADR 0008 changes one point: the worker reads the Project when the scheduler checks a project.
 
 ## Decision
 

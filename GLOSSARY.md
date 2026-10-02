@@ -22,4 +22,5 @@ Terms used in handoff. Test names, types and issue titles use these words.
 - **Worktree**: a git worktree created per run where a Coder node works. A failed run keeps it until the run is repaired or cancelled, or `handoff gc` removes it.
 - **Library**: the catalog of skills and MCP servers that can be enabled per node or per edge.
 - **Engine**: the worker process that schedules node executions, evaluates contracts and edges, and writes events.
+- **Scheduler**: a project's switch that lets handoff start runs on its own. Once a person turns it on, the worker starts runs on the plan's Ready tasks, up to a limit of active runs, and starts nothing while a failed run or a pending permission request holds the project. It is not the engine's scheduling of node executions, which the engine does for every run.
 - **Event**: one row in the events table, streamed to the dashboard. CLI stream-json lines become events.

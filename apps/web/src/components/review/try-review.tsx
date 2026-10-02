@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, ExternalLinkIcon, ListChecksIcon, RotateCwIcon } from "lucide-react";
-import { unstable_rethrow } from "next/navigation";
 import { answerReviewAction, restartTryItAction } from "@/app/inbox/actions";
 import { Screenshot, type Shot } from "@/components/runs/screenshot";
 import { Tag } from "@/components/tag";
@@ -17,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { cn } from "@/lib/utils";
 import { CARD } from "./styles";
+import { isNextNavigation } from "./send-review";
 
 /** The run's app as the gate started it: its address while it runs, or why it did not start. */
 export type TryPreview = { id?: string; url?: string; status: "running" | "failed"; error?: string };
@@ -41,16 +41,6 @@ const isTyping = (target: EventTarget | null) => target instanceof HTMLElement &
 const sectionId = (index: number) => `try-criterion-${index}`;
 
 type Option = "approve" | "changes";
-
-/** Whether an error is Next's own: the redirect a server action ends with, after Next has started the navigation. */
-function isNextNavigation(error: unknown) {
-  try {
-    unstable_rethrow(error);
-    return false;
-  } catch {
-    return true;
-  }
-}
 
 /** How a refusal lists the criteria a page tool can take. */
 const criteriaList = (acceptance: string[]) => `The criteria are: ${acceptance.map((text, i) => `${i + 1}. ${text}`).join("; ")}.`;

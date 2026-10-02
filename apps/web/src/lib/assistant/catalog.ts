@@ -642,7 +642,7 @@ export const CATALOG: ToolSpec[] = [
     input: z.object({
       project_id: z.string().describe("The project's id from list_projects"),
       view: z.enum(["tree", "board", "timeline"]).optional(),
-      zoom: z.enum(["weeks", "months"]).optional().describe("The timeline's zoom; it picks one from the dates when left out"),
+      zoom: z.enum(["days", "weeks", "months"]).optional().describe("The timeline's zoom: days at 96 px a day for dragging, weeks or months; it picks one from the dates when left out"),
       epic: z.union([z.number().int().positive(), z.literal("unplanned")]).optional().describe("An epic's issue number, or unplanned"),
       status: z.array(z.enum(["Shaping", "Ready", "Running", "In review", "Done"])).optional(),
       run: z.enum(["any", "active", "needs-you", "none"]).optional().describe("Tasks with an active run, whose run needs the person, or with no run"),

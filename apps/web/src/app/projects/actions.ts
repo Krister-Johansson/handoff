@@ -9,7 +9,7 @@ import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
-import { addDateFields, addEstimateFields, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
+import { addDateFields, addEstimateFields, listGitHubProjects, moveItem, moveToReady, moveToShaping, planIssue, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { deleteProject, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
@@ -333,6 +333,25 @@ export async function setSizeAction(input: z.input<typeof SetSizeSchema>): Promi
   if (!parsed.success) return { ok: false, error: "Give a size of S, M or L, or an estimate from 0 to 1000 hours." };
   const { projectId, issue, size, estimate } = parsed.data;
   return onPlan(projectId, (deps) => setSize(deps, projectId, { issue, ...(size !== undefined ? { size } : {}), ...(estimate !== undefined ? { estimate } : {}) }));
+}
+
+const MoveItemSchema = z.object({
+  projectId: z.string().uuid(),
+  issue: z.number().int().positive(),
+  start: day,
+  target: day,
+  estimate: z.number().min(0).max(1000).nullable().optional(),
+});
+
+/**
+ * A drop or a keyboard move on the timeline, and its Undo: writes Start and Target, and the manual estimate
+ * when the move set or cleared one, in one write. The person's drop is the decision, so there is no approval card.
+ */
+export async function moveItemAction(input: z.input<typeof MoveItemSchema>): Promise<ActionState> {
+  const parsed = MoveItemSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Give the dates as YYYY-MM-DD and an estimate from 0 to 1000 hours." };
+  const { projectId, issue, start, target, estimate } = parsed.data;
+  return onPlan(projectId, (deps) => moveItem(deps, projectId, { issue, start, target, ...(estimate !== undefined ? { estimate } : {}) }));
 }
 
 /** The timeline banner's Add the fields: creates Size and Estimate on the plan's GitHub Project. */

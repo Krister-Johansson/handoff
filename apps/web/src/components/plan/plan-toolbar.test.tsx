@@ -213,7 +213,7 @@ test("in Timeline the toolbar holds Today, Weeks or Months and the Legend, the c
   fireEvent.click(screen.getByRole("button", { name: "Legend" }));
   const legend = screen.getByRole("dialog", { name: "Legend" });
   expect(within(legend).getByText("Derived")).toBeInTheDocument();
-  expect(within(legend).getByText("Drag dates on GitHub's roadmap. This timeline shows the Project; it does not move dates.")).toBeInTheDocument();
+  expect(within(legend).getByText("Drag a task's bar to move its Start, or its end to set a manual estimate. Each drop saves to GitHub with Undo.")).toBeInTheDocument();
   fireEvent.keyDown(legend, { key: "Escape" });
   expect(screen.queryByRole("dialog", { name: "Legend" })).not.toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("button", { name: "Legend" })).toHaveFocus());

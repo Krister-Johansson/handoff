@@ -3,7 +3,7 @@
 import { useState, useSyncExternalStore, useTransition, type ReactNode, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClockIcon, CalendarIcon, ClockAlertIcon, InfoIcon,
- LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon } from "lucide-react";
+ LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon, TimerIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
 import { addDateFieldsAction, addEstimateFieldsAction } from "@/app/projects/actions";
@@ -27,9 +27,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { planPath } from "@/lib/paths";
 import type { Timeline, TimelineItem } from "@/lib/plan/schedule";
 import type { PlanFilters } from "@/lib/plan/filters";
+import { formatDuration } from "@/lib/plan/duration";
 import { BAR_TONE, taskColumn } from "@/lib/plan/task";
 import { chartRange } from "@/lib/plan/timeline-rows";
-import { defaultZoom, shortDay, timeScale, type Zoom } from "@/lib/plan/timeline-scale";
+import { defaultZoom, shortDay, timeScale, ZOOMS, type Zoom } from "@/lib/plan/timeline-scale";
 import { cn } from "@/lib/utils";
 import type { StartRunContext } from "./plan-actions";
 import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
@@ -64,7 +65,7 @@ const LEGEND: { label: string; swatch: string }[] = [
   { label: "Late", swatch: "h-0 border-t-[1.5px] border-danger-dot" },
 ];
 
-/** The timeline's legend in a popover, with the note that dates move on GitHub's roadmap. */
+/** The timeline's legend in a popover, with how bars move. */
 function Legend() {
   return (
     <Popover>
@@ -93,7 +94,7 @@ function Legend() {
         <Separator />
         <p className="flex gap-2 leading-snug text-muted-foreground">
           <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-          Drag dates on GitHub&apos;s roadmap. This timeline shows the Project; it does not move dates.
+          Drag a task&apos;s bar to move its Start, or its end to set a manual estimate. Each drop saves to GitHub with Undo.
         </p>
       </PopoverContent>
     </Popover>
@@ -101,7 +102,7 @@ function Legend() {
 }
 
 /**
- * The timeline's controls at the right end of the Plan toolbar: Today, Weeks or Months, and the Legend.
+ * The timeline's controls at the right end of the Plan toolbar: Today, Days, Weeks or Months, and the Legend.
  * Under 640 px, where the timeline is a list, the range it shows takes Today's place.
  */
 export function TimelineControls({
@@ -146,23 +147,24 @@ export function TimelineControls({
         onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: v as Zoom }), { scroll: false })}
         aria-label="Zoom"
       >
-        <ToggleGroupItem value="weeks" className={SEGMENTED_ITEM}>
-          Weeks
-        </ToggleGroupItem>
-        <ToggleGroupItem value="months" className={SEGMENTED_ITEM}>
-          Months
-        </ToggleGroupItem>
+        {ZOOMS.map((z) => (
+          <ToggleGroupItem key={z} value={z} className={SEGMENTED_ITEM}>
+            {ZOOM_NAME[z]}
+          </ToggleGroupItem>
+        ))}
       </ToggleGroup>
       <Legend />
     </div>
   );
 }
 
+const ZOOM_NAME: Record<Zoom, string> = { days: "Days", weeks: "Weeks", months: "Months" };
+
 const numbers = (list: number[]) => list.map((n) => `#${n}`).join(", ");
 
 /**
- * What a task says about its time as chips, in the hover card of its bar: late, blocked, overdue, or
- * outside its parent's window.
+ * What a task says about its time as chips, in the hover card of its bar: late, blocked, overdue or over
+ * forecast, starting before a blocker ends, or outside its parent's window.
  */
 export function TimeChips({ task, entry, window }: { task: PlanTask; entry: TimelineItem; window: "story" | "epic" }) {
   const done = taskColumn(task) === "Done";
@@ -184,6 +186,18 @@ export function TimeChips({ task, entry, window }: { task: PlanTask; entry: Time
       <Tag key="overdue" tone="attention">
         <CalendarClockIcon aria-hidden />
         Overdue by {entry.overdueDays === 1 ? "1 day" : `${entry.overdueDays} days`}
+      </Tag>
+    ),
+    entry.overForecastMinutes !== undefined && (
+      <Tag key="over" tone="danger">
+        <TimerIcon aria-hidden />
+        Over forecast by {formatDuration(entry.overForecastMinutes / 60, Infinity)}
+      </Tag>
+    ),
+    !entry.late && entry.startsBeforeBlocker.length > 0 && (
+      <Tag key="early" tone="danger">
+        <TriangleAlertIcon aria-hidden />
+        Starts before {numbers(entry.startsBeforeBlocker)} ends
       </Tag>
     ),
     entry.outsideParent && (

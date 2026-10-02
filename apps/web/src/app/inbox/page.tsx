@@ -1,5 +1,6 @@
+import { InboxPageTools } from "@/components/inbox/inbox-page-tools";
 import { Count, InboxProjectFilter, InboxSections } from "@/components/inbox/inbox-sections";
-import { inboxCount, narrowInbox, type InboxView } from "@/components/inbox/inbox-view";
+import { inboxCount, inboxItems, narrowInbox, type InboxView } from "@/components/inbox/inbox-view";
 import { PageHeader } from "@/components/page-header";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { getDb } from "@/lib/db";
@@ -14,8 +15,10 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const current = typeof project === "string" ? project : undefined;
   const shown = narrowInbox(view, current);
   const total = inboxCount(view);
+  const narrowed = current ? inboxItems(view).find((item) => item.projectId === current) : undefined;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
+      <InboxPageTools view={shown} project={current ? { id: current, name: narrowed?.projectName ?? current } : null} />
       <PageHeader
         crumbs={[{ label: "Inbox" }]}
         title="Inbox"
