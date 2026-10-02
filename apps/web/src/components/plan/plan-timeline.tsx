@@ -725,7 +725,9 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
     const from = placeItem(arrow.from, anchor, barOf, stripsOf);
     const to = placeItem(arrow.to, anchor, barOf, stripsOf);
     if (!from || !to || (from.row === to.row && !from.own)) return [];
-    return [{ ...arrow, start: from, end: to, d: arrowPath(from, to) }];
+    // Red when the blocked item is late, or starts before its blocker ends.
+    const early = entries.get(arrow.to)?.startsBeforeBlocker.includes(arrow.from) ?? false;
+    return [{ ...arrow, early, red: arrow.late || early, start: from, end: to, d: arrowPath(from, to) }];
   });
   const touches = (a: (typeof arrows)[number]) => hovered !== undefined && (a.from === hovered || a.to === hovered);
   const related = new Set(hovered === undefined ? [] : [hovered, ...arrows.filter(touches).flatMap((a) => [a.from, a.to])]);
@@ -825,9 +827,10 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                       key={`${a.from}-${a.to}`}
                       data-arrow={`${a.from}-${a.to}`}
                       data-late={a.late}
-                      className={cn(a.late ? "text-danger-dot" : "text-muted-foreground", hovered !== undefined && (touches(a) ? !a.late && "text-foreground" : "opacity-25"))}
+                      data-early={a.early}
+                      className={cn(a.red ? "text-danger-dot" : "text-muted-foreground", hovered !== undefined && (touches(a) ? !a.red && "text-foreground" : "opacity-25"))}
                     >
-                      <path d={a.d} fill="none" stroke="currentColor" strokeWidth={touches(a) ? 2.25 : a.late ? 1.75 : 1.25} />
+                      <path d={a.d} fill="none" stroke="currentColor" strokeWidth={touches(a) ? 2.25 : a.red ? 1.75 : 1.25} />
                       <path d={`M${a.end.left} ${a.end.y} l-5 -3.5 v7 z`} fill="currentColor" />
                       {!a.start.own && <circle cx={a.start.right} cy={a.start.y} r={2.5} fill="currentColor" />}
                     </g>

@@ -52,10 +52,11 @@ function flagsOf(task: PlanTask, entry: TimelineItem, bounds: PlanItem | undefin
     entry.late && `Late: waiting on ${numbers(entry.waitingOn)}`,
     !entry.late && !done && entry.waitingOn.length > 0 && `Blocked by ${numbers(entry.waitingOn)}`,
     entry.overdueDays !== undefined && `Overdue by ${dayCount(entry.overdueDays)}`,
+    !entry.late && entry.startsBeforeBlocker.length > 0 && `Starts before ${numbers(entry.startsBeforeBlocker)} ends`,
     entry.outsideParent && `Outside ${bounds?.kind === "epic" ? "epic" : "story"} window`,
     waitingOnYou && "Waiting on you",
   ].filter((f): f is string => Boolean(f));
-  const tone = entry.late ? "text-danger" : entry.overdueDays !== undefined || waitingOnYou ? "text-attention" : "text-muted-foreground";
+  const tone = entry.late || entry.startsBeforeBlocker.length > 0 ? "text-danger" : entry.overdueDays !== undefined || waitingOnYou ? "text-attention" : "text-muted-foreground";
   return { flags, tone };
 }
 
@@ -83,7 +84,8 @@ function Blocker({ n, task, ctx }: { n: number; task: PlanTask; ctx: FlagContext
 }
 
 /** Late and overdue with the dates they come from, and the window the task's dates leave. */
-function TimeRows({ task, entry, bounds }: { task: PlanTask; entry: TimelineItem; bounds: Window | undefined }) {
+function TimeRows({ task, entry, bounds, ctx }: { task: PlanTask; entry: TimelineItem; bounds: Window | undefined; ctx: FlagContext }) {
+  const ends = (n: number) => ctx.entries.get(n)?.planned?.end;
   return (
     <>
       {entry.late && (
@@ -99,6 +101,15 @@ function TimeRows({ task, entry, bounds }: { task: PlanTask; entry: TimelineItem
           <dt className="font-medium text-attention">Overdue</dt>
           <dd>
             Target was {task.target ? shortDay(task.target) : "not set"}, {dayCount(entry.overdueDays)} ago
+          </dd>
+        </>
+      )}
+      {!entry.late && entry.startsBeforeBlocker.length > 0 && entry.planned && (
+        <>
+          <dt className="font-medium text-danger">Early</dt>
+          <dd>
+            Starts {shortDay(entry.planned.start)} before{" "}
+            {entry.startsBeforeBlocker.map((n) => `#${n}${ends(n) ? ` ends on ${shortDay(ends(n)!)}` : " ends"}`).join(" and ")}
           </dd>
         </>
       )}
@@ -166,7 +177,7 @@ function RunRows({ task, waitingOnYou, projectId }: { task: PlanTask; waitingOnY
 }
 
 /**
- * The warning icon after a task's title on the timeline: blocked, late, overdue, outside its window,
+ * The warning icon after a task's title on the timeline: blocked, late, overdue, starting before a blocker ends, outside its window,
  * or waiting on you. Its accessible name lists the flags. Hover or focus opens a card, in the style
  * of the bar's, with what each flag stands for; Escape closes it, and a tap or a click opens it on
  * touch screens.
@@ -200,7 +211,7 @@ export function FlagCard({ task, entry, ctx }: { task: PlanTask; entry: Timeline
           #{task.number} {task.title}
         </Link>
         <dl className="grid grid-cols-[74px_minmax(0,1fr)] gap-x-2.5 gap-y-1.5">
-          <TimeRows task={task} entry={entry} bounds={bounds} />
+          <TimeRows task={task} entry={entry} bounds={bounds} ctx={ctx} />
           <BlockerRows task={task} entry={entry} ctx={ctx} />
           <RunRows task={task} waitingOnYou={waitingOnYou} projectId={ctx.projectId} />
         </dl>

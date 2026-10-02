@@ -11,6 +11,7 @@ import { PlanTimeline } from "./plan-timeline";
 import { TimelineControls } from "./timeline-parts";
 import { Sizing } from "./plan-context";
 import { epic, planView, PROJECT, REPO_URL, run, sizedTimelineOf, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
+import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
@@ -32,6 +33,8 @@ beforeEach(() => localStorage.clear());
 afterEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  // Sonner keeps its toasts in a module; each test starts with none.
+  toast.dismiss();
 });
 
 /** Friday 2026-10-02 at noon: the today of every test. */
@@ -493,7 +496,7 @@ const sized = planView([
       task(143, "R3 Restyle the sidebar", "Ready", { start: "2026-10-02", target: "2026-10-03", size: "L", estimate: 9, blockedBy: [142] }),
       task(145, "R5 Restyle board columns", "Shaping", { start: "2026-10-03", target: "2026-10-03", size: "M", blockedBy: [143] }),
       task(146, "R6 Restyle the list view", "Shaping", { start: "2026-10-03", target: "2026-10-03", size: "M", blockedBy: [143] }),
-      task(149, "R9 Restyle dialogs", "Shaping", { start: "2026-10-04", target: "2026-10-04", size: "L" }),
+      task(149, "R9 Restyle dialogs", "Shaping", { start: "2026-10-04", target: "2026-10-04", size: "L", blockedBy: [143] }),
       task(152, "Document the workflow", "Shaping"),
       task(153, "Restyle the help page", "Shaping", { size: "S" }),
     ]),
@@ -634,4 +637,28 @@ test("dragging the end of a sized task sets a manual estimate in hours and keeps
   // Undo clears the estimate again.
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   await waitFor(() => expect(actions.moveItemAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 149, start: "2026-10-04", target: "2026-10-04", estimate: null }));
+});
+
+test("a drop before a blocker ends is allowed with the warning", async () => {
+  const { container } = renderSized();
+  const label = within(row(/^Task #149 /)).getByRole("rowheader");
+  expect(within(label).queryByRole("button", { name: /Starts before/ })).not.toBeInTheDocument();
+
+  // On Oct 3 #149 comes after #145 and #146, 1h 40m in, while #143's nine hours run to 3h into Oct 3.
+  const bar = barOf(149);
+  fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 500 });
+  fireEvent.pointerMove(bar, { pointerId: 1, clientX: 500 - DAY });
+  expect(dragTip()).toHaveTextContent("Sat Oct 3L, default ~2h. Target Oct 3Starts before #143 ends on Oct 3");
+  fireEvent.pointerUp(bar, { pointerId: 1, clientX: 500 - DAY });
+
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 149, start: "2026-10-03", target: "2026-10-03" }));
+  expect(await screen.findByText("Moved #149 to Oct 3")).toBeInTheDocument();
+  expect(screen.getByText("Saved to GitHub. It starts before #143 ends.")).toBeInTheDocument();
+
+  // The row warns, the bar's left edge and the arrow from its blocker turn red, and the blocker stays put.
+  expect(within(label).getByRole("button", { name: "Blocked by #143. Starts before #143 ends" })).toBeInTheDocument();
+  expect(barOf(149)).toHaveAttribute("data-early", "true");
+  expect(container.querySelector('[data-arrow="143-149"]')).toHaveAttribute("data-early", "true");
+  expect(container.querySelector('[data-arrow="142-143"]')).toHaveAttribute("data-early", "false");
+  expect(leftOf(barOf(143))).toBe(OCT_1 + DAY);
 });
