@@ -194,14 +194,16 @@ function TargetText({ item, entry }: { item: PlanItem; entry: TimelineItem }) {
 }
 
 /** The hover card of a bar or a row title: kind, status, dates and where they come from, blockers, latest run and pull request. */
-function ItemCard({ row, entry, ctx, children }: { row: TimelineRow; entry: TimelineItem; ctx: CardContext; children: ReactNode }) {
+function ItemCard({ row, entry, ctx, quiet = false, children }: { row: TimelineRow; entry: TimelineItem; ctx: CardContext; quiet?: boolean; children: ReactNode }) {
   const item = row.item!;
   const task = row.task;
   const span = entry.planned ? "Own dates" : entry.derived ? "Derived from its tasks" : "Not scheduled";
   const progress = progressOf(item);
   const pr = task && prNumberOf(task);
+  // A bar on the move keeps its card shut; the drag's tooltip speaks for it.
+  const [open, setOpen] = useState(false);
   return (
-    <HoverCard openDelay={300} closeDelay={100}>
+    <HoverCard openDelay={300} closeDelay={100} open={open && !quiet} onOpenChange={setOpen}>
       <HoverCardTrigger asChild>{children}</HoverCardTrigger>
       <HoverCardContent align="start" className="flex w-75 flex-col gap-2 text-xs">
         <p className="text-[13px] leading-snug font-semibold">
@@ -359,7 +361,7 @@ function TaskBar({ row, entry, span, scale, todayX, ctx, move }: BarProps & { to
         />
       )}
       {move?.origin && <span aria-hidden data-ghost className="absolute top-1.5 z-[1] h-5 rounded-[5px] border-[1.5px] border-dashed border-muted-foreground bg-foreground/5" style={move.origin} />}
-      <ItemCard row={row} entry={entry} ctx={ctx}>
+      <ItemCard row={row} entry={entry} ctx={ctx} quiet={move?.tip !== undefined}>
         <a
           href={task.url}
           data-bar

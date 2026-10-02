@@ -563,6 +563,9 @@ test("dragging a bar moves its Start a day at a time and the tooltip names the T
   expect(leftOf(bar)).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
   fireEvent.pointerUp(bar, { pointerId: 1, clientX: 700 });
   expect(actions.moveItemAction).not.toHaveBeenCalled();
+  // The click that ends a drag does not open the issue; a click after it does.
+  expect(fireEvent.click(bar)).toBe(false);
+  expect(fireEvent.click(bar)).toBe(true);
 });
 
 /** Drags a bar by its body from x 500 by `dx` pixels and lets go. */

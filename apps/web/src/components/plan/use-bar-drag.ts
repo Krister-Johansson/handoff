@@ -44,6 +44,8 @@ export function useBarDrag({ onDrop, onSize }: { onDrop: (drag: BarDrag) => void
   };
   const cancel = () => {
     clearTimeout(keyTimer.current);
+    // A drag put back with Escape still ends in a click on the bar, which must not open the issue.
+    if (gesture.current?.moved) clickAfterDrag.current = true;
     gesture.current = null;
     stopPlacing.current?.();
     setDrag(undefined);
@@ -58,6 +60,7 @@ export function useBarDrag({ onDrop, onSize }: { onDrop: (drag: BarDrag) => void
   const pointerDown = (bar: DragBar, edge: Gesture["edge"]) => (e: PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
     if (edge === "end") e.stopPropagation();
+    clickAfterDrag.current = false;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     gesture.current = { ...bar, edge, x0: e.clientX, moved: false };
   };
