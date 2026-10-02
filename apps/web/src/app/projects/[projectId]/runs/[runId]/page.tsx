@@ -18,6 +18,7 @@ import { projectMergeQueue } from "@/server/merge-queue";
 import { runPath } from "@/lib/paths";
 import { formatCost, formatDuration } from "@/lib/format";
 import { getRunDetail } from "@/server/queries";
+import { StartedByScheduler } from "@/components/scheduler/scheduler-tag";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,12 @@ function blockersOf({ run, executions, events }: Detail): number[] | undefined {
   return blockers.length ? [...new Set(blockers)] : undefined;
 }
 
+/** The run's place in the scheduler's order, when the scheduler started it. */
+function scheduledPlace(events: Detail["events"]): number | undefined {
+  const place = (events.find((e) => e.type === "run.scheduled")?.payload as { place?: unknown } | undefined)?.place;
+  return typeof place === "number" ? place : undefined;
+}
+
 /** Where the run stands in its project's merge queue, while its merge step waits there. */
 async function queuePlace(projectId: string, runId: string): Promise<RunQueue | undefined> {
   const entry = (await projectMergeQueue(getDb(), projectId)).find((e) => e.runId === runId && e.waiting);
@@ -108,6 +115,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
               {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
               <IssueLinks variant="meta" projectId={project.id} issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
               <PartOf issues={run.issues} projectId={project.id} />
+              <StartedByScheduler startedBy={run.startedBy} place={scheduledPlace(events)} />
               {graph && (
                 <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
                   <GitForkIcon aria-hidden />

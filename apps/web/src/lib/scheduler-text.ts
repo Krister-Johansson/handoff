@@ -2,7 +2,7 @@ type EventLike = { type: string; payload: Record<string, unknown> };
 type Settings = { maxRuns?: number; order?: string; graphName?: string; skipLabel?: string | null };
 
 const short = (id: unknown) => (typeof id === "string" ? id.slice(0, 8) : "?");
-const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
+export const ordinal = (n: number) => `${n}${n % 100 >= 11 && n % 100 <= 13 ? "th" : (["th", "st", "nd", "rd"][n % 10] ?? "th")}`;
 const runs = (n: number) => `${n} ${n === 1 ? "run" : "runs"}`;
 
 /** Where a person acted from, as the starter names it. */
