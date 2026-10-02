@@ -1,5 +1,5 @@
 import { eq, projects, type Db } from "@handoff/db";
-import { STATUS_OPTIONS, type GitHubPort, type PlanItem, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
+import { STATUS_OPTIONS, type GitHubPort, type PlanItem, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
 import { latestRuns, type BacklogIssue, type BacklogRun } from "./backlog.ts";
 
 /** A board column: one per Status handoff knows, plus Other for an option it does not. */
@@ -12,6 +12,7 @@ export type PlanProgress = {
   /** GitHub's own count of the direct sub-issues and the closed ones among them. */
   subIssues: { total: number; completed: number };
 };
+/** A plan item with the latest run that links it; a closed item's status reads Done whatever its Status says. */
 export type PlanTask = PlanItem & { run: BacklogRun | null };
 export type PlanStory = PlanItem & { tasks: PlanTask[]; progress: PlanProgress };
 /** An epic with its stories, and the tasks whose parent is the epic itself. */
@@ -42,6 +43,10 @@ export async function projectsAccessProblem(plan: ProjectsPort | undefined): Pro
   if (!scopes.project) return `GITHUB_TOKEN lacks the project scope. ${SCOPE_FIX}`;
   return undefined;
 }
+
+const isStory = (kind: PlanKind | undefined) => kind === "story";
+/** A task, or an issue nested too deep for depth to give it a kind. */
+const isTask = (kind: PlanKind | undefined) => kind !== "story" && kind !== "epic";
 
 /** The column a task belongs in: a closed task is done whatever its Status says. */
 const columnOf = (task: PlanItem): PlanColumn => (task.state === "closed" ? "Done" : (task.status ?? "Other"));
@@ -75,30 +80,30 @@ export async function loadPlan(db: Db, github: GitHubPort | undefined, plan: Pro
   ]);
   if (!planProject) return { reason: "unreachable", error: `GitHub Project #${number} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.` };
   const byNumber = new Map(items.map((i) => [i.number, i]));
-  const task = (item: PlanItem): PlanTask => ({ ...item, status: item.state === "closed" ? "Done" : item.status, run: runs.get(item.number) ?? null });
+  const sorted = [...items].sort((a, b) => a.number - b.number);
+  const task =(item: PlanItem): PlanTask => ({ ...item, status: item.state === "closed" ? "Done" : item.status, run: runs.get(item.number) ?? null });
 
   // Each story hangs under its nearest epic, each task under its nearest story or epic; the walk stays inside the plan.
-  const holderOf = (item: PlanItem, kinds: readonly string[]): PlanItem | undefined => {
+  const holderOf = (item: PlanItem): PlanItem | undefined => {
+    const holds = (kind: PlanKind | undefined) => kind === "epic" || (kind === "story" && item.kind !== "story");
     const seen = new Set<number>();
     for (let p = item.parent; p !== undefined && !seen.has(p); p = byNumber.get(p)?.parent) {
       seen.add(p);
       const parent = byNumber.get(p);
       if (!parent) return undefined;
-      if (parent.kind && kinds.includes(parent.kind)) return parent;
+      if (holds(parent.kind)) return parent;
     }
     return undefined;
   };
   const children = new Map<number, PlanItem[]>();
   const unparented: PlanTask[] = [];
-  for (const item of [...items].sort((a, b) => a.number - b.number)) {
+  for (const item of sorted) {
     if (item.kind === "epic") continue;
-    const holder = holderOf(item, item.kind === "story" ? ["epic"] : ["story", "epic"]);
+    const holder = holderOf(item);
     if (holder) children.set(holder.number, [...(children.get(holder.number) ?? []), item]);
     else unparented.push(task(item));
   }
-  const childrenOf = (parent: number, kind: (k: PlanItem["kind"]) => boolean) => (children.get(parent) ?? []).filter((i) => kind(i.kind));
-  const isStory = (k: PlanItem["kind"]) => k === "story";
-  const isTask = (k: PlanItem["kind"]) => k !== "story" && k !== "epic";
+  const childrenOf = (parent: number, kind: (k: PlanKind | undefined) => boolean) => (children.get(parent) ?? []).filter((i) => kind(i.kind));
 
   const epics = items
     .filter((i) => i.kind === "epic")
@@ -112,7 +117,9 @@ export async function loadPlan(db: Db, github: GitHubPort | undefined, plan: Pro
       return { ...epic, stories, tasks, progress: progressOf(epic, [...stories.flatMap((s) => s.tasks), ...tasks]) };
     });
   const board = columns<PlanTask[]>(() => []);
-  for (const item of [...items].sort((a, b) => a.number - b.number)) if (isTask(item.kind)) board[columnOf(item)].push(task(item));
-  const unplanned = open.filter((i) => !byNumber.has(i.number)).map((issue) => ({ ...issue, run: runs.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
+  for (const item of sorted) if (isTask(item.kind)) board[columnOf(item)].push(task(item));
+  const unplanned = open
+    .filter((i) => !byNumber.has(i.number))
+    .map((issue) => ({ ...issue, run: runs.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
   return { project: planProject, epics, unparented, board, unplanned };
 }
