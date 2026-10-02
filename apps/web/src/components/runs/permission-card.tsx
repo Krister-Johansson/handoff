@@ -19,7 +19,7 @@ export type PermissionRequestView = { id: string; runId: string; nodeKey: string
 
 /**
  * A tool call a step's allow rules do not cover, while the step waits for an answer: what it wants to
- * do, and Allow once, Always allow (which adds the rule to the node for later runs) or Deny with a note.
+ * do, and Allow once, Always allow (which adds the rule to the node for later runs, when a rule is safe to offer) or Deny with a note.
  */
 export function PermissionCard({ request, run }: { request: PermissionRequestView; run?: { projectId: string; projectName: string; task: string } }) {
   const { action, detail } = describePermission(request.toolName, request.input);
@@ -93,9 +93,11 @@ export function PermissionCard({ request, run }: { request: PermissionRequestVie
             <Button type="submit" name="decision" value="once" disabled={pending} onClick={() => (pressed.current = "once")}>
               Allow once
             </Button>
-            <Button type="button" variant="outline" disabled={pending} aria-label={`Always allow ${rule}`} onClick={() => answer({ decision: "always", rule })}>
-              Always allow <span className="font-mono text-xs">{rule}</span>
-            </Button>
+            {rule && (
+              <Button type="button" variant="outline" disabled={pending} aria-label={`Always allow ${rule}`} onClick={() => answer({ decision: "always", rule })}>
+                Always allow <span className="font-mono text-xs">{rule}</span>
+              </Button>
+            )}
             <Button type="submit" name="decision" value="deny" variant="outline" disabled={pending} onClick={() => (pressed.current = "deny")}>
               Deny
             </Button>
