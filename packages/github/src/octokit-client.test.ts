@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import { expect, test } from "vitest";
 import { OctokitGitHub } from "./octokit-client.ts";
 import { fakeFetch, fakeGraphql } from "./testing/fake-fetch.ts";
@@ -238,12 +239,158 @@ test("behindBy counts the base branch's commits the head does not have", async (
   expect(new URL(calls[0]!.url).pathname).toBe("/repos/octo/sample/compare/abc123...main");
 });
 
-test("getIssue reads an issue with its body", async () => {
+test("getIssue reads an issue with its body, labels, assignees, author and times", async () => {
   const { fetch } = fakeFetch({
-    "GET /repos/octo/sample/issues/12": () => ({ json: { number: 12, title: "Slugify drops digits", html_url: "https://github.com/octo/sample/issues/12", body: null, state: "open" } }),
+    "GET /repos/octo/sample/issues/12": () => ({
+      json: {
+        number: 12,
+        title: "Slugify drops digits",
+        html_url: "https://github.com/octo/sample/issues/12",
+        body: null,
+        state: "closed",
+        state_reason: "completed",
+        labels: [{ name: "task" }, "bug"],
+        assignees: [{ login: "ann" }, { login: "bob" }],
+        user: { login: "cat" },
+        author_association: "OWNER",
+        created_at: "2026-09-30T10:00:00Z",
+        updated_at: "2026-10-01T12:00:00Z",
+      },
+    }),
   });
   const gh = OctokitGitHub.withToken("t", { fetch });
-  expect(await gh.getIssue(repo, 12)).toEqual({ number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", body: "", state: "open" });
+  expect(await gh.getIssue(repo, 12)).toEqual({
+    number: 12,
+    title: "Slugify drops digits",
+    url: "https://github.com/octo/sample/issues/12",
+    body: "",
+    state: "closed",
+    stateReason: "completed",
+    labels: ["task", "bug"],
+    assignees: ["ann", "bob"],
+    author: "cat",
+    authorAssociation: "OWNER",
+    createdAt: "2026-09-30T10:00:00Z",
+    updatedAt: "2026-10-01T12:00:00Z",
+    pullRequest: false,
+  });
+});
+
+test("getIssue tells a pull request's number from an issue's", async () => {
+  const { fetch } = fakeFetch({
+    "GET /repos/octo/sample/issues/7": () => ({
+      json: { number: 7, title: "Add a changelog", html_url: "https://github.com/octo/sample/pull/7", body: "", state: "open", pull_request: { url: "https://api.github.com/repos/octo/sample/pulls/7" } },
+    }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.getIssue(repo, 7)).toMatchObject({ number: 7, pullRequest: true });
+});
+
+test("getIssue tells a number GitHub does not know from GitHub not answering", async () => {
+  const { fetch } = fakeFetch({
+    "GET /repos/octo/sample/issues/999": () => ({ status: 404, json: { message: "Not Found" } }),
+    "GET /repos/octo/sample/issues/16": () => ({ status: 502, json: { message: "Bad gateway" } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch, retry: false });
+  await expect(gh.getIssue(repo, 999)).rejects.toMatchObject({ name: "GitHubReadError", reason: "not-found" });
+  await expect(gh.getIssue(repo, 16)).rejects.toMatchObject({ name: "GitHubReadError", reason: "unreachable" });
+  const offline = OctokitGitHub.withToken("t", {
+    fetch: async () => {
+      throw new TypeError("fetch failed");
+    },
+    retry: false,
+  });
+  await expect(offline.getIssue(repo, 16)).rejects.toMatchObject({ name: "GitHubReadError", reason: "unreachable" });
+});
+
+const restIssue = (number: number, title: string, state = "open") => ({ number, title, html_url: `https://github.com/octo/sample/issues/${number}`, state });
+
+test("dependencies reads the issues blocking an issue and those it blocks, open or closed", async () => {
+  const { fetch } = fakeFetch({
+    "GET /repos/octo/sample/issues/16/dependencies/blocked_by": () => ({ json: [restIssue(145, "Restyle board columns"), restIssue(15, "Move menu", "closed")] }),
+    "GET /repos/octo/sample/issues/16/dependencies/blocking": () => ({ json: [restIssue(88, "Reorder subtasks")] }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.dependencies(repo, 16)).toEqual({
+    blockedBy: [
+      { number: 145, title: "Restyle board columns", url: "https://github.com/octo/sample/issues/145", state: "open" },
+      { number: 15, title: "Move menu", url: "https://github.com/octo/sample/issues/15", state: "closed" },
+    ],
+    blocking: [{ number: 88, title: "Reorder subtasks", url: "https://github.com/octo/sample/issues/88", state: "open" }],
+  });
+});
+
+test("listIssueComments reads an issue's comments oldest first with author, association and time", async () => {
+  const { fetch, calls } = fakeFetch({
+    "GET /repos/octo/sample/issues/16/comments": () => ({
+      json: [
+        {
+          id: 1,
+          user: { login: "ann" },
+          author_association: "OWNER",
+          created_at: "2026-10-01T22:17:00Z",
+          updated_at: "2026-10-01T22:20:00Z",
+          body: "Notes from the review.",
+          html_url: "https://github.com/octo/sample/issues/16#issuecomment-1",
+        },
+        { id: 2, user: null, author_association: "NONE", created_at: "2026-10-02T00:17:00Z", updated_at: "2026-10-02T00:17:00Z", body: null, html_url: "u2" },
+      ],
+    }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.listIssueComments(repo, 16)).toEqual([
+    {
+      id: 1,
+      author: "ann",
+      authorAssociation: "OWNER",
+      createdAt: "2026-10-01T22:17:00Z",
+      updatedAt: "2026-10-01T22:20:00Z",
+      body: "Notes from the review.",
+      url: "https://github.com/octo/sample/issues/16#issuecomment-1",
+    },
+    { id: 2, author: null, authorAssociation: "NONE", createdAt: "2026-10-02T00:17:00Z", updatedAt: "2026-10-02T00:17:00Z", body: "", url: "u2" },
+  ]);
+  expect(new URL(calls[0]!.url).searchParams.get("per_page")).toBe("100");
+});
+
+test("viewer is the login of the token's user, and undefined for a GitHub App, which has no user", async () => {
+  const { fetch } = fakeFetch({ "GET /user": () => ({ json: { login: "Krister-Johansson", id: 1 } }) });
+  expect(await OctokitGitHub.withToken("t", { fetch }).viewer()).toBe("Krister-Johansson");
+
+  const app = fakeFetch({});
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+  expect(await OctokitGitHub.withApp({ appId: 1, privateKey, fetch: app.fetch }).viewer()).toBeUndefined();
+  expect(app.calls).toEqual([]);
+});
+
+test("listAssignable lists who can be assigned issues in the repository, with their avatars", async () => {
+  const { fetch } = fakeFetch({
+    "GET /repos/octo/sample/assignees": () => ({ json: [{ login: "ann", avatar_url: "https://avatars.githubusercontent.com/u/1" }, { login: "bob", avatar_url: "https://avatars.githubusercontent.com/u/2" }] }),
+  });
+  expect(await OctokitGitHub.withToken("t", { fetch }).listAssignable(repo)).toEqual([
+    { login: "ann", avatarUrl: "https://avatars.githubusercontent.com/u/1" },
+    { login: "bob", avatarUrl: "https://avatars.githubusercontent.com/u/2" },
+  ]);
+});
+
+test("setAssignees replaces an issue's assignees and returns those GitHub kept", async () => {
+  const { fetch, calls } = fakeFetch({
+    "PATCH /repos/octo/sample/issues/16": (body) => ({ json: { number: 16, assignees: (body as { assignees: string[] }).assignees.map((login) => ({ login })) } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.setAssignees(repo, 16, ["ann"])).toEqual(["ann"]);
+  expect(await gh.setAssignees(repo, 16, [])).toEqual([]);
+  expect(calls.map((c) => c.body)).toEqual([{ assignees: ["ann"] }, { assignees: [] }]);
+});
+
+test("listSubIssues reads an issue's sub-issues in GitHub's order", async () => {
+  const { fetch } = fakeFetch({
+    "GET /repos/octo/sample/issues/132/sub_issues": () => ({ json: [restIssue(88, "Reorder subtasks"), restIssue(16, "Drag and drop", "closed")] }),
+  });
+  expect(await OctokitGitHub.withToken("t", { fetch }).listSubIssues(repo, 132)).toEqual([
+    { number: 88, title: "Reorder subtasks", url: "https://github.com/octo/sample/issues/88", state: "open" },
+    { number: 16, title: "Drag and drop", url: "https://github.com/octo/sample/issues/16", state: "closed" },
+  ]);
 });
 
 test("getIssue reads the parent chain when asked", async () => {
@@ -272,7 +419,7 @@ test("getIssue reads the parent chain when asked", async () => {
     },
   );
   const gh = OctokitGitHub.withToken("t", { fetch });
-  expect(await gh.getIssue(repo, 57, { parents: true })).toEqual({
+  expect(await gh.getIssue(repo, 57, { parents: true })).toMatchObject({
     number: 57,
     title: "Add the migration",
     url: "https://github.com/octo/sample/issues/57",

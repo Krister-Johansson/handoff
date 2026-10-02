@@ -26,7 +26,7 @@ const issue = (number: number, title: string, run: { id: string; status: string;
 test("an issue nobody works on offers Start run, which opens New run with the issue linked", async () => {
   render(<Backlog projectId="p1" graphs={["loop"]} graphName="loop" filter="todo" counts={{ todo: 1, started: 1, all: 2 }} issues={[issue(12, "Slugify drops digits")]} />);
   const row = screen.getByRole("listitem");
-  expect(within(row).getByRole("link", { name: /#12/ })).toHaveAttribute("href", "https://github.com/o/r/issues/12");
+  expect(within(row).getByRole("link", { name: /#12/ })).toHaveAttribute("href", "/projects/p1/issues/12");
   expect(within(row).getByText("bug")).toBeInTheDocument();
   fireEvent.click(within(row).getByRole("button", { name: "Start run" }));
   const linked = await screen.findByRole("list", { name: "Linked issues" });

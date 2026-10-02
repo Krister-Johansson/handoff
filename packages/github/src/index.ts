@@ -1,4 +1,5 @@
 export * from "./types.ts";
+export * from "./errors.ts";
 export * from "./verify-signature.ts";
 export * from "./webhook-events.ts";
 export * from "./feedback.ts";

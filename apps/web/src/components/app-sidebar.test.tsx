@@ -2,7 +2,9 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { beforeEach, expect, test, vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { ReactNode } from "react";
 import { AppSidebar, type SidebarProject } from "./app-sidebar";
+import { SidebarSection, SidebarSectionProvider } from "./sidebar-section";
 
 const nav = vi.hoisted(() => ({ pathname: "/" }));
 vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
@@ -123,6 +125,43 @@ test("picking another project keeps the page type", () => {
   run.unmount();
   renderSidebar({ pathname: "/library", lastProjectId: "p1" });
   expect(openSwitcher(/^Project: handoff/)[0]).toEqual(["example-shopexample-org/example-shop", "/projects/p2"]);
+});
+
+/** The sidebar beside a page that may tell it its section, as the issue page does. */
+function withPage(pathname: string, page: ReactNode) {
+  nav.pathname = pathname;
+  return (
+    <TooltipProvider>
+      <SidebarProvider>
+        <SidebarSectionProvider>
+          <AppSidebar projects={PROJECTS} inboxCount={0} worker={{ live: 1, queuedRuns: 0 }} />
+          {page}
+        </SidebarSectionProvider>
+      </SidebarProvider>
+    </TooltipProvider>
+  );
+}
+
+test("an issue page marks the section it tells the sidebar: Plan for an item of the plan, Issues for another issue", () => {
+  const { rerender } = render(withPage("/projects/p1/issues/16", <SidebarSection section="plan" />));
+  expect(current()).toEqual(["Plan"]);
+  rerender(withPage("/projects/p1/issues/407", <SidebarSection section="issues" />));
+  expect(current()).toEqual(["Issues"]);
+});
+
+test("until the issue page tells its section, a direct visit marks Issues and a click from another page keeps that page's item", () => {
+  const direct = render(withPage("/projects/p1/issues/16", null));
+  expect(current()).toEqual(["Issues"]);
+  direct.unmount();
+
+  const { rerender } = render(withPage("/projects/p1/plan", null));
+  rerender(withPage("/projects/p1/issues/16", null));
+  expect(current()).toEqual(["Plan"]);
+  rerender(withPage("/projects/p1/issues/16", <SidebarSection section="plan" />));
+  rerender(withPage("/projects/p1/issues/88", null));
+  expect(current()).toEqual(["Plan"]);
+  rerender(withPage("/projects/p1/issues/88", <SidebarSection section="issues" />));
+  expect(current()).toEqual(["Issues"]);
 });
 
 test("collapsed, Inbox shows a dot when it has items", () => {

@@ -35,6 +35,24 @@ test("the activity line shows the latest issues, sub_issues or issue_dependencie
   expect(screen.queryByText(/Last from GitHub/)).not.toBeInTheDocument();
 });
 
+test("every task, story and epic title on the tree, the board and the timeline links to its issue page; Open on GitHub stays in the row menu", () => {
+  const { unmount } = render(<PlanTab {...props} activity={null} />);
+  const tree = screen.getByRole("tree");
+  expect(within(tree).getByRole("link", { name: "#57 Add the migration" })).toHaveAttribute("href", "/projects/p1/issues/57");
+  expect(within(tree).getByRole("link", { name: "#41 Shaping" })).toHaveAttribute("href", "/projects/p1/issues/41");
+  expect(within(tree).getByRole("link", { name: "#12 Project management" })).toHaveAttribute("href", "/projects/p1/issues/12");
+  unmount();
+
+  const board = render(<PlanTab {...props} view="board" activity={null} />);
+  expect(screen.getByRole("link", { name: "#57 Add the migration" })).toHaveAttribute("href", "/projects/p1/issues/57");
+  board.unmount();
+
+  const plan = { ...view, timeline: timelineOf(view, [], new Date(READ_AT)) };
+  render(<PlanTab {...props} plan={plan} view="timeline" zoom="months" activity={null} />);
+  const grid = screen.getByRole("grid", { name: "Timeline" });
+  expect(within(grid).getByRole("link", { name: "#57 Add the migration" })).toHaveAttribute("href", "/projects/p1/issues/57");
+});
+
 test("the timeline view shows the chart narrowed by the filters, and says so when nothing matches", () => {
   const plan = { ...view, timeline: timelineOf(view, [], new Date(READ_AT)) };
   const { unmount } = render(<PlanTab {...props} plan={plan} view="timeline" zoom="months" filters={parsePlanFilters({ status: "Ready" })} activity={null} />);

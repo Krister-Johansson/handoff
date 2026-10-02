@@ -163,6 +163,64 @@ test("loadPlan joins each task's runs into actual strips and marks late tasks fr
   expect(later.timeline!.items.find((i) => i.number === gate)).toMatchObject({ late: false, waitingOn: [] });
 });
 
+/** A succeeded run on one task whose planner proposed a size from a plan of `steps` steps and `paths` owned paths. */
+async function proposed(projectId: string, github: FakeGitHub, task: number, size: "S" | "M" | "L", steps = 2, paths = 3) {
+  const run = await startRunFromGraph(db, { projectId, graphName: "g", task: "", issues: [task] }, github);
+  const plan = { plan: "p", steps: Array.from({ length: steps }, (_, i) => `step ${i}`), ownedPaths: Array.from({ length: paths }, (_, i) => `src/${i}.ts`), size };
+  await db
+    .update(runs)
+    .set({ status: "succeeded", state: { ...run.state, plan } })
+    .where(eq(runs.id, run.id));
+  return run;
+}
+
+test("loadPlan gives each task its size, estimate, proposal and duration, and the project its forecasts and capacity", async () => {
+  const { github, plan, project, number, issue, status } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  await db.update(projects).set({ planHoursPerDay: 8 }).where(eq(projects.id, project.id));
+  const epic = await issue("Estimates", ["epic"]);
+  const story = await issue("Forecasts", ["story"], epic);
+  const estimated = await issue("Estimated", ["task"], story);
+  const sized = await issue("Sized", ["task"], story);
+  const proposal = await issue("Proposed", ["task"], story);
+  const bare = await issue("Bare", ["task"], story);
+  const item = (n: number) => plan.itemsOf(repo).get(n)!;
+  Object.assign(item(estimated), { size: "M", estimate: 3 });
+  item(sized).size = "L";
+  status(proposal, "Ready");
+  const run = await proposed(project.id, github, proposal, "S", 6, 4);
+
+  const view = await loadPlan(db, github, plan, project.id);
+  if ("error" in view) throw new Error(view.error);
+  expect(view.capacity).toBe(8);
+  expect(view.forecasts).toMatchObject({ S: { source: "default", minutes: 30 }, M: { source: "default", minutes: 60 }, L: { source: "default", minutes: 120 } });
+  const tasks = view.epics[0]!.stories[0]!.tasks;
+  expect(tasks.map((t) => [t.number, t.size, t.estimate, t.proposal, t.duration])).toEqual([
+    [estimated, "M", 3, null, { hours: 3, source: "estimate" }],
+    [sized, "L", undefined, null, { hours: 2, source: "default" }],
+    [proposal, undefined, undefined, { size: "S", runId: run.id, steps: 6, paths: 4 }, { hours: 0.5, source: "proposal" }],
+    [bare, undefined, undefined, null, null],
+  ]);
+  expect(view.board.Shaping.find((t) => t.number === sized)!.duration).toEqual({ hours: 2, source: "default" });
+});
+
+test("a task with a Size ignores a planner's proposal", async () => {
+  const { github, plan, project, number, issue, status } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  const story = await issue("Forecasts", ["story"], await issue("Estimates", ["epic"]));
+  const sized = await issue("Sized after its run", ["task"], story);
+  status(sized, "Ready");
+  const run = await proposed(project.id, github, sized, "L");
+  plan.itemsOf(repo).get(sized)!.size = "S";
+
+  const view = await loadPlan(db, github, plan, project.id);
+  if ("error" in view) throw new Error(view.error);
+  const task = view.epics[0]!.stories[0]!.tasks[0]!;
+  // The S default sets the duration; the disagreeing proposal stays for the hover card to name.
+  expect(task.duration).toEqual({ hours: 0.5, source: "default" });
+  expect(task.proposal).toMatchObject({ size: "L", runId: run.id });
+});
+
 test("without a plan number loadPlan says there is no plan, and without the project scope it says what is missing", async () => {
   const { github, plan, project } = await planned();
   const bare = await createProject(db, { name: "bare", repo: "octo/bare", defaultBranch: "main" });

@@ -5,6 +5,7 @@ import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, reque
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
 import { projectReadiness } from "./readiness";
+import { assignmentOf, setIssueAssignees } from "./assignees";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
@@ -14,6 +15,7 @@ import { runPathOf } from "./run-path";
 import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ScheduleItem } from "./shaping";
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
+import type { Forecast } from "../lib/plan/forecast";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
@@ -182,7 +184,22 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Graphs page.`);
       if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
       const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [], startedBy: actor }, github, plan);
-      return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };
+      const { assigned, notAssigned } = await assignmentOf(db, run.id);
+      return {
+        run_id: run.id,
+        status: run.status,
+        graph: graphName,
+        branch: run.branchName,
+        url: url(runPath(detail.project.id, run.id)),
+        assigned,
+        not_assigned: notAssigned,
+      };
+    },
+
+    assign: async ({ project, issue, logins, me }: { project: string; issue: number; logins: string[]; me?: boolean }) => {
+      const found = await findProject(db, project);
+      const result = await setIssueAssignees(db, github, found.id, issue, { logins, me });
+      return { ...result, url: `https://github.com/${found.repoOwner}/${found.repoName}/issues/${issue}` };
     },
 
     list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {
@@ -340,10 +357,17 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         blocked_by: t.blockedBy,
         run: t.run ? { id: t.run.id, status: t.run.status, url: url(runPath(projectId, t.run.id)) } : null,
         pr: t.run?.prNumber ?? t.prNumbers[0] ?? null,
+        size: t.size ?? null,
+        estimate_hours: t.estimate ?? null,
+        proposal: t.proposal ? { size: t.proposal.size, run_id: t.proposal.runId } : null,
+        duration: t.duration ?? null,
       });
       const progress = (p: PlanProgress) => `${p.done} of ${p.total} done`;
+      const forecast = (f: Forecast) => ({ source: f.source, minutes: f.minutes, parts: f.parts, cost_usd: f.costUsd, runs: f.runs, measured_minutes: f.measuredMinutes });
       return {
         project: { number: view.project.number, title: view.project.title, url: view.project.url },
+        capacity_hours: view.capacity ?? null,
+        forecasts: view.forecasts ? { S: forecast(view.forecasts.S), M: forecast(view.forecasts.M), L: forecast(view.forecasts.L) } : null,
         epics: view.epics
           .filter((e) => epic === undefined || e.number === epic)
           .map((e) => ({

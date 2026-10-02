@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
 import { PermissionCard, type PermissionRequestView } from "@/components/runs/permission-card";
 import { pendingPermissions } from "@/server/permissions";
-import { IssueLinks } from "@/components/runs/issue-links";
+import { IssueLinks, PartOf } from "@/components/runs/issue-links";
 import { RunAgainButton } from "@/components/runs/run-again-button";
 import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
 import { projectCrumb, projectRunsCrumb, runCrumb } from "@/server/crumbs";
@@ -106,7 +106,8 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
           meta: (
             <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs [&_svg]:size-[13px] [&_svg]:shrink-0">
               {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
-              <IssueLinks variant="meta" issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
+              <IssueLinks variant="meta" projectId={project.id} issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
+              <PartOf issues={run.issues} projectId={project.id} />
               {graph && (
                 <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
                   <GitForkIcon aria-hidden />

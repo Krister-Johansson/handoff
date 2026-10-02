@@ -4,7 +4,7 @@ import { CircleDotIcon, ListTreeIcon, SearchXIcon } from "lucide-react";
 import { SetUpPlanDialog } from "@/components/plan/set-up-plan-dialog";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Card } from "@/components/ui/card";
-import { runPath } from "@/lib/paths";
+import { issuePath, runPath } from "@/lib/paths";
 import type { BacklogIssue } from "@/server/backlog";
 import type { IssueWork } from "@/server/overview";
 import type { OverviewProject, OverviewStart } from "./project-overview";
@@ -42,9 +42,9 @@ function IssueRow({ issue, projectId, children }: { issue: BacklogIssue; project
     <li aria-labelledby={titleId} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
       <CircleDotIcon aria-hidden className="size-4 shrink-0 text-success" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <a id={titleId} href={issue.url} className="truncate text-[13px] font-medium hover:underline hover:underline-offset-3" title={issue.title}>
+        <Link id={titleId} href={issuePath(projectId, issue.number)} className="truncate text-[13px] font-medium hover:underline hover:underline-offset-3" title={issue.title}>
           <span className="font-mono text-xs font-normal text-muted-foreground">#{issue.number}</span> {issue.title}
-        </a>
+        </Link>
         {issue.run?.status === "cancelled" && <span className="text-xs text-muted-foreground">Last run cancelled</span>}
       </div>
       <span className="ml-auto shrink-0">

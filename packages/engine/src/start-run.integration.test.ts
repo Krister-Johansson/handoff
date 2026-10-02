@@ -59,6 +59,38 @@ test("startRun records startedBy on the run and in run.created", async () => {
   expect(events.find((e) => e.type === "run.created")?.payload).toMatchObject({ issues: [11], startedBy: "scheduler" });
 });
 
+const assignments = async (runId: string) =>
+  (await inspect(db, runId)).events.filter((e) => e.type.startsWith("issue.assign")).map((e) => ({ type: e.type, ...(e.payload as object) }));
+
+test("startRun assigns the token's user to an issue with no assignee, keeps an existing assignee, and records what it did", async () => {
+  const { github, start } = await project();
+  github.issues.get(12)!.assignees = ["ann"];
+  const run = await start([11, 12]);
+  expect(github.issues.get(11)!.assignees).toEqual(["octocat"]);
+  expect(github.issues.get(12)!.assignees).toEqual(["ann"]);
+  expect(await assignments(run.id)).toEqual([{ type: "issue.assigned", issue: 11, login: "octocat" }]);
+});
+
+test("startRun assigns nobody with a GitHub App, which has no user, and says so on the run", async () => {
+  const { github, start } = await project();
+  github.login = undefined;
+  const run = await start([11]);
+  expect(github.issues.get(11)!.assignees ?? []).toEqual([]);
+  expect(await assignments(run.id)).toEqual([{ type: "issue.assign.skipped", issue: 11, reason: "no-user" }]);
+});
+
+test("a failed assignment is recorded and the run starts anyway", async () => {
+  const { github, start } = await project();
+  github.assignable = [];
+  vi.spyOn(github, "setAssignees").mockRejectedValueOnce(new Error("Validation Failed"));
+  const run = await start([11, 12]);
+  expect(run.status).toBe("queued");
+  expect(await assignments(run.id)).toEqual([
+    { type: "issue.assign.skipped", issue: 11, reason: "Validation Failed" },
+    { type: "issue.assign.skipped", issue: 12, reason: "not-assignable" },
+  ]);
+});
+
 const repo = { owner: "octo", name: "sample" };
 
 /** A project whose plan is the repository's GitHub Project; `task` adds a task in Ready to it. */

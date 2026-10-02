@@ -13,16 +13,23 @@ import { getProjectDetail } from "@/server/graphs";
 import { loadPlan } from "@/server/plan";
 import { lastGitHubActivity } from "@/server/plan-activity";
 import { planSignals } from "@/server/plan-signals";
+import { tokenUser } from "@/server/assignees";
+import { planAssignAction, planPeopleAction } from "@/app/projects/issue-actions";
 
 export const dynamic = "force-dynamic";
 
 /** Everything the page shows, read together, with the moment GitHub was read for the refresh line. */
 async function loadPlanPage(projectId: string) {
   const db = getDb();
-  const [detail, plan, activity] = await Promise.all([getProjectDetail(db, projectId), loadPlan(db, getGitHub(), getProjects(), projectId), lastGitHubActivity(db, projectId)]);
+  const [detail, plan, activity, me] = await Promise.all([
+    getProjectDetail(db, projectId),
+    loadPlan(db, getGitHub(), getProjects(), projectId),
+    lastGitHubActivity(db, projectId),
+    tokenUser(getGitHub()),
+  ]);
   const signals = detail && !("reason" in plan) ? await planSignals(db, projectId, Object.values(plan.board).flat()) : { needsYou: [], skipped: {} };
   const crumbs = detail ? [projectCrumb(detail.project), { label: "Plan" }] : [];
-  return { detail, plan, activity, signals, crumbs, readAt: Date.now() };
+  return { detail, plan, activity, signals, crumbs, me, readAt: Date.now() };
 }
 
 /** A project's plan from its GitHub Project: epics, stories and tasks as a tree, a board or a timeline. */
@@ -34,7 +41,7 @@ export default async function PlanPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [{ projectId }, query] = await Promise.all([params, searchParams]);
-  const { detail, plan, activity, signals, crumbs, readAt } = await loadPlanPage(projectId);
+  const { detail, plan, activity, signals, crumbs, me, readAt } = await loadPlanPage(projectId);
   if (!detail || ("reason" in plan && plan.reason === "not-found")) notFound();
   const { project, graphs, defaultGraph } = detail;
 
@@ -64,6 +71,9 @@ export default async function PlanPage({
         start={{ graphs: graphs.map((g) => g.name), graphName: project.isDemo ? undefined : defaultGraph }}
         readAt={readAt}
         activity={activity}
+        me={me}
+        // Rows and cards assign through GitHub; the server actions are bound to this project.
+        assign={project.isDemo ? undefined : { people: planPeopleAction.bind(null, project.id), assign: planAssignAction.bind(null, project.id) }}
       />
     </main>
   );

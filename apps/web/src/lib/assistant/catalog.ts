@@ -130,6 +130,27 @@ export const CATALOG: ToolSpec[] = [
     summarize: (a) => `Start a run in ${a.project}${a.issues?.length ? ` on ${a.issues.map((n) => `#${n}`).join(", ")}` : a.task ? `: ${a.task}` : ""}`,
   }),
   spec({
+    name: "assign",
+    title: "Assign an issue",
+    description:
+      "Sets who is assigned an issue on GitHub, replacing its assignees: the logins given, plus the person handoff acts for (the GitHub user of its token) with me. An empty list without me clears the assignees. Use me when the person says they will work on an issue. Refuses a login the repository cannot assign, and then changes nothing. Does not change the plan's Status. start_run already assigns the person to an issue that has no assignee.",
+    input: z.object({
+      project,
+      issue: z.number().int().positive().describe("The issue number"),
+      logins: z.array(z.string().min(1)).describe("GitHub logins to assign; [] with me false clears the assignees"),
+      me: z.boolean().optional().describe("Also assign the person handoff acts for"),
+    }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    openWorld: true,
+    idempotent: true,
+    summarize: (a) => {
+      const who = [...a.logins, ...(a.me ? ["you"] : [])];
+      return who.length ? `Assign #${a.issue} in ${a.project} to ${who.join(", ")}` : `Clear the assignees of #${a.issue} in ${a.project}`;
+    },
+  }),
+  spec({
     name: "list_runs",
     title: "List runs",
     description: "Runs, newest first, each with the step it is on and for how long. status active means queued, running or waiting.",
@@ -343,7 +364,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_plan",
     title: "Show the plan",
     description:
-      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done), each with its Start and Target dates, each task with its open blockers, latest run and pull request; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). With epic, only that epic.",
+      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done), each with its Start and Target dates, each task with its open blockers, latest run and pull request, its Size (S, M or L), its Estimate in hours, the size its planner proposed and its duration in hours with where it comes from; the project's capacity in hours a day and each size's forecast from its finished runs; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). With epic, only that epic.",
     input: z.object({ project, epic: z.number().int().positive().optional().describe("Only this epic, by issue number") }),
     kind: "data",
     confirm: false,

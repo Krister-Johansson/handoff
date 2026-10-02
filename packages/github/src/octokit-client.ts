@@ -1,8 +1,9 @@
 import { App, Octokit } from "octokit";
 import { z } from "zod";
 import { IssueParentsDocument, PullRequestSnapshotDocument, type IssueParentsQuery, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
+import { readError } from "./errors.ts";
 import { ancestorsOf } from "./projects/lineage.ts";
-import type { CheckContext, GitHubPort, IssueDetail, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
+import type { Assignable, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -76,13 +77,22 @@ export class OctokitGitHub implements GitHubPort {
     private readonly clientFor: (repo: RepoRef) => Promise<Octokit>,
     private readonly tokenFor: (repo: RepoRef) => Promise<string>,
     private readonly reposFor: () => Promise<RepoSummary[]>,
+    private readonly viewerFor: () => Promise<string | undefined>,
   ) {}
 
-  static withToken(token: string, opts: { fetch?: Fetch } = {}): OctokitGitHub {
-    const octokit = new Octokit({ auth: token, ...(opts.fetch ? { request: { fetch: opts.fetch } } : {}) });
+  /** `retry: false` turns off Octokit's retries of failed requests, for tests that answer with a 5xx. */
+  static withToken(token: string, opts: { fetch?: Fetch; retry?: boolean } = {}): OctokitGitHub {
+    const octokit = new Octokit({ auth: token, ...(opts.fetch ? { request: { fetch: opts.fetch } } : {}), ...(opts.retry === false ? { retry: { enabled: false } } : {}) });
     const repos = async () =>
       (await octokit.paginate(octokit.rest.repos.listForAuthenticatedUser, { sort: "pushed", per_page: 100 })).map((r) => toSummary(r as RestRepo)).sort(byPushed);
-    return new OctokitGitHub(async () => octokit, async () => token, repos);
+    // The token's user does not change while the process runs, so it is asked once.
+    let login: Promise<string> | undefined;
+    const viewer = () => {
+      login ??= octokit.rest.users.getAuthenticated().then(({ data }) => data.login);
+      login.catch(() => (login = undefined));
+      return login;
+    };
+    return new OctokitGitHub(async () => octokit, async () => token, repos, viewer);
   }
 
   static withApp(input: { appId: number; privateKey: string; fetch?: Fetch }): OctokitGitHub {
@@ -108,11 +118,17 @@ export class OctokitGitHub implements GitHubPort {
         for await (const { repository } of app.eachRepository.iterator()) repos.push(toSummary(repository as RestRepo));
         return repos.sort(byPushed);
       },
+      // An installation acts as the App, not as a person.
+      async () => undefined,
     );
   }
 
   listRepos(): Promise<RepoSummary[]> {
     return this.reposFor();
+  }
+
+  viewer(): Promise<string | undefined> {
+    return this.viewerFor();
   }
 
   async listIssues(repo: RepoRef): Promise<IssueSummary[]> {
@@ -137,6 +153,48 @@ export class OctokitGitHub implements GitHubPort {
     return openNumbers(data.repository.issue?.blockedBy.nodes ?? []);
   }
 
+  async dependencies(repo: RepoRef, number: number): Promise<IssueDependencies> {
+    const octokit = await this.clientFor(repo);
+    const params = { owner: repo.owner, repo: repo.name, issue_number: number, per_page: 100 };
+    const [blockedBy, blocking] = await Promise.all([
+      octokit.paginate(octokit.rest.issues.listDependenciesBlockedBy, params),
+      octokit.paginate(octokit.rest.issues.listDependenciesBlocking, params),
+    ]);
+    return { blockedBy: blockedBy.map(toIssueRef), blocking: blocking.map(toIssueRef) };
+  }
+
+  async listIssueComments(repo: RepoRef, number: number): Promise<IssueComment[]> {
+    const octokit = await this.clientFor(repo);
+    const comments = await octokit.paginate(octokit.rest.issues.listComments, { owner: repo.owner, repo: repo.name, issue_number: number, per_page: 100 });
+    return comments.map((c) => ({
+      id: c.id,
+      author: c.user?.login ?? null,
+      authorAssociation: c.author_association,
+      createdAt: c.created_at,
+      updatedAt: c.updated_at,
+      body: c.body ?? "",
+      url: c.html_url,
+    }));
+  }
+
+  async listSubIssues(repo: RepoRef, number: number): Promise<IssueRef[]> {
+    const octokit = await this.clientFor(repo);
+    const subIssues = await octokit.paginate(octokit.rest.issues.listSubIssues, { owner: repo.owner, repo: repo.name, issue_number: number, per_page: 100 });
+    return subIssues.map(toIssueRef);
+  }
+
+  async listAssignable(repo: RepoRef): Promise<Assignable[]> {
+    const octokit = await this.clientFor(repo);
+    const users = await octokit.paginate(octokit.rest.issues.listAssignees, { owner: repo.owner, repo: repo.name, per_page: 100 });
+    return users.map((u) => ({ login: u.login, avatarUrl: u.avatar_url }));
+  }
+
+  async setAssignees(repo: RepoRef, number: number, logins: string[]): Promise<string[]> {
+    const octokit = await this.clientFor(repo);
+    const { data } = await octokit.rest.issues.update({ owner: repo.owner, repo: repo.name, issue_number: number, assignees: logins });
+    return (data.assignees ?? []).map((a) => a.login);
+  }
+
   async addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void> {
     const octokit = await this.clientFor(repo);
     // The endpoint takes the blocking issue's id, not its number.
@@ -145,12 +203,31 @@ export class OctokitGitHub implements GitHubPort {
   }
 
   async getIssue(repo: RepoRef, number: number, opts: { parents?: boolean } = {}): Promise<IssueDetail> {
-    const octokit = await this.clientFor(repo);
-    const [{ data }, parents] = await Promise.all([
-      octokit.rest.issues.get({ owner: repo.owner, repo: repo.name, issue_number: number }),
-      opts.parents ? this.parentsOf(octokit, repo, number) : undefined,
-    ]);
-    const issue: IssueDetail = { number: data.number, title: data.title, url: data.html_url, body: data.body ?? "", state: data.state === "closed" ? "closed" : "open" };
+    const [{ data }, parents] = await this.clientFor(repo)
+      .then((octokit) =>
+        Promise.all([
+          octokit.rest.issues.get({ owner: repo.owner, repo: repo.name, issue_number: number }),
+          opts.parents ? this.parentsOf(octokit, repo, number) : undefined,
+        ]),
+      )
+      .catch((error: unknown) => {
+        throw readError(error, `${repo.owner}/${repo.name}#${number}`);
+      });
+    const issue: IssueDetail = {
+      number: data.number,
+      title: data.title,
+      url: data.html_url,
+      body: data.body ?? "",
+      state: data.state === "closed" ? "closed" : "open",
+      stateReason: data.state_reason ?? null,
+      labels: (data.labels ?? []).flatMap((l) => (typeof l === "string" ? [l] : l.name ? [l.name] : [])),
+      assignees: (data.assignees ?? []).map((a) => a.login),
+      author: data.user?.login ?? null,
+      authorAssociation: data.author_association ?? "NONE",
+      createdAt: data.created_at,
+      updatedAt: data.updated_at,
+      pullRequest: data.pull_request != null,
+    };
     return parents ? { ...issue, parents } : issue;
   }
 
@@ -312,6 +389,10 @@ export class OctokitGitHub implements GitHubPort {
     const basic = Buffer.from(`x-access-token:${token}`).toString("base64");
     return { GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "http.https://github.com/.extraheader", GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basic}` };
   }
+}
+
+function toIssueRef(issue: { number: number; title: string; html_url: string; state: string }): IssueRef {
+  return { number: issue.number, title: issue.title, url: issue.html_url, state: issue.state === "closed" ? "closed" : "open" };
 }
 
 function toCheckContext(c: NonNullable<GqlContext>): CheckContext[] {
