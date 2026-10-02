@@ -25,12 +25,15 @@ function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
-/** The bubble's outline: fixed at the bottom centre, with the progress line along its top edge while the assistant works. */
+/**
+ * The bubble's outline at the bottom centre of the page column, with the progress line along its top
+ * edge while the assistant works. The shell's overlay slot keeps it at the bottom of the window.
+ */
 function Frame({ progress = false, children }: { progress?: boolean; children: ReactNode }) {
   return (
     <section
       aria-label="Voice assistant"
-      className="fixed bottom-4 left-1/2 z-40 flex w-[min(480px,calc(100%-32px))] -translate-x-1/2 flex-col overflow-hidden rounded-[14px] border bg-popover text-[13px] text-popover-foreground shadow-[0_2px_4px_oklch(0_0_0/6%),0_18px_48px_oklch(0_0_0/16%)] sm:bottom-6 dark:shadow-[0_2px_4px_oklch(0_0_0/30%),0_18px_48px_oklch(0_0_0/45%)]"
+      className="absolute bottom-0 left-1/2 flex w-[min(480px,calc(100%-32px))] -translate-x-1/2 flex-col overflow-hidden rounded-[14px] border bg-popover text-[13px] text-popover-foreground shadow-[0_2px_4px_oklch(0_0_0/6%),0_18px_48px_oklch(0_0_0/16%)] dark:shadow-[0_2px_4px_oklch(0_0_0/30%),0_18px_48px_oklch(0_0_0/45%)]"
     >
       {progress && (
         <span aria-hidden className="absolute inset-x-0 top-0 h-0.5 overflow-hidden">
