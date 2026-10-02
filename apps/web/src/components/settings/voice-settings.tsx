@@ -1,12 +1,15 @@
 "use client";
 
 import { useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
+import { MicOffIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { readVoicePrefs, writeVoicePrefs, type VoicePrefs } from "@/lib/voice/prefs";
 import { useVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
+import { cn } from "@/lib/utils";
 
 const LANGUAGES = [
   { value: "en-US", label: "English (US)" },
@@ -17,17 +20,24 @@ const LANGUAGES = [
   { value: "es-ES", label: "Spanish" },
 ];
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 2];
+const rateLabel = (rate: number) => (rate === 1 ? "1x, normal" : `${rate}x`);
 
-function Row({ id, title, description, children }: { id: string; title: string; description: ReactNode; children: ReactNode }) {
+/** One setting: its title and what it does on the left, the control on the right. Without an id the title labels nothing. */
+function Row({ id, title, description, disabled, children }: { id?: string; title: string; description: ReactNode; disabled?: boolean; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-t py-3.5 first:border-t-0 first:pt-0">
-      <div className="flex flex-col gap-0.5">
-        <Label htmlFor={id}>{title}</Label>
-        <span className="text-xs text-muted-foreground">{description}</span>
+    <div className="flex items-center justify-between gap-6 border-t py-3.5">
+      <div className={cn("flex max-w-[460px] flex-col gap-0.5", disabled && "opacity-55")}>
+        {id ? <Label htmlFor={id}>{title}</Label> : <span className="text-sm font-medium">{title}</span>}
+        <span className="text-xs leading-normal text-muted-foreground">{description}</span>
       </div>
       {children}
     </div>
   );
+}
+
+/** A group's heading: Listening or Speaking. */
+function Group({ children, first }: { children: ReactNode; first?: boolean }) {
+  return <p className={cn("pt-[18px] pb-0.5 text-[11px] font-medium tracking-[0.05em] text-muted-foreground uppercase", first ? "pt-0" : "border-t")}>{children}</p>;
 }
 
 const NO_VOICES: SpeechSynthesisVoice[] = [];
@@ -90,17 +100,24 @@ export function VoiceSettings({ support: given }: { support?: VoiceSupport }) {
     support.synth.speak(utterance);
   };
   const canSpeak = Boolean(support.synth);
+  const listens = Boolean(support.recognition);
+  const local = listed.filter((v) => v.localService);
+  const online = listed.filter((v) => !v.localService);
   return (
-    <div className="flex flex-col text-sm">
-      {!support.recognition ? (
-        <p className="pb-3 text-xs text-muted-foreground">Speech recognition is not available in this browser. Chrome on Windows, macOS or Linux supports it.</p>
-      ) : (
-        !support.onDeviceCheck && (
-          <p className="pb-3 text-xs text-muted-foreground">This browser cannot check for on-device recognition, so listening needs server-based recognition.</p>
-        )
+    <div className="flex flex-col text-sm [&_[data-group]+div]:border-t-0">
+      {!listens && (
+        <p role="note" className="mb-[18px] flex items-start gap-2 rounded-md border bg-subtle px-3 py-2 text-xs leading-normal text-muted-foreground [&_svg]:mt-px [&_svg]:size-3.5">
+          <MicOffIcon aria-hidden />
+          This browser has no speech recognition, so the microphone button is hidden. Replies and notifications can still be read aloud.
+        </p>
       )}
-      <Row id="voice-lang" title="Language" description="What you speak, and the language voices are picked for.">
-        <NativeSelect id="voice-lang" value={prefs.lang} onChange={(e) => update({ lang: e.target.value })}>
+      {listens && !support.onDeviceCheck && (
+        <p className="mb-3 text-xs text-muted-foreground">This browser cannot check for on-device recognition, so listening needs server-based recognition.</p>
+      )}
+      <Group first>Listening</Group>
+      <div data-group />
+      <Row id="voice-lang" title="Language" description="The language you speak. Replies are read in it too." disabled={!listens}>
+        <NativeSelect id="voice-lang" value={prefs.lang} disabled={!listens} onChange={(e) => update({ lang: e.target.value })}>
           {LANGUAGES.map((l) => (
             <NativeSelectOption key={l.value} value={l.value}>
               {l.label}
@@ -111,48 +128,68 @@ export function VoiceSettings({ support: given }: { support?: VoiceSupport }) {
       <Row
         id="voice-server"
         title="Server-based recognition"
-        description="When this language has no on-device pack, send audio to Google's speech service. Off keeps audio on this machine."
+        description="Sends your voice to your browser's speech service (Google, in Chrome) for better accuracy. Off: speech is recognized on this computer, after a one-time download of the language."
+        disabled={!listens}
       >
-        <Switch id="voice-server" checked={prefs.allowServerRecognition} disabled={!support.recognition} onCheckedChange={(on) => update({ allowServerRecognition: on })} />
+        <Switch id="voice-server" checked={prefs.allowServerRecognition} disabled={!listens} onCheckedChange={(on) => update({ allowServerRecognition: on })} />
       </Row>
-      {!canSpeak && <p className="border-t py-3 text-xs text-muted-foreground">This browser cannot speak, so the speaking settings are off.</p>}
-      <Row id="voice-replies" title="Speak replies" description="Read each finished assistant reply aloud. The text stays on screen.">
+      <Group>Speaking</Group>
+      <div data-group />
+      {!canSpeak && <p className="pt-3 text-xs text-muted-foreground">This browser cannot speak, so the speaking settings are off.</p>}
+      <Row id="voice-replies" title="Speak replies" description="Read the assistant's replies aloud, with a Stop button while it speaks. It never listens while speaking." disabled={!canSpeak}>
         <Switch id="voice-replies" checked={prefs.speakReplies} disabled={!canSpeak} onCheckedChange={(on) => update({ speakReplies: on })} />
       </Row>
-      <Row id="voice-notifications" title="Speak notifications" description="Say new questions, permission requests, pull requests ready to merge and failed runs.">
+      <Row id="voice-notifications" title="Speak notifications" description="Read new questions, failed runs and reviews aloud as they arrive." disabled={!canSpeak}>
         <Switch id="voice-notifications" checked={prefs.speakNotifications} disabled={!canSpeak} onCheckedChange={(on) => update({ speakNotifications: on })} />
       </Row>
-      <Row id="voice-finished" title="Also finished and merged runs" description="Say those too, not only what needs you.">
-        <Switch id="voice-finished" checked={prefs.speakFinished} disabled={!canSpeak || !prefs.speakNotifications} onCheckedChange={(on) => update({ speakFinished: on })} />
-      </Row>
-      <Row id="voice-voice" title="Voice" description="Automatic picks a voice on this machine for the language.">
-        <NativeSelect id="voice-voice" value={prefs.voiceURI ?? ""} disabled={!canSpeak} onChange={(e) => update({ voiceURI: e.target.value || null })}>
+      <div className="-mt-1 flex items-center gap-2 pb-3 pl-5 text-[13px]">
+        <Checkbox
+          id="voice-finished"
+          checked={prefs.speakFinished}
+          disabled={!canSpeak || !prefs.speakNotifications}
+          onCheckedChange={(on) => update({ speakFinished: on === true })}
+        />
+        <Label htmlFor="voice-finished" className="font-normal">
+          Also finished and merged runs
+        </Label>
+      </div>
+      <Row id="voice-voice" title="Voice" description="Voices on this device come first." disabled={!canSpeak}>
+        <NativeSelect id="voice-voice" className="w-60" value={prefs.voiceURI ?? ""} disabled={!canSpeak} onChange={(e) => update({ voiceURI: e.target.value || null })}>
           <NativeSelectOption value="">Automatic</NativeSelectOption>
-          {listed.map((v) => (
-            <NativeSelectOption key={v.voiceURI} value={v.voiceURI}>
-              {`${v.name} (${v.lang}${v.localService ? "" : ", remote"})`}
-            </NativeSelectOption>
-          ))}
+          {local.length > 0 && (
+            <optgroup label="On this device">
+              {local.map((v) => (
+                <NativeSelectOption key={v.voiceURI} value={v.voiceURI}>{`${v.name} (${v.lang})`}</NativeSelectOption>
+              ))}
+            </optgroup>
+          )}
+          {online.length > 0 && (
+            <optgroup label="Online">
+              {online.map((v) => (
+                <NativeSelectOption key={v.voiceURI} value={v.voiceURI}>{`${v.name} (${v.lang})`}</NativeSelectOption>
+              ))}
+            </optgroup>
+          )}
         </NativeSelect>
       </Row>
-      <Row id="voice-remote" title="Remote voices" description="List voices that send the text to their vendor to synthesize.">
+      <Row id="voice-remote" title="Online voices" description="Online voices can sound more natural. The text they read goes to the voice's service." disabled={!canSpeak}>
         <Switch id="voice-remote" checked={prefs.allowRemoteVoices} disabled={!canSpeak} onCheckedChange={(on) => update({ allowRemoteVoices: on })} />
       </Row>
-      <Row id="voice-rate" title="Rate" description="How fast the voice speaks.">
+      <Row id="voice-rate" title="Rate" description="How fast replies and notifications are read." disabled={!canSpeak}>
         <NativeSelect id="voice-rate" value={String(prefs.rate)} disabled={!canSpeak} onChange={(e) => update({ rate: Number(e.target.value) })}>
           {RATES.map((r) => (
             <NativeSelectOption key={r} value={String(r)}>
-              {`${r}×`}
+              {rateLabel(r)}
             </NativeSelectOption>
           ))}
         </NativeSelect>
       </Row>
-      <div className="flex items-center justify-between gap-4 border-t pt-3.5">
-        <span className="text-xs text-muted-foreground">Speaking and a screen reader can talk over each other. Both are off by default.</span>
+      <Row title="Test" description="Reads one sentence with this voice and rate." disabled={!canSpeak}>
         <Button type="button" size="sm" variant="outline" disabled={!canSpeak} onClick={test}>
+          <PlayIcon data-icon="inline-start" />
           Test voice
         </Button>
-      </div>
+      </Row>
     </div>
   );
 }

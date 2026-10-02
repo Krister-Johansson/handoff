@@ -16,10 +16,10 @@ type Model = (typeof MODELS)[number]["value"];
 
 function Row({ id, title, description, children }: { id: string; title: string; description: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-t py-3.5 first:border-t-0 first:pt-0">
-      <div className="flex flex-col gap-0.5">
+    <div className="flex items-center justify-between gap-6 border-t py-3.5 first:border-t-0 first:pt-0">
+      <div className="flex max-w-[460px] flex-col gap-0.5">
         <Label htmlFor={id}>{title}</Label>
-        <span className="text-xs text-muted-foreground">{description}</span>
+        <span className="text-xs leading-normal text-muted-foreground">{description}</span>
       </div>
       {children}
     </div>
@@ -51,7 +51,7 @@ export function AssistantSettings({ hasToken, enabled, model, lastModel }: { has
         title="Assistant"
         description={
           hasToken
-            ? "Answers in the panel beside every page and acts after you approve, with Claude Code on your subscription."
+            ? "Opens with the Assistant button in the header or ⌘J."
             : "Add CLAUDE_CODE_OAUTH_TOKEN (from claude setup-token) to the dashboard's environment and restart it. The assistant runs Claude Code on your subscription."
         }
       >
