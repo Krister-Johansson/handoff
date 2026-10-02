@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { buildSchema, Kind, parse, validate } from "graphql";
 import { expect, test } from "vitest";
 import { fakeGraphql, GraphqlErrors } from "../testing/fake-fetch.ts";
 import { OctokitProjects } from "./octokit-projects.ts";
@@ -186,6 +188,38 @@ test("listItems reads Start and Target as YYYY-MM-DD and an iteration's title, s
   ]);
 });
 
+test("listItems reads Size as S, M or L and Estimate in hours, and another Size option or an Estimate of 0 as none", async () => {
+  const size = (name: string) => ({ __typename: "ProjectV2ItemFieldSingleSelectValue", name });
+  const estimate = (number: number) => ({ __typename: "ProjectV2ItemFieldNumberValue", number });
+  const { fetch } = fakeGraphql({
+    PlanItems: () =>
+      page(
+        [
+          { ...issueItem(50), size: size("S"), estimate: null },
+          { ...issueItem(51), size: size("M"), estimate: estimate(10.5) },
+          { ...issueItem(52), size: size("L"), estimate: estimate(0) },
+          // Project #1's own Size options are not handoff's sizes.
+          { ...issueItem(53), size: size("🦑 Large"), estimate: estimate(-2) },
+          { ...issueItem(54), size: null, estimate: estimate(3) },
+          // Fields named Size and Estimate of another type answer with another value type.
+          { ...issueItem(55), size: { __typename: "ProjectV2ItemFieldTextValue" }, estimate: { __typename: "ProjectV2ItemFieldTextValue" } },
+        ],
+        null,
+        false,
+      ),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("octo", 3, repo)).map((i) => [i.number, i.size, i.estimate])).toEqual([
+    [50, "S", undefined],
+    [51, "M", 10.5],
+    [52, "L", undefined],
+    [53, undefined, undefined],
+    [54, undefined, 3],
+    [55, undefined, undefined],
+  ]);
+});
+
 const statusField = {
   __typename: "ProjectV2SingleSelectField",
   id: "F_status",
@@ -210,7 +244,7 @@ const planProject = (number: number, ownerId = "U_octo", dates = true) => ({
 });
 
 /** The IssuePlan answer for an issue that is an item of the given Projects. */
-function issuePlan(number: number, items: { id: string; project: ReturnType<typeof planProject>; status?: string }[], over: Record<string, unknown> = {}) {
+function issuePlan(number: number, items: { id: string; project: ReturnType<typeof planProject> & Record<string, unknown>; status?: string }[], over: Record<string, unknown> = {}) {
   return {
     repository: {
       owner: { id: "U_octo" },
@@ -371,18 +405,15 @@ test("createIssue sets Start and Target after adding the item", async () => {
       return { addProjectV2ItemById: { item: { id: "PVTI_20" } } };
     },
     SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
-    SetPlanDate: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
+    SetPlanFields: () => ({ start: { projectV2Item: { id: "PVTI_20" } }, target: { projectV2Item: { id: "PVTI_20" } } }),
   });
   const projects = port(fetch);
 
   await projects.createIssue(repo, { project: 3, title: "Add the migration", body: "A column.", labels: ["task"], start: "2026-10-06", target: "2026-10-09" });
 
-  expect(operations.map((o) => o.operation).slice(-3)).toEqual(["IssuePlan", "SetPlanDate", "SetPlanDate"]);
-  expect(operations.filter((o) => o.operation === "SetPlanDate").map((o) => o.variables)).toEqual([
-    { projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_start", date: "2026-10-06" },
-    { projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_target", date: "2026-10-09" },
-  ]);
-  expect(operations.findIndex((o) => o.operation === "SetPlanStatus")).toBeLessThan(operations.findIndex((o) => o.operation === "SetPlanDate"));
+  expect(operations.map((o) => o.operation).slice(-2)).toEqual(["IssuePlan", "SetPlanFields"]);
+  expect(operations.at(-1)!.variables).toEqual({ projectId: "PVT_3", itemId: "PVTI_20", startField: "F_start", startValue: "2026-10-06", targetField: "F_target", targetValue: "2026-10-09" });
+  expect(operations.findIndex((o) => o.operation === "SetPlanStatus")).toBeLessThan(operations.findIndex((o) => o.operation === "SetPlanFields"));
 });
 
 test("createIssue refuses a label the repository does not have, before creating anything", async () => {
@@ -574,6 +605,7 @@ test("getProject reads a user's Project with its Status option ids and date fiel
     title: "sample plan",
     statusOptions: { Shaping: "o_shaping", Ready: "o_ready", Running: "o_running", "In review": "o_review", Done: "o_done" },
     dateFields: { start: "F_start", target: "F_target" },
+    estimateFields: { size: undefined, estimate: undefined },
   });
   expect(await projects.getProject("octo", 99)).toBeUndefined();
 });
@@ -636,6 +668,34 @@ test("a Project without Start and Target fields is still read, with no date fiel
 
   expect(await projects.getProject("octo", 5)).toMatchObject({ number: 5, title: "older plan", dateFields: { start: undefined, target: undefined } });
   expect((await projects.listProjects("octo", repo)).map((p) => p.number)).toEqual([5]);
+});
+
+/** How GitHub answers `field(name: "Size")` and `field(name: "Estimate")` on a Project without those fields: a NOT_FOUND per field next to the data. */
+const missingEstimateFields = (path: string[]) =>
+  [
+    ["size", "Size"],
+    ["estimate", "Estimate"],
+  ].map(([alias, name]) => ({ type: "NOT_FOUND", path: [...path, alias!], message: `Could not resolve to a Unions::ProjectV2FieldConfiguration with the name ${name}` }));
+
+/** A Size single select field with the named options, ids o_<name>, each with a colour and description. */
+const sizeField = (...names: string[]) => ({
+  __typename: "ProjectV2SingleSelectField",
+  id: "F_size",
+  options: names.map((name) => ({ id: `o_${name}`, name, color: "GRAY", description: "" })),
+});
+
+test("a Project without Size and Estimate fields is read with no estimate field ids", async () => {
+  const bare = { ...planProject(5), url: "https://github.com/users/octo/projects/5", title: "todooverkill plan", closed: false, repositories: { nodes: [] } };
+  const sized = { ...planProject(1), url: "https://github.com/users/octo/projects/1", title: "sized", size: sizeField("🐋 X-Large", "S", "M", "L"), estimate: projectField("F_estimate", "NUMBER") };
+  const { fetch } = fakeGraphql({
+    PlanProject: (v) => (v.number === 5 ? new GraphqlErrors({ user: { projectV2: bare } }, missingEstimateFields(["user", "projectV2"])) : { user: { projectV2: sized } }),
+    PlanProjects: () => new GraphqlErrors({ user: { projectsV2: { nodes: [bare] } } }, missingEstimateFields(["user", "projectsV2", "nodes", "0"])),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getProject("octo", 5)).toMatchObject({ number: 5, dateFields: { start: "F_start", target: "F_target" }, estimateFields: { size: undefined, estimate: undefined } });
+  expect((await projects.listProjects("octo", repo)).map((p) => p.number)).toEqual([5]);
+  expect((await projects.getProject("octo", 1))?.estimateFields).toEqual({ size: { id: "F_size", options: { S: "o_S", M: "o_M", L: "o_L" } }, estimate: "F_estimate" });
 });
 
 test("a Project without a Priority field gives every item no priority", async () => {
@@ -728,23 +788,23 @@ test("setDates writes a date, clears one with null, and reports no-field on a Pr
           ? issuePlan(13, [{ id: "PVTI_2", project: planProject(2) }])
           : // A Project with a text field named Start and no Target field.
             issuePlan(14, [{ id: "PVTI_14", project: { ...planProject(3, "U_octo", false), start: projectField("F_text", "TEXT") } }]),
-    SetPlanDate: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_3" } } }),
-    ClearPlanField: () => ({ clearProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_3" } } }),
+    SetPlanFields: () => ({ start: { projectV2Item: { id: "PVTI_3" } } }),
   });
   const projects = port(fetch);
 
   expect(await projects.setDates(repo, 3, 12, { start: "2026-10-06", target: null })).toBe("set");
   expect(operations.map((o) => [o.operation, o.variables])).toEqual([
     ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
-    ["SetPlanDate", { projectId: "PVT_3", itemId: "PVTI_3", fieldId: "F_start", date: "2026-10-06" }],
-    ["ClearPlanField", { projectId: "PVT_3", itemId: "PVTI_3", fieldId: "F_target" }],
+    ["SetPlanFields", { projectId: "PVT_3", itemId: "PVTI_3", startField: "F_start", startValue: "2026-10-06", targetField: "F_target" }],
   ]);
 
   // Only the dates given change: target alone leaves Start as it is.
   operations.length = 0;
   expect(await projects.setDates(repo, 3, 12, { target: "2026-10-17" })).toBe("set");
-  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "SetPlanDate"]);
-  expect(operations[1]!.variables).toMatchObject({ fieldId: "F_target", date: "2026-10-17" });
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
+    ["SetPlanFields", { projectId: "PVT_3", itemId: "PVTI_3", targetField: "F_target", targetValue: "2026-10-17" }],
+  ]);
 
   operations.length = 0;
   expect(await projects.setDates(repo, 3, 13, { start: "2026-10-06" })).toBe("not-in-project");
@@ -784,6 +844,195 @@ test("setDates reports no-field on a Project without Start and Target fields ins
 
   expect(await projects.setDates(repo, 5, 12, { start: "2026-10-06" })).toBe("no-field");
   expect(operations.map((o) => o.operation)).toEqual(["IssuePlan"]);
+});
+
+test("status and date writes work on a Project that lacks Start, Target, Size and Estimate", async () => {
+  // Live on todoOverKill #146: a `field(name: "Size")` lookup inside projectItems answered NOT_FOUND at
+  // repository.issue.projectItems.nodes.0.project.size next to complete data.
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: () =>
+      new GraphqlErrors(issuePlan(12, [{ id: "PVTI_5", project: planProject(5, "U_octo", false), status: "Shaping" }]), [
+        ...missingDateFields(itemProjectPath(0)),
+        ...missingEstimateFields(itemProjectPath(0)),
+      ]),
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_5" } } }),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getStatus(repo, 5, 12)).toBe("Shaping");
+  expect(await projects.setStatus(repo, 5, 12, "Ready")).toBe("set");
+  expect(await projects.setDates(repo, 5, 12, { start: "2026-10-06" })).toBe("no-field");
+  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan", "SetPlanStatus", "IssuePlan"]);
+});
+
+/** GitHub's schema, vendored, to check the documents built at run time that codegen never sees. */
+// GitHub publishes a schema that graphql-js would reject for its deprecations, so it is taken as valid.
+const githubSchema = buildSchema(readFileSync(new URL("../schema/schema.docs.graphql", import.meta.url), "utf8"), { assumeValid: true });
+
+/** The mutations a document sends, as [alias, mutation]; throws when the document is not valid against GitHub's schema. */
+function mutationsOf(query: string): [string, string][] {
+  const document = parse(query);
+  const errors = validate(githubSchema, document);
+  if (errors.length) throw new Error(errors.map((e) => e.message).join("\n"));
+  const operation = document.definitions[0];
+  if (operation?.kind !== Kind.OPERATION_DEFINITION) throw new Error("not an operation");
+  return operation.selectionSet.selections.flatMap((s) => (s.kind === Kind.FIELD ? [[s.alias?.value ?? s.name.value, s.name.value] as [string, string]] : []));
+}
+
+/** A Project with every field handoff reads: Status, Start, Target, Size with S, M and L, and Estimate. */
+const fullProject = (number: number) => ({ ...planProject(number), size: sizeField("S", "M", "L"), estimate: projectField("F_estimate", "NUMBER") });
+
+test("setPlanFields writes Start, Target, Size and Estimate in one request after one read, and clears a field with null", async () => {
+  const { fetch, operations, calls } = fakeGraphql({
+    IssuePlan: () => issuePlan(12, [{ id: "PVTI_3", project: fullProject(3) }]),
+    SetPlanFields: () => ({ start: { projectV2Item: { id: "PVTI_3" } } }),
+  });
+  const projects = port(fetch);
+  const sentQuery = () => (calls.at(-1)!.body as { query: string }).query;
+
+  expect(await projects.setPlanFields(repo, 3, 12, { start: "2026-10-06", target: "2026-10-07", size: "M", estimate: 10.5 })).toBe("set");
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
+    [
+      "SetPlanFields",
+      {
+        projectId: "PVT_3",
+        itemId: "PVTI_3",
+        startField: "F_start",
+        startValue: "2026-10-06",
+        targetField: "F_target",
+        targetValue: "2026-10-07",
+        sizeField: "F_size",
+        sizeValue: "o_M",
+        estimateField: "F_estimate",
+        estimateValue: 10.5,
+      },
+    ],
+  ]);
+  expect(mutationsOf(sentQuery())).toEqual([
+    ["start", "updateProjectV2ItemFieldValue"],
+    ["target", "updateProjectV2ItemFieldValue"],
+    ["size", "updateProjectV2ItemFieldValue"],
+    ["estimate", "updateProjectV2ItemFieldValue"],
+  ]);
+
+  // null clears; a field left out is not sent.
+  operations.length = 0;
+  expect(await projects.setPlanFields(repo, 3, 12, { size: null, estimate: null, target: "2026-10-09" })).toBe("set");
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
+    ["SetPlanFields", { projectId: "PVT_3", itemId: "PVTI_3", targetField: "F_target", targetValue: "2026-10-09", sizeField: "F_size", estimateField: "F_estimate" }],
+  ]);
+  expect(mutationsOf(sentQuery())).toEqual([
+    ["target", "updateProjectV2ItemFieldValue"],
+    ["size", "clearProjectV2ItemFieldValue"],
+    ["estimate", "clearProjectV2ItemFieldValue"],
+  ]);
+});
+
+test("setPlanFields reports no-field and no-option and changes nothing", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: (v) =>
+      v.number === 12
+        ? // Project #5 live: Status, Start and Target, no Size and no Estimate.
+          new GraphqlErrors(issuePlan(12, [{ id: "PVTI_5", project: planProject(5) }]), missingEstimateFields(itemProjectPath(0)))
+        : v.number === 13
+          ? // Project #1 live: a Size field with its own options and no S, M or L yet, and an Estimate that is text.
+            issuePlan(13, [{ id: "PVTI_1", project: { ...planProject(5), size: sizeField("🐋 X-Large", "🦑 Large", "🐂 Medium", "🐇 Small", "🦔 Tiny"), estimate: projectField("F_estimate", "TEXT") } }])
+          : issuePlan(14, [{ id: "PVTI_2", project: planProject(2) }]),
+  });
+  const projects = port(fetch);
+
+  // Start could be written, but Size cannot, so neither is.
+  expect(await projects.setPlanFields(repo, 5, 12, { start: "2026-10-06", size: "M" })).toBe("no-field");
+  expect(await projects.setPlanFields(repo, 5, 12, { estimate: null })).toBe("no-field");
+  expect(await projects.setPlanFields(repo, 5, 13, { target: "2026-10-07", size: "L" })).toBe("no-option");
+  expect(await projects.setPlanFields(repo, 5, 13, { estimate: 3 })).toBe("no-field");
+  expect(await projects.setPlanFields(repo, 5, 14, { size: "S" })).toBe("not-in-project");
+  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan"]);
+});
+
+/** How createProjectV2Field or updateProjectV2Field answers for a Size field with these options: the sent ids kept, new ones for the rest. */
+const sizeFieldFrom = (options: { id?: string; name: string }[]) => ({
+  __typename: "ProjectV2SingleSelectField",
+  id: "F_size",
+  options: options.map((o) => ({ id: o.id ?? `o_${o.name}`, name: o.name, color: "GRAY", description: "" })),
+});
+
+test("ensureEstimateFields creates Size with S, M and L and Estimate as a Number once", async () => {
+  let project: Record<string, unknown> = { ...planProject(5), url: "u", title: "t" };
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: () =>
+      project.size ? { user: { projectV2: project } } : new GraphqlErrors({ user: { projectV2: { ...project, size: null, estimate: null } } }, missingEstimateFields(["user", "projectV2"])),
+    CreatePlanSizeField: (v) => {
+      const field = sizeFieldFrom(v.options as { name: string }[]);
+      project = { ...project, size: field };
+      return { createProjectV2Field: { projectV2Field: field } };
+    },
+    CreatePlanEstimateField: () => {
+      project = { ...project, estimate: projectField("F_estimate", "NUMBER") };
+      return { createProjectV2Field: { projectV2Field: projectField("F_estimate", "NUMBER") } };
+    },
+  });
+  const projects = port(fetch);
+
+  const ids = { size: { id: "F_size", options: { S: "o_S", M: "o_M", L: "o_L" } }, estimate: "F_estimate" };
+  expect(await projects.ensureEstimateFields("octo", 5)).toEqual(ids);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "CreatePlanSizeField", "CreatePlanEstimateField"]);
+  const size = operations[1]!.variables as { projectId: string; name: string; options: { name: string; color: string; description: string }[] };
+  expect([size.projectId, size.name, size.options.map((o) => o.name)]).toEqual(["PVT_5", "Size", ["S", "M", "L"]]);
+  expect(size.options.every((o) => o.color && o.description)).toBe(true);
+  expect(operations[2]!.variables).toEqual({ projectId: "PVT_5", name: "Estimate" });
+
+  operations.length = 0;
+  expect(await projects.ensureEstimateFields("octo", 5)).toEqual(ids);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
+test("ensureEstimateFields adds S, M and L to an existing Size field and keeps its options with their ids", async () => {
+  // Project #1 live has these five options; here a person has also added M by hand.
+  const current = sizeField("🐋 X-Large", "🦑 Large", "M", "🐂 Medium", "🐇 Small", "🦔 Tiny");
+  let project: Record<string, unknown> = { ...planProject(1), url: "u", title: "t", size: current, estimate: projectField("F_estimate", "NUMBER") };
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: () => ({ user: { projectV2: project } }),
+    SetPlanSizeOptions: (v) => {
+      const field = sizeFieldFrom(v.options as { id?: string; name: string }[]);
+      project = { ...project, size: field };
+      return { updateProjectV2Field: { projectV2Field: field } };
+    },
+  });
+  const projects = port(fetch);
+
+  expect(await projects.ensureEstimateFields("octo", 1)).toEqual({ size: { id: "F_size", options: { S: "o_S", M: "o_M", L: "o_L" } }, estimate: "F_estimate" });
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "SetPlanSizeOptions"]);
+  const sent = operations[1]!.variables as { fieldId: string; options: { id?: string; name: string; color: string; description: string }[] };
+  expect(sent.fieldId).toBe("F_size");
+  // Every existing option goes back with its id, colour and description, so no item loses its value; S and L are added.
+  expect(sent.options.slice(0, 6)).toEqual(current.options);
+  expect(sent.options.slice(6).map((o) => [o.id, o.name])).toEqual([
+    [undefined, "S"],
+    [undefined, "L"],
+  ]);
+  expect(sent.options.slice(6).every((o) => o.color && o.description)).toBe(true);
+
+  operations.length = 0;
+  await projects.ensureEstimateFields("octo", 1);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
+test("ensureEstimateFields refuses a Size that is not a single select", async () => {
+  let project: Record<string, unknown> = { ...planProject(3), url: "u", title: "t", size: projectField("F_size_text", "TEXT"), estimate: null };
+  const { fetch, operations } = fakeGraphql({ PlanProject: () => ({ user: { projectV2: project } }) });
+  const projects = port(fetch);
+
+  await expect(projects.ensureEstimateFields("octo", 3)).rejects.toThrow(/has a Size field that is not a single select/);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+
+  // An Estimate that is not a number is refused the same way, before the missing Size is created.
+  project = { ...project, size: null, estimate: projectField("F_estimate_text", "TEXT") };
+  operations.length = 0;
+  await expect(projects.ensureEstimateFields("octo", 3)).rejects.toThrow(/has an Estimate field that is not a number field/);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
 });
 
 test("setStatus still fails for an issue GitHub cannot resolve", async () => {
