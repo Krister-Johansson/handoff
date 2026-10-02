@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
+import { AssistantButton } from "@/components/assistant/assistant-button";
 import { Button } from "@/components/ui/button";
 import { InboxLink } from "@/components/inbox-link";
 import { NavLink } from "@/components/nav-link";
@@ -23,6 +24,7 @@ export function SiteHeader() {
           <NavLink href="/library">Library</NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-1">
+          <AssistantButton />
           <NotificationBell />
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground" asChild>
             <Link href="/settings" aria-label="Settings">

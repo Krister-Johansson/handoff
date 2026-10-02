@@ -4,6 +4,7 @@ import { SiteHeader } from "./site-header";
 
 vi.mock("@/components/inbox-link", () => ({ InboxLink: () => <a href="/inbox">Inbox</a> }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
+vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => <button type="button">Assistant</button> }));
 vi.mock("@/components/worker-status", () => ({ WorkerStatus: () => null }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1/runs/r1" }));
 
