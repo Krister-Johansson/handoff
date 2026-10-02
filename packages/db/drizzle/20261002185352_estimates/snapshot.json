@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "df17d67a-a1cc-4e1c-b12b-9cb09b97e807",
+  "id": "dfc2db28-2152-405f-8a6e-4031679818ac",
   "prevIds": [
     "b2e809a7-6bd9-44f5-ae88-6f8afa4646f6"
   ],
@@ -534,6 +534,19 @@
       "generated": null,
       "identity": null,
       "name": "plan_project_number",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "numeric(4,1)",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'6'",
+      "generated": null,
+      "identity": null,
+      "name": "plan_hours_per_day",
       "entityType": "columns",
       "schema": "public",
       "table": "projects"
@@ -5159,6 +5172,13 @@
       "schema": "public",
       "table": "library_skills",
       "entityType": "uniques"
+    },
+    {
+      "value": "\"plan_hours_per_day\" between 1 and 24",
+      "name": "projects_plan_hours_per_day_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "projects"
     },
     {
       "value": "\"size\" in ('S', 'M', 'L')",
