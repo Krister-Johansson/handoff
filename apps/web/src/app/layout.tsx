@@ -4,7 +4,10 @@ import "@xyflow/react/dist/style.css";
 import "./globals.css";
 import { Geist, Geist_Mono } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { AssistantProvider } from "@/components/assistant/assistant-provider";
+import { AssistantSheet } from "@/components/assistant/assistant-sheet";
 import { SiteHeader } from "@/components/site-header";
+import { assistantConfig } from "@/server/assistant/env";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -24,9 +27,13 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
       <body className="min-h-svh bg-background">
         <ThemeProvider>
           <TooltipProvider>
-            <SiteHeader />
-            {children}
-            <Toaster position="bottom-right" closeButton />
+            {/* The assistant lives in the root layout so its conversation stays on screen while pages change. */}
+            <AssistantProvider available={Boolean(assistantConfig().oauthToken)}>
+              <SiteHeader />
+              {children}
+              <AssistantSheet />
+              <Toaster position="bottom-right" closeButton />
+            </AssistantProvider>
           </TooltipProvider>
         </ThemeProvider>
       </body>
