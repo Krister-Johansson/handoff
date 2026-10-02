@@ -272,3 +272,28 @@ test("page_restart_app calls restartTryItAction", async () => {
   expect(await call("page_restart_app")).toEqual({ text: "The run's workspace is gone.", isError: true });
   expect(within(screen.getByRole("region", { name: "The app" })).getByText("The run's workspace is gone.")).toBeInTheDocument();
 });
+
+test("an answered Try it binds only navigation tools", async () => {
+  const answered = { option: "changes", comments: [{ quote: "The project shows in the sidebar", body: "Only after a reload." }] };
+  const { call, whereAmI } = await withAssistant({ answered });
+  const page = (await whereAmI()).page!;
+  expect(page.tools.map((t) => t.name)).toEqual(["page_go_to_criterion", "page_expand_criteria"]);
+  expect(page.state.data).toMatchObject({ readOnly: true, app: { status: "stopped" } });
+
+  expect(await call("page_go_to_criterion", { index: 2 })).toEqual({ text: 'Now on criterion 2 of 3: "The project shows in the sidebar".', isError: false });
+  expect(cursor()).toHaveTextContent("2 of 3");
+
+  // The working criteria start collapsed; all expands them and all false collapses every one.
+  const first = () => within(section("A user can create a new project")).getByRole("button", { name: /A user can create a new project$/ });
+  expect(first()).toHaveAttribute("aria-expanded", "false");
+  expect(await call("page_expand_criteria", { all: true })).toEqual({ text: "Expanded every criterion.", isError: false });
+  expect(first()).toHaveAttribute("aria-expanded", "true");
+  expect(await call("page_expand_criteria", { all: false })).toEqual({ text: "Collapsed every criterion.", isError: false });
+  expect(first()).toHaveAttribute("aria-expanded", "false");
+
+  for (const name of ["page_mark_criterion", "page_set_note", "page_submit", "page_restart_app"]) {
+    expect(await call(name, { index: 1, works: true, note: "x", option: "approve" })).toMatchObject({ isError: true, text: expect.stringContaining(`${name} is not available here`) });
+  }
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+  expect(actions.restartTryItAction).not.toHaveBeenCalled();
+});

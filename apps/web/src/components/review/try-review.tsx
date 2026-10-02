@@ -333,6 +333,8 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
   const [note, setNote] = useState("");
   const [submitError, setSubmitError] = useState<string>();
   const [submitting, startSubmit] = useTransition();
+  const [restartError, setRestartError] = useState<string>();
+  const [restarting, startRestart] = useTransition();
   const failed = acceptance.flatMap((quote, i) => (checks[i]?.works === false ? [{ quote, body: checks[i]!.note.trim() || "Does not work." }] : []));
   const allWork = checks.every((c) => c.works === true);
   const criteria = new Set(acceptance);
@@ -345,6 +347,7 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
       else next.add(index);
       return next;
     });
+  const expandAll = (all: boolean) => setClosed(all ? new Set() : new Set(acceptance.map((_, i) => i)));
   /** Marks a criterion, with what is wrong when a note comes with it; returns the criterion the cursor moved to. */
   const mark = (index: number, works: boolean | undefined, note?: string) => {
     const next = checks.map((c, i) => (i === index ? { ...c, works, ...(note === undefined ? {} : { note }) } : c));
@@ -370,8 +373,6 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
     setSubmitError(error);
     return error;
   };
-  const [restartError, setRestartError] = useState<string>();
-  const [restarting, startRestart] = useTransition();
   /** Starts the run's app again from its branch; resolves to why it could not. */
   const restart = async () => {
     const result = await restartTryItAction({ questionId, runId });
@@ -437,8 +438,8 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
               if (!isNextNavigation(error)) throw error;
             }
             if (option === "approve") return "Approved: every criterion works. The run page opens.";
-            const what = failed.length ? `${failed.length} ${failed.length === 1 ? "criterion does" : "criteria do"} not work` : "every criterion works";
-            return `Sent back to ${from}: ${what}${overall.trim() ? ", with the note" : ""}. The run page opens.`;
+            if (!failed.length) return `Sent back to ${from} with the note. The run page opens.`;
+            return `Sent back to ${from}: ${failed.length} ${failed.length === 1 ? "criterion does" : "criteria do"} not work${overall.trim() ? ", with the note" : ""}. The run page opens.`;
           },
       page_restart_app: readOnly
         ? undefined
@@ -447,7 +448,10 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
             if (error) throw new Error(error);
             return "Started the app again from the run's branch.";
           },
-      page_expand_criteria: undefined,
+      page_expand_criteria: ({ all }) => {
+        expandAll(all);
+        return all ? "Expanded every criterion." : "Collapsed every criterion.";
+      },
     },
     () => ({
       questionId,
@@ -467,10 +471,10 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
       {acceptance.length > 0 && (
         <div className="sticky top-[60px] z-20 flex flex-wrap items-center gap-2 rounded-lg border bg-background/90 p-2 backdrop-blur-md">
           <CriterionMenu acceptance={acceptance} checks={checks} current={current} go={go} />
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Collapse all criteria" onClick={() => setClosed(new Set(acceptance.map((_, i) => i)))}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Collapse all criteria" onClick={() => expandAll(false)}>
             <ChevronsDownUpIcon />
           </Button>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Expand all criteria" onClick={() => setClosed(new Set())}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Expand all criteria" onClick={() => expandAll(true)}>
             <ChevronsUpDownIcon />
           </Button>
           <span className={cn("text-xs text-muted-foreground", readOnly && "ml-auto")}>{`${checked} of ${acceptance.length} checked`}</span>
