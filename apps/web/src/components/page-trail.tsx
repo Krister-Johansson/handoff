@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 export type CrumbMenuItem = { label: string; href: string; current?: boolean; hint?: string; status?: string };
 
 /** One step of the trail. With `menu`, the crumb also opens a searchable list of its siblings, `menuLabel` naming them. */
-export type Crumb = { label: string; href?: string; menu?: CrumbMenuItem[]; menuLabel?: string };
+export type Crumb = { label: string; href?: string; menu?: CrumbMenuItem[]; menuLabel?: string; /** Left out below 768 px, where the trail keeps its last crumbs. */ wide?: boolean };
 
 /** Matches the search against an item's label, hint and status, which cmdk passes as keywords. */
 const matchItem = (_value: string, search: string, keywords?: string[]) => (keywords?.join(" ").toLowerCase().includes(search.trim().toLowerCase()) ? 1 : 0);
@@ -92,8 +92,8 @@ export function PageTrail({ crumbs }: { crumbs: Crumb[] }) {
           const last = i === crumbs.length - 1;
           return (
             <Fragment key={crumb.href ?? crumb.label}>
-              {i > 0 && <BreadcrumbSeparator />}
-              <BreadcrumbItem>
+              {i > 0 && <BreadcrumbSeparator className={cn(crumbs[i - 1]?.wide && "max-md:hidden")} />}
+              <BreadcrumbItem className={cn(crumb.wide && "max-md:hidden")}>
                 {crumb.menu?.length ? (
                   <CrumbWithMenu crumb={crumb} menu={crumb.menu}>
                     <CrumbLabel crumb={crumb} last={last} />

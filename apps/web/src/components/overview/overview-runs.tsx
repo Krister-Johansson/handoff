@@ -1,34 +1,13 @@
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { CheckIcon, GitPullRequestIcon, HandIcon, PlayIcon } from "lucide-react";
 import { StatusBadge } from "@/components/runs/status-badge";
+import { StepTrail, TONE_TEXT } from "@/components/runs/step-trail";
 import { formatAgo, formatCost, formatSince } from "@/lib/format";
 import { runPath } from "@/lib/paths";
-import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { OverviewRun } from "@/server/overview";
-import type { RunStep } from "@/server/run-lines";
 import { OverviewEmpty, OverviewList, OverviewSection } from "./overview-section";
-
-const TEXT: Record<StatusTone, string> = {
-  success: "text-success",
-  active: "text-active",
-  attention: "text-attention",
-  danger: "text-danger",
-  repaired: "text-repaired",
-  neutral: "text-muted-foreground",
-  muted: "text-muted-foreground",
-};
-
-const DOT: Record<StatusTone, string> = {
-  success: "bg-success-dot",
-  active: "bg-active-dot",
-  attention: "bg-attention-dot",
-  danger: "bg-danger-dot",
-  repaired: "bg-repaired-dot",
-  neutral: "bg-muted-foreground/50",
-  muted: "bg-muted-foreground/50",
-};
 
 /** The Plan's Needs you chip; on the Home page it leads to the run's card in Needs you. */
 export function NeedsYouChip() {
@@ -40,27 +19,6 @@ export function NeedsYouChip() {
       <HandIcon aria-hidden className="size-3" />
       Needs you
     </Link>
-  );
-}
-
-/** The run's steps so far in order: a dot in the step's colour, its key, and how often it ran when more than once. */
-function StepTrail({ steps }: { steps: RunStep[] }) {
-  if (steps.length === 0) return null;
-  return (
-    <ol aria-label="Steps so far" className="flex flex-wrap items-center gap-x-1.5 gap-y-1 font-mono text-[11px] text-muted-foreground">
-      {steps.map((step, i) => (
-        <Fragment key={step.nodeKey}>
-          {i > 0 && (
-            <span aria-hidden className="h-px w-2.5 bg-border" />
-          )}
-          <li className={cn("inline-flex items-center gap-1.5", step.status !== "passed" && "font-medium text-foreground")}>
-            <span aria-hidden className={cn("size-1.5 rounded-full", DOT[statusTone(step.status)])} />
-            {step.nodeKey}
-            {step.times > 1 && <span className="text-muted-foreground"> ×{step.times}</span>}
-          </li>
-        </Fragment>
-      ))}
-    </ol>
   );
 }
 
@@ -88,7 +46,7 @@ function RunRow({ run, repoUrl, when, aside, children }: { run: OverviewRun; rep
       <span className="flex justify-end">
         <StatusBadge status={run.status} />
       </span>
-      <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px]", TEXT[now.tone])}>
+      <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px]", TONE_TEXT[now.tone])}>
         {now.tone === "success" && <CheckIcon aria-hidden className="size-3.5" />}
         <span className="min-w-0">{now.text}</span>
         {aside}
