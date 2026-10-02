@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { and, asc, eq, projects, projectSchedulers, runs, schedulerEvents, sql } from "@handoff/db";
+import { and, asc, eq, inArray, projects, projectSchedulers, runs, schedulerEvents, sql } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { startRun } from "../start-run.ts";
@@ -158,4 +158,53 @@ test("a refused start is skipped and the next candidate starts", async () => {
   expect((await p.events("scheduler.run_started")).map((e) => e.payload)).toEqual([{ runId: run!.id, issue: second, place: 2 }]);
   expect((await p.row()).lastResult).toMatchObject({ state: "running", skipped: [{ number: first, reason: expect.stringContaining("blocked by #99") }] });
   expect((await p.row()).startFailures).toBe(0);
+});
+
+test("a refusal is recorded once per issue and reason", async () => {
+  const p = await planned();
+  const first = await p.task("Blocked on GitHub");
+  const second = await p.task("Blocked on GitHub too");
+  const blockers = vi.spyOn(p.github, "openBlockers").mockResolvedValue([99]);
+
+  await p.check();
+  await p.check();
+  blockers.mockResolvedValue([98]);
+  await p.check();
+
+  expect((await p.events("scheduler.skipped")).map((e) => [e.payload.issue, e.payload.reason])).toEqual([
+    [first, `#${first} is blocked by #99 on GitHub. A run can start once they are closed.`],
+    [second, `#${second} is blocked by #99 on GitHub. A run can start once they are closed.`],
+    [first, `#${first} is blocked by #98 on GitHub. A run can start once they are closed.`],
+    [second, `#${second} is blocked by #98 on GitHub. A run can start once they are closed.`],
+  ]);
+  expect((await p.row()).lastResult).toMatchObject({ state: "idle", reason: "all_skipped" });
+  expect(await p.events("scheduler.idle")).toHaveLength(1);
+});
+
+test("held is recorded once until the reasons change", async () => {
+  const p = await planned({ maxRuns: 3 });
+  const one = await p.task("Its run failed");
+  const two = await p.task("Its run failed later");
+  await p.task("Waits");
+  const fail = async (issue: number) => {
+    const run = await startRun(db, { projectId: p.project.id, graphName: "g", task: "", issues: [issue], startedBy: "dashboard" }, { github: p.github, projects: p.plan });
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+    return run;
+  };
+  const first = await fail(one);
+
+  await p.check();
+  await p.check();
+  const second = await fail(two);
+  await p.check();
+  await p.check();
+  // Both failures are cancelled: the hold clears, and the next hold is recorded again.
+  await db.update(runs).set({ status: "cancelled" }).where(inArray(runs.id, [first.id, second.id]));
+  await p.check();
+  const third = (await p.started()).find((r) => r.startedBy === "scheduler")!;
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, third.id));
+  await p.check();
+
+  const held = (await p.events("scheduler.held")).map((e) => (e.payload.holds as { runId: string }[]).map((h) => h.runId));
+  expect(held).toEqual([[first.id], [first.id, second.id], [third.id]]);
 });

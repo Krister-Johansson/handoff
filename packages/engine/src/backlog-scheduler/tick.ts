@@ -76,6 +76,7 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
   const items = await deps.projects.listItems(repo.owner, project.planProjectNumber, repo);
   const found = candidates(items, await issueRuns(db, projectId), { order: row.order, skipLabel: row.skipLabel });
   const skipped = [...found.skipped];
+  await recordSkips(db, projectId, found.skipped);
   // One start per check: the run it starts has no plan yet, so the next check waits for its planner.
   for (const [index, candidate] of found.candidates.entries()) {
     const place = index + 1;
@@ -98,8 +99,9 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
     } catch (error) {
       if (!(error instanceof StartRefusal)) throw error;
       // A refusal is about this task only: it is skipped for this check and the next candidate is tried.
-      skipped.push({ number: candidate.number, title: candidate.title, reason: error.message });
-      await record(db, projectId, "scheduler.skipped", { issue: candidate.number, reason: error.message });
+      const skip = { number: candidate.number, title: candidate.title, reason: error.message };
+      skipped.push(skip);
+      await recordSkips(db, projectId, [skip]);
     }
   }
   return { ...result, skipped, state: "idle", reason: skipped.length ? "all_skipped" : "no_ready" };
@@ -107,9 +109,26 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
 
 /** Held and idle are recorded when they begin or their reasons change, not on every check. */
 async function recordChanges(db: DbExecutor, projectId: string, previous: CheckResult | null, result: CheckResult) {
+  if (result.state === "held" && (previous?.state !== "held" || !same(previous.holds, result.holds))) {
+    await record(db, projectId, "scheduler.held", { holds: result.holds });
+  }
   if (result.state === "idle") {
     const idle = idleOf(result);
     if (previous?.state !== "idle" || !same(idleOf(previous), idle)) await record(db, projectId, "scheduler.idle", idle);
+  }
+}
+
+/** Records each skip unless the issue's last recorded skip had the same reason. */
+async function recordSkips(db: DbExecutor, projectId: string, skips: Skipped[]) {
+  if (skips.length === 0) return;
+  const { rows } = await db.execute<{ issue: number; reason: string }>(sql`
+    select distinct on (payload->>'issue') (payload->>'issue')::int as issue, payload->>'reason' as reason
+    from scheduler_events
+    where project_id = ${projectId} and type = 'scheduler.skipped'
+    order by payload->>'issue', id desc`);
+  const last = new Map(rows.map((r) => [r.issue, r.reason]));
+  for (const skip of skips) {
+    if (last.get(skip.number) !== skip.reason) await record(db, projectId, "scheduler.skipped", { issue: skip.number, reason: skip.reason });
   }
 }
 
