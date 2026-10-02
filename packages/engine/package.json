@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./operations": "./src/operations.ts",
     "./runs": "./src/runs.ts",
+    "./plan-status": "./src/plan-status.ts",
     "./library-import": "./src/library/import-repo.ts",
     "./mcp-check": "./src/library/mcp-check.ts",
     "./mcp-oauth": "./src/library/mcp-oauth.ts",

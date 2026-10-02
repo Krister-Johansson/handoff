@@ -5,9 +5,10 @@ import { buildClaudeArgv, ClaudeCliExecutor } from "@handoff/cli-adapter";
 import { createDb } from "@handoff/db";
 import { runMigrations } from "@handoff/db/migrate";
 import { branchDiff, cliNodeExecutor, demoExecutor, finishExecutor, startExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
-import { OctokitGitHub, type GitHubPort } from "@handoff/github";
+import { OctokitGitHub, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
 import { checkClaudeVersion } from "./claude-version.ts";
 import type { WorkerEnv } from "./env.ts";
+import { planAccess } from "./plan-status.ts";
 import { parseGitHubRemote } from "./remote.ts";
 
 export function createGitHub(env: WorkerEnv): GitHubPort {
@@ -16,8 +17,11 @@ export function createGitHub(env: WorkerEnv): GitHubPort {
     : OctokitGitHub.withToken(env.github.token);
 }
 
-/** Wires the engine from environment: Claude CLI, GitHub, git worktrees and the node executors. */
-export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unknown) => void): EngineDeps {
+/**
+ * Wires the engine from environment: Claude CLI, GitHub, git worktrees and the node executors. With
+ * `projects`, the PR and merge nodes move the run's tasks on the plan.
+ */
+export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unknown) => void, projects?: ProjectsPort): EngineDeps {
   const home = resolve(env.HANDOFF_HOME);
   const configDir = join(home, "claude-config");
   mkdirSync(configDir, { recursive: true });
@@ -65,8 +69,8 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       tester: testerExecutor(),
       demo: demoExecutor({ ...cliOptions, db, workerId, artifactsRoot: join(home, "artifacts") }),
       human_gate: humanGateExecutor({ db, branchDiff, workerId }),
-      pr: prNodeExecutor({ github, db, reconcileMs: env.HANDOFF_PR_RECONCILE_MS }),
-      merge: mergeNodeExecutor({ github, db }),
+      pr: prNodeExecutor({ github, db, reconcileMs: env.HANDOFF_PR_RECONCILE_MS, projects }),
+      merge: mergeNodeExecutor({ github, db, projects }),
     },
     workdirs: env.HANDOFF_WORKSPACE === "docker" ? new DockerWorkdirProvider({ git, image: env.HANDOFF_DOCKER_IMAGE, mounts: [home, ...(env.HANDOFF_DOCKER_MOUNTS?.split(",").map((m) => m.trim()).filter(Boolean) ?? [])], ...(env.HANDOFF_DOCKER_NETWORK ? { network: env.HANDOFF_DOCKER_NETWORK } : {}) }) : git,
     log,
@@ -85,7 +89,9 @@ export async function runWorker(env: WorkerEnv) {
   );
   if (docker) log(`running nodes in containers from ${env.HANDOFF_DOCKER_IMAGE}`);
   if (cli.drift) log(`claude ${cli.version} differs from the pinned ${env.HANDOFF_CLAUDE_VERSION}; continuing because HANDOFF_ALLOW_CLI_DRIFT is set`);
-  const deps = buildEngine(env, log);
+  // A GitHub App cannot reach a user-owned Project: status writes need GITHUB_TOKEN even when the App runs the rest.
+  const projects = await planAccess(projectsFromEnv({ GITHUB_TOKEN: env.GITHUB_TOKEN }), log);
+  const deps = buildEngine(env, log, projects);
   await runMigrations(deps.db);
   const template = buildClaudeArgv({
     prompt: "<prompt>",

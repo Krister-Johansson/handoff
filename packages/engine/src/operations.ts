@@ -1,7 +1,9 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { appendEvents, events, nodeExecutions, permissionRequests, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
+import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
 import type { RunState } from "@handoff/core";
+import type { ProjectsPort } from "@handoff/github";
 import { loadCompiledGraph } from "./graph-cache.ts";
+import { recordPlanStatus } from "./plan-status.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
 import { createExecution } from "./scheduler/complete.ts";
 
@@ -39,9 +41,12 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
   });
 }
 
-/** Cancels a run: stops claiming its work, fails queued and waiting nodes, signals the running one, and stops its apps. */
-export async function cancelRun(db: Db, runId: string, opts: { reason?: string } = {}) {
-  await db.transaction(async (tx) => {
+/**
+ * Cancels a run: stops claiming its work, fails queued and waiting nodes, signals the running one, and stops its apps.
+ * With the Projects port, the run's tasks go back to Ready on the plan, so they return to the backlog.
+ */
+export async function cancelRun(db: Db, runId: string, opts: { reason?: string; projects?: ProjectsPort } = {}) {
+  const cancelled = await db.transaction(async (tx) => {
     const [run] = await tx
       .update(runs)
       .set({ status: "cancelled", cancelRequestedAt: sql`now()`, finishedAt: sql`now()` })
@@ -53,8 +58,23 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string }
       .set({ status: "failed", error: { code: "cancelled", message: "run was cancelled" }, finishedAt: sql`now()` })
       .where(and(eq(nodeExecutions.runId, runId), inArray(nodeExecutions.status, ["pending", "waiting"])));
     await appendEvents(tx, runId, [{ type: "run.cancelled", payload: { reason: opts.reason ?? null } }]);
+    return run;
   });
   await stopRunPreviews(db, runId);
+  const [project] = await db.select().from(projectRows).where(eq(projectRows.id, cancelled.projectId));
+  if (!project || project.planProjectNumber === null || cancelled.issues.length === 0) return;
+  await recordPlanStatus(db, runId, opts.projects, project, await issuesItOwns(db, cancelled), "Ready");
+}
+
+/** The run's issues no newer run of the project links: a newer run owns the status of its issues. */
+async function issuesItOwns(db: Db, run: typeof runs.$inferSelect): Promise<number[]> {
+  const newer = await db
+    .select({ issues: runs.issues })
+    .from(runs)
+    // Compared in SQL: a JavaScript Date drops the microseconds Postgres keeps.
+    .where(and(eq(runs.projectId, run.projectId), sql`${runs.createdAt} > (select r.created_at from runs r where r.id = ${run.id})`));
+  const taken = new Set(newer.flatMap((r) => r.issues.map((i) => i.number)));
+  return run.issues.map((i) => i.number).filter((n) => !taken.has(n));
 }
 
 /**

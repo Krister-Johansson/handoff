@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
-import { screenshots, wakeByKey } from "@handoff/db";
+import { eq, projects, screenshots, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createRun } from "../runs.ts";
 import { createOriginRepo, git } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
@@ -170,6 +170,58 @@ describe("Merge node", () => {
     const merge = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "merge")!;
     // Without an update edge there is nowhere to send it back to.
     expect(merge).toMatchObject({ status: "failed", error: { code: "merge_conflict" } });
+  });
+});
+
+describe("status on the plan", () => {
+  const repo = { owner: "octo", name: "sample" };
+
+  /** A run on two tasks of the project's plan, both Running, with the PR and merge nodes writing to the plan. */
+  async function plannedRun() {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    const plan = new FakeProjects(github);
+    const { number } = await plan.createProject("octo", repo, "sample plan");
+    const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+    await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
+    const tasks = [];
+    for (const title of ["Add the changelog", "Link it from the README"]) {
+      const created = await plan.createIssue(repo, { project: number, title, body: "", labels: ["task"] });
+      plan.itemsOf(repo).get(created.number)!.status = "Running";
+      tasks.push({ number: created.number, title, url: created.url, body: "" });
+    }
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md", issues: tasks });
+    const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, projects: plan }), merge: mergeNodeExecutor({ github, projects: plan }) };
+    const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+    const statusOf = (n: number) => plan.getStatus(repo, number, n);
+    const planEvents = async () => (await inspect(db, run.id)).events.filter((e) => e.type.startsWith("plan.")).map((e) => [e.type, e.payload]);
+    return { github, plan, tasks: tasks.map((t) => t.number), run, deps, statusOf, planEvents };
+  }
+
+  test("opening the pull request sets each linked task to In review once", async () => {
+    const { tasks, deps, statusOf, planEvents, plan } = await plannedRun();
+    await drain(deps);
+    expect(await Promise.all(tasks.map(statusOf))).toEqual(["In review", "In review"]);
+    // A person drags one back on GitHub's board; the PR node waking again on CI news writes nothing.
+    plan.itemsOf(repo).get(tasks[0]!)!.status = "Ready";
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    expect(await statusOf(tasks[0]!)).toBe("Ready");
+    expect(await planEvents()).toEqual(tasks.map((issue) => ["plan.status", { issue, status: "In review" }]));
+  });
+
+  test("the merge sets Done after closing the issues", async () => {
+    const { github, tasks, run, deps, statusOf } = await plannedRun();
+    await drain(deps);
+    github.setChecks(1, "SUCCESS");
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    expect(github.merged).toEqual([1]);
+    expect(await Promise.all(tasks.map(statusOf))).toEqual(["Done", "Done"]);
+    const { types, events } = await inspect(db, run.id);
+    const done = events.filter((e) => e.type === "plan.status" && (e.payload as { status: string }).status === "Done");
+    expect(done.map((e) => (e.payload as { issue: number }).issue)).toEqual(tasks);
+    expect(types.indexOf("github.issues_closed")).toBeLessThan(types.indexOf("plan.status", types.indexOf("github.merged")));
   });
 });
 

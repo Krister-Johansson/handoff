@@ -31,6 +31,16 @@ test("summarizes a failure with its error message", () => {
   );
 });
 
+test("summarizes a status write on the plan and one that was skipped, with the reason", () => {
+  expect(summarizeEvent({ type: "plan.status", payload: { issue: 57, status: "In review" } })).toBe("#57 to In review");
+  expect(summarizeEvent({ type: "plan.skipped", payload: { issue: 90, status: "Running", reason: "not-in-project" } })).toBe(
+    "#90 not moved to Running: not in the plan's Project",
+  );
+  expect(summarizeEvent({ type: "plan.skipped", payload: { issue: 57, status: "Done", reason: "Resource not accessible" } })).toBe(
+    "#57 not moved to Done: Resource not accessible",
+  );
+});
+
 test("returns an empty string for unknown events", () => {
   expect(summarizeEvent({ type: "something.new", payload: {} })).toBe("");
 });
