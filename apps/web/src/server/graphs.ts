@@ -8,7 +8,7 @@ import type { GitHubPort, ProjectsPort } from "@handoff/github";
 
 export const TEMPLATES = {
   plan: { label: "Plan, review, approve, build: a reviewer and you approve the plan before any code, and you try UI changes before the PR", document: planReview },
-  linear: { label: "Plan, code, PR, merge, with a demo and Try it for UI changes", document: linear },
+  linear: { label: "Plan, code, PR, merge", document: linear },
   loop: { label: "Plan, code, test, review, PR, merge with retry loops, and a demo and Try it for UI changes", document: loop },
   empty: {
     label: "Empty: a Start node to build from",

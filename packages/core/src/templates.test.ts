@@ -15,8 +15,8 @@ test("every template wires the merge node's update port to the PR node", () => {
   }
 });
 
-test("every template demos UI changes before a Try it gate, and wires the demo's skipped port past the gate to the PR node", () => {
-  for (const template of [linear, loop, planReview]) {
+test("the loop and plan templates demo UI changes before a Try it gate, and wire the demo's skipped port past the gate to the PR node", () => {
+  for (const template of [loop, planReview]) {
     const compiled = compileGraph(template);
     if (!compiled.ok) throw new Error(compiled.errors.map((e) => e.message).join("; "));
     const { graph } = compiled;
@@ -29,6 +29,12 @@ test("every template demos UI changes before a Try it gate, and wires the demo's
     expect(graph.outEdges(gate!.key).filter((e) => e.port === "approve").map((e) => graph.node(e.target).type)).toEqual(["pr"]);
     expect(graph.outEdges(gate!.key).filter((e) => e.port === "changes").map((e) => graph.node(e.target).type)).toEqual(["coder"]);
   }
+});
+
+test("the linear template has no demo and no Try it gate", () => {
+  const types = linear.nodes.map((n) => n.attributes.type);
+  expect(types).not.toContain("demo");
+  expect(linear.nodes.filter((n) => n.attributes.type === "human_gate")).toEqual([]);
 });
 
 test("every template gives its coder a turn budget that grows with the plan", () => {
