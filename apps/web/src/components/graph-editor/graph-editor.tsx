@@ -216,7 +216,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                               <Button
                                 variant="ghost"
                                 size="icon-sm"
-                                className="text-muted-foreground hover:text-foreground"
+                                className="text-muted-foreground hover:text-foreground aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
                                 aria-label={`Add ${NODE_LABELS[type]}`}
                                 // A graph has one Start.
                                 disabled={type === "start" && hasStart}

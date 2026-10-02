@@ -33,7 +33,7 @@ export function VersionHistory({ versions, version, restoring, pending, onRestor
       <Tooltip>
         <TooltipTrigger asChild>
           <SheetTrigger asChild>
-            <ControlButton aria-label="Version history">
+            <ControlButton aria-label="Version history" className="[&_svg]:!fill-none">
               <HistoryIcon />
             </ControlButton>
           </SheetTrigger>

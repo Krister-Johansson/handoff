@@ -13,7 +13,7 @@ export function EditLockButton({ locked, onToggle }: { locked: boolean; onToggle
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <ControlButton aria-label={label} onClick={onToggle}>
+        <ControlButton aria-label={label} onClick={onToggle} className="[&_svg]:!fill-none">
           {locked ? <LockIcon /> : <LockOpenIcon />}
         </ControlButton>
       </TooltipTrigger>
