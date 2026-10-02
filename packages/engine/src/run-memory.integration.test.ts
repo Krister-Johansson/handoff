@@ -6,6 +6,7 @@ import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "./executors/cli-node.ts";
 import { humanGateExecutor } from "./executors/human-gate.ts";
+import { repairNodeExecution } from "./operations.ts";
 import { createRun } from "./runs.ts";
 import { createOriginRepo, git } from "./testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "./testing/harness.ts";
@@ -64,7 +65,7 @@ async function startRun(cli: FakeCliExecutor, tester: ReturnType<typeof scripted
   };
   const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
   await drain(deps);
-  return { run, deps };
+  return { run, deps, cli };
 }
 
 const coders = async (runId: string) => (await inspect(db, runId)).executions.filter((e) => e.nodeKey === "coder");
@@ -88,4 +89,27 @@ test("a path declared in extraPaths by attempt 1 passes diff_within_paths in att
   ]);
   expect(attempts[2]!.checks).toEqual([expect.objectContaining({ kind: "diff_within_paths", passed: true })]);
   expect((await inspect(db, run.id)).run.status).toBe("succeeded");
+});
+
+test("a repair note reaches every later attempt of the node, not only the repaired one", async () => {
+  const note = "Use the date helper in src/dates.ts.";
+  const cli = new FakeCliExecutor([{ output: { status: "failed", summary: "gave up" } }]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsFail), done(outputs.testsPass)));
+  const [failed] = await coders(run.id);
+  expect(failed!.status).toBe("failed");
+
+  cli.push(coderWrites({ "CHANGELOG.md": "# Changelog\n" }, outputs.coderDone), coderWrites({ "CHANGELOG.md": "# Changelog\n\n- one\n" }, outputs.coderDone), { output: outputs.approve });
+  await repairNodeExecution(db, failed!.id, { note });
+  await drain(deps);
+
+  const attempts = await coders(run.id);
+  expect(attempts.map((e) => [e.attempt, e.status])).toEqual([
+    [1, "repaired"],
+    [2, "passed"],
+    [3, "passed"],
+  ]);
+  const [, repaired, later] = cli.requests;
+  expect(repaired!.systemPrompt).toContain(note);
+  expect(later!.session.mode).toBe("new");
+  expect(later!.systemPrompt).toContain(note);
 });

@@ -151,7 +151,9 @@ function declaredPaths(output: unknown): { path: string; reason: string }[] {
 /** Records what this attempt adds to its node's memory, so later attempts of the node are told it too. */
 function rememberAttempt(state: RunState, row: NodeExecutionRow, output: unknown): RunState {
   const extraPaths = declaredPaths(output).map((e) => ({ ...e, attempt: row.attempt }));
-  return extraPaths.length ? remember(state, row.nodeKey, { extraPaths }) : state;
+  // The repaired attempt reads its own note from its row; the attempts after it read it from here.
+  const notes = row.repairNote ? [{ note: row.repairNote, attempt: row.attempt }] : [];
+  return extraPaths.length || notes.length ? remember(state, row.nodeKey, { extraPaths, notes }) : state;
 }
 
 /** The run's project and task, which a notification about how the run ended names. */
