@@ -41,6 +41,31 @@ function datesText(dates: { start?: string | null | undefined; target?: string |
   return parts.length ? parts.join(", ") : "no change";
 }
 
+type SizeOf = "S" | "M" | "L";
+/** One set_size item: the new size and estimate (null clears, left out stays), and what list_plan showed before. */
+type SizeItem = {
+  issue: number;
+  size?: SizeOf | null | undefined;
+  estimate?: string | number | null | undefined;
+  was?: { size?: SizeOf | null | undefined; estimate_hours?: number | null | undefined } | undefined;
+};
+
+/** A set_size item for an approval card: "#57 size M to L, estimate none to 3h", "#60 clear size". */
+function sizeText(item: SizeItem) {
+  const hours = (value: string | number | null | undefined) => (value === null || value === undefined ? "none" : typeof value === "number" ? `${value}h` : value);
+  const part = (name: string, value: string | number | null | undefined, was: string | number | null | undefined, known: boolean) => {
+    if (value === undefined) return [];
+    const to = name === "size" ? (value ?? "none") : hours(value);
+    if (known) return [`${name} ${name === "size" ? (was ?? "none") : hours(was)} to ${to}`];
+    return [value === null ? `clear ${name}` : `${name} ${to}`];
+  };
+  const parts = [
+    ...part("size", item.size, item.was?.size, item.was?.size !== undefined),
+    ...part("estimate", item.estimate, item.was?.estimate_hours, item.was?.estimate_hours !== undefined),
+  ];
+  return `#${item.issue} ${parts.join(", ")}`;
+}
+
 /**
  * start_scheduler's approval sentence: "Let handoff start up to 2 runs at a time on Ready tasks in
  * todooverkill, in Project order, with graph master". A setting left out keeps its stored value, or
@@ -469,6 +494,7 @@ export const CATALOG: ToolSpec[] = [
       blocked_by: z.array(z.number().int().positive()).optional().describe("Issue numbers this task waits on"),
       start: day.optional().describe("Start, YYYY-MM-DD, only when the person gave dates"),
       target: day.optional().describe("Target, YYYY-MM-DD, only when the person gave dates"),
+      size: z.enum(["S", "M", "L"]).optional().describe("S, M or L, when the person sized the task"),
     }),
     kind: "data",
     confirm: true,
@@ -476,7 +502,7 @@ export const CATALOG: ToolSpec[] = [
     openWorld: true,
     idempotent: false,
     summarize: (a) =>
-      `Create task '${a.title}' under story #${a.story} in ${a.project}${a.blocked_by?.length ? `, blocked by ${a.blocked_by.map((n) => `#${n}`).join(", ")}` : ""}${a.start || a.target ? `, ${datesText(a)}` : ""}`,
+      `Create task '${a.title}' under story #${a.story} in ${a.project}${a.blocked_by?.length ? `, blocked by ${a.blocked_by.map((n) => `#${n}`).join(", ")}` : ""}${a.start || a.target ? `, ${datesText(a)}` : ""}${a.size ? `, size ${a.size}` : ""}`,
   }),
   spec({
     name: "move_to_ready",
@@ -527,6 +553,48 @@ export const CATALOG: ToolSpec[] = [
     openWorld: true,
     idempotent: true,
     summarize: (a) => `Schedule in ${a.project}: ${a.items.map((i) => `#${i.issue} ${datesText(i)}`).join("; ")}`,
+  }),
+  spec({
+    name: "set_size",
+    title: "Size tasks",
+    description:
+      "Sets or clears the Size (S, M or L) and the manual Estimate of tasks of the project's plan on its GitHub Project. An estimate is hours or days, like 3h or 2d (a day is the project's capacity in hours, which list_plan gives), or a number of hours; it overrides the size's forecast, and 0 or null clears it. A task with a Start gets the Target its new duration ends on. Give was with the size and estimate list_plan shows now, so the approval card names old and new values. Refuses an epic or a story (they sum their tasks), an issue outside the plan, an estimate it cannot read and a Project without the Size and Estimate fields (setup_plan adds them), and then changes nothing. Size tasks when the person sizes them.",
+    input: z.object({
+      project,
+      items: z
+        .array(
+          z
+            .object({
+              issue: z.number().int().positive().describe("The task's issue number"),
+              size: z.enum(["S", "M", "L"]).nullable().optional().describe("S, M or L; null clears it"),
+              estimate: z.union([z.string(), z.number().min(0)]).nullable().optional().describe("Hours or days, like 3h or 2d, or a number of hours; 0 or null clears it"),
+              was: z
+                .object({ size: z.enum(["S", "M", "L"]).nullable().optional(), estimate_hours: z.number().nullable().optional() })
+                .optional()
+                .describe("The task's size and estimate_hours as list_plan shows them now, for the approval card"),
+            })
+            .refine((i) => i.size !== undefined || i.estimate !== undefined, { error: "Give a size, an estimate or both." }),
+        )
+        .min(1),
+    }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    openWorld: true,
+    idempotent: true,
+    summarize: (a) => `Size in ${a.project}: ${a.items.map(sizeText).join("; ")}`,
+  }),
+  spec({
+    name: "arrange_plan",
+    title: "Arrange by estimate",
+    description:
+      "A preview of the plan's unscheduled tasks laid out by their size or estimate, as the timeline's Arrange by estimate does: from today, in blocked-by order, filling each day up to the project's capacity after the work already planned, a task never before its blockers end. Each placed task has its Start, Target and hours; tasks without a size or an estimate are left out with the reason. Tasks with dates stay where they are. With epic, only that epic's tasks are placed, while every planned task still counts. Writes nothing: propose the dates with schedule, one call, when the person asks to plan the timeline.",
+    input: z.object({ project, epic: z.number().int().positive().optional().describe("Only this epic's tasks, by issue number") }),
+    kind: "data",
+    confirm: false,
+    readOnly: true,
+    untrusted: true,
+    summarize: (a) => `Arrange the unscheduled tasks${a.epic ? ` of epic #${a.epic}` : ""} in ${a.project} by estimate`,
   }),
   spec({
     name: "plan_issue",

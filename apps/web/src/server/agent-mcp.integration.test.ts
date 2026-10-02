@@ -1,13 +1,14 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeEach, expect, test, vi } from "vitest";
 import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, projectSchedulers, questions, registerWorker, runs, schedulerEvents, sql, workers } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { checkProject } from "@handoff/engine/backlog-scheduler";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
-import { CATALOG } from "../lib/assistant/catalog";
+import { CATALOG, toolSpec } from "../lib/assistant/catalog";
 import { runPath } from "../lib/paths";
+import { addDays } from "../lib/plan/timeline-scale";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createHandoffMcpServer, registerDataTools } from "./agent-mcp";
 import { createProject, saveGraphVersion } from "./graphs";
@@ -892,6 +893,134 @@ test("create_task with start and target sets them", async () => {
   expect(github.issues.size).toBe(count);
 });
 
+/** A story with a task dated Oct 4 and an undated task, on a plan with the Size and Estimate fields. */
+async function sizingPlan() {
+  const { number, epic, story } = await epicAndStory();
+  await plan.ensureEstimateFields("octo", number);
+  const create = async (title: string, dates: Record<string, string> = {}) => (await call("create_task", { project: "sandbox", story, title, brief: `${title}.`, ...dates })).number as number;
+  const dated = await create("Dated", { start: "2026-10-04", target: "2026-10-04" });
+  const undated = await create("Undated");
+  return { number, epic, story, dated, undated };
+}
+
+/** The Size and Estimate an issue has on the sandbox plan. */
+const sizeOf = (issue: number) => {
+  const item = plan.itemsOf(repo).get(issue);
+  return { size: item?.size, estimate: item?.estimate };
+};
+
+test("set_size writes sizes and estimates and moves the Target of a dated task", async () => {
+  const { dated, undated } = await sizingPlan();
+  const writes = vi.spyOn(plan, "setManyPlanFields");
+
+  // 1.5 days at 6 hours a day is 9 hours: from Oct 4 the dated task ends on Oct 5.
+  const result = await call("set_size", { project: "sandbox", items: [{ issue: dated, estimate: "1.5d" }, { issue: undated, size: "M" }] });
+  expect(result.sized).toEqual([
+    { issue: dated, title: "Dated", estimate: { from: null, to: 9 }, target: { from: "2026-10-04", to: "2026-10-05" } },
+    { issue: undated, title: "Undated", size: { from: null, to: "M" } },
+  ]);
+  expect(result.summary).toBe(`#${dated} Dated: estimate none to 9h, Target 2026-10-04 to 2026-10-05; #${undated} Undated: size none to M`);
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect([sizeOf(dated), datesOf(dated), sizeOf(undated), datesOf(undated)]).toEqual([
+    { size: undefined, estimate: 9 },
+    { start: "2026-10-04", target: "2026-10-05" },
+    { size: "M", estimate: undefined },
+    { start: undefined, target: undefined },
+  ]);
+
+  // 0 clears the estimate: S's default of 30 minutes ends on Oct 4 again. A number is hours.
+  await call("set_size", { project: "sandbox", items: [{ issue: dated, size: "S", estimate: 0 }, { issue: undated, estimate: 2 }] });
+  expect([sizeOf(dated), datesOf(dated), sizeOf(undated)]).toEqual([
+    { size: "S", estimate: undefined },
+    { start: "2026-10-04", target: "2026-10-04" },
+    { size: "M", estimate: 2 },
+  ]);
+});
+
+test("set_size refuses an epic, an issue outside the plan, an unknown estimate and a Project without the fields", async () => {
+  const { epic, story, dated, undated } = await sizingPlan();
+  const refused = async (items: unknown[]) => (await call("set_size", { project: "sandbox", items })).error as string;
+
+  // Each refusal writes nothing, not even the tasks before the one refused.
+  expect(await refused([{ issue: undated, size: "M" }, { issue: epic, size: "M" }])).toBe(`#${epic} is an epic. Only tasks have a size; stories and epics sum their tasks.`);
+  expect(await refused([{ issue: undated, size: "M" }, { issue: story, estimate: "3h" }])).toBe(`#${story} is a story. Only tasks have a size; stories and epics sum their tasks.`);
+  expect(await refused([{ issue: undated, size: "M" }, { issue: 11, size: "S" }])).toBe("#11 is not in the plan of sandbox. Add it with plan_issue first.");
+  expect(await refused([{ issue: undated, size: "M" }, { issue: dated, estimate: "3 weeks" }])).toBe(`#${dated}: "3 weeks" is not an estimate. Use hours or days, like 3h or 2d.`);
+  expect(await refused([{ issue: dated, estimate: 1001 }])).toBe(`#${dated}: An estimate is hours from 0 to 1000.`);
+  expect([sizeOf(undated), sizeOf(dated), datesOf(dated)]).toEqual([
+    { size: undefined, estimate: undefined },
+    { size: undefined, estimate: undefined },
+    { start: "2026-10-04", target: "2026-10-04" },
+  ]);
+
+  plan.plans.get("octo/sample")!.project.estimateFields = undefined;
+  expect(await refused([{ issue: undated, size: "M" }])).toMatch(/has no Size and no Estimate field\. .*run setup_plan/);
+  expect(sizeOf(undated)).toEqual({ size: undefined, estimate: undefined });
+});
+
+test("arrange_plan returns placements and the tasks it left out, and writes nothing", async () => {
+  const { number, story } = await epicAndStory();
+  await plan.ensureEstimateFields("octo", number);
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const tomorrow = addDays(today, 1);
+  const create = async (title: string, parent: number, fields: Record<string, unknown> = {}) =>
+    (await call("create_task", { project: "sandbox", story: parent, title, brief: `${title}.`, ...fields })).number as number;
+
+  // Another epic holds 4 hours planned today, which counts even when arrange_plan looks at the first epic only.
+  const other = await call("create_epic", { project: "sandbox", title: "Other work", goal: "Elsewhere." });
+  const otherStory = (await call("create_story", { project: "sandbox", epic: other.number, title: "Elsewhere", acceptance: ["x"] })).number as number;
+  const planned = await create("Planned", otherStory, { start: today, target: today });
+  // In the first epic: 2 hours, then an M (1 hour by default) that waits for them, and a task with no size.
+  const first = await create("First", story);
+  const second = await create("Second", story, { blocked_by: [first] });
+  const bare = await create("Bare", story);
+  // An unscheduled S in the other epic, placed only when arrange_plan looks at the whole plan.
+  const loose = await create("Loose", otherStory);
+  Object.assign(plan.itemsOf(repo).get(planned)!, { estimate: 4 });
+  Object.assign(plan.itemsOf(repo).get(first)!, { estimate: 2 });
+  Object.assign(plan.itemsOf(repo).get(second)!, { size: "M" });
+  Object.assign(plan.itemsOf(repo).get(loose)!, { size: "S" });
+  const before = structuredClone([...plan.itemsOf(repo).entries()]);
+  const writes = [vi.spyOn(plan, "setManyPlanFields"), vi.spyOn(plan, "setPlanFields"), vi.spyOn(plan, "setDates")];
+
+  const arranged = await call("arrange_plan", { project: "sandbox", epic: (await call("list_plan", { project: "sandbox" })).epics.find((e: { title: string }) => e.title === "Project management").number });
+  expect(arranged).toEqual({
+    today,
+    capacity_hours: 6,
+    placements: [
+      { issue: first, title: "First", start: today, target: today, hours: 2 },
+      { issue: second, title: "Second", start: tomorrow, target: tomorrow, hours: 1 },
+    ],
+    left_out: [{ issue: bare, title: "Bare", reason: "needs a size" }],
+  });
+
+  // Without an epic, every unscheduled task of the plan is placed: the S after the M tomorrow.
+  const all = await call("arrange_plan", { project: "sandbox" });
+  expect(all.placements.map((p: { issue: number; start: string }) => [p.issue, p.start])).toEqual([
+    [first, today],
+    [second, tomorrow],
+    [loose, tomorrow],
+  ]);
+  for (const write of writes) expect(write).not.toHaveBeenCalled();
+  expect([...plan.itemsOf(repo).entries()]).toEqual(before);
+});
+
+test("create_task with a size sets it", async () => {
+  const { number, story } = await epicAndStory();
+  await plan.ensureEstimateFields("octo", number);
+  const task = await call("create_task", { project: "sandbox", story, title: "Sized", brief: "A brief.", size: "M" });
+  expect(task).toMatchObject({ kind: "task", status: "Shaping", size: "M" });
+  expect(sizeOf(task.number)).toEqual({ size: "M", estimate: undefined });
+  expect(toolSpec("create_task").summarize({ project: "sandbox", story, title: "Sized", brief: "A brief.", size: "M" })).toBe(`Create task 'Sized' under story #${story} in sandbox, size M`);
+
+  // A Project without the fields refuses before the issue exists.
+  plan.plans.get("octo/sample")!.project.estimateFields = undefined;
+  const count = github.issues.size;
+  expect((await call("create_task", { project: "sandbox", story, title: "Unsized", brief: "A brief.", size: "S" })).error).toMatch(/no Size and no Estimate field\. .*run setup_plan/);
+  expect(github.issues.size).toBe(count);
+});
+
 test("every shaping tool refuses with the scope sentence when the Projects port is missing", async () => {
   await withPlan();
   const server = createHandoffMcpServer({ db, github, projects: undefined, baseUrl: BASE });
@@ -910,6 +1039,8 @@ test("every shaping tool refuses with the scope sentence when the Projects port 
     ["move_to_shaping", { issues: [3] }],
     ["plan_issue", { issue: 11 }],
     ["schedule", { items: [{ issue: 3, start: "2026-10-06" }] }],
+    ["set_size", { items: [{ issue: 3, size: "M" }] }],
+    ["arrange_plan", {}],
   ];
   for (const [name, args] of calls) {
     const result = (await without.callTool({ name, arguments: { project: "sandbox", ...args } })) as { content: { text: string }[]; isError?: boolean };
