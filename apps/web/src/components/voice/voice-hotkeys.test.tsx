@@ -28,6 +28,23 @@ test("V toggles listening outside text fields and does nothing inside a textarea
   expect(FakeSpeechRecognition.instances).toHaveLength(1);
 });
 
+/** Presses Ctrl+M on `target`; returns false when the page took the key (preventDefault). */
+const ctrlM = (target: Element = document.body, init: KeyboardEventInit = {}) => fireEvent.keyDown(target, { key: "m", code: "KeyM", ctrlKey: true, ...init });
+
+test("Ctrl+M opens the bubble", async () => {
+  render(<VoiceTestApp />);
+  expect(screen.queryByRole("region", { name: "Voice assistant" })).not.toBeInTheDocument();
+  expect(ctrlM()).toBe(false);
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
+  // One question, asked in the bubble.
+  expect(latest()).toMatchObject({ continuous: false });
+  act(() => latest().emitStart());
+  expect(screen.getByRole("region", { name: "Voice assistant" })).toHaveTextContent("Listening");
+  // A second Ctrl+M stops listening.
+  ctrlM();
+  expect(latest().stopped).toBe(true);
+});
+
 test("Escape stops listening and leaves an idle page alone", async () => {
   render(<VoiceTestApp />);
   const idle = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });

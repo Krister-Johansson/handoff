@@ -26,6 +26,11 @@ export function VoiceHotkeys() {
       return;
     }
     if (!voice.supported) return;
+    if (e.code === "KeyM" && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      voice.toggle();
+      return;
+    }
     if (e.key.toLowerCase() === "v" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
       e.preventDefault();
       voice.toggle();
