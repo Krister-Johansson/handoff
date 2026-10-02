@@ -1,4 +1,4 @@
-import { and, eq, graphs, projects, projectSchedulers, schedulerEvents, type Db, type DbExecutor, type ProjectSchedulerRow } from "@handoff/db";
+import { and, eq, graphs, projects, projectSchedulers, schedulerEvents, sql, type Db, type DbExecutor, type ProjectSchedulerRow } from "@handoff/db";
 import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import type { ProjectsPort } from "@handoff/github";
 import { getProjectDetail } from "./graphs";
@@ -67,4 +67,22 @@ export async function startScheduler(deps: SchedulerDeps, projectId: string, set
     await nudgeScheduler(tx, projectId);
   });
   return { state: "on" as const, max_runs: next.maxRuns, order: next.order, graph: next.graphName };
+}
+
+/**
+ * Pauses the project's scheduler: no new starts until start_scheduler resumes it. Active runs go on.
+ * Pausing a paused scheduler changes nothing, and a scheduler that is off stays off.
+ */
+export async function pauseScheduler(db: Db, projectId: string, actor: string, reason?: string) {
+  return db.transaction(async (tx) => {
+    const [row] = await tx.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId)).for("update");
+    if (!row?.enabled) return { state: "off" as const };
+    if (row.pausedAt) return { state: "paused" as const, reason: row.pauseReason };
+    await tx
+      .update(projectSchedulers)
+      .set({ pausedAt: sql`now()`, pausedBy: "person", pauseReason: reason ?? null })
+      .where(eq(projectSchedulers.projectId, projectId));
+    await record(tx, projectId, "scheduler.paused", { by: actor, ...(reason ? { reason } : {}) });
+    return { state: "paused" as const, reason: reason ?? null };
+  });
 }

@@ -17,7 +17,7 @@ import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
-import { startScheduler } from "./scheduler";
+import { pauseScheduler, startScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
 
 /**
@@ -392,6 +392,11 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     start_scheduler: async ({ project, max_runs, order, graph }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string }) => {
       const { id } = await findProject(db, project);
       return { ...(await startScheduler({ db, projects: plan }, id, { maxRuns: max_runs, order, graph }, actor)), url: url(planPath(id)) };
+    },
+
+    pause_scheduler: async ({ project, reason }: { project: string; reason?: string }) => {
+      const { id } = await findProject(db, project);
+      return { ...(await pauseScheduler(db, id, actor, reason)), url: url(planPath(id)) };
     },
 
     list_library: async () => {

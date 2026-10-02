@@ -4,6 +4,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
 import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, projectSchedulers, questions, runs, schedulerEvents, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
+import { checkProject } from "@handoff/engine/backlog-scheduler";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG } from "../lib/assistant/catalog";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -724,4 +725,26 @@ test("start_scheduler refuses without access to GitHub Projects and refuses a de
   await db.update(projects).set({ isDemo: true }).where(eq(projects.id, projectId));
   expect((await call("start_scheduler", { project: "sandbox" })).error).toBe("sandbox is a demo project: its runs are simulated, so the scheduler cannot start any.");
   expect(await schedulerRow()).toBeUndefined();
+});
+
+test("pause_scheduler stops new starts and leaves active runs alone", async () => {
+  const { task } = await withPlan();
+  const mine = await task("Add the migration", "Ready");
+  await task("Add the endpoint", "Ready");
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [mine] });
+  await call("start_scheduler", { project: "sandbox", max_runs: 2 });
+
+  expect(await call("pause_scheduler", { project: "sandbox", reason: "Lunch" })).toMatchObject({ state: "paused", reason: "Lunch" });
+  expect(await schedulerRow()).toMatchObject({ enabled: true, pausedBy: "person", pauseReason: "Lunch", pausedAt: expect.any(Date) });
+  // Pausing again changes nothing.
+  expect(await call("pause_scheduler", { project: "sandbox" })).toMatchObject({ state: "paused", reason: "Lunch" });
+  expect((await schedulerLog()).filter((e) => e.type === "scheduler.paused")).toEqual([{ type: "scheduler.paused", payload: { by: "claude-code", reason: "Lunch" } }]);
+
+  // A check while paused starts nothing, though a slot is free and a Ready task waits; the active run goes on.
+  expect(await checkProject({ db, github, projects: plan, owner: "worker-1" }, projectId)).toBeUndefined();
+  expect(await db.select({ id: runs.id, status: runs.status }).from(runs)).toEqual([{ id: run_id, status: "queued" }]);
+
+  // Resumed, the next check starts the waiting task.
+  await call("start_scheduler", { project: "sandbox" });
+  expect(await checkProject({ db, github, projects: plan, owner: "worker-1" }, projectId)).toMatchObject({ state: "running" });
 });

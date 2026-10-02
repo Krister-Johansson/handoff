@@ -506,6 +506,17 @@ export const CATALOG: ToolSpec[] = [
     summarize: (a) => `Let handoff start ${a.max_runs ? `up to ${a.max_runs} ${a.max_runs === 1 ? "run" : "runs"} at a time` : "runs"} on Ready tasks in ${a.project}`,
   }),
   spec({
+    name: "pause_scheduler",
+    title: "Pause the scheduler",
+    description: "Pauses a project's scheduler: it starts no new runs until start_scheduler resumes it. Active runs go on.",
+    input: z.object({ project, reason: z.string().optional().describe("Why, shown with the paused scheduler") }),
+    kind: "data",
+    confirm: false,
+    readOnly: false,
+    idempotent: true,
+    summarize: (a) => `Pause the scheduler of ${a.project}${a.reason ? `: ${a.reason}` : ""}`,
+  }),
+  spec({
     name: "go_to",
     title: "Open a page",
     description: "Opens a page of this dashboard in the person's browser: a path such as /projects/<id>/runs/<run id>, or a dashboard URL a tool returned.",
