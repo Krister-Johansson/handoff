@@ -63,11 +63,11 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
   await stopRunPreviews(db, runId);
   const [project] = await db.select().from(projectRows).where(eq(projectRows.id, cancelled.projectId));
   if (!project || project.planProjectNumber === null || cancelled.issues.length === 0) return;
-  await recordPlanStatus(db, runId, opts.projects, project, await latestRunOf(db, cancelled), "Ready");
+  await recordPlanStatus(db, runId, opts.projects, project, await issuesItOwns(db, cancelled), "Ready");
 }
 
-/** The run's issues it is the latest run of: a newer run that links an issue owns its status. */
-async function latestRunOf(db: Db, run: typeof runs.$inferSelect): Promise<number[]> {
+/** The run's issues no newer run of the project links: a newer run owns the status of its issues. */
+async function issuesItOwns(db: Db, run: typeof runs.$inferSelect): Promise<number[]> {
   const newer = await db
     .select({ issues: runs.issues })
     .from(runs)
