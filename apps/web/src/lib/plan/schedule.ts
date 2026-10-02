@@ -80,15 +80,52 @@ function barOf(item: PlanItem, hours: number, offsetHours: number, capacity: num
  * whether it is late (Start passed, a blocker not done) or overdue (Target passed, not done), and the
  * dependency arrows from blocked-by links. Nothing here is stored; `now` decides today.
  */
+/**
+ * Tasks with each one after the blockers among them, and otherwise by issue number. Blockers that form a
+ * loop fall back to number order.
+ */
+export function inBlockerOrder<T extends { number: number; blockers: readonly number[] }>(tasks: readonly T[]): T[] {
+  const pending = new Map(tasks.map((t) => [t.number, t]));
+  const ordered: T[] = [];
+  while (pending.size) {
+    const free = [...pending.values()].filter((t) => !t.blockers.some((b) => b !== t.number && pending.has(b)));
+    const next = (free.length ? free : [...pending.values()]).reduce((a, b) => (b.number < a.number ? b : a));
+    ordered.push(next);
+    pending.delete(next.number);
+  }
+  return ordered;
+}
+
+/** Every blocker GitHub links, open or closed. */
+const blockersOf = (item: PlanItem) => item.blockers ?? item.blockedBy;
+
+/**
+ * The bars of the tasks with a duration and a Start. The tasks that start on one day sit one after another
+ * in blocker order, then by number, so a later task starts after the hours of the ones before it.
+ */
+function sizedBars(items: PlanItem[], opts: SpanOptions): Map<number, PlannedSpan> {
+  const byDay = new Map<string, { number: number; blockers: number[]; item: PlanItem; hours: number }[]>();
+  for (const item of items) {
+    const duration = opts.durations.get(item.number);
+    if (!duration || !item.start) continue;
+    byDay.set(item.start, [...(byDay.get(item.start) ?? []), { number: item.number, blockers: blockersOf(item), item, hours: duration.hours }]);
+  }
+  const bars = new Map<number, PlannedSpan>();
+  for (const day of byDay.values()) {
+    let used = 0;
+    for (const task of inBlockerOrder(day)) {
+      bars.set(task.number, barOf(task.item, task.hours, used, opts.capacity));
+      used += task.hours;
+    }
+  }
+  return bars;
+}
+
 export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date, opts?: SpanOptions): Timeline {
   const today = dayOf(now);
   const byNumber = new Map(items.map((i) => [i.number, i]));
-  const planned = new Map(
-    items.map((i) => {
-      const duration = opts?.durations.get(i.number);
-      return [i.number, duration && i.start ? barOf(i, duration.hours, 0, opts.capacity) : plannedOf(i)];
-    }),
-  );
+  const bars = opts ? sizedBars(items, opts) : new Map<number, PlannedSpan>();
+  const planned = new Map(items.map((i) => [i.number, bars.get(i.number) ?? plannedOf(i)]));
   const children = new Map<number, PlanItem[]>();
   for (const i of items) if (i.parent !== undefined && byNumber.has(i.parent)) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
 

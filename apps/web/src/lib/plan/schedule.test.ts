@@ -138,3 +138,24 @@ test("a sized task's bar runs from Start for its duration over the capacity", ()
     overdueDays: 3,
   });
 });
+
+test("tasks on one day sit in blocker order, then by number, and a later task's Target counts the hours before it", () => {
+  const items = [
+    item(3, { start: "2026-10-12", blockedBy: [7] }),
+    item(5, { start: "2026-10-12" }),
+    item(7, { start: "2026-10-12" }),
+    item(9, { start: "2026-10-12" }),
+    // The order is per Start day: #7's last hour on the 13th does not push #11, so the load row shows that day over capacity.
+    item(11, { start: "2026-10-13" }),
+  ];
+  const timeline = deriveSpans(items, [], NOW, { durations: hours({ 3: 2, 5: 4, 7: 3, 9: 1, 11: 2 }), capacity: 6 });
+  const bar = (n: number) => timeline.items.find((i) => i.number === n)!.planned;
+  // #3 waits for its blocker #7, then comes before #9 by number.
+  expect([5, 7, 3, 9, 11].map((n) => [n, bar(n)!.offsetHours, bar(n)!.end])).toEqual([
+    [5, 0, "2026-10-12"],
+    [7, 4, "2026-10-13"],
+    [3, 7, "2026-10-13"],
+    [9, 9, "2026-10-13"],
+    [11, 0, "2026-10-13"],
+  ]);
+});
