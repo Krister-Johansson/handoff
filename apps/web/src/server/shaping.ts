@@ -10,6 +10,7 @@ import {
   type PlanSize,
   type PlanStatus,
   type ProjectsPort,
+  type SetFieldsResult,
 } from "@handoff/github";
 import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import { recordPlanStatus } from "@handoff/engine/plan-status";
@@ -382,6 +383,60 @@ export async function setSize(deps: ShapingDeps, projectId: string, input: SizeI
     ...(writes.estimate !== undefined ? { estimate: { from: item.estimate ?? null, to: writes.estimate } } : {}),
     ...(writes.target ? { target: { from: item.target ?? null, to: writes.target } } : {}),
   };
+}
+
+/** A drop on the timeline: the new Start and Target (null clears), and a manual estimate in hours when the drop set or cleared one. */
+export type MoveInput = { issue: number; start: string | null; target: string | null; estimate?: number | null };
+
+/**
+ * Writes a task's Start and Target, and its manual estimate when given, as one write after one read of the
+ * item: the timeline's drop, its keyboard moves and their Undo. The dashboard computes the Target that
+ * follows; this checks the dates and refuses a Target before Start, and reads no other item of the plan.
+ */
+export async function moveItem(deps: ShapingDeps, projectId: string, input: MoveInput) {
+  checkDates(`#${input.issue}`, input.start, input.target);
+  if (input.estimate !== undefined && input.estimate !== null && !(Number.isFinite(input.estimate) && input.estimate >= 0 && input.estimate <= MAX_ESTIMATE)) {
+    throw new Error(`An estimate is hours from 0 to ${MAX_ESTIMATE}.`);
+  }
+  const { plan, repo, number } = await plannedProject(deps, projectId);
+  const estimate = input.estimate === undefined ? undefined : input.estimate || null;
+  const fields: PlanFields = { start: input.start, target: input.target, ...(estimate !== undefined ? { estimate } : {}) };
+  const result = await plan.setPlanFields(repo, number, input.issue, fields);
+  if (result !== "set") {
+    const why = { "not-in-project": "it is not in the Project", "no-field": "the Project lacks a field; run setup_plan", "no-option": "the Project lacks a field; run setup_plan" }[result];
+    throw new Error(`#${input.issue} could not be moved: ${why}.`);
+  }
+  return { issue: input.issue, start: input.start, target: input.target, ...(estimate !== undefined ? { estimate } : {}) };
+}
+
+/** Where Arrange by estimate put a task: the Start and Target the person saw in the preview. */
+export type ArrangeInput = { issue: number; start: string; target: string };
+
+/** Why GitHub refused a task's fields, as a clause. */
+const REFUSED: Record<Exclude<SetFieldsResult, "set">, string> = {
+  "not-in-project": "it is not in the Project",
+  "no-field": "the Project has no Start or Target field; run setup_plan",
+  "no-option": "the Project has no Start or Target field; run setup_plan",
+};
+
+/**
+ * Writes the Start and Target of the tasks an Arrange preview placed, all in one batched write: a few
+ * requests, not one per task. Checks every date first and writes nothing when one is wrong. A task GitHub
+ * refuses is left out and the others are written; the result names each refused task with why. Like a drop
+ * it reads no other item: the preview already placed the tasks around the plan the page showed.
+ */
+export async function saveArrange(deps: ShapingDeps, projectId: string, items: ArrangeInput[]) {
+  if (!items.length) throw new Error("Give at least one task to arrange.");
+  for (const item of items) checkDates(`#${item.issue}`, item.start, item.target);
+  const { plan, repo, number } = await plannedProject(deps, projectId);
+  const write = (list: ArrangeInput[]) => plan.setManyPlanFields(repo, number, list.map(({ issue, start, target }) => ({ issue, fields: { start, target } })));
+
+  // setManyPlanFields writes nothing when any issue is refused, so the rest go out again without them.
+  const first = await write(items);
+  const refused = first.flatMap(({ issue, result }) => (result === "set" ? [] : [{ issue, reason: REFUSED[result] }]));
+  const rest = items.filter((i) => !refused.some((r) => r.issue === i.issue));
+  if (refused.length && rest.length) await write(rest);
+  return { saved: (refused.length ? rest : items).map((i) => i.issue), refused };
 }
 
 /**

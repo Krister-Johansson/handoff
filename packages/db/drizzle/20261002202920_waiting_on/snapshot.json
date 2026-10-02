@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "9fccb89c-95fd-499f-887d-8e68a37c76a4",
+  "id": "a6ac1f14-70c7-4025-9d02-3bf2e64bad5e",
   "prevIds": [
     "dfc2db28-2152-405f-8a6e-4031679818ac"
   ],
@@ -508,32 +508,6 @@
       "generated": null,
       "identity": null,
       "name": "teardown_command",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": false,
-      "dimensions": 0,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "demo_seed_command",
-      "entityType": "columns",
-      "schema": "public",
-      "table": "projects"
-    },
-    {
-      "type": "text",
-      "typeSchema": null,
-      "notNull": false,
-      "dimensions": 1,
-      "default": null,
-      "generated": null,
-      "identity": null,
-      "name": "ui_paths",
       "entityType": "columns",
       "schema": "public",
       "table": "projects"
@@ -1288,6 +1262,19 @@
       "generated": null,
       "identity": null,
       "name": "wait_deadline_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "node_executions"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "waiting_on",
       "entityType": "columns",
       "schema": "public",
       "table": "node_executions"

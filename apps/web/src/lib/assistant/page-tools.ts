@@ -173,7 +173,7 @@ const TOOLS = {
     spec({
       name: "page_expand_files",
       title: "Expand or collapse files",
-      description: "Expands or collapses every file (all), or one file by path (path with open).",
+      description: "Expands or collapses every file (all), or one file by path: open false collapses it, otherwise it expands.",
       input: z.object({ all: z.boolean().optional(), path: z.string().optional(), open: z.boolean().optional() }),
       confirm: false,
       readOnly: true,
@@ -192,7 +192,8 @@ const TOOLS = {
     spec({
       name: "page_comment_on_lines",
       title: "Comment on lines",
-      description: "Drafts a comment on a line or a range of lines of a file, on the new side unless side is old. The draft is sent when the review is submitted.",
+      description:
+        "Drafts a comment on a line or a range of lines of a file, on the new side unless side is old, with the code of those lines quoted. Only lines the diff shows can be commented on. The draft is sent when the review is submitted.",
       input: z.object({
         path: z.string(),
         line: index,
@@ -220,7 +221,8 @@ const TOOLS = {
     spec({
       name: "page_comment_on_passage",
       title: "Comment on a passage",
-      description: "Drafts a comment on a passage of the plan, quoted exactly as the plan has it. The draft is sent when the review is submitted.",
+      description:
+        "Drafts a comment on a passage of the plan, quoted as the page shows it (the text without markdown; runs of whitespace count as one space). The draft is sent when the review is submitted.",
       input: z.object({ quote: z.string().min(1), body: z.string().min(1) }),
       confirm: false,
       readOnly: false,

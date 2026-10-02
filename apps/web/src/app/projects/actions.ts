@@ -9,7 +9,7 @@ import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
-import { addDateFields, addEstimateFields, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
+import { addDateFields, addEstimateFields, listGitHubProjects, moveItem, moveToReady, moveToShaping, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { deleteProject, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
@@ -335,6 +335,50 @@ export async function setSizeAction(input: z.input<typeof SetSizeSchema>): Promi
   if (!parsed.success) return { ok: false, error: "Give a size of S, M or L, or an estimate from 0 to 1000 hours." };
   const { projectId, issue, size, estimate } = parsed.data;
   return onPlan(projectId, (deps) => setSize(deps, projectId, { issue, ...(size !== undefined ? { size } : {}), ...(estimate !== undefined ? { estimate } : {}) }));
+}
+
+const MoveItemSchema = z.object({
+  projectId: z.string().uuid(),
+  issue: z.number().int().positive(),
+  start: day,
+  target: day,
+  estimate: z.number().min(0).max(1000).nullable().optional(),
+});
+
+/**
+ * A drop or a keyboard move on the timeline, and its Undo: writes Start and Target, and the manual estimate
+ * when the move set or cleared one, in one write. The person's drop is the decision, so there is no approval card.
+ */
+export async function moveItemAction(input: z.input<typeof MoveItemSchema>): Promise<ActionState> {
+  const parsed = MoveItemSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Give the dates as YYYY-MM-DD and an estimate from 0 to 1000 hours." };
+  const { projectId, issue, start, target, estimate } = parsed.data;
+  return onPlan(projectId, (deps) => moveItem(deps, projectId, { issue, start, target, ...(estimate !== undefined ? { estimate } : {}) }));
+}
+
+const SaveArrangeSchema = z.object({
+  projectId: z.string().uuid(),
+  items: z.array(z.object({ issue: z.number().int().positive(), start: z.iso.date(), target: z.iso.date() })).min(1).max(500),
+});
+
+/** What Arrange's Save reports: the tasks written, and each task GitHub refused with why. */
+export type ArrangeState = { ok: true; saved: number[]; refused: { issue: number; reason: string }[] } | { ok: false; error: string };
+
+/**
+ * Arrange by estimate's Save: writes the Start and Target of every task the preview placed, in one batched
+ * write. The person confirmed the preview, so there is no approval card.
+ */
+export async function saveArrangeAction(input: z.input<typeof SaveArrangeSchema>): Promise<ArrangeState> {
+  const parsed = SaveArrangeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Give each task's Start and Target as YYYY-MM-DD." };
+  const { projectId, items } = parsed.data;
+  try {
+    const result = await saveArrange(shapingDeps(), projectId, items);
+    revalidatePath(planPath(projectId));
+    return { ok: true, ...result };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
 }
 
 /** The timeline banner's Add the fields: creates Size and Estimate on the plan's GitHub Project. */

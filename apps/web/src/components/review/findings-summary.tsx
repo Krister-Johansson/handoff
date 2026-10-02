@@ -30,6 +30,8 @@ type Props = {
   questionId: string;
   /** The issue already opened from these findings, if any. */
   followUp?: FollowUp | undefined;
+  /** Called with the issue once the person opens one. */
+  onFollowUp?: ((issue: FollowUp) => void) | undefined;
 };
 
 /** One finding: a pick box for a follow-up issue, where it is, and its text. */
@@ -55,7 +57,7 @@ function FindingRow({ finding, at, picked, onPick, open }: { finding: Finding; a
 }
 
 /** Which findings go into a follow-up issue: the follow-up ones to start with, then what the person picks. */
-function useFollowUp(findings: Findings, runId: string, questionId: string, initial: FollowUp | undefined) {
+function useFollowUp(findings: Findings, runId: string, questionId: string, initial: FollowUp | undefined, onFollowUp: ((issue: FollowUp) => void) | undefined) {
   const [picked, setPicked] = useState<ReadonlySet<number>>(() => new Set(findings.comments.flatMap((c, i) => (c.severity === "follow_up" ? [i] : []))));
   const [issue, setIssue] = useState(initial);
   const [error, setError] = useState<string>();
@@ -71,8 +73,10 @@ function useFollowUp(findings: Findings, runId: string, questionId: string, init
     startTransition(async () => {
       const result = await createFollowUpAction({ runId, questionId, findings: [...picked].sort((a, b) => a - b) });
       startTransition(() => {
-        if (result.ok) setIssue(result.issue);
-        else setError(result.error);
+        if (result.ok) {
+          setIssue(result.issue);
+          onFollowUp?.(result.issue);
+        } else setError(result.error);
       });
     });
   return { picked, pick, issue, error, pending, create };
@@ -84,11 +88,11 @@ function useFollowUp(findings: Findings, runId: string, questionId: string, init
  * its line; a finding on a file outside the diff is shown in full here, the only place it appears. A
  * person picks findings to leave for later and opens one GitHub issue with them.
  */
-export function FindingsSummary({ findings, by, files, open, runId, questionId, followUp }: Props) {
+export function FindingsSummary({ findings, by, files, open, runId, questionId, followUp, onFollowUp }: Props) {
   const index = new Map(files.map((f, i) => [f.path, i]));
   const n = findings.comments.length;
   const inDiff = findings.comments.filter((c) => index.has(c.path)).length;
-  const later = useFollowUp(findings, runId, questionId, followUp);
+  const later = useFollowUp(findings, runId, questionId, followUp, onFollowUp);
   const numbered = findings.comments.map((finding, i) => ({ finding, i }));
   return (
     <section aria-label="Code review findings" className={cn(CARD, "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-4 px-[18px] py-3.5")}>

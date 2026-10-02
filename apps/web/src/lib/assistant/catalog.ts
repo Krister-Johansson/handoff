@@ -88,7 +88,7 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "get_project",
     title: "Show a project",
-    description: "A project's graphs, the graph new runs use by default, and its latest runs.",
+    description: "A project's graphs with their latest versions, the graph new runs use by default, and its latest runs with the graph version each runs on.",
     input: z.object({ project }),
     kind: "data",
     confirm: false,
@@ -157,7 +157,7 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "list_runs",
     title: "List runs",
-    description: "Runs, newest first, each with the step it is on and for how long. status active means queued, running or waiting.",
+    description: "Runs, newest first, each with the step it is on, for how long, and its state: queued with its place in line, running, or waiting with waiting_on (permission, question, ci, merge_queue, worker or overlap). status active means queued, running or waiting.",
     input: z.object({ project: z.string().optional().describe("Project name"), status: z.enum(["active", "succeeded", "failed", "cancelled"]).optional() }),
     kind: "data",
     confirm: false,
@@ -167,7 +167,8 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "get_run",
     title: "Show a run",
-    description: "Where a run stands: status, steps with their start, end and duration, PR, linked issues, open questions and the failed step.",
+    description:
+      "Where a run stands: status, cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue or the worker), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, and a stuck loop's last review.",
     input: z.object({ run_id: runId }),
     kind: "data",
     confirm: false,
@@ -190,7 +191,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_attention",
     title: "List what needs attention",
     description:
-      "Everything waiting on a person (questions from Human gates, failed runs, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).",
+      "Everything waiting on a person (permission prompts, questions from Human gates, failed runs nobody dismissed, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).",
     input: z.object({}),
     kind: "data",
     confirm: false,
@@ -239,9 +240,10 @@ export const CATALOG: ToolSpec[] = [
   }),
   spec({
     name: "dismiss_attention",
-    title: "Dismiss a finished run",
-    description: "Takes a finished run (an item of kind finished from list_attention) off the list once the user has seen it. Other items leave the list when someone acts on them.",
-    input: z.object({ item_id: z.string().describe("The item's id from list_attention, finished:<run id>") }),
+    title: "Dismiss a finished or failed run",
+    description:
+      "Takes a finished or failed run (an item of kind finished or failed from list_attention) off the list once the user has seen it. A failed run still waits for a repair in list_inbox. Questions and permission prompts leave the list when someone answers them.",
+    input: z.object({ item_id: z.string().describe("The item's id from list_attention: finished:<run id>, failed:<step id> or stuck:<run id>") }),
     kind: "data",
     confirm: false,
     readOnly: false,
@@ -251,11 +253,16 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "answer_question",
     title: "Answer a question",
-    description: "Answers a question a run asked, which lets it continue. Only answer with the user's decision.",
+    description:
+      "Answers a question a run asked, which lets it continue. The option must be one the question lists (get_run shows them): approve, changes or fix (approve once the comments are fixed) for a review. At a Try it gate, give criteria: a verdict for each acceptance criterion. Only answer with the user's decision.",
     input: z.object({
       question_id: z.string(),
-      answer: z.string().min(1),
-      option: z.string().optional().describe("One of the question's options, when it has them: approve or changes for a review"),
+      answer: z.string().min(1).optional().describe("The answer or note; required unless criteria answer a Try it gate"),
+      option: z.string().optional().describe("One of the question's options, when it has them"),
+      criteria: z
+        .array(z.object({ criterion: z.string(), works: z.boolean(), note: z.string().optional().describe("What is wrong, when it does not work") }))
+        .optional()
+        .describe("For a Try it gate: whether each acceptance criterion works. Any that does not sends the work back with its note."),
       comments: z
         .array(
           z.object({
@@ -273,7 +280,10 @@ export const CATALOG: ToolSpec[] = [
     confirm: true,
     readOnly: false,
     idempotent: false,
-    summarize: (a) => `Answer the question${a.option ? ` with ${a.option}` : ""}: ${a.answer}`,
+    summarize: (a) =>
+      a.criteria
+        ? `Answer the Try it gate: ${a.criteria.filter((c) => !c.works).length} of ${a.criteria.length} criteria do not work`
+        : `Answer the question${a.option ? ` with ${a.option}` : ""}: ${a.answer ?? ""}`,
   }),
   spec({
     name: "answer_permission",
@@ -632,7 +642,7 @@ export const CATALOG: ToolSpec[] = [
     input: z.object({
       project_id: z.string().describe("The project's id from list_projects"),
       view: z.enum(["tree", "board", "timeline"]).optional(),
-      zoom: z.enum(["weeks", "months"]).optional().describe("The timeline's zoom; it picks one from the dates when left out"),
+      zoom: z.enum(["days", "weeks", "months"]).optional().describe("The timeline's zoom: days at 96 px a day for dragging, weeks or months; it picks one from the dates when left out"),
       epic: z.union([z.number().int().positive(), z.literal("unplanned")]).optional().describe("An epic's issue number, or unplanned"),
       status: z.array(z.enum(["Shaping", "Ready", "Running", "In review", "Done"])).optional(),
       run: z.enum(["any", "active", "needs-you", "none"]).optional().describe("Tasks with an active run, whose run needs the person, or with no run"),

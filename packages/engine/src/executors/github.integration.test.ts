@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
-import { eq, projects, screenshots, wakeByKey } from "@handoff/db";
+import { eq, projects, screenshots, wakeByKey, webhookDeliveries } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createRun } from "../runs.ts";
@@ -136,6 +136,26 @@ describe("PR node", () => {
     await drain(deps);
     const pr = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "pr")!;
     expect(pr.status).toBe("waiting");
+  });
+
+  test("with no webhook from the repository since the push, a PR waiting on CI looks again within a minute, not at the ten-minute reconcile", async () => {
+    // Runs on 2026-10-02 got no webhook at all (the relay was not running): every green PR waited the full reconcile.
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github, db }) };
+    const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+    const prDeadline = async () => (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "pr")!.waitDeadlineAt!.getTime() - Date.now();
+    await drain(deps);
+    expect(await prDeadline()).toBeLessThanOrEqual(60_000);
+    expect(await prDeadline()).toBeGreaterThan(30_000);
+
+    // Once GitHub's webhooks arrive, a webhook wakes the PR node and the reconcile is only the fallback.
+    await db.insert(webhookDeliveries).values({ deliveryId: "d1", eventName: "check_suite", action: "requested", repoId: 42, payload: {} });
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    expect(await prDeadline()).toBeGreaterThan(9 * 60_000);
   });
 
   test("PR node is idempotent when a PR already exists for the branch", async () => {

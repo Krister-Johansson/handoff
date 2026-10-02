@@ -8,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
 import { quoteRanges } from "@/lib/quote-ranges";
+import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { useReviewDraft } from "@/lib/use-review-draft";
 import { CARD, PROSE } from "./styles";
+import { submitReviewTool } from "./send-review";
 import { SubmitReview } from "./submit-review";
 
 type Comment = { quote: string; body: string };
@@ -130,6 +132,10 @@ function useSelectedText(root: React.RefObject<HTMLElement | null>) {
   return [selected, setSelected] as const;
 }
 
+/** A quote as a selection gives it: runs of whitespace are one space. */
+const normalize = (quote: string) => quote.replace(/\s+/g, " ").trim();
+const commentCount = (n: number) => `${n} ${n === 1 ? "comment" : "comments"} drafted`;
+
 /** Buttons under a selection: comment on it in the side panel, or copy it. */
 function SelectionBar({ selected, onComment }: { selected: Selected; onComment: () => void }) {
   // Pressing a button must not clear the selection it acts on.
@@ -163,6 +169,37 @@ export function PlanReview({ questionId, runId, from, markdown }: { questionId: 
   const [selected, setSelected] = useSelectedText(article);
   const { comments, setComments, note, setNote, onSending, onFailed } = useReviewDraft<Comment>(questionId);
   useQuoteHighlights(article, comments.map((c) => c.quote));
+
+  usePageTools(
+    "plan_review",
+    {
+      page_comment_on_passage: ({ quote: given, body }) => {
+        const quote = normalize(given);
+        // The plan as the page shows it, where a person's selection comes from and the highlight looks.
+        if (!article.current || quoteRanges(article.current, quote).length === 0) throw new Error(`"${quote}" is not in the plan. Quote the plan's text as the page shows it, without markdown.`);
+        setComments((list) => [...list, { quote, body }]);
+        return `Drafted a comment on "${quote}". ${commentCount(comments.length + 1)}.`;
+      },
+      page_remove_comment: ({ quote: given }) => {
+        const quote = normalize(given);
+        if (!comments.some((c) => c.quote === quote)) {
+          const drafted = comments.map((c) => `"${c.quote}"`);
+          throw new Error(`No drafted comment is on "${quote}". ${drafted.length ? `The drafted comments are on: ${drafted.join("; ")}.` : "No comments are drafted."}`);
+        }
+        setComments((list) => {
+          const first = list.findIndex((c) => c.quote === quote);
+          return list.filter((_, i) => i !== first);
+        });
+        return `Removed the comment on "${quote}". ${commentCount(comments.length - 1)}.`;
+      },
+      page_set_note: ({ note: next }) => {
+        setNote(next);
+        return next.trim() ? `Set the overall comment to "${next}"` : "Cleared the overall comment.";
+      },
+      page_submit_review: ({ option }) => submitReviewTool({ questionId, runId, option, note, comments, target: from, onSending, onFailed }),
+    },
+    () => ({ questionId, runId, from, comments, note }),
+  );
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">

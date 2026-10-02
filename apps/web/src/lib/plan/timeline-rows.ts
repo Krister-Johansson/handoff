@@ -11,6 +11,21 @@ export const progressOf = (item: unknown): PlanProgress | undefined => (item && 
 /** "Oct 1 to now" for an active run, "Sep 26 to Sep 30" for one that ended. */
 export const stripDates = (strip: ActualStrip) => `${shortDay(dayOfInstant(strip.start))} to ${strip.active ? "now" : shortDay(dayOfInstant(strip.end))}`;
 
+/** The local clock time of an instant, 24 hours: "14:05". */
+const clockOf = (iso: string) => {
+  const at = new Date(iso);
+  return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+};
+
+/** "Oct 2, 12:20 to now", "Oct 1, 10:00 to 11:00", or with the end's day when it ended on another day. */
+export function stripClock(strip: ActualStrip): string {
+  const startDay = dayOfInstant(strip.start);
+  const from = `${shortDay(startDay)}, ${clockOf(strip.start)}`;
+  if (strip.active) return `${from} to now`;
+  const endDay = dayOfInstant(strip.end);
+  return `${from} to ${endDay === startDay ? "" : `${shortDay(endDay)}, `}${clockOf(strip.end)}`;
+}
+
 /** Whether the Project lacks Start or Target. */
 export const lacksDateFields = (project: PlanProject) => !project.dateFields?.start || !project.dateFields.target;
 

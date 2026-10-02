@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { redactSecrets } from "@handoff/core";
-import { and, eq, inArray, permissionRequests, type Db } from "@handoff/db";
+import { and, eq, inArray, nodeExecutions, permissionRequests, resumeAfterPermission, waitOnPermission, type Caps, type Db } from "@handoff/db";
 
 /** The MCP tool Claude Code asks for permission through: the `approve` tool of handoff's permission server. */
 export const PERMISSION_TOOL = "mcp__handoff__approve";
@@ -32,11 +32,23 @@ type Request = { id: string; toolName: string; input: Record<string, unknown> };
  */
 export function watchPermissions(
   db: Db,
-  step: { runId: string; executionId: string; dir: string; onRequest: (request: Request) => void | Promise<void>; intervalMs?: number },
+  step: {
+    runId: string;
+    executionId: string;
+    dir: string;
+    onRequest: (request: Request) => void | Promise<void>;
+    intervalMs?: number;
+    /** The executor caps a step must fit in again before its answer goes back. Without them, it goes back at once. */
+    caps?: Partial<Caps>;
+    /** The permission server's timeout: a request older than this was denied by the server itself. */
+    timeoutMs?: number;
+  },
 ): PermissionWatch {
   mkdirSync(step.dir, { recursive: true });
   const open = new Set<string>();
   const known = new Set<string>();
+  const askedAt = new Map<string, number>();
+  const timeoutMs = step.timeoutMs ?? PERMISSION_TIMEOUT_MS;
   let ticking: Promise<void> = Promise.resolve();
 
   const tick = async () => {
@@ -53,19 +65,37 @@ export function watchPermissions(
         .values({ id, runId: step.runId, nodeExecutionId: step.executionId, toolName: request.toolName, input: request.input })
         .onConflictDoNothing();
       open.add(id);
+      askedAt.set(id, Date.now());
+      // While a person decides, the step's process idles and another step may use its slot.
+      await waitOnPermission(db, step.executionId);
       await step.onRequest({ id, toolName: request.toolName, input: request.input });
     }
     if (open.size === 0) return;
+    // The permission server denies a request nobody answered in time, and Claude Code goes on without the slot check.
+    const late = [...open].filter((id) => Date.now() - (askedAt.get(id) ?? Date.now()) > timeoutMs);
+    if (late.length) {
+      await db
+        .update(permissionRequests)
+        .set({ status: "expired", decidedAt: new Date() })
+        .where(and(inArray(permissionRequests.id, late), eq(permissionRequests.status, "pending")));
+    }
     const answered = await db
       .select()
       .from(permissionRequests)
       .where(and(inArray(permissionRequests.id, [...open]), inArray(permissionRequests.status, ["allowed", "denied", "expired"])));
+    if (answered.length === 0) return;
+    // The answer goes back once the step has its slot again; until then it is asked for on every tick.
+    const decided = answered.filter((row) => row.status !== "expired");
+    if (decided.length && !(await resumeAfterPermission(db, step.executionId, step.caps ?? {}))) return;
     for (const row of answered) {
       open.delete(row.id);
       if (row.status === "expired") continue;
       const answer = row.status === "allowed" ? { behavior: "allow" } : { behavior: "deny", ...(row.message ? { message: row.message } : {}) };
       writeFileSync(join(step.dir, `${row.id}.response.json`), JSON.stringify(answer));
     }
+    // Another request still waits for a person, or the last one expired: the slot follows what the process does.
+    if (open.size > 0) await waitOnPermission(db, step.executionId);
+    else if (decided.length === 0) await db.update(nodeExecutions).set({ waitingOn: null }).where(eq(nodeExecutions.id, step.executionId));
   };
   const timer = setInterval(() => {
     ticking = ticking.then(tick).catch(() => {});
@@ -81,6 +111,7 @@ export function watchPermissions(
         .update(permissionRequests)
         .set({ status: "expired", decidedAt: new Date() })
         .where(and(eq(permissionRequests.nodeExecutionId, step.executionId), eq(permissionRequests.status, "pending")));
+      await db.update(nodeExecutions).set({ waitingOn: null }).where(eq(nodeExecutions.id, step.executionId));
     },
   };
 }

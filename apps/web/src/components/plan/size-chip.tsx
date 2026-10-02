@@ -19,11 +19,14 @@ const CHIP = "inline-flex h-5 shrink-0 items-center overflow-hidden rounded-[5px
  * size's default, dashed for the planner's proposal, a pin for a manual estimate, and "Size" with none.
  * It opens the size popover. Without the Plan page's forecasts it shows nothing.
  */
-export function SizeChip({ task }: { task: PlanTask }) {
+export function SizeChip({ task, open, onOpenChange }: { task: PlanTask } & OpenControl) {
   const sizing = use(Sizing);
   if (!sizing) return null;
-  return <SizeControl task={task} sizing={sizing} />;
+  return <SizeControl task={task} sizing={sizing} open={open} onOpenChange={onOpenChange} />;
 }
+
+/** A popover the page opens from elsewhere too: the timeline opens it with E on a focused bar. */
+type OpenControl = { open?: boolean | undefined; onOpenChange?: ((open: boolean) => void) | undefined };
 
 /**
  * The durations of a story's, an epic's or a column's tasks added up, "~" when any part is a forecast and
@@ -47,9 +50,14 @@ const applied =(value: SizeValue, change: SizeChange): SizeValue => ({
 });
 
 /** The chip and its popover: a pick shows at once with a spinner while it saves, and a refusal reopens the popover with the reason. */
-function SizeControl({ task, sizing }: { task: PlanTask; sizing: SizingControl }) {
+function SizeControl({ task, sizing, open: asked, onOpenChange }: { task: PlanTask; sizing: SizingControl } & OpenControl) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [own, setOwn] = useState(false);
+  const open = asked || own;
+  const setOpen = (next: boolean) => {
+    setOwn(next);
+    onOpenChange?.(next);
+  };
   const [error, setError] = useState<string>();
   const [value, showValue] = useOptimistic<SizeValue, SizeChange>({ size: task.size, estimate: task.estimate }, applied);
   const [saving, setSaving] = useOptimistic(false);

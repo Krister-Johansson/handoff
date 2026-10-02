@@ -1,5 +1,5 @@
 import { spreadHours } from "./load";
-import { endHour, inBlockerOrder, stackBars, startHour, type BarTask, type PlannedSpan } from "./schedule";
+import { endHour, inBlockerOrder, stackBars, startHour, type BarTask, type PlannedSpan, type TimelineItem } from "./schedule";
 import { addDays } from "./timeline-scale";
 
 /**
@@ -72,4 +72,38 @@ export function arrange(tasks: readonly ArrangeTask[], planned: readonly Arrange
     placements: placed.map((t) => ({ issue: t.number, start: t.start, target: bars.get(t.number)!.end })),
     leftOut: tasks.filter((t) => t.hours === undefined).map((t) => ({ issue: t.number, reason: "no-duration" as const })),
   };
+}
+
+/** An Arrange preview on the timeline: where each task goes with the bar it gets there, and the tasks left out. */
+export type ArrangePreview = Arrangement & { bars: Map<number, PlannedSpan> };
+
+/**
+ * Arrange over what the timeline shows: `tasks` are the unscheduled tasks in view with their hours, and every
+ * item's bar on the timeline, hidden by the filters or not, is the work already planned. Blockers come from the
+ * timeline's arrows. Each placed task gets the bar the timeline will draw for it once its dates are saved.
+ */
+export function arrangeTimeline(
+  tasks: readonly { number: number; hours: number | undefined }[],
+  timeline: { items: readonly TimelineItem[]; arrows: readonly { from: number; to: number }[] },
+  capacity: number,
+  today: string,
+): ArrangePreview {
+  const blockers = new Map<number, number[]>();
+  for (const { from, to } of timeline.arrows) blockers.set(to, [...(blockers.get(to) ?? []), from]);
+  const blockersOf = (n: number) => blockers.get(n) ?? [];
+  const planned = timeline.items.flatMap((item): ArrangeTask[] => {
+    const span = item.planned;
+    if (!span) return [];
+    return [{ number: item.number, blockers: blockersOf(item.number), start: span.openStart ? undefined : span.start, target: span.openEnd ? undefined : span.end, hours: span.hours }];
+  });
+  const result = arrange(
+    tasks.map((t) => ({ ...t, blockers: blockersOf(t.number) })),
+    planned,
+    capacity,
+    today,
+  );
+  const hoursOf = new Map(tasks.map((t) => [t.number, t.hours]));
+  const fixed = planned.flatMap((t): BarTask[] => (t.start && t.hours !== undefined ? [{ number: t.number, start: t.start, blockers: t.blockers, hours: t.hours }] : []));
+  const all = stackBars([...fixed, ...result.placements.map((p) => ({ number: p.issue, start: p.start, blockers: blockersOf(p.issue), hours: hoursOf.get(p.issue)! }))], capacity);
+  return { ...result, bars: new Map(result.placements.map((p) => [p.issue, all.get(p.issue)!])) };
 }

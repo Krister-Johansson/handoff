@@ -1,8 +1,8 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, questions, runs, sql } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
-import { listAttention } from "./attention";
+import { dismissAttention, listAttention } from "./attention";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
 
 const db = createTestDb();
@@ -104,4 +104,22 @@ test("a run that reached a Finish node with notify on is listed as finished for 
   for (const run of [done, quiet, old]) await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, run.id));
 
   expect(await listAttention(db)).toEqual([{ id: `finished:${done.id}`, kind: "finished", title: "sandbox: run finished", body: "Add a truncate helper", href: `/projects/${project.id}/runs/${done.id}`, projectId: project.id }]);
+});
+
+test("a dismissed failure hides only that failure: the run's next failure and its finish are listed", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a CHANGELOG.md" });
+  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.runId, run.id));
+  const first = await seedExecution(db, run.id, { nodeKey: "coder", status: "failed" });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+  await dismissAttention(db, `failed:${first.id}`);
+  expect(await listAttention(db)).toEqual([]);
+  await db.update(nodeExecutions).set({ status: "repaired" }).where(eq(nodeExecutions.id, first.id));
+  const second = await seedExecution(db, run.id, { nodeKey: "coder", status: "failed", attempt: 2 });
+  expect((await listAttention(db)).map((i) => i.id)).toEqual([`failed:${second.id}`]);
+  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, second.id));
+  await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, run.id));
+  await db.transaction((tx) => appendEvents(tx, run.id, [{ type: "run.finish", payload: { notify: true } }]));
+  expect((await listAttention(db)).map((i) => i.id)).toEqual([`finished:${run.id}`]);
 });

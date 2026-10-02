@@ -3,10 +3,21 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { PlanTimeline } from "./plan-timeline";
-import { epic, planView, PROJECT, REPO_URL, story, task, timelineOf } from "./testing/plan-fixtures";
+import { Sizing } from "./plan-context";
+import { epic, planView, PROJECT, REPO_URL, sizedTimelineOf, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }) }));
-vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), scheduleAction: vi.fn(), addDateFieldsAction: vi.fn() }));
+const actions = vi.hoisted(() => ({
+  moveToReadyAction: vi.fn(),
+  moveToShapingAction: vi.fn(),
+  startRunAction: vi.fn(),
+  listIssuesAction: vi.fn(),
+  scheduleAction: vi.fn(),
+  addDateFieldsAction: vi.fn(),
+  setSizeAction: vi.fn(),
+  moveItemAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+}));
+vi.mock("@/app/projects/actions", () => actions);
 
 const wide = window.matchMedia;
 beforeEach(() => {
@@ -118,4 +129,61 @@ test("under 640 px the warning icon opens the same card on focus, with the block
 
   fireEvent.keyDown(icon, { key: "Escape" });
   await waitFor(() => expect(screen.queryByRole("group", { name: /^Flags of/ })).not.toBeInTheDocument());
+});
+
+test("under 640 px a task shows its size and a Start field whose Target follows the duration", async () => {
+  const view = planView([
+    epic(120, "Refined product redesign", [
+      story(127, "Restyle project views", 120, [
+        task(141, "R1 Redesign tokens", "Running", { start: "2026-10-02", target: "2026-10-02", size: "S" }),
+        task(143, "R3 Restyle the sidebar", "Ready", { start: "2026-10-02", target: "2026-10-03", size: "L", estimate: 9 }),
+        task(146, "R6 Restyle the list view", "Shaping", { start: "2026-10-03", target: "2026-10-03", size: "M", blockedBy: [143] }),
+        task(152, "Document the workflow", "Shaping"),
+      ]),
+    ]),
+  ]);
+  render(
+    <Sizing value={sizingOf()}>
+      <PlanTimeline
+        projectId="p1"
+        repoUrl={REPO_URL}
+        project={{ ...PROJECT, dateFields: { start: "s", target: "t" } }}
+        epics={view.epics}
+        unparented={[]}
+        timeline={sizedTimelineOf(view, [], NOW)}
+        zoom={undefined}
+        filters={parsePlanFilters({})}
+        needsYou={[]}
+        graphs={["loop"]}
+        graphName="loop"
+        readAt={NOW.getTime()}
+      />
+    </Sizing>,
+    { wrapper: TooltipProvider },
+  );
+  const item = (name: RegExp) => screen.getByRole("listitem", { name });
+  expect(within(item(/Task #146/)).getByRole("button", { name: "Size M, forecast 50m. Change the size or estimate of #146" })).toBeInTheDocument();
+  expect(within(item(/Task #143/)).getByRole("button", { name: "Size L, manual estimate 1.5d. Change the size or estimate of #143" })).toBeInTheDocument();
+
+  fireEvent.click(within(item(/Task #146/)).getByRole("button", { name: "Start of #146, Oct 3. Change" }));
+  const form = within(item(/Task #146/)).getByRole("group", { name: "New start for #146" });
+  expect(within(form).getByLabelText("Start")).toHaveValue("2026-10-03");
+  expect(within(form).getByText("Target follows from the M forecast, ~50m: Oct 3.")).toBeInTheDocument();
+  expect(within(form).getByText("Blocked by #143, planned to end Oct 3.")).toBeInTheDocument();
+
+  fireEvent.change(within(form).getByLabelText("Start"), { target: { value: "2026-10-06" } });
+  expect(within(form).getByText("Target follows from the M forecast, ~50m: Oct 6.")).toBeInTheDocument();
+  fireEvent.click(within(form).getByRole("button", { name: "Save to GitHub" }));
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 146, start: "2026-10-06", target: "2026-10-06" }));
+  await waitFor(() => expect(within(item(/Task #146/)).queryByRole("group", { name: "New start for #146" })).not.toBeInTheDocument());
+
+  // A manual estimate counts in days of the capacity; a task with neither keeps Schedule. Nothing drags here.
+  fireEvent.click(within(item(/Task #143/)).getByRole("button", { name: "Start of #143, Oct 2. Change" }));
+  expect(within(item(/Task #143/)).getByText("Target follows from the manual estimate, 1.5d: Oct 3.")).toBeInTheDocument();
+  expect(within(item(/Task #152/)).getByRole("button", { name: "Schedule #152 Document the workflow" })).toBeInTheDocument();
+  expect(within(item(/Task #152/)).queryByRole("button", { name: /^Start of/ })).not.toBeInTheDocument();
+  // A Running task keeps its dates: its run owns it.
+  expect(within(item(/Task #141/)).getByRole("button", { name: "Size S, forecast 25m. Change the size or estimate of #141" })).toBeInTheDocument();
+  expect(within(item(/Task #141/)).queryByRole("button", { name: /^Start of/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /^Task #/ })).not.toBeInTheDocument();
 });

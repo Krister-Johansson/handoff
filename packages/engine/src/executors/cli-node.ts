@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, verdictOf, type NodeType, type ReviewerOutput } from "@handoff/core";
-import type { Db } from "@handoff/db";
+import type { Caps, Db } from "@handoff/db";
 import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
 import { heldApproval, recordApproval } from "../approvals.ts";
@@ -22,12 +22,14 @@ export type CliNodeOptions = {
   idleTimeoutMs?: number;
   model?: string;
   effort?: string;
-  permissions?: { db: Db; timeoutMs?: number };
+  /** Permission prompts go to a person; `caps` are the worker's, which a step fits in again before its answer goes back. */
+  permissions?: { db: Db; timeoutMs?: number; caps?: Partial<Caps> };
 };
 
 const PROMPTS: Partial<Record<NodeType, string>> = {
   planner:
     "Plan the task in the system prompt. Read the repository as needed but do not edit files. Return the plan, the ordered steps and the paths the change will own. " +
+    "To learn a dependency's installed version, read node_modules/<package>/package.json with the Read tool instead of running a command. " +
     "Keep plan to a few sentences on the approach; put the ordered work in steps and do not repeat the steps in plan. " +
     "ownedPaths is the whole list of files and directories the change may touch: a plan has no extra paths, so include every file the steps need, such as lockfiles next to a package.json you change. " +
     "When the linked issues list no acceptance criteria, list in acceptance what a person can check in the running app to see the task is done, one plain sentence each, such as \"A user can create a new task\". " +
@@ -222,6 +224,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           runId: ctx.run.id,
           executionId: ctx.execution.id,
           dir,
+          timeoutMs: options.permissions.timeoutMs ?? PERMISSION_TIMEOUT_MS,
+          ...(options.permissions.caps ? { caps: options.permissions.caps } : {}),
           onRequest: async (request) => {
             ctx.emit("permission.requested", request);
             const { action, detail } = describePermission(request.toolName, request.input);

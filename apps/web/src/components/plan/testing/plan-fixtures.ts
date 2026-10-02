@@ -2,7 +2,7 @@ import type { Assignee, PlanItem, PlanProject, PlanStatus } from "@handoff/githu
 import type { BacklogIssue, BacklogRun } from "@/server/backlog";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanStory, PlanTask, PlanView } from "@/server/plan";
 import { deriveSpans, type TimelineRun } from "@/lib/plan/schedule";
-import type { Forecasts } from "@/lib/plan/forecast";
+import { durationOf, type Forecasts } from "@/lib/plan/forecast";
 import type { SizingControl } from "../plan-context";
 
 export const REPO_URL = "https://github.com/o/r";
@@ -82,10 +82,23 @@ export function planView(epics: PlanEpic[], extra: { unparented?: PlanTask[]; un
   return { project: PROJECT, epics, unparented: extra.unparented ?? [], board, unplanned: extra.unplanned ?? [] };
 }
 
+const itemsOfView = (view: Pick<PlanView, "epics" | "unparented">) => [...view.epics.flatMap((e) => [e, ...e.stories, ...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...view.unparented];
+
 /** The timeline loadPlan would derive for a view: every epic, story and task, the runs given, at `now`. */
 export function timelineOf(view: Pick<PlanView, "epics" | "unparented">, runs: TimelineRun[], now: Date) {
-  const items = [...view.epics.flatMap((e) => [e, ...e.stories, ...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...view.unparented];
-  return deriveSpans(items, runs, now);
+  return deriveSpans(itemsOfView(view), runs, now);
+}
+
+/** The timeline loadPlan derives with sizes: each task's duration from its estimate, Size or proposal at FORECASTS and 6 hours a day. */
+export function sizedTimelineOf(view: Pick<PlanView, "epics" | "unparented">, runs: TimelineRun[], now: Date, capacity = 6) {
+  const items = itemsOfView(view);
+  const durations = new Map(
+    items.flatMap((item) => {
+      const duration = item.kind === "task" ? durationOf(item, FORECASTS, (item as PlanTask).proposal?.size) : undefined;
+      return duration ? [[item.number, duration] as const] : [];
+    }),
+  );
+  return deriveSpans(items, runs, now, { durations, capacity });
 }
 
 /** S and M from this project's runs, L on its default with three runs, as the design shows them. */

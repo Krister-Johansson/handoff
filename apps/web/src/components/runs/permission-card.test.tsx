@@ -7,19 +7,25 @@ const actions = vi.hoisted(() => ({ answerPermissionAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
 beforeEach(() => actions.answerPermissionAction.mockReset().mockResolvedValue({ ok: true }));
 
-const request = { id: "3f6b2a10-0000-4000-8000-000000000001", runId: "22222222-2222-4222-8222-222222222222", nodeKey: "coder-1", toolName: "Bash", input: { command: "git -C /w log --oneline -8" }, createdAt: new Date() };
+const request = { id: "3f6b2a10-0000-4000-8000-000000000001", runId: "22222222-2222-4222-8222-222222222222", nodeKey: "coder-1", toolName: "Bash", input: { command: "git log --oneline -8" }, createdAt: new Date() };
 
 test("a step waiting on a permission shows what it wants to run, with the rule Always allow would add", () => {
   render(<PermissionCard request={request} />);
   expect(screen.getByRole("heading", { name: "coder-1 asks to run a command" })).toBeInTheDocument();
-  expect(screen.getByText("git -C /w log --oneline -8")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Always allow Bash(git *)" })).toBeInTheDocument();
+  expect(screen.getByText("git log --oneline -8")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Always allow Bash(git log *)" })).toBeInTheDocument();
+});
+
+test("a command no rule can safely cover, such as node, offers no Always allow", () => {
+  render(<PermissionCard request={{ ...request, input: { command: "node -e 'require(\"fs\").rmSync(\"x\")'" } }} />);
+  expect(screen.getByRole("button", { name: "Allow once" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Always allow/ })).not.toBeInTheDocument();
 });
 
 test("each answer goes to the step: once, always with its rule, or a denial with a note", async () => {
   const answers: [string, (() => void) | undefined, unknown][] = [
     ["Allow once", undefined, { id: request.id, runId: request.runId, decision: "once" }],
-    ["Always allow Bash(git *)", undefined, { id: request.id, runId: request.runId, decision: "always", rule: "Bash(git *)" }],
+    ["Always allow Bash(git log *)", undefined, { id: request.id, runId: request.runId, decision: "always", rule: "Bash(git log *)" }],
     [
       "Deny",
       () => fireEvent.change(screen.getByLabelText("Note for Claude (optional)"), { target: { value: "Read the log with the Read tool." } }),
@@ -44,7 +50,7 @@ test("the card's form is a WebMCP tool with Allow once and Deny as its submit co
   expect(screen.getByRole("button", { name: "Allow once" })).toHaveAttribute("type", "submit");
   expect(screen.getByRole("button", { name: "Deny" })).toHaveAttribute("type", "submit");
   // Always allow changes the node's rules for later runs: a person's choice, never a form an agent submits.
-  expect(screen.getByRole("button", { name: "Always allow Bash(git *)" })).toHaveAttribute("type", "button");
+  expect(screen.getByRole("button", { name: "Always allow Bash(git log *)" })).toHaveAttribute("type", "button");
   expect(screen.getByLabelText("Note for Claude (optional)")).toHaveAttribute("toolparamdescription", expect.stringContaining("denial"));
   fireEvent.change(screen.getByLabelText("Note for Claude (optional)"), { target: { value: "Use Read." } });
   fireEvent.click(screen.getByRole("button", { name: "Deny" }));

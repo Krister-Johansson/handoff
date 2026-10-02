@@ -4,7 +4,7 @@ import { nodeExecutions } from "../schema/index.ts";
 import { seedExecution, seedRun } from "../testing/fixtures.ts";
 import { truncateAll } from "../testing/reset.ts";
 import { createTestDb } from "../testing/test-db.ts";
-import { claimNext, heartbeat, reapExpiredLeases, reapExpiredWaits, wakeByKey } from "./claim.ts";
+import { claimNext, heartbeat, reapExpiredLeases, reapExpiredWaits, resumeAfterPermission, waitOnPermission, wakeByKey } from "./claim.ts";
 
 const db = createTestDb();
 const caps = { cli: 1, shell: 4, github: 4, human: 100, function: 8 };
@@ -83,6 +83,27 @@ describe("claimNext", () => {
     const claimed = await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 });
     expect(claimed?.id).toBe(row.id);
     expect(claimed?.queuedMs).toBeLessThan(400);
+  });
+
+  test("a step waiting on a permission prompt does not hold the Claude slot", async () => {
+    const { run } = await seedRun(db);
+    await seedExecution(db, run.id, { nodeKey: "planner", nodeType: "planner" });
+    const asking = (await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 }))!;
+    await seedExecution(db, run.id, { nodeKey: "coder" });
+    expect(await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 })).toBeUndefined();
+
+    await waitOnPermission(db, asking.id);
+    const other = await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 });
+    expect(other?.nodeKey).toBe("coder");
+
+    // Answered while the other step runs, the asking step waits for the slot before its process goes on.
+    expect(await resumeAfterPermission(db, asking.id, caps)).toBe(false);
+    const [still] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.id, asking.id));
+    expect(still?.waitingOn).toBe("permission");
+    await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, other!.id));
+    expect(await resumeAfterPermission(db, asking.id, caps)).toBe(true);
+    const [resumed] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.id, asking.id));
+    expect(resumed).toMatchObject({ status: "running", waitingOn: null });
   });
 
   test("claimNext skips executions of cancelled or finished runs", async () => {

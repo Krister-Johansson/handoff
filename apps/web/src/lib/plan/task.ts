@@ -14,6 +14,9 @@ export const hasKindLabel = (labels: readonly string[]) => labels.some((l) => KI
 const ACTIVE = new Set(["queued", "running", "waiting"]);
 export const hasActiveRun = (task: PlanTask) => task.run !== null && ACTIVE.has(task.run.status);
 
+/** Whether a person may move a task's dates on the timeline: not when it is Done, nor while a run owns it. */
+export const canMove = (task: PlanTask) => taskColumn(task) !== "Done" && taskColumn(task) !== "Running" && !hasActiveRun(task);
+
 /** The open Ready tasks no run is working on: the ones the backlog offers. */
 export const readyInBacklog = (ready: readonly PlanTask[]) => ready.filter((t) => t.state === "open" && (t.run === null || t.run.status === "cancelled")).length;
 
