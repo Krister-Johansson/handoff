@@ -1,4 +1,4 @@
-import { and, appendEvents, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
+import { and, appendEvents, desc, eq, events, isNull, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
 import { brief, describePermission, questionBrief } from "@handoff/core";
 import { reviewPath, runPath } from "../lib/paths";
 import type { AttentionItem } from "../lib/attention";
@@ -29,7 +29,10 @@ export async function waitingReviews(db: Db) {
   return rows.filter((r) => r.pr && r.pr.ci !== "pending" && r.pr.number !== undefined);
 }
 
-/** Runs that reached a Finish node with notify on in the last day, and that nobody has dismissed. */
+/**
+ * Runs that reached a Finish node with notify on in the last day, that nobody has dismissed and that no
+ * run started again in their place. (A superseded run that failed was cancelled, so it is no failed item.)
+ */
 async function finishedRuns(db: Db) {
   const dismissed = sql`exists (select 1 from events d where d.run_id = ${runs.id} and d.type = 'attention.dismissed' and d.payload->>'itemId' = 'finished:' || ${runs.id}::text)`;
   return db
@@ -37,7 +40,15 @@ async function finishedRuns(db: Db) {
     .from(events)
     .innerJoin(runs, eq(runs.id, events.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
-    .where(and(eq(events.type, "run.finish"), sql`(${events.payload}->>'notify')::boolean`, sql`${events.createdAt} > now() - interval '1 day'`, sql`not ${dismissed}`))
+    .where(
+      and(
+        eq(events.type, "run.finish"),
+        sql`(${events.payload}->>'notify')::boolean`,
+        sql`${events.createdAt} > now() - interval '1 day'`,
+        sql`not ${dismissed}`,
+        isNull(runs.supersededBy),
+      ),
+    )
     .orderBy(desc(events.createdAt));
 }
 

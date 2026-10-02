@@ -3,6 +3,8 @@ import loop from "@handoff/core/templates/loop.graph.json" with { type: "json" }
 import planReview from "@handoff/core/templates/plan-review.graph.json" with { type: "json" };
 import { compileGraph, RunStateSchema, suggestProjectName, type CompileError } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
+import { cancelRun, statusesBeforeRun } from "@handoff/engine/operations";
+import { branchHasWork, previousRunOf } from "@handoff/engine/runs";
 import { startRun, type StartRunInput } from "@handoff/engine/start-run";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 
@@ -157,13 +159,37 @@ export async function startRunFromGraph(db: Db, input: StartRunInput, github?: G
   return startRun(db, input, { github, projects: plan });
 }
 
+/** Where a run started again begins: on the earlier run's branch, or on the default branch with only the task. */
+export type RunAgainFrom = "branch" | "scratch";
+
+export type RunAgainOptions = {
+  github?: GitHubPort | undefined;
+  projects?: ProjectsPort | undefined;
+  startedBy?: string | undefined;
+  /** Defaults to the branch when the earlier run's branch has work of its own, else scratch. */
+  from?: RunAgainFrom | undefined;
+};
+
 /**
- * Starts the same task again on the latest version of the graph an earlier run used. With the
- * Projects port its tasks move to Running on the plan, as for any new run, without the Ready gate.
+ * Starts the same task again on the latest version of the graph an earlier run used, after the same
+ * blocker check as any start. From the branch, the new branch starts at the earlier run's branch and its
+ * planner is told the earlier plan, decisions and open findings. The earlier run is marked superseded and,
+ * when it failed, cancelled. With the Projects port its tasks move to Running on the plan, as for any new
+ * run, without the Ready gate.
  */
-export async function runAgain(db: Db, runId: string, opts: { projects?: ProjectsPort | undefined; startedBy?: string | undefined } = {}) {
+export async function runAgain(db: Db, runId: string, opts: RunAgainOptions = {}) {
   const [earlier] = await db
-    .select({ projectId: runs.projectId, task: runs.task, status: runs.status, state: runs.state, size: runs.size, graphName: graphs.name })
+    .select({
+      id: runs.id,
+      projectId: runs.projectId,
+      task: runs.task,
+      status: runs.status,
+      state: runs.state,
+      size: runs.size,
+      branchName: runs.branchName,
+      supersededBy: runs.supersededBy,
+      graphName: graphs.name,
+    })
     .from(runs)
     .innerJoin(graphVersions, eq(graphVersions.id, runs.graphVersionId))
     .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
@@ -172,13 +198,21 @@ export async function runAgain(db: Db, runId: string, opts: { projects?: Project
   if (earlier.status === "queued" || earlier.status === "running" || earlier.status === "waiting") {
     throw new Error(`The run is still ${earlier.status}.`);
   }
+  if (earlier.supersededBy) throw new Error(`The run was run again as ${earlier.supersededBy}. Run that one again instead.`);
   const issues = RunStateSchema.shape.issues.parse(earlier.state.issues) ?? [];
-  return startRunFromGraph(
+  const from = opts.from ?? (branchHasWork(earlier) ? "branch" : "scratch");
+  const previousRun = from === "branch" ? previousRunOf(earlier) : undefined;
+  const again = await startRunFromGraph(
     db,
-    { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues, again: true, size: earlier.size, startedBy: opts.startedBy },
-    undefined,
+    { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues, again: true, size: earlier.size, startedBy: opts.startedBy, previousRun, statusesBefore: await statusesBeforeRun(db, runId) },
+    opts.github,
     opts.projects,
   );
+  // The new run takes the old one's place: the old run leaves what needs attention, and a failed one is
+  // cancelled, which frees its worktree. Its tasks stay with the new run.
+  await db.update(runs).set({ supersededBy: again.id }).where(eq(runs.id, runId));
+  if (earlier.status === "failed") await cancelRun(db, runId, { reason: `run again as ${again.id}`, projects: opts.projects });
+  return again;
 }
 
 const GRAPH_NAME = /^[a-z0-9][a-z0-9-]*$/;

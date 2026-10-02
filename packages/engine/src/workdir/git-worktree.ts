@@ -50,10 +50,24 @@ export class GitWorktreeProvider implements WorkdirProvider {
         mirror,
         branchExists
           ? ["worktree", "add", "-q", path, spec.branchName]
-          : ["worktree", "add", "-q", "-b", spec.branchName, path, `origin/${spec.baseBranch}`],
+          : ["worktree", "add", "-q", "-b", spec.branchName, path, await this.startPoint(mirror, spec)],
       );
       return { path, baseSha };
     });
+  }
+
+  /**
+   * Where a new run branch starts: the head of the branch the run continues, as this clone has it or
+   * else as origin has it, and the base branch otherwise.
+   */
+  private async startPoint(mirror: string, spec: WorkdirSpec): Promise<string> {
+    const base = `origin/${spec.baseBranch}`;
+    if (!spec.startFrom) return base;
+    for (const ref of [`refs/heads/${spec.startFrom}`, `refs/remotes/origin/${spec.startFrom}`]) {
+      const found = await this.git(mirror, ["rev-parse", "--verify", "--quiet", ref]).catch(() => "");
+      if (found) return ref;
+    }
+    return base;
   }
 
   /**

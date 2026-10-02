@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { bigint, check, index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { bigint, check, index, integer, jsonb, pgTable, text, uuid, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { createdAt, id, tstz, updatedAt } from "./columns.ts";
 import { runStatus } from "./enums.ts";
 import { graphVersions } from "./graphs.ts";
@@ -38,6 +38,8 @@ export const runs = pgTable(
     startedBy: text("started_by"),
     /** The Size, S, M or L, its single linked task had on the plan when the run started; null without one or with several tasks. */
     size: text("size").$type<"S" | "M" | "L">(),
+    /** The run started again in this run's place; a superseded run no longer needs a person. */
+    supersededBy: uuid("superseded_by").references((): AnyPgColumn => runs.id, { onDelete: "set null" }),
     startedAt: tstz("started_at"),
     finishedAt: tstz("finished_at"),
     createdAt: createdAt(),

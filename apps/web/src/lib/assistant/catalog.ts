@@ -381,13 +381,22 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "run_again",
     title: "Run again",
-    description: "Starts a finished run's task again on the latest version of its graph.",
-    input: z.object({ run_id: runId }),
+    description:
+      "Starts a finished run's task again on the latest version of its graph, after the same blocker check as start_run. The new run supersedes the old one, and a failed old run is cancelled.",
+    input: z.object({
+      run_id: runId,
+      from: z
+        .enum(["branch", "scratch"])
+        .optional()
+        .describe(
+          "branch: the new branch starts at the old run's branch, and the planner gets the old plan, decisions and open review findings. scratch: a new branch from the default branch with only the task. Defaults to branch when the old run committed work, else scratch.",
+        ),
+    }),
     kind: "data",
     confirm: true,
     readOnly: false,
     openWorld: true,
-    summarize: (a) => `Run the task of run ${short(a.run_id)} again`,
+    summarize: (a) => `Run the task of run ${short(a.run_id)} again${a.from === "scratch" ? " from scratch" : a.from === "branch" ? " from its branch" : ""}`,
   }),
   spec({
     name: "list_library",

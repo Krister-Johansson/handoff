@@ -153,6 +153,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     ...(state.issues?.length ? { issues: state.issues } : {}),
     ...(acceptance ? { acceptance } : {}),
     ...(REVIEW_TYPES.has(node.type) ? { stage: coderPassed(state) ? ("code" as const) : ("plan" as const) } : {}),
+    ...(node.type === "planner" && state.previousRun ? { earlierRun: state.previousRun } : {}),
   };
   const previousReview = previousReviewOf(node, state, sentBackTo);
   if (previousReview) packet.previousReview = previousReview;

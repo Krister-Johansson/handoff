@@ -38,6 +38,18 @@ test("release removes the worktree and keeps the branch", async () => {
   expect(git(provider.mirrorPath(spec.remoteUrl), "branch", "--list", "handoff/run-1")).toContain("handoff/run-1");
 });
 
+test("a run that continues another starts its branch at that branch's head", async () => {
+  const { provider, spec } = setup();
+  const earlier = await provider.acquire(spec);
+  git(earlier.path, "commit", "--allow-empty", "-qm", "earlier work");
+  const head = git(earlier.path, "rev-parse", "HEAD");
+  await provider.release(spec);
+
+  const workdir = await provider.acquire({ ...spec, runId: "run-2", branchName: "handoff/run-2", startFrom: "handoff/run-1" });
+  expect(git(workdir.path, "branch", "--show-current")).toBe("handoff/run-2");
+  expect(git(workdir.path, "rev-parse", "HEAD")).toBe(head);
+});
+
 test("releasing a run whose clone was never made does nothing", async () => {
   const { provider, spec } = setup();
   await expect(provider.release(spec)).resolves.toBeUndefined();

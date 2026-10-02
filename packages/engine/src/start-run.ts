@@ -1,9 +1,9 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import type { LinkedIssue } from "@handoff/core";
+import type { LinkedIssue, PreviousRun } from "@handoff/core";
 import { graphs, graphVersions, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
 import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
 import { assignStarter } from "./assign-starter.ts";
-import { recordPlanStatus } from "./plan-status.ts";
+import { recordPlanStatus, type StatusesBefore } from "./plan-status.ts";
 import { createRun } from "./runs.ts";
 import type { RunRow } from "./types.ts";
 
@@ -26,6 +26,10 @@ export type StartRunInput = {
   maxActive?: number | undefined;
   /** Events the starter records on the run right after run.created, such as the scheduler's run.scheduled. */
   events?: NewEvent[] | undefined;
+  /** The failed run this run continues from its branch: its branch starts there, and its planner is told of it. */
+  previousRun?: PreviousRun | undefined;
+  /** For a run started again: the Status the earlier run moved each task from, which this run records as its own `from`. */
+  statusesBefore?: StatusesBefore | undefined;
 };
 
 /**
@@ -82,11 +86,12 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
-    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events });
+    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events, previousRun: input.previousRun });
   });
-  // The run owns its tasks now: they move to Running on the plan, recording the Status the gate read for a
-  // cancel to put back. A failed write is recorded and the run goes on.
-  const before = new Map(items?.map((item) => [item.number, item.status]));
+  // The run owns its tasks now: they move to Running on the plan, recording the Status the gate read (or, for
+  // a run started again, the one the earlier run moved them from) for a cancel to put back. A failed write
+  // is recorded and the run goes on.
+  const before = input.again ? (input.statusesBefore ?? new Map()) : new Map(items?.map((item) => [item.number, item.status]));
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running", before);
   // The person who starts the work is the token's user: an issue nobody has yet is assigned to them.
   await assignStarter(db, run.id, github, repo, issues.map((i) => i.number));

@@ -57,4 +57,5 @@ A run can stop for a person. A step can ask permission for a tool call, a run ca
 - Answer a question with `answer_question` only after the user decides, with one of the options `get_run` lists. A review takes approve, changes or fix (approve once the comments are fixed). A Try it gate shows the app's address, each acceptance criterion and what the demo saw; answer it with `criteria`, a verdict for each criterion.
 - Once the user has seen a failed run they will come back to, `dismiss_attention` takes it off the list; it still waits for a repair.
 - A failed run can be repaired in place with `repair_run`, which re-runs the failed step and keeps earlier work. Say what failed first, and add a note for the agent when the user gives direction.
+- `run_again` starts the task as a new run that supersedes the old one and cancels it if it failed. With `from: "branch"` the new branch starts at the old run's branch and its planner gets the old plan, decisions and open findings; `from: "scratch"` starts over from the default branch. It defaults to the branch when the old run committed work. Ask the user which they want.
 - Ask before `cancel_run`.

@@ -92,9 +92,10 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
 /**
  * The Status each task the run moved had before the run moved it, from the `from` of the run's first
  * plan.status for the task that records one. A task the run moved before runs recorded `from` came from
- * Ready, the gate every start passed. A task the run never moved has no entry.
+ * Ready, the gate every start passed. A task the run never moved has no entry. A run started again
+ * records these as its own `from`.
  */
-async function statusesBeforeRun(db: Db, runId: string): Promise<Map<number, PlanStatus>> {
+export async function statusesBeforeRun(db: Db, runId: string): Promise<Map<number, PlanStatus>> {
   const moves = await db
     .select({ payload: events.payload })
     .from(events)

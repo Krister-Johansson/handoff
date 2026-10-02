@@ -48,7 +48,6 @@ test("the handoff skill names set_size and arrange_plan", () => {
   expect(section).toMatch(/`set_size`[^\n]*when the user sizes/);
   expect(section).toMatch(/`arrange_plan`[^\n]*`schedule`/);
   expect(section.indexOf("`arrange_plan`")).toBeLessThan(section.lastIndexOf("`schedule`"));
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.12.0");
 });
 
 test("the handoff skill says a person decides what is Ready and names start_scheduler, pause_scheduler, stop_scheduler and get_scheduler", () => {
@@ -79,6 +78,12 @@ test("the handoff skill says get_run has the whole command of a permission promp
   expect(skill).toMatch(/permission prompt[^\n]*whole command[^\n]*`answer_permission`/);
   expect(skill).toMatch(/approve, changes or fix/);
   expect(skill).toMatch(/Try it gate[^\n]*`criteria`/);
+});
+
+test("the handoff skill says run_again starts from the branch or from scratch and supersedes the run", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  expect(skill).toMatch(/`run_again`[^\n]*supersedes[^\n]*`from: "branch"`[^\n]*`from: "scratch"`/);
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.13.0");
 });
 
 test("the plugin ships a setup skill that walks through setup_project", () => {

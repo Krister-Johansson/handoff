@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { describePermission, redactSecrets } from "@handoff/core";
+import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
 import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
@@ -8,7 +8,7 @@ import { projectReadiness } from "./readiness";
 import { assignmentOf, setIssueAssignees } from "./assignees";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
-import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
+import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph, type RunAgainFrom } from "./graphs";
 import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
@@ -215,6 +215,9 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     started_by: run.startedBy,
     url: `${deps.baseUrl}${runPath(run.projectId, run.id)}`,
     branch: run.branchName,
+    // Run again links the runs: the run this one continues from its branch, and the run started in its place.
+    continues: RunStateSchema.shape.previousRun.parse(run.state.previousRun)?.runId ?? null,
+    superseded_by: run.supersededBy,
     pr: run.prNumber ? { number: run.prNumber, url: `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` } : null,
     issues: run.issues.map((i) => ({ number: i.number, title: i.title, url: i.url })),
     // What Claude cost over every step of the run, in US dollars.
@@ -522,9 +525,10 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { cancelled: true, url: await urlOf(run_id) };
     },
 
-    run_again: async ({ run_id }: { run_id: string }) => {
-      const run = await runAgain(db, run_id, { projects: plan, startedBy: actor });
-      return { run_id: run.id, status: run.status, url: url(runPath(run.projectId, run.id)) };
+    run_again: async ({ run_id, from }: { run_id: string; from?: RunAgainFrom }) => {
+      const run = await runAgain(db, run_id, { github, projects: plan, startedBy: actor, from });
+      const continues = RunStateSchema.shape.previousRun.parse(run.state.previousRun);
+      return { run_id: run.id, status: run.status, from: continues ? "branch" : "scratch", supersedes: run_id, url: url(runPath(run.projectId, run.id)) };
     },
 
     list_plan: async ({ project, epic }: { project: string; epic?: number }) => {

@@ -555,7 +555,20 @@ test("run_again over MCP sets the task to Running again", async () => {
   plan.itemsOf(repo).get(ready)!.status = "Ready";
   const again = await call("run_again", { run_id: first.run_id });
   expect(await statusOf(ready)).toBe("Running");
-  expect(await planEvents(again.run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running" } }]);
+  expect(await planEvents(again.run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running", from: "Ready" } }]);
+});
+
+test("run_again continues from the branch when the run committed, takes from: scratch, and supersedes the run", async () => {
+  const first = await call("start_run", { project: "sandbox", task: "Add a slugify helper" });
+  const committed = { nodes: { coder: { executionId: "e1", attempt: 1, output: { status: "done", summary: "Added slugify" } } } };
+  await db.update(runs).set({ status: "failed", state: sql`${runs.state} || ${JSON.stringify(committed)}::jsonb` }).where(eq(runs.id, first.run_id));
+  const again = await call("run_again", { run_id: first.run_id });
+  expect(again).toMatchObject({ status: "queued", from: "branch", supersedes: first.run_id });
+
+  await db.update(runs).set({ status: "failed", state: sql`${runs.state} || ${JSON.stringify(committed)}::jsonb` }).where(eq(runs.id, again.run_id));
+  const fresh = await call("run_again", { run_id: again.run_id, from: "scratch" });
+  expect(fresh).toMatchObject({ status: "queued", from: "scratch", supersedes: again.run_id });
+  expect(await call("get_run", { run_id: again.run_id })).toMatchObject({ status: "cancelled", superseded_by: fresh.run_id });
 });
 
 test("setup_plan creates the labels and the Project once, stores the number and is idempotent", async () => {

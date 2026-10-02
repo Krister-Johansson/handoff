@@ -1,6 +1,8 @@
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { asc, eq, events, graphVersions, projects, runs } from "@handoff/db";
+import { renderContextPacket, RunStateSchema } from "@handoff/core";
+import { asc, eq, events, graphVersions, nodeExecutions, projects, runs } from "@handoff/db";
+import { cancelRun, loadCompiledGraph, selectContext, workdirSpecOf } from "@handoff/engine";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjectGraphs, listProjects, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
@@ -313,5 +315,112 @@ describe("the Ready gate", () => {
     plan.itemsOf(repo).get(ready)!.size = "L";
     const again = await runAgain(db, first.id, { projects: plan });
     expect(again.size).toBe("M");
+  });
+
+  test("run again records the Status the earlier run moved the task from, so a cancel puts it back", async () => {
+    const { plan, issue, start } = await planned();
+    const ready = await issue("Ready to build", ["task"], "Ready");
+    const first = await start([ready]);
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.id));
+
+    const again = await runAgain(db, first.id, { projects: plan });
+    expect(await plan.getStatus(repo, 1, ready)).toBe("Running");
+    expect(await planEvents(again.id)).toEqual([["plan.status", { issue: ready, status: "Running", from: "Ready" }]]);
+    expect(await planEvents(first.id)).toEqual([["plan.status", { issue: ready, status: "Running", from: "Ready" }]]);
+    await cancelRun(db, again.id, { projects: plan });
+    expect(await plan.getStatus(repo, 1, ready)).toBe("Ready");
+  });
+});
+
+describe("run again continues", () => {
+  /** A failed run of the linear graph that planned, committed, and had its code sent back by a review. */
+  async function failedWithWork() {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const first = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a slugify helper" });
+    const state = {
+      ...first.state,
+      plan: { plan: "Add slugify in src/slug.ts and export it", steps: ["Write slugify", "Export it"], ownedPaths: ["src/slug.ts"] },
+      decisions: [{ gate: "approve-plan", note: "Keep digits in slugs", comments: [{ quote: "export it", body: "From src/index.ts" }] }],
+      nodes: {
+        coder: { executionId: "e1", attempt: 1, output: { status: "done", summary: "Added slugify", commitSha: "abc1234" } },
+        review: { executionId: "e2", attempt: 1, output: { verdict: "request_changes", comments: [{ path: "src/slug.ts", line: 3, body: "Digits are dropped", severity: "blocking" }] } },
+      },
+    };
+    await db.update(runs).set({ status: "failed", state }).where(eq(runs.id, first.id));
+    return { project, first };
+  }
+
+  test("run again from the branch starts the new branch at the old head and gives the planner the old plan, decisions and open findings", async () => {
+    const { first } = await failedWithWork();
+
+    const again = await runAgain(db, first.id);
+    expect(again.branchName).not.toBe(first.branchName);
+    expect(workdirSpecOf(again, "origin")).toMatchObject({ branchName: again.branchName, startFrom: first.branchName });
+
+    const graph = await loadCompiledGraph(db, again.graphVersionId);
+    const [execution] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, again.id));
+    const packet = renderContextPacket(selectContext(graph.node("planner"), RunStateSchema.parse(again.state), execution!));
+    expect(packet).toContain("# An earlier run of this task");
+    expect(packet).toContain(first.branchName);
+    expect(packet).toContain("Add slugify in src/slug.ts and export it");
+    expect(packet).toContain("- Export it");
+    expect(packet).toContain("Keep digits in slugs");
+    expect(packet).toContain('On "export it": From src/index.ts');
+    expect(packet).toContain("[blocking] src/slug.ts:3: Digits are dropped");
+  });
+
+  test("run again from scratch starts on the default branch with only the task", async () => {
+    const { first } = await failedWithWork();
+
+    const again = await runAgain(db, first.id, { from: "scratch" });
+    expect(workdirSpecOf(again, "origin").startFrom).toBeUndefined();
+    const graph = await loadCompiledGraph(db, again.graphVersionId);
+    const [execution] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, again.id));
+    expect(renderContextPacket(selectContext(graph.node("planner"), RunStateSchema.parse(again.state), execution!))).not.toContain("An earlier run");
+  });
+
+  test("run again starts from scratch by default when the earlier run committed nothing", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const first = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a slugify helper" });
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.id));
+
+    const again = await runAgain(db, first.id);
+    expect(workdirSpecOf(again, "origin").startFrom).toBeUndefined();
+  });
+
+  test("run again marks the old run superseded and cancels it", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const first = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a slugify helper" });
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.id));
+
+    const again = await runAgain(db, first.id);
+    const [old] = await db.select().from(runs).where(eq(runs.id, first.id));
+    expect(old).toMatchObject({ status: "cancelled", supersededBy: again.id });
+    const cancelled = await db.select().from(events).where(eq(events.runId, first.id));
+    expect(cancelled.find((e) => e.type === "run.cancelled")?.payload).toEqual({ reason: `run again as ${again.id}` });
+  });
+
+  test("run again refuses a run that was already run again, and names the run in its place", async () => {
+    const { first } = await failedWithWork();
+    const again = await runAgain(db, first.id);
+    await expect(runAgain(db, first.id)).rejects.toThrow(`was run again as ${again.id}`);
+  });
+
+  test("run again refuses a blocked issue", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const github = new FakeGitHub();
+    for (const n of [5, 7]) github.issues.set(n, { number: n, title: `F0${n}`, url: `u${n}`, body: "", state: "open" });
+    const first = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues: [7] }, github);
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.id));
+    github.issues.get(7)!.blockedBy = [5];
+
+    await expect(runAgain(db, first.id, { github })).rejects.toThrow("#7 is blocked by #5");
+    const [old] = await db.select().from(runs).where(eq(runs.id, first.id));
+    expect(old).toMatchObject({ status: "failed", supersededBy: null });
+    expect(await db.select().from(runs)).toHaveLength(1);
   });
 });

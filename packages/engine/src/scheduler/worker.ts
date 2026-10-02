@@ -34,6 +34,7 @@ import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts
 import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
+import { workdirSpecOf } from "../runs.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider, WorkdirSpec } from "../types.ts";
 import { askAboutPaths, completeFailed, completePassed, failAndRetry, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
@@ -294,7 +295,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       outcome = { kind: "failed", error: { code: "no_executor", message: `no executor registered for node type ${node.type}` } };
     } else {
       if (typeof executor.needsWorkdir === "function" ? executor.needsWorkdir(node) : executor.needsWorkdir) {
-        const spec = { runId: run.id, remoteUrl: (deps.remoteUrl ?? defaultRemote)(project), baseBranch: run.baseBranch, branchName: run.branchName };
+        const spec = workdirSpecOf(run, (deps.remoteUrl ?? defaultRemote)(project));
         const emit = (type: string, payload: unknown) => void buffer.push({ type, payload, nodeExecutionId: row.id });
         workdir = await deps.workdirs.acquire(spec);
         if (run.worktreePath !== workdir.path) await db.update(runs).set({ worktreePath: workdir.path }).where(eq(runs.id, run.id));
