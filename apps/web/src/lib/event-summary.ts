@@ -1,3 +1,5 @@
+import { ordinal, settingsText } from "./scheduler-text";
+
 type EventLike = { type: string; payload: unknown };
 
 const obj = (v: unknown): Record<string, unknown> => (v && typeof v === "object" ? (v as Record<string, unknown>) : {});
@@ -37,6 +39,7 @@ export function summarizeEvent(event: EventLike): string {
   }
   if (event.type === "run.failed") return typeof p.nodeKey === "string" ? `at ${p.nodeKey}` : "";
   if (event.type === "run.created" && typeof p.branchName === "string") return p.branchName;
+  if (event.type === "run.scheduled" && typeof p.place === "number") return `Started by the scheduler, ${ordinal(p.place)} in order: ${settingsText(obj(p.settings))}`;
   if (event.type === "run.overlap_held" && Array.isArray(p.paths)) return `Waiting: shares ${p.paths.join(", ")} with run ${String(p.runId).slice(0, 8)}`;
   if (event.type === "plan.status")return `#${String(p.issue)} to ${String(p.status)}`;
   if (event.type === "plan.skipped") return `#${String(p.issue)} not moved to ${String(p.status)}: ${SKIP_REASONS[String(p.reason)] ?? String(p.reason)}`;

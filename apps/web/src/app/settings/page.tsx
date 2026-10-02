@@ -23,6 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { getDb } from "@/lib/db";
 import { getProjects } from "@/lib/github";
 import { parseSettingsTab, SETTINGS_TAB_LABEL, type SettingsTab } from "@/lib/settings-tab";
+import { schedulerStates } from "@/server/scheduler-card";
 
 export const dynamic = "force-dynamic";
 
@@ -73,11 +74,17 @@ function Section({ title, description, children }: { title: string; description:
   );
 }
 
+/** Every project for Settings, Projects, with its scheduler's state while it is on. */
+async function projectRows() {
+  const [rows, schedulers] = await Promise.all([projectsForSettings(getDb(), getProjects()), schedulerStates(getDb())]);
+  return rows.map((row) => ({ ...row, scheduler: schedulers[row.id] }));
+}
+
 /** The open section with what it reads on the server; only the open section reads anything. */
 async function OpenSection({ tab, adding, origin }: { tab: SettingsTab; adding: boolean; origin: string }) {
   switch (tab) {
     case "projects":
-      return <ProjectsSettings key={adding ? "adding" : "list"} projects={await projectsForSettings(getDb(), getProjects())} adding={adding} />;
+      return <ProjectsSettings key={adding ? "adding" : "list"} projects={await projectRows()} adding={adding} />;
     case "appearance":
       return (
         <Section title="Appearance" description="How the dashboard looks. This browser keeps the choice.">

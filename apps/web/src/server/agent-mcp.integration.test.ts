@@ -873,3 +873,25 @@ test("get_scheduler reports holds with their links, active runs of max_runs, Cla
   await call("pause_scheduler", { project: "sandbox", reason: "Lunch" });
   expect(await call("get_scheduler", { project: "sandbox" })).toMatchObject({ state: "paused", paused: { by: "person", reason: "Lunch" }, summary: "1 of 3 runs active, no worker running", claude_slots: null });
 });
+
+test("get_scheduler says a scheduler just turned on has not checked yet and when it first checks", async () => {
+  await withPlan();
+  await call("start_scheduler", { project: "sandbox" });
+  const status = await call("get_scheduler", { project: "sandbox" });
+  expect(status).toMatchObject({ checked_at: null, next: [], check: expect.stringMatching(/^Not checked yet; first check (due now|in about \d+ s)$/) });
+
+  await checkProject({ db, github, projects: plan, owner: "worker-1" }, projectId);
+  expect((await call("get_scheduler", { project: "sandbox" })).check).toMatch(/^Checked \d+ s ago$/);
+});
+
+test("stop_scheduler turns the scheduler off, and start_scheduler takes a skip label and turns it on again as the first time", async () => {
+  await withPlan();
+  await call("start_scheduler", { project: "sandbox", max_runs: 2, skip_label: "manual" });
+  expect(await schedulerRow()).toMatchObject({ enabled: true, maxRuns: 2, skipLabel: "manual" });
+
+  expect(await call("stop_scheduler", { project: "sandbox" })).toEqual({ state: "off", url: `${BASE}/projects/${projectId}/plan` });
+  expect(await call("get_scheduler", { project: "sandbox" })).toMatchObject({ state: "off" });
+  await call("start_scheduler", { project: "sandbox", skip_label: null });
+  expect(await schedulerRow()).toMatchObject({ enabled: true, maxRuns: 2, skipLabel: null });
+  expect((await schedulerLog()).map((e) => e.type)).toEqual(["scheduler.started", "scheduler.stopped", "scheduler.started"]);
+});

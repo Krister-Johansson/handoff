@@ -80,6 +80,8 @@ type PlanTabProps = {
   /** The filters and the search from the URL. */
   filters: Filters;
   signals: PlanSignals;
+  /** The scheduler's next tasks with their place in its order, for the tree's Next tags. */
+  next?: Record<number, number> | undefined;
   start: StartRunContext;
   /** When the page read GitHub, in epoch milliseconds. */
   readAt: number;
@@ -145,7 +147,7 @@ function PlanBody(props: BodyProps) {
       );
     default: {
       const { hidden, by } = hiddenTasks(narrowed, found);
-      return <PlanTree {...shared} epics={shown.epics} unparented={shown.unparented} unplanned={shown.unplanned} hidden={hidden} hiddenBy={by} searchOpen={searchOpen} />;
+      return <PlanTree {...shared} next={props.next} epics={shown.epics} unparented={shown.unparented} unplanned={shown.unplanned} hidden={hidden} hiddenBy={by} searchOpen={searchOpen} />;
     }
   }
 }

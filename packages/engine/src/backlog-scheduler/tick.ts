@@ -2,7 +2,8 @@ import { toneOf } from "@handoff/core";
 import { and, createNotification, desc, eq, inArray, isNull, projects, projectSchedulers, runs, schedulerEvents, sql, type Db, type DbExecutor, type ProjectSchedulerRow } from "@handoff/db";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 import { StartRefusal, startRun } from "../start-run.ts";
-import { candidates, type Candidate, type IssueRun, type Skipped } from "./candidates.ts";
+import { candidates, type Candidate, type Skipped } from "./candidates.ts";
+import { issueRuns, releasedRuns } from "./issue-runs.ts";
 import { projectHolds, type Hold } from "./holds.ts";
 
 type ProjectRow = typeof projects.$inferSelect;
@@ -42,7 +43,6 @@ export type CheckResult = {
 };
 
 const ACTIVE = ["queued", "running", "waiting"] as const;
-const isActive = (status: string) => (ACTIVE as readonly string[]).includes(status);
 const CHECK_EVERY = "60 seconds";
 const NUDGE_FLOOR = "10 seconds";
 const PAUSE_AFTER = 3;
@@ -140,7 +140,8 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
     deps.projects.listItems(repo.owner, project.planProjectNumber, repo),
     row.order === "priority" ? deps.projects.getProject(repo.owner, project.planProjectNumber) : undefined,
   ]);
-  const found = candidates(items, await issueRuns(db, projectId), { order: row.order, priorityOptions: plan?.priorityOptions, skipLabel: row.skipLabel });
+  const [runsByIssue, released] = await Promise.all([issueRuns(db, projectId), releasedRuns(db, projectId)]);
+  const found = candidates(items, runsByIssue, { order: row.order, priorityOptions: plan?.priorityOptions, skipLabel: row.skipLabel, released });
   const skipped = [...found.skipped];
   await recordSkips(db, projectId, found.skipped);
   // One start per check: the run it starts has no plan yet, so the next check waits for its planner.
@@ -229,17 +230,4 @@ async function planningRun(db: DbExecutor, projectId: string): Promise<string | 
     .orderBy(desc(runs.createdAt))
     .limit(1);
   return row?.id;
-}
-
-/** The run that counts for each issue of the project: its active run when it has one, else its latest run. */
-async function issueRuns(db: DbExecutor, projectId: string): Promise<Map<number, IssueRun>> {
-  const rows = await db.select({ id: runs.id, status: runs.status, issues: runs.issues }).from(runs).where(eq(runs.projectId, projectId)).orderBy(desc(runs.createdAt));
-  const result = new Map<number, IssueRun>();
-  for (const run of rows) {
-    for (const { number } of run.issues) {
-      const known = result.get(number);
-      if (!known || (isActive(run.status) && !isActive(known.status))) result.set(number, { id: run.id, status: run.status });
-    }
-  }
-  return result;
 }
