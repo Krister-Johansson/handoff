@@ -1,0 +1,91 @@
+import type { PlanSize } from "@handoff/github";
+import { formatDuration } from "./duration";
+import { durationOf, FORECAST_MIN_RUNS, type Forecast, type Forecasts } from "./forecast";
+
+/** What a size chip needs of a task: its Size, its manual estimate in hours, and the planner's proposal. */
+export type SizedTask = { number: number; size?: PlanSize | undefined; estimate?: number | undefined; proposal?: { size: PlanSize } | null | undefined };
+
+/** How a chip reads: a forecast from runs, a size's default, the planner's proposal, a manual estimate, or nothing. */
+export type ChipKind = "forecast" | "default" | "proposal" | "estimate" | "none";
+
+export type Chip = {
+  kind: ChipKind;
+  /** The letter in the chip: the Size, else the proposal; undefined for an estimate without either. */
+  size: PlanSize | undefined;
+  /** The duration as the chip writes it: "~50m" for a forecast, "1.5d" for an estimate, "Size" with neither. */
+  text: string;
+  /** The button's accessible name. */
+  label: string;
+  /** The hover text that says where the duration comes from; undefined with nothing to say. */
+  title: string | undefined;
+};
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+/** Hours in words, as a manual estimate's title writes them: "9 hours", "1 hour", "1.5 hours". */
+export const hoursInWords = (hours: number) => `${Number(hours.toFixed(2))} ${hours === 1 ? "hour" : "hours"}`;
+
+/** A sum of hours in words, as a story's or a column's title writes it: "2 hours 30 minutes", "50 minutes". */
+export function durationInWords(hours: number): string {
+  const minutes = Math.round(hours * 60);
+  const whole = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return [whole && plural(whole, "hour"), rest && plural(rest, "minute")].filter(Boolean).join(" ") || "0 minutes";
+}
+
+/** What a size usually takes, as the plan writes durations: "50m", "2h". */
+export const usually = (forecast: Forecast, capacity: number) => formatDuration(forecast.minutes / 60, capacity);
+
+/** Where a size's forecast comes from, in a chip's hover text. */
+export function forecastTitle(forecast: Forecast, capacity: number): string {
+  const { size, runs } = forecast;
+  if (forecast.source === "runs") return `Forecast for ${size}: usually ${usually(forecast, capacity)}, from ${plural(runs, "run")}`;
+  const sofar = runs === 0 ? `No ${size} runs yet` : `${runs} ${size} ${runs === 1 ? "run" : "runs"} so far`;
+  return `Default for ${size}: ${usually(forecast, capacity)}. ${sofar}; ${FORECAST_MIN_RUNS} needed`;
+}
+
+/** The forecast of a size in the size popover, with how much of it waits on the person or how far it is from its own runs. */
+export function forecastSentence(forecast: Forecast, capacity: number, projectName: string): string {
+  const { size, runs } = forecast;
+  const time = usually(forecast, capacity);
+  if (forecast.source === "runs") {
+    const waiting = Math.round(forecast.parts?.waiting ?? 0);
+    const part = waiting > 0 ? `, about ${formatDuration(waiting / 60, capacity)} of it waiting on you` : "";
+    return `Forecast from ${runs} finished ${size} runs in ${projectName}: usually ${time}${part}.`;
+  }
+  const sofar = runs === 0 ? `No finished ${size} runs yet` : `${runs} finished ${size} ${runs === 1 ? "run" : "runs"} so far`;
+  return `Default for ${size}: ${time}. ${sofar}; the forecast starts at ${FORECAST_MIN_RUNS}.`;
+}
+
+/** "the L default of 2h" or "the M forecast of 50m": what a manual estimate overrides. */
+export const overridden = (forecast: Forecast, capacity: number) =>
+  `the ${forecast.size} ${forecast.source === "runs" ? "forecast" : "default"} of ${usually(forecast, capacity)}`;
+
+/**
+ * A task's size chip: its manual estimate pinned, else its Size's forecast (dotted for a default), else the
+ * planner's proposal (dashed), else "Size".
+ */
+export function chipOf(task: SizedTask, forecasts: Forecasts, capacity: number): Chip {
+  const change = `Change the size or estimate of #${task.number}`;
+  const duration = durationOf(task, forecasts, task.proposal?.size);
+  if (!duration) return { kind: "none", size: undefined, text: "Size", label: `Set a size for #${task.number}`, title: undefined };
+  const text = formatDuration(duration.hours, capacity);
+  if (duration.source === "estimate") {
+    const size = task.size;
+    const overrides = size ? `; overrides ${overridden(forecasts[size], capacity)}` : "";
+    return {
+      kind: "estimate",
+      size,
+      text,
+      label: `${size ? `Size ${size}, manual` : "Manual"} estimate ${text}. ${change}`,
+      title: `Manual estimate ${hoursInWords(duration.hours)}${overrides}`,
+    };
+  }
+  const size = (task.size ?? task.proposal?.size)!;
+  const title = forecastTitle(forecasts[size], capacity);
+  if (duration.source === "proposal") {
+    return { kind: "proposal", size, text: `~${text}`, label: `Size ${size}, proposed by the planner, forecast ${text}. ${change}`, title: `Proposed by the planner. ${title}` };
+  }
+  const kind = duration.source === "forecast" ? "forecast" : "default";
+  return { kind, size, text: `~${text}`, label: `Size ${size}, ${kind === "default" ? "default forecast" : "forecast"} ${text}. ${change}`, title };
+}

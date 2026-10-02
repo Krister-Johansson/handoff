@@ -2,6 +2,8 @@ import type { PlanItem, PlanProject, PlanStatus } from "@handoff/github";
 import type { BacklogIssue, BacklogRun } from "@/server/backlog";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanStory, PlanTask, PlanView } from "@/server/plan";
 import { deriveSpans, type TimelineRun } from "@/lib/plan/schedule";
+import type { Forecasts } from "@/lib/plan/forecast";
+import type { SizingControl } from "../plan-context";
 
 export const REPO_URL = "https://github.com/o/r";
 
@@ -82,3 +84,20 @@ export function timelineOf(view: Pick<PlanView, "epics" | "unparented">, runs: T
   const items = [...view.epics.flatMap((e) => [e, ...e.stories, ...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...view.unparented];
   return deriveSpans(items, runs, now);
 }
+
+/** S and M from this project's runs, L on its default with three runs, as the design shows them. */
+export const FORECASTS: Forecasts = {
+  S: { size: "S", source: "runs", minutes: 25, parts: { agent: 15, queue: 3, waiting: 7 }, costUsd: 0.4, runs: 18, measuredMinutes: 25 },
+  M: { size: "M", source: "runs", minutes: 50, parts: { agent: 30, queue: 5, waiting: 15 }, costUsd: 0.9, runs: 12, measuredMinutes: 50 },
+  L: { size: "L", source: "default", minutes: 120, parts: null, costUsd: null, runs: 3, measuredMinutes: 110 },
+};
+
+/** What the size chips read from the Plan page: project p1 named todooverkill at 6 hours a day. */
+export const sizingOf = (over: Partial<SizingControl> = {}): SizingControl => ({
+  projectId: "p1",
+  projectName: "todooverkill",
+  forecasts: FORECASTS,
+  capacity: 6,
+  spanOf: () => undefined,
+  ...over,
+});
