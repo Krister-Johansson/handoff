@@ -489,6 +489,33 @@ export type SetPlanStatusMutationVariables = Exact<{
 
 export type SetPlanStatusMutation = { updateProjectV2ItemFieldValue: { projectV2Item: { id: string } | null } | null };
 
+export type CreatePlanSizeFieldMutationVariables = Exact<{
+  projectId: string | number;
+  name: string;
+  options: Array<ProjectV2SingleSelectFieldOptionInput> | ProjectV2SingleSelectFieldOptionInput;
+}>;
+
+
+export type CreatePlanSizeFieldMutation = { createProjectV2Field: { projectV2Field:
+      | { __typename: 'ProjectV2Field' }
+      | { __typename: 'ProjectV2IterationField' }
+      | { __typename: 'ProjectV2MultiSelectField' }
+      | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+     | null } | null };
+
+export type CreatePlanEstimateFieldMutationVariables = Exact<{
+  projectId: string | number;
+  name: string;
+}>;
+
+
+export type CreatePlanEstimateFieldMutation = { createProjectV2Field: { projectV2Field:
+      | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+      | { __typename: 'ProjectV2IterationField' }
+      | { __typename: 'ProjectV2MultiSelectField' }
+      | { __typename: 'ProjectV2SingleSelectField' }
+     | null } | null };
+
 export type PlanDateFieldsFragment = { start:
     | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
     | { __typename: 'ProjectV2IterationField' }
@@ -1317,6 +1344,44 @@ export const SetPlanStatusDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<SetPlanStatusMutation, SetPlanStatusMutationVariables>;
+export const CreatePlanSizeFieldDocument = new TypedDocumentString(`
+    mutation CreatePlanSizeField($projectId: ID!, $name: String!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+  createProjectV2Field(
+    input: {
+      projectId: $projectId
+      dataType: SINGLE_SELECT
+      name: $name
+      singleSelectOptions: $options
+    }
+  ) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2SingleSelectField {
+        id
+        options {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreatePlanSizeFieldMutation, CreatePlanSizeFieldMutationVariables>;
+export const CreatePlanEstimateFieldDocument = new TypedDocumentString(`
+    mutation CreatePlanEstimateField($projectId: ID!, $name: String!) {
+  createProjectV2Field(
+    input: { projectId: $projectId, dataType: NUMBER, name: $name }
+  ) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2Field {
+        id
+        dataType
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreatePlanEstimateFieldMutation, CreatePlanEstimateFieldMutationVariables>;
 export const PlanOwnerIdsDocument = new TypedDocumentString(`
     query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
   user(login: $login) {

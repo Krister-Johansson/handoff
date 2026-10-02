@@ -5,6 +5,8 @@ import {
   AddPlanLabelsDocument,
   AddPlanSubIssueDocument,
   CreatePlanDateFieldDocument,
+  CreatePlanEstimateFieldDocument,
+  CreatePlanSizeFieldDocument,
   CreatePlanLabelDocument,
   CreatePlanIssueDocument,
   IssueCreateRefsDocument,
@@ -21,6 +23,8 @@ import {
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
   type CreatePlanDateFieldMutation,
+  type CreatePlanEstimateFieldMutation,
+  type CreatePlanSizeFieldMutation,
   type CreatePlanIssueMutation,
   type CreatePlanProjectMutation,
   type IssueCreateRefsQuery,
@@ -236,6 +240,32 @@ export class OctokitProjects implements ProjectsPort {
     }
     for (const key of DATE_KEYS) ids[key] ??= await this.createDateField(project.id, key);
     return ids;
+  }
+
+  async ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds> {
+    const project = await this.projectNode(login, number);
+    if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
+    const ids = estimateFieldIds(project);
+    const size = ids.size ?? (await this.createSizeField(project.id));
+    const estimate = ids.estimate ?? (await this.createEstimateField(project.id));
+    return { size, estimate };
+  }
+
+  /** Creates the Size single select field with the options S, M and L and returns its ids. */
+  private async createSizeField(projectId: string): Promise<NonNullable<PlanEstimateFieldIds["size"]>> {
+    const options = PLAN_SIZES.map((name) => ({ name, ...SIZE_STYLE[name] }));
+    const created = await this.octokit.graphql<CreatePlanSizeFieldMutation>(CreatePlanSizeFieldDocument.toString(), { projectId, name: ESTIMATE_FIELD_NAMES.size, options });
+    const field = created.createProjectV2Field?.projectV2Field;
+    if (field?.__typename !== "ProjectV2SingleSelectField") throw new Error("creating the Size field returned no single select field");
+    return sizeFieldIds(field);
+  }
+
+  /** Creates the Estimate number field and returns its id. */
+  private async createEstimateField(projectId: string): Promise<string> {
+    const created = await this.octokit.graphql<CreatePlanEstimateFieldMutation>(CreatePlanEstimateFieldDocument.toString(), { projectId, name: ESTIMATE_FIELD_NAMES.estimate });
+    const field = created.createProjectV2Field?.projectV2Field;
+    if (field?.__typename !== "ProjectV2Field") throw new Error("creating the Estimate field returned no number field");
+    return field.id;
   }
 
   /** Sets a new issue's Start and Target, once it is an item; throws naming the issue when they cannot be written. */
@@ -465,13 +495,24 @@ function dateFieldIds(project: PlanDateFieldsFragment): PlanDateFieldIds {
 
 /** The ids of a Project's Size single select field with its S, M and L options and of its Estimate number field; undefined for a field it lacks or of another type. */
 function estimateFieldIds(project: PlanEstimateFieldsFragment): PlanEstimateFieldIds {
-  const size = project.size?.__typename === "ProjectV2SingleSelectField" ? project.size : undefined;
-  const optionId = (name: PlanSize) => size?.options.find((o) => o.name === name)?.id;
   return {
-    size: size ? { id: size.id, options: { S: optionId("S"), M: optionId("M"), L: optionId("L") } } : undefined,
+    size: project.size?.__typename === "ProjectV2SingleSelectField" ? sizeFieldIds(project.size) : undefined,
     estimate: project.estimate?.__typename === "ProjectV2Field" && project.estimate.dataType === "NUMBER" ? project.estimate.id : undefined,
   };
 }
+
+/** A Size field's id and the ids of its S, M and L options; its other options are not handoff's sizes. */
+function sizeFieldIds(field: { id: string; options: { id: string; name: string }[] }): NonNullable<PlanEstimateFieldIds["size"]> {
+  const optionId = (name: PlanSize) => field.options.find((o) => o.name === name)?.id;
+  return { id: field.id, options: { S: optionId("S"), M: optionId("M"), L: optionId("L") } };
+}
+
+/** How handoff's Size options look on GitHub's board; the descriptions say what each size means. */
+const SIZE_STYLE: Record<PlanSize, Pick<ProjectV2SingleSelectFieldOptionInput, "color" | "description">> = {
+  S: { color: "GREEN", description: "A change in one place" },
+  M: { color: "YELLOW", description: "A feature across a few files" },
+  L: { color: "ORANGE", description: "A change across several areas" },
+};
 
 /** The day of a date field's value; undefined when the item has none or the field is not a date field. */
 function dateOf(value: { __typename: string; date?: string | null } | null | undefined): string | undefined {

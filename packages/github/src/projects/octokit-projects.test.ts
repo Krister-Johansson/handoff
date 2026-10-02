@@ -952,6 +952,43 @@ test("setPlanFields reports no-field and no-option and changes nothing", async (
   expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan"]);
 });
 
+/** How createProjectV2Field or updateProjectV2Field answers for a Size field with these options: the sent ids kept, new ones for the rest. */
+const sizeFieldFrom = (options: { id?: string; name: string }[]) => ({
+  __typename: "ProjectV2SingleSelectField",
+  id: "F_size",
+  options: options.map((o) => ({ id: o.id ?? `o_${o.name}`, name: o.name, color: "GRAY", description: "" })),
+});
+
+test("ensureEstimateFields creates Size with S, M and L and Estimate as a Number once", async () => {
+  let project: Record<string, unknown> = { ...planProject(5), url: "u", title: "t" };
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: () =>
+      project.size ? { user: { projectV2: project } } : new GraphqlErrors({ user: { projectV2: { ...project, size: null, estimate: null } } }, missingEstimateFields(["user", "projectV2"])),
+    CreatePlanSizeField: (v) => {
+      const field = sizeFieldFrom(v.options as { name: string }[]);
+      project = { ...project, size: field };
+      return { createProjectV2Field: { projectV2Field: field } };
+    },
+    CreatePlanEstimateField: () => {
+      project = { ...project, estimate: projectField("F_estimate", "NUMBER") };
+      return { createProjectV2Field: { projectV2Field: projectField("F_estimate", "NUMBER") } };
+    },
+  });
+  const projects = port(fetch);
+
+  const ids = { size: { id: "F_size", options: { S: "o_S", M: "o_M", L: "o_L" } }, estimate: "F_estimate" };
+  expect(await projects.ensureEstimateFields("octo", 5)).toEqual(ids);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "CreatePlanSizeField", "CreatePlanEstimateField"]);
+  const size = operations[1]!.variables as { projectId: string; name: string; options: { name: string; color: string; description: string }[] };
+  expect([size.projectId, size.name, size.options.map((o) => o.name)]).toEqual(["PVT_5", "Size", ["S", "M", "L"]]);
+  expect(size.options.every((o) => o.color && o.description)).toBe(true);
+  expect(operations[2]!.variables).toEqual({ projectId: "PVT_5", name: "Estimate" });
+
+  operations.length = 0;
+  expect(await projects.ensureEstimateFields("octo", 5)).toEqual(ids);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
 test("setStatus still fails for an issue GitHub cannot resolve", async () => {
   const { fetch } = fakeGraphql({
     IssuePlan: (v) =>
