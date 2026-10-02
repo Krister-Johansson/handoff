@@ -307,7 +307,8 @@ export class OctokitProjects implements ProjectsPort {
 
   /** The issue and its item in the repository owner's Project `project`, if it is one. */
   private async issuePlan(repo: RepoRef, project: number | undefined, number: number) {
-    const { repository } = await this.octokit.graphql<IssuePlanQuery>(IssuePlanDocument.toString(), { owner: repo.owner, name: repo.name, number });
+    // Each of the issue's Projects that lacks Start or Target adds a NOT_FOUND, whichever Project the plan is.
+    const { repository } = await this.withOptionalFields<IssuePlanQuery>(IssuePlanDocument.toString(), { owner: repo.owner, name: repo.name, number });
     const issue = repository?.issue;
     if (!repository || !issue) throw new Error(`issue ${repo.owner}/${repo.name}#${number} not found`);
     const item = present(issue.projectItems?.nodes).find((i) => i.project.number === project && i.project.owner.id === repository.owner.id);
@@ -442,7 +443,7 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
 const DATE_KEYS = ["start", "target"] as const;
 /** The names of the date fields on GitHub, the pair the roadmap layout reads once a person picks them. */
 const DATE_FIELD_NAMES = { start: "Start", target: "Target" } as const;
-/** The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`) and Priority (`PlanProject`). */
+/** The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`, also inside IssuePlan's items) and Priority (`PlanProject`). */
 const OPTIONAL_FIELD_ALIASES = new Set<string>([...Object.keys(DATE_FIELD_NAMES), "priority"]);
 
 /** The ids of a Project's Start and Target fields, each undefined when missing or not a date field. */
