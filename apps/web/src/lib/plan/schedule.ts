@@ -101,7 +101,7 @@ const blockersOf = (item: PlanItem) => item.blockers ?? item.blockedBy;
  * The bars of the tasks with a duration and a Start. The tasks that start on one day sit one after another
  * in blocker order, then by number, so a later task starts after the hours of the ones before it.
  */
-function sizedBars(items: PlanItem[], opts: SpanOptions): Map<number, PlannedSpan> {
+export function sizedBars(items: readonly PlanItem[], opts: SpanOptions): Map<number, PlannedSpan> {
   const byDay = new Map<string, { number: number; blockers: number[]; item: PlanItem; hours: number }[]>();
   for (const item of items) {
     const duration = opts.durations.get(item.number);
