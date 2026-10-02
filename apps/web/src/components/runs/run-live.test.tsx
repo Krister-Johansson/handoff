@@ -367,6 +367,23 @@ test("page_show_view switches to the graph and events views and where_am_i says 
   expect((await whereAmI()).page?.state.data).toMatchObject({ view: "steps" });
 });
 
+test("where_am_i on the run page gives its ids, status, steps and open questions, and lists its five tools", async () => {
+  const { whereAmI } = await withAssistant({ labels: { gate: "Approve the plan" }, initialStatus: "waiting", initialExecutions: [gate], questions: [question(false)] });
+  const page = (await whereAmI()).page!;
+  expect(page.tools.map((t) => t.name)).toEqual(["page_show_view", "page_open_step", "page_close_step", "page_pop_out", "page_filter_events"]);
+  expect(page.state.data).toEqual({
+    runId: "r1",
+    projectId: "p1",
+    status: "waiting",
+    view: "steps",
+    steps: [{ id: "e5", nodeKey: "gate", label: "Approve the plan", attempt: 1, status: "waiting" }],
+    openStep: null,
+    poppedOut: false,
+    events: { node: null, cli: false },
+    questions: [{ id: "q1", stepId: "e5", nodeKey: "gate", reason: "approval", question: "Review the plan from Planner", options: ["approve", "changes"] }],
+  });
+});
+
 test("page_open_step opens the latest execution of a node key, and an attempt opens that one; a key that is not a step is refused with the keys", async () => {
   const steps = [
     { ...executions[0]!, id: "e1" },
@@ -414,4 +431,34 @@ test("page_close_step closes the drawer and page_pop_out needs an open step", as
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect((await whereAmI()).page?.state.data).toMatchObject({ openStep: null, poppedOut: false });
   expect(await call("page_close_step")).toEqual({ text: "No step was open.", isError: false });
+});
+
+test("page_filter_events narrows the events to a node and shows the events view", async () => {
+  const steps = [executions[0]!, { id: "e2", nodeKey: "coder", attempt: 1, status: "running", costUsd: null, durationMs: null }];
+  const at = "2026-10-02T10:00:00Z";
+  const initialEvents = [
+    { seq: 1, type: "node.claimed", payload: { nodeKey: "planner", attempt: 1 }, nodeExecutionId: "e1", createdAt: at },
+    { seq: 2, type: "node.failed", payload: { nodeKey: "coder", attempt: 1 }, nodeExecutionId: "e2", createdAt: at },
+    { seq: 3, type: "cli.tool_use", payload: { name: "Edit" }, nodeExecutionId: "e2", createdAt: at },
+  ];
+  const { call, whereAmI } = await withAssistant({ initialStatus: "running", initialExecutions: steps, initialEvents });
+  expect(screen.getByText("node.claimed")).toBeInTheDocument();
+  expect(screen.queryByText("cli.tool_use")).not.toBeInTheDocument();
+
+  expect(await call("page_filter_events", { node: "coder" })).toEqual({ text: "Showing the events of Code (coder).", isError: false });
+  expect(selectedTab()).toMatch(/^Events/);
+  expect(screen.getByRole("combobox", { name: "Node" })).toHaveValue("coder");
+  expect(screen.getByText("node.failed")).toBeInTheDocument();
+  expect(screen.queryByText("node.claimed")).not.toBeInTheDocument();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ view: "events", events: { node: "coder", cli: false } });
+
+  // cli alone keeps the node; node null shows every node again.
+  expect(await call("page_filter_events", { cli: true })).toEqual({ text: "Showing the events of Code (coder), with the Claude CLI's events.", isError: false });
+  expect(screen.getByRole("switch", { name: "Claude CLI events" })).toBeChecked();
+  expect(screen.getByText("cli.tool_use")).toBeInTheDocument();
+  expect(await call("page_filter_events", { node: null })).toEqual({ text: "Showing the events of every node, with the Claude CLI's events.", isError: false });
+  expect(screen.getByText("node.claimed")).toBeInTheDocument();
+
+  expect(await call("page_filter_events", { node: "tester" })).toEqual({ text: "No step has the key tester. The steps are planner, coder.", isError: true });
+  expect(screen.getByRole("combobox", { name: "Node" })).toHaveValue("");
 });

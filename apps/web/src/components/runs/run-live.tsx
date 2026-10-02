@@ -142,6 +142,9 @@ const VIEWS = ["steps", "graph", "events"] as const;
 type RunView = (typeof VIEWS)[number];
 const isView = (value: string): value is RunView => (VIEWS as readonly string[]).includes(value);
 
+/** The sentence a refusal ends with, naming the node keys a page tool can take. */
+const stepsList = (keys: string[]) => (keys.length ? `The steps are ${keys.join(", ")}.` : "The run has no steps yet.");
+
 /**
  * The execution a page tool names: an execution id, or a node key with its latest attempt or the
  * attempt asked for. Throws a refusal that lists what there is to choose from.
@@ -152,10 +155,7 @@ function findStep(executions: ExecutionView[], step: string, attempt?: number): 
   // With an attempt, an execution id stands for its node.
   const key = byId?.nodeKey ?? step;
   const ofNode = executions.filter((e) => e.nodeKey === key);
-  if (ofNode.length === 0) {
-    const keys = [...new Set(executions.map((e) => e.nodeKey))];
-    throw new Error(`No step has the key or id ${step}. ${keys.length ? `The steps are ${keys.join(", ")}.` : "The run has no steps yet."}`);
-  }
+  if (ofNode.length === 0) throw new Error(`No step has the key or id ${step}. ${stepsList([...new Set(executions.map((e) => e.nodeKey))])}`);
   if (attempt === undefined) return ofNode.at(-1)!;
   const match = ofNode.findLast((e) => e.attempt === attempt);
   if (!match) throw new Error(`${key} has no attempt ${attempt}. Its attempts are ${ofNode.map((e) => e.attempt).join(", ")}.`);
@@ -298,7 +298,16 @@ export function RunLive({
         setPoppedOut(open);
         return open ? `Popped out ${stepName(selected)}.` : `Put ${stepName(selected)} back in the drawer.`;
       },
-      page_filter_events: undefined,
+      page_filter_events: ({ node, cli }) => {
+        if (node && !nodeKeys.includes(node)) throw new Error(`No step has the key ${node}. ${stepsList(nodeKeys)}`);
+        // A field left out keeps what the page shows; node null shows every node.
+        const nextNode = node === undefined ? nodeFilter : (node ?? "");
+        const nextCli = cli ?? showCli;
+        setNodeFilter(nextNode);
+        setShowCli(nextCli);
+        setView("events");
+        return `Showing the events of ${nextNode ? `${labels[nextNode] ?? nextNode} (${nextNode})` : "every node"}${nextCli ? ", with the Claude CLI's events" : ""}.`;
+      },
     },
     () => ({
       runId,
@@ -308,6 +317,9 @@ export function RunLive({
       steps: executions.map((e) => ({ id: e.id, nodeKey: e.nodeKey, label: labels[e.nodeKey] ?? e.nodeKey, attempt: e.attempt, status: e.status })),
       openStep: selected ? { id: selected.id, nodeKey: selected.nodeKey, attempt: selected.attempt } : null,
       poppedOut: selected !== undefined && poppedOut,
+      events: { node: nodeFilter || null, cli: showCli },
+      // The ids answer_question and the other catalog tools take for what waits on a person here.
+      questions: questions.map((q) => ({ id: q.id, stepId: q.nodeExecutionId, nodeKey: q.nodeKey, reason: q.reason, question: q.question, options: q.options })),
     }),
   );
 
