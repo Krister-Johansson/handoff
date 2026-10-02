@@ -460,3 +460,36 @@ test("page_mark_viewed saves the mark and collapses the file", async () => {
   expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByRole("checkbox", { name: "Viewed" })).not.toBeChecked();
   expect(actions.markViewedAction).toHaveBeenCalledTimes(3);
 });
+
+/** What a server action that redirects rejects with in the browser, once Next has started the navigation. */
+const redirectTo = (path: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${path};303;` });
+
+test("page_submit_review changes with no comment and no note is refused, and with a comment sends it", async () => {
+  const { call, whereAmI } = await withAssistant();
+  for (const option of ["changes", "fix"]) {
+    expect(await call("page_submit_review", { option })).toEqual({ text: "Add a comment or an overall comment first, so there is something to fix.", isError: true });
+  }
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+
+  await call("page_comment_on_lines", { path: "src/b.ts", line: 2, body: "Drop c." });
+  expect(await call("page_set_note", { note: "Nearly there." })).toEqual({ text: 'Set the overall comment to "Nearly there."', isError: false });
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  expect(screen.getByLabelText("Overall comment")).toHaveValue("Nearly there.");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ note: "Nearly there." });
+
+  // What the action refuses comes back as the tool's error, and the draft stays.
+  actions.answerReviewAction.mockResolvedValueOnce({ ok: false, error: "This question was already answered." });
+  expect(await call("page_submit_review", { option: "changes" })).toEqual({ text: "This question was already answered.", isError: true });
+  expect(screen.getByText("1 comment drafted")).toBeInTheDocument();
+
+  // On success the action redirects to the run page, which Next reports to the caller as a rejection.
+  actions.answerReviewAction.mockRejectedValueOnce(redirectTo("/projects/p1/runs/r1"));
+  expect(await call("page_submit_review", { option: "changes" })).toEqual({ text: "Requested changes from coder-1 with 1 comment and the overall comment. The run page opens.", isError: false });
+  expect(actions.answerReviewAction).toHaveBeenLastCalledWith({
+    questionId: "q1",
+    runId: "r1",
+    option: "changes",
+    note: "Nearly there.",
+    comments: [{ path: "src/b.ts", side: "new", line: 2, quote: "export const c = 2;", body: "Drop c." }],
+  });
+});

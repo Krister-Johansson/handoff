@@ -21,7 +21,7 @@ import { viewState, type View, type ViewState } from "@/lib/viewed";
 import { FileDiff } from "./file-diff";
 import { FindingsSummary } from "./findings-summary";
 import { CARD, PROSE, PROSE_TIGHT } from "./styles";
-import { SubmitReview } from "./submit-review";
+import { SubmitReview, submitReviewTool } from "./submit-review";
 
 /** The design's segmented control: two or more choices in one soft well, the chosen one raised. */
 const SEG = "rounded-md border bg-subtle p-0.5";
@@ -320,8 +320,16 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
             return `Drafted a comment on ${linesText(side, line, comment.endLine)} of ${path}. ${commentCount(comments.length + 1)}.`;
           },
       page_remove_line_comment: undefined,
-      page_set_note: undefined,
-      page_submit_review: undefined,
+      page_set_note: readOnly
+        ? undefined
+        : ({ note }) => {
+            draft.setNote(note);
+            return note.trim() ? `Set the overall comment to "${note}"` : "Cleared the overall comment.";
+          },
+      page_submit_review: readOnly
+        ? undefined
+        : ({ option }) =>
+            submitReviewTool({ questionId, runId, option, note: draft.note, comments, target: from, onSending: draft.onSending, onFailed: draft.onFailed }),
     },
     () => ({ questionId, runId, from, current: files.length ? current + 1 : null,
       mode,
@@ -336,6 +344,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
         comments: comments.filter((c) => c.path === f.path).length,
       })),
       comments,
+      note: readOnly ? "" : draft.note,
     }),
   );
 
