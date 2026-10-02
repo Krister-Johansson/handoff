@@ -4,7 +4,7 @@ import planReview from "@handoff/core/fixtures/plan-review.graph.json" with { ty
 import { compileGraph, RunStateSchema, suggestProjectName, type CompileError, type LinkedIssue } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
 import { createRun } from "@handoff/engine/runs";
-import type { GitHubPort } from "@handoff/github";
+import type { GitHubPort, ProjectsPort } from "@handoff/github";
 
 export const TEMPLATES = {
   plan: { label: "Plan, review, approve, build: a reviewer and you approve the plan before any code", document: planReview },
@@ -160,6 +160,7 @@ export async function startRunFromGraph(
   db: Db,
   input: { projectId: string; graphName: string; task: string; issues?: number[] | LinkedIssue[] },
   github?: GitHubPort,
+  plan?: ProjectsPort,
 ) {
   const [project] = await db.select().from(projects).where(eq(projects.id, input.projectId));
   if (!project) throw new Error("project not found");
@@ -168,6 +169,7 @@ export async function startRunFromGraph(
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
   const issues = await linkIssues(input.issues ?? [], repo, github);
+  if (plan && project.planProjectNumber !== null && issues.length > 0) await refuseUnready(plan, repo, project.planProjectNumber, issues);
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
   if (!task) throw new Error("Describe the task, or link at least one issue.");
@@ -175,6 +177,24 @@ export async function startRunFromGraph(
 }
 
 const andList = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
+
+/**
+ * With a plan, Ready is the gate: a run starts only on tasks in Ready. Issues outside the plan's
+ * Project are unplanned and start as before.
+ */
+async function refuseUnready(plan: ProjectsPort, repo: { owner: string; name: string }, number: number, issues: LinkedIssue[]) {
+  const items = new Map((await plan.listItems(repo.owner, number, repo)).map((item) => [item.number, item]));
+  for (const issue of issues) {
+    const item = items.get(issue.number);
+    if (!item) continue;
+    if (item.kind === "epic" || item.kind === "story") {
+      throw new Error(`#${issue.number} is ${item.kind === "epic" ? "an epic" : "a story"} on the plan. Runs work on tasks: start a run on one of its tasks.`);
+    }
+    if (item.status === "Ready") continue;
+    if (item.status) throw new Error(`#${issue.number} is in ${item.status} on the plan. Move it to Ready to start a run on it.`);
+    throw new Error(`#${issue.number} is not Ready on the plan: its Status is not one handoff knows. Move it to Ready to start a run on it.`);
+  }
+}
 
 /** A run cannot start for an issue GitHub records as blocked by an open issue: it would build on work not merged yet. */
 async function refuseBlocked(github: GitHubPort, repo: { owner: string; name: string }, issues: LinkedIssue[]) {

@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { eq, graphVersions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjectGraphs, listProjects, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 
 const db = createTestDb();
@@ -222,5 +222,56 @@ describe("renaming and deleting graphs", () => {
     github.issues.get(5)!.state = "closed";
     github.issues.get(6)!.state = "closed";
     await expect(startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues: [7] }, github)).resolves.toMatchObject({ status: "queued" });
+  });
+});
+
+describe("the Ready gate", () => {
+  const repo = { owner: "octo", name: "sample" };
+
+  /** A project whose plan is the repository's GitHub Project; `issue` creates an issue in it with a Status. */
+  async function planned() {
+    const github = new FakeGitHub();
+    const plan = new FakeProjects(github);
+    const { number } = await plan.createProject("octo", repo, "sandbox plan");
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const issue = async (title: string, labels: string[], status: string | undefined, parent?: number) => {
+      const created = (await plan.createIssue(repo, { project: number, title, body: "", labels, parent })).number;
+      plan.itemsOf(repo).get(created)!.status = status;
+      return created;
+    };
+    const start = (issues: number[]) => startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues }, github, plan);
+    return { github, issue, start };
+  }
+
+  test("start_run refuses a task that is not Ready and names its status", async () => {
+    const { issue, start } = await planned();
+    const shaping = await issue("Still shaping", ["task"], "Shaping");
+    const parked = await issue("Parked", ["task"], "Blocked");
+    const ready = await issue("Ready to build", ["task"], "Ready");
+    await expect(start([ready, shaping])).rejects.toThrow(`#${shaping} is in Shaping on the plan`);
+    await expect(start([parked])).rejects.toThrow(`#${parked} is not Ready on the plan`);
+    expect(await db.select().from(runs)).toEqual([]);
+    await expect(start([ready])).resolves.toMatchObject({ status: "queued" });
+  });
+
+  test("start_run refuses an epic and a story", async () => {
+    const { issue, start } = await planned();
+    const epic = await issue("Project management", ["epic"], "Ready");
+    const story = await issue("Plan read model", ["story"], "Ready", epic);
+    await expect(start([epic])).rejects.toThrow(`#${epic} is an epic`);
+    await expect(start([story])).rejects.toThrow(`#${story} is a story`);
+    expect(await db.select().from(runs)).toEqual([]);
+  });
+
+  test("start_run starts an unplanned issue as before", async () => {
+    const { github, issue, start } = await planned();
+    const ready = await issue("Ready to build", ["task"], "Ready");
+    github.issues.set(90, { number: 90, title: "Fix the crash", url: "https://github.com/octo/sample/issues/90", body: "It crashes", state: "open" });
+    github.issues.set(91, { number: 91, title: "Fix the other crash", url: "https://github.com/octo/sample/issues/91", body: "", state: "open", blockedBy: [90] });
+    const run = await start([90, ready]);
+    expect(run.issues.map((i) => i.number)).toEqual([90, ready]);
+    await expect(start([91])).rejects.toThrow("#91 is blocked by #90");
   });
 });
