@@ -9,9 +9,10 @@ import type { OpenPage, PageToolHandler } from "./run-page-tool";
  * Offers the open page's tools to the assistant while the page is mounted: `handlers` act in the page,
  * `describe` returns its state for where_am_i. The registration changes only when the kind or the set
  * of bound tools does; the handlers and describe always see the page's latest state. Outside an
- * AssistantProvider it does nothing.
+ * AssistantProvider it does nothing. The kind alone decides the handlers' types: NoInfer keeps
+ * TypeScript from inferring it from the handlers too, which loses their arguments' types.
  */
-export function usePageTools<K extends PageKind>(kind: K, handlers: PageHandlers<K>, describe: () => unknown) {
+export function usePageTools<K extends PageKind>(kind: K, handlers: NoInfer<PageHandlers<K>>, describe: () => unknown) {
   const registerPage = useOptionalPageRegistry();
   const latest = useRef({ handlers: handlers as Partial<Record<string, PageToolHandler>>, describe });
   useLayoutEffect(() => {
