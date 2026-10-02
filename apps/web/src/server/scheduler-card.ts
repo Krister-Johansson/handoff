@@ -1,11 +1,11 @@
-import { and, desc, eq, inArray, runs, schedulerEvents, type Db } from "@handoff/db";
+import { and, desc, eq, inArray, projectSchedulers, runs, schedulerEvents, type Db } from "@handoff/db";
 import { candidates, issueRuns, releasedRuns, type Candidate, type Skipped } from "@handoff/engine/backlog-scheduler";
 import type { PlanItem } from "@handoff/github";
 import { runPath } from "../lib/paths";
 import { describeSchedulerEvent } from "../lib/scheduler-text";
 import type { StatusTone } from "../lib/status";
 import { runLines } from "./run-lines";
-import { getScheduler, type SchedulerStatus } from "./scheduler";
+import { getScheduler, type SchedulerState, type SchedulerStatus } from "./scheduler";
 
 /** An active run as the scheduler card lists it: its task, the step it is at and what it waits for. */
 export type ActiveRunView = {
@@ -129,4 +129,19 @@ export async function loadSchedulerCard(db: Db, projectId: string, plan?: PlanRe
   ]);
   const events = eventRows.map((e) => ({ id: e.id, type: e.type, text: describeSchedulerEvent(e), at: e.createdAt }));
   return { status, runs: active, holdIssues, events, pausedFrom: from, ...next };
+}
+
+/** A project's scheduler as Settings, Projects shows it on the project's row. */
+export type SchedulerBrief = { state: SchedulerState; active: number; maxRuns: number };
+
+/** The scheduler of each project that has it on, by project id; a project with it off is left out. */
+export async function schedulerStates(db: Db): Promise<Record<string, SchedulerBrief>> {
+  const on = await db.select({ projectId: projectSchedulers.projectId }).from(projectSchedulers).where(eq(projectSchedulers.enabled, true));
+  const states = await Promise.all(
+    on.map(async ({ projectId }) => {
+      const status = await getScheduler(db, projectId);
+      return [projectId, { state: status.state, active: status.active, maxRuns: status.settings?.maxRuns ?? 1 }] as const;
+    }),
+  );
+  return Object.fromEntries(states);
 }

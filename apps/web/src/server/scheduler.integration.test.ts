@@ -5,7 +5,7 @@ import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { reviewPath, runPath } from "../lib/paths";
 import { createProject, saveGraphVersion } from "./graphs";
-import { loadSchedulerCard } from "./scheduler-card";
+import { loadSchedulerCard, schedulerStates } from "./scheduler-card";
 import { pauseScheduler, releaseTask, startScheduler, stopScheduler } from "./scheduler";
 
 const db = createTestDb();
@@ -196,6 +196,20 @@ test("Next up comes from the plan the page read while the last check has none", 
   // Off, nothing is next.
   await stopScheduler(db, projectId, "dashboard");
   expect((await loadSchedulerCard(db, projectId, { items, priorityOptions: undefined })).next).toEqual([]);
+});
+
+test("each project whose scheduler is on has its state and its active runs of max runs; off has none", async () => {
+  await createProject(db, { name: "other", repo: "octo/other", defaultBranch: "main" });
+  await startScheduler(deps(), projectId, { maxRuns: 2 }, "dashboard");
+  await taskWithRun("waiting");
+  expect(await schedulerStates(db)).toEqual({ [projectId]: { state: "running", active: 1, maxRuns: 2 } });
+
+  await taskWithRun("failed");
+  expect(await schedulerStates(db)).toEqual({ [projectId]: { state: "held", active: 1, maxRuns: 2 } });
+  await pauseScheduler(db, projectId, "dashboard");
+  expect((await schedulerStates(db))[projectId]).toMatchObject({ state: "paused" });
+  await stopScheduler(db, projectId, "dashboard");
+  expect(await schedulerStates(db)).toEqual({});
 });
 
 test("only a task whose latest run was cancelled can be let to the scheduler", async () => {
