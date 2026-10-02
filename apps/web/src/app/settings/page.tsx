@@ -93,7 +93,7 @@ async function OpenSection({ tab, adding, origin }: { tab: SettingsTab; adding: 
     case "voice": {
       const voice = await loadElevenLabsVoices();
       return (
-        <Section title="Voice" description="Push to talk: the dashboard listens only after you press the microphone or V, and stops on Escape.">
+        <Section title="Voice" description="Push to talk: the dashboard listens only after you press the microphone or Ctrl+M, and stops on Escape.">
           <VoiceSettingsLoader {...(voice ? { elevenLabs: voice } : {})} />
         </Section>
       );

@@ -42,21 +42,22 @@ function App({ available = true }: { available?: boolean }) {
 const recognizer = () => FakeSpeechRecognition.instances.at(-1)!;
 const bubble = () => screen.getByRole("region", { name: "Voice assistant" });
 const said = () => synth.spoken;
+const pressCtrlM = () => fireEvent.keyDown(document.body, { key: "m", code: "KeyM", ctrlKey: true });
 
-/** Presses V and says `text` as one utterance. */
+/** Presses Ctrl+M and says `text` as one utterance. */
 async function ask(text: string) {
   const before = FakeSpeechRecognition.instances.length;
-  fireEvent.keyDown(document.body, { key: "v" });
+  pressCtrlM();
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(before + 1));
   act(() => recognizer().emitStart());
   act(() => recognizer().emitResult(text, true));
   act(() => recognizer().emitEnd());
 }
 
-test("V opens the bubble and the final transcript goes to the assistant with source voice", async () => {
+test("Ctrl+M opens the bubble and the final transcript goes to the assistant with source voice", async () => {
   render(<App />);
   expect(screen.queryByRole("region", { name: "Voice assistant" })).not.toBeInTheDocument();
-  fireEvent.keyDown(document.body, { key: "v" });
+  pressCtrlM();
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
   act(() => recognizer().emitStart());
   expect(bubble()).toHaveTextContent("Listening");
@@ -72,7 +73,7 @@ test("V opens the bubble and the final transcript goes to the assistant with sou
 
 test("nothing is sent while results are interim", async () => {
   render(<App />);
-  fireEvent.keyDown(document.body, { key: "v" });
+  pressCtrlM();
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
   act(() => recognizer().emitStart());
   act(() => recognizer().emitResult("cancel every", false));
@@ -171,14 +172,14 @@ test("Open in panel opens the conversation and closes the bubble", async () => {
   expect(screen.queryByRole("region", { name: "Voice assistant" })).not.toBeInTheDocument();
 });
 
-test("V while the reply is spoken stops it and listens", async () => {
+test("Ctrl+M while the reply is spoken stops it and listens", async () => {
   render(<App />);
   await ask("what needs me");
   await waitFor(() => expect(transport.turns).toHaveLength(1));
   act(() => transport.emit({ type: "turn", turnId: "t1" }));
   act(() => transport.emit({ type: "done", text: "Two runs wait. One failed." }));
   expect(said()).toEqual(["Two runs wait."]);
-  fireEvent.keyDown(document.body, { key: "v" });
+  pressCtrlM();
   expect(synth.cancels).toBeGreaterThan(0);
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(2));
   act(() => recognizer().emitStart());

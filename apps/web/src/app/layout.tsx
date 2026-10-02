@@ -47,12 +47,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
                   // Not behind Suspense: the sidebar hydrates with its provider, which on a phone then
                   // swaps it for a sheet. A boundary that hydrated later would see the sheet and mismatch.
                   sidebar={<AppSidebarData lastProjectId={lastProjectId} />}
+                  // From 1280 px the assistant docks beside the page; below that it is a sheet over it.
+                  panel={<AssistantSheet />}
+                  // The voice bubble centres on the page column, between the sidebar and a docked panel.
+                  overlay={<VoiceBubble />}
                 >
                   {children}
                 </AppShell>
                 <VoiceHotkeys />
-                <AssistantSheet />
-                <VoiceBubble />
                 <Toaster position="bottom-right" closeButton />
               </VoiceProvider>
             </AssistantProvider>

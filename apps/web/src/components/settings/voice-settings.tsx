@@ -86,7 +86,7 @@ export function VoiceSettings({ support: given, elevenLabs }: { support?: VoiceS
       {!listens && (
         <p role="note" className="mb-[18px] flex items-start gap-2 rounded-md border bg-subtle px-3 py-2 text-xs leading-normal text-muted-foreground [&_svg]:mt-px [&_svg]:size-3.5">
           <MicOffIcon aria-hidden />
-          This browser has no speech recognition, so the microphone button and V are not available. Chrome on Windows, macOS or Linux supports it. Replies and
+          This browser has no speech recognition, so the microphone button and Ctrl+M are not available. Chrome on Windows, macOS or Linux supports it. Replies and
           notifications can still be read aloud.
         </p>
       )}
@@ -119,7 +119,7 @@ export function VoiceSettings({ support: given, elevenLabs }: { support?: VoiceS
           ? "The dashboard speaks with ElevenLabs: the text read aloud goes to ElevenLabs."
           : "Add ELEVENLABS_API_KEY to the dashboard's environment and restart it. The dashboard speaks with ElevenLabs, so the text read aloud goes to ElevenLabs."}
       </p>
-      <Row id="voice-replies" title="Speak replies" description="Read the assistant's replies in the panel aloud when they are done, up to three sentences, with a Stop button while it speaks. Replies to questions asked with V are always spoken." disabled={!canSpeak}>
+      <Row id="voice-replies" title="Speak replies" description="Read the assistant's replies in the panel aloud when they are done, up to three sentences, with a Stop button while it speaks. Replies to questions asked in the voice bubble are always spoken." disabled={!canSpeak}>
         <Switch id="voice-replies" checked={prefs.speakReplies} disabled={!canSpeak} onCheckedChange={(on) => update({ speakReplies: on })} />
       </Row>
       <Row id="voice-notifications" title="Speak notifications" description="Read new questions, permission requests, failed runs and pull requests ready to merge aloud as they arrive. While you speak, they wait until you stop." disabled={!canSpeak}>
@@ -176,7 +176,10 @@ export function VoiceSettings({ support: given, elevenLabs }: { support?: VoiceS
 }
 
 const SHORTCUTS = [
-  { key: "V", does: "Outside a text field: ask the assistant. The voice bubble listens for one question." },
+  {
+    key: "Ctrl+M",
+    does: "Ask the assistant: the voice bubble listens for one question. With the assistant panel open, dictate into its message box. Works in a text field too.",
+  },
   { key: "Microphone button", button: true, does: "In a text field: dictate into it until you stop. What you say goes in at the caret." },
   { key: "Escape", does: "Stop speaking, then stop listening, then close the voice bubble." },
 ];
