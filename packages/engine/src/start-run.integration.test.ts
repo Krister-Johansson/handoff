@@ -3,7 +3,7 @@ import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { eq, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
-import { startRun } from "./start-run.ts";
+import { StartRefusal, startRun } from "./start-run.ts";
 import { inspect, seedGraph } from "./testing/harness.ts";
 
 const db = createTestDb();
@@ -37,6 +37,18 @@ test("two concurrent starts on one issue create one run", async () => {
     expect.stringContaining("#11 is taken by run"),
   ]);
   expect(await db.select().from(runs)).toHaveLength(1);
+});
+
+test("a refusal of one issue is a StartRefusal, and a failure to start at all is not", async () => {
+  const { github, project: seeded, start } = await project();
+  await start([11]);
+  github.issues.get(12)!.blockedBy = [11];
+
+  await expect(start([11])).rejects.toBeInstanceOf(StartRefusal);
+  await expect(start([12])).rejects.toThrow(new StartRefusal("#12 is blocked by #11 on GitHub. A run can start once they are closed."));
+  const missing = startRun(db, { projectId: seeded.id, graphName: "gone", task: "", issues: [12] }, { github });
+  await expect(missing).rejects.toThrow("no graph named gone");
+  await expect(missing).rejects.not.toBeInstanceOf(StartRefusal);
 });
 
 test("startRun records startedBy on the run and in run.created", async () => {
