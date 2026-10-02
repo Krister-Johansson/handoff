@@ -29,8 +29,10 @@ export type TimelineItem = {
   waitingOn: number[];
   /** Today is past its Start and a blocker is not done. */
   late: boolean;
-  /** Days past its Target while not done; undefined when it is not overdue. */
+  /** Days past its Target on GitHub while not done; undefined when it is not overdue or is over forecast. */
   overdueDays: number | undefined;
+  /** Minutes an active run has gone past the task's duration; undefined without an active run past it. */
+  overForecastMinutes: number | undefined;
   /** Its own span leaves the own dates of its nearest ancestor that has both. */
   outsideParent: boolean;
   /** Neither its own dates nor a derived span place it on the chart. */
@@ -75,12 +77,6 @@ function barOf(item: PlanItem, hours: number, offsetHours: number, capacity: num
 }
 
 /**
- * Where each item of a plan sits in time: its planned span from the Project's Start and Target, a
- * derived span for a story or an epic without dates, the actual strips of the runs that linked it,
- * whether it is late (Start passed, a blocker not done) or overdue (Target passed, not done), and the
- * dependency arrows from blocked-by links. Nothing here is stored; `now` decides today.
- */
-/**
  * Tasks with each one after the blockers among them, and otherwise by issue number. Blockers that form a
  * loop fall back to number order.
  */
@@ -121,6 +117,22 @@ function sizedBars(items: PlanItem[], opts: SpanOptions): Map<number, PlannedSpa
   return bars;
 }
 
+/** Minutes the newest active run has worked past the duration; undefined while inside it or without either. */
+function overForecastOf(strips: ActualStrip[], duration: { hours: number } | undefined, now: Date): number | undefined {
+  const active = strips.find((s) => s.active);
+  if (!active || !duration) return undefined;
+  const over = Math.round((now.getTime() - Date.parse(active.start)) / 60_000 - duration.hours * 60);
+  return over > 0 ? over : undefined;
+}
+
+/**
+ * Where each item of a plan sits in time: its planned span from the Project's Start and Target, a
+ * derived span for a story or an epic without dates, the actual strips of the runs that linked it,
+ * whether it is late (Start passed, a blocker not done) or overdue (Target passed, not done), and the
+ * dependency arrows from blocked-by links. With durations, a task's bar runs from its Start for its
+ * hours at the capacity, and an active run past the duration is over forecast instead of overdue.
+ * Nothing here is stored; `now` decides today.
+ */
 export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date, opts?: SpanOptions): Timeline {
   const today = dayOf(now);
   const byNumber = new Map(items.map((i) => [i.number, i]));
@@ -169,31 +181,33 @@ export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date, o
   const timelineItems = items.map((item): TimelineItem => {
     const own = planned.get(item.number);
     const derived = derivedOf(item);
-    const blockers = item.blockers ?? item.blockedBy;
     // A blocker in the plan is done when closed or in Done; one outside it while GitHub lists it as open.
-    const waitingOn = blockers.filter((b) => {
+    const waitingOn = blockersOf(item).filter((b) => {
       const blocker = byNumber.get(b);
       return blocker ? !isDone(blocker) : item.blockedBy.includes(b);
     });
     const done = isDone(item);
     const late = !done && item.start !== undefined && today > item.start && waitingOn.length > 0;
-    const overdueDays = !done && item.target !== undefined && today > item.target ? daysBetween(item.target, today) : undefined;
+    const actual = (stripsOf.get(item.number) ?? []).sort((a, b) => b.start.localeCompare(a.start));
+    const overForecastMinutes = overForecastOf(actual, opts?.durations.get(item.number), now);
+    const overdueDays = !done && overForecastMinutes === undefined && item.target !== undefined && today > item.target ? daysBetween(item.target, today) : undefined;
     const window = own ? windowOf(item) : undefined;
     return {
       number: item.number,
       planned: own,
       derived,
-      actual: (stripsOf.get(item.number) ?? []).sort((a, b) => b.start.localeCompare(a.start)),
+      actual,
       waitingOn,
       late,
       overdueDays,
+      overForecastMinutes,
       outsideParent: own !== undefined && window !== undefined && (own.start < window.start || own.end > window.end),
       unscheduled: !own && !derived,
     };
   });
   const lateOf = new Map(timelineItems.map((i) => [i.number, i.late]));
   const arrows = items.flatMap((item) =>
-    (item.blockers ?? item.blockedBy).filter((b) => byNumber.has(b)).map((from) => ({ from, to: item.number, late: lateOf.get(item.number) ?? false })),
+    blockersOf(item).filter((b) => byNumber.has(b)).map((from) => ({ from, to: item.number, late: lateOf.get(item.number) ?? false })),
   );
   return { today, items: timelineItems, arrows };
 }

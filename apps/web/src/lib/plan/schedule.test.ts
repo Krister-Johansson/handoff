@@ -176,3 +176,23 @@ test("a task with a duration and no Start is unscheduled", () => {
   expect(of(1)).toMatchObject({ derived: undefined, unscheduled: true });
   expect(of(4)).toMatchObject({ planned: { start: "2026-10-16", end: "2026-10-16", openStart: true }, unscheduled: false });
 });
+
+test("an active run past its duration is over forecast and not overdue", () => {
+  const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3600_000).toISOString();
+  // Every task's Target on GitHub was two days ago.
+  const items = [1, 2, 3, 4].map((n) => item(n, { start: "2026-10-08", target: "2026-10-08" }));
+  const runs: TimelineRun[] = [
+    { id: "past", status: "running", issues: [1], startedAt: hoursAgo(3), finishedAt: null },
+    { id: "within", status: "waiting", issues: [2], startedAt: hoursAgo(3), finishedAt: null },
+    { id: "ended", status: "failed", issues: [3], startedAt: hoursAgo(30), finishedAt: hoursAgo(20) },
+    { id: "unsized", status: "running", issues: [4], startedAt: hoursAgo(3), finishedAt: null },
+  ];
+  const timeline = deriveSpans(items, runs, NOW, { durations: hours({ 1: 1, 2: 4, 3: 1 }), capacity: 6 });
+  const of = (n: number) => timeline.items.find((i) => i.number === n)!;
+  // Three hours into a one-hour task: two hours over, and Overdue gives way.
+  expect(of(1)).toMatchObject({ overForecastMinutes: 120, overdueDays: undefined });
+  // Still inside its four hours, or no longer running, or without a duration: Overdue as before.
+  expect(of(2)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
+  expect(of(3)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
+  expect(of(4)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
+});
