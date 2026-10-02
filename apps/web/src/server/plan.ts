@@ -2,6 +2,8 @@ import { eq, projects, runs, type Db } from "@handoff/db";
 import { STATUS_OPTIONS, type GitHubPort, type PlanItem, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
 import { latestRuns, type BacklogIssue, type BacklogRun } from "./backlog.ts";
 import { deriveSpans, type Timeline, type TimelineRun } from "../lib/plan/schedule.ts";
+import { durationOf, type Duration, type Forecasts } from "../lib/plan/forecast.ts";
+import { latestProposals, loadForecasts, type Proposal } from "./forecasts.ts";
 
 /** A board column: one per Status handoff knows, plus Other for an option it does not. */
 export type PlanColumn = PlanStatus | "Other";
@@ -13,8 +15,11 @@ export type PlanProgress = {
   /** GitHub's own count of the direct sub-issues and the closed ones among them. */
   subIssues: { total: number; completed: number };
 };
-/** A plan item with the latest run that links it; a closed item's status reads Done whatever its Status says. */
-export type PlanTask = PlanItem & { run: BacklogRun | null };
+/**
+ * A plan item with the latest run that links it; a closed item's status reads Done whatever its Status says.
+ * loadPlan also sets the planner's latest proposed size and the task's duration; views built by hand may leave them out.
+ */
+export type PlanTask = PlanItem & { run: BacklogRun | null; proposal?: Proposal | null; duration?: Duration | null };
 export type PlanStory = PlanItem & { tasks: PlanTask[]; progress: PlanProgress };
 /** An epic with its stories, and the tasks whose parent is the epic itself. */
 export type PlanEpic = PlanItem & { stories: PlanStory[]; tasks: PlanTask[]; progress: PlanProgress };
@@ -33,6 +38,10 @@ export type PlanView = {
    * items and the dependency arrows. Optional so views built by hand need not name it; loadPlan sets it.
    */
   timeline?: Timeline | undefined;
+  /** What each size usually takes in this project; loadPlan sets it. */
+  forecasts?: Forecasts | undefined;
+  /** The person's hours of work a day on the plan; loadPlan sets it. */
+  capacity?: number | undefined;
 };
 
 /** Why a project's plan cannot be shown, with a sentence that says what to do. */
@@ -84,17 +93,28 @@ export async function loadPlan(
   const number = project.planProjectNumber;
   if (number === null) return { reason: "no-plan", error: "This project has no plan on GitHub yet." };
   const repo = { owner: project.repoOwner, name: project.repoName };
-  const [planProject, items, open, latest, projectRuns] = await Promise.all([
+  const [planProject, items, open, latest, projectRuns, proposals] = await Promise.all([
     plan.getProject(repo.owner, number),
     plan.listItems(repo.owner, number, repo),
     github.listIssues(repo),
     latestRuns(db, projectId),
     timelineRuns(db, projectId),
+    latestProposals(db, projectId),
   ]);
   if (!planProject) return { reason: "unreachable", error: `GitHub Project #${number} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.` };
   const byNumber = new Map(items.map((i) => [i.number, i]));
+  const { forecasts, capacity } = await loadForecasts(db, projectId, (issue) => byNumber.get(issue)?.size);
   const sorted = [...items].sort((a, b) => a.number - b.number);
-  const task =(item: PlanItem): PlanTask => ({ ...item, status: item.state === "closed" ? "Done" : item.status, run: latest.get(item.number) ?? null });
+  const task = (item: PlanItem): PlanTask => {
+    const proposal = proposals.get(item.number) ?? null;
+    return {
+      ...item,
+      status: item.state === "closed" ? "Done" : item.status,
+      run: latest.get(item.number) ?? null,
+      proposal,
+      duration: durationOf(item, forecasts, proposal?.size) ?? null,
+    };
+  };
 
   // Each story hangs under its nearest epic, each task under its nearest story or epic; the walk stays inside the plan.
   const holderOf = (item: PlanItem): PlanItem | undefined => {
@@ -134,7 +154,7 @@ export async function loadPlan(
   const unplanned = open
     .filter((i) => !byNumber.has(i.number))
     .map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
-  return { project: planProject, epics, unparented, board, unplanned, timeline: deriveSpans(items, projectRuns, opts.now ?? new Date()) };
+  return { project: planProject, epics, unparented, board, unplanned, timeline: deriveSpans(items, projectRuns, opts.now ?? new Date()), forecasts, capacity };
 }
 
 /** Every run of a project with the issues it linked and when it ran, for the timeline's actual strips. */

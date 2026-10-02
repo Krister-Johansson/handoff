@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, nodeExecutions, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { and, desc, eq, inArray, isNotNull, nodeExecutions, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { PLAN_SIZES, sizeOf, type PlanSize } from "@handoff/github";
 import { forecastOf, runParts, type ForecastSample, type Forecasts } from "../lib/plan/forecast.ts";
 
@@ -78,4 +78,31 @@ export async function loadForecasts(db: Db, projectId: string, sizeOfIssue: (iss
   }
   const forecasts = Object.fromEntries(PLAN_SIZES.map((size) => [size, forecastOf(samples[size], size)])) as Forecasts;
   return { forecasts, capacity: project?.capacity ?? 6 };
+}
+
+/** A size the planner proposed for a task, from the plan of the run it names. */
+export type Proposal = { size: PlanSize; runId: string; steps: number; paths: number };
+
+/**
+ * Per issue, the proposal of the newest run on that one issue whose planner set a size. A run on several
+ * issues sized them together, so its proposal is no single task's.
+ */
+export async function latestProposals(db: Db, projectId: string): Promise<Map<number, Proposal>> {
+  const rows = await db
+    .select({
+      runId: runs.id,
+      issue: sql<number>`(${runs.issues}->0->>'number')::int`,
+      size: sql<string>`${runs.state}->'plan'->>'size'`,
+      steps: sql<number>`coalesce(jsonb_array_length(${runs.state}->'plan'->'steps'), 0)`,
+      paths: sql<number>`coalesce(jsonb_array_length(${runs.state}->'plan'->'ownedPaths'), 0)`,
+    })
+    .from(runs)
+    .where(and(eq(runs.projectId, projectId), sql`jsonb_array_length(${runs.issues}) = 1`, sql`${runs.state}->'plan'->>'size' is not null`))
+    .orderBy(desc(runs.createdAt));
+  const proposals = new Map<number, Proposal>();
+  for (const row of rows) {
+    const size = sizeOf(row.size);
+    if (size && !proposals.has(row.issue)) proposals.set(row.issue, { size, runId: row.runId, steps: row.steps, paths: row.paths });
+  }
+  return proposals;
 }
