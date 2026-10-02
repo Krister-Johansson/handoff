@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
 import { remember, RunStateSchema, type RunState } from "@handoff/core";
 import type { ProjectsPort } from "@handoff/github";
+import { nudgeScheduler } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { recordPlanStatus } from "./plan-status.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
@@ -42,6 +43,8 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
       ? { state: remember(RunStateSchema.parse(run!.state), failed.nodeKey, { extraPaths: allowPaths.map((path) => ({ path, reason, attempt: attempt + 1, by: "person" as const })) }), stateVersion: sql`${runs.stateVersion} + 1` }
       : {};
     await tx.update(runs).set({ status: "running", finishedAt: null, ...state }).where(eq(runs.id, failed.runId));
+    // A failed run held the project's scheduler; repaired, it no longer does.
+    await nudgeScheduler(tx, run!.projectId);
     await appendEvents(tx, failed.runId, [
       { type: "node.repair_requested", payload: { nodeKey: failed.nodeKey, note: opts.note ?? null, ...(allowPaths.length ? { allowPaths } : {}) }, nodeExecutionId: failed.id },
       { type: "node.created", payload: { nodeKey: failed.nodeKey, attempt: attempt + 1, via: "repair" }, nodeExecutionId: created!.id },
@@ -67,6 +70,8 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
       .set({ status: "failed", error: { code: "cancelled", message: "run was cancelled" }, finishedAt: sql`now()` })
       .where(and(eq(nodeExecutions.runId, runId), inArray(nodeExecutions.status, ["pending", "waiting"])));
     await appendEvents(tx, runId, [{ type: "run.cancelled", payload: { reason: opts.reason ?? null } }]);
+    // A cancelled run frees a slot, and a failed one no longer holds the project.
+    await nudgeScheduler(tx, run.projectId);
     return run;
   });
   await stopRunPreviews(db, runId);
@@ -91,13 +96,18 @@ async function issuesItOwns(db: Db, run: typeof runs.$inferSelect): Promise<numb
  * A request already answered, or expired when its step ended, cannot be answered again.
  */
 export async function decidePermission(db: Db, id: string, input: { allow: boolean; decidedBy: string; message?: string; rule?: string }) {
-  const [row] = await db
-    .update(permissionRequests)
-    .set({ status: input.allow ? "allowed" : "denied", decidedBy: input.decidedBy, decidedAt: new Date(), message: input.message ?? null, rule: input.rule ?? null })
-    .where(and(eq(permissionRequests.id, id), eq(permissionRequests.status, "pending")))
-    .returning();
-  if (!row) throw new Error("That request was already answered, or its step has ended.");
-  return row;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(permissionRequests)
+      .set({ status: input.allow ? "allowed" : "denied", decidedBy: input.decidedBy, decidedAt: new Date(), message: input.message ?? null, rule: input.rule ?? null })
+      .where(and(eq(permissionRequests.id, id), eq(permissionRequests.status, "pending")))
+      .returning();
+    if (!row) throw new Error("That request was already answered, or its step has ended.");
+    // A pending request held the project's scheduler.
+    const [run] = await tx.select({ projectId: runs.projectId }).from(runs).where(eq(runs.id, row.runId));
+    if (run) await nudgeScheduler(tx, run.projectId);
+    return row;
+  });
 }
 
 /** Wakes a Try it gate that still waits for its answer, so it starts the run's app again if it stopped. */
@@ -137,6 +147,9 @@ export async function answerQuestion(
       throw new Error(existing ? "question already answered" : `question ${questionId} not found`);
     }
     await wakeByToken(tx, question.id, { reason: "answer", payload: { option: input.option ?? null, answeredBy: input.answeredBy } });
+    // An open question or review held the project's scheduler.
+    const [run] = await tx.select({ projectId: runs.projectId }).from(runs).where(eq(runs.id, question.runId));
+    if (run) await nudgeScheduler(tx, run.projectId);
     await appendEvents(tx, question.runId, [
       {
         type: "human.answered",
@@ -195,6 +208,8 @@ export async function resolveExhaustedLoop(db: Db, runId: string, action: "retry
       created.push({ type: "node.created", payload: { nodeKey: edge.target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
     }
     await tx.update(runs).set({ status: "running", finishedAt: null, state, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, runId));
+    // The stuck loop held the project's scheduler.
+    await nudgeScheduler(tx, run!.projectId);
     await appendEvents(tx, runId, [{ type: "loop.resolved", payload: { action, edgeKey: stuck.edgeKey, nodeKey: stuck.nodeKey }, nodeExecutionId: stuck.executionId }, ...created]);
   });
 }
