@@ -61,3 +61,10 @@ test("a run in the list shows its status", () => {
   fireEvent.click(screen.getByRole("button", { name: "Switch from #3 F03 Prisma" }));
   expect(within(screen.getByRole("option")).getByText("succeeded")).toBeInTheDocument();
 });
+
+test("a top-level page shows its title without a trail that only repeats it", () => {
+  render(<PageHeader crumbs={[{ label: "Settings" }]} title="Settings" description="Settings for this dashboard." />);
+  expect(screen.queryByRole("navigation", { name: /breadcrumb/i })).not.toBeInTheDocument();
+  expect(screen.getAllByText("Settings")).toHaveLength(1);
+  expect(screen.getByRole("heading", { level: 1, name: "Settings" })).toBeInTheDocument();
+});

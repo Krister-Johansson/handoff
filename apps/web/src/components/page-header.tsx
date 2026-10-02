@@ -132,7 +132,8 @@ export function PageHeader({
 }) {
   return (
     <header className={cn("flex flex-col gap-2.5", className)}>
-      <PageTrail crumbs={crumbs} />
+      {/* A trail of one plain crumb only repeats the title, so top-level pages show none; a crumb with a switcher stays. */}
+      {(crumbs.length > 1 || crumbs.some((c) => c.menu?.length)) && <PageTrail crumbs={crumbs} />}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
           <h1 className="flex flex-wrap items-center gap-2.5 text-[22px] leading-tight font-semibold tracking-[-0.015em] break-words">
