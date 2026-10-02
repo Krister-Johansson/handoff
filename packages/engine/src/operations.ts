@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
 import { remember, RunStateSchema, type RunState } from "@handoff/core";
 import type { ProjectsPort } from "@handoff/github";
-import { nudgeScheduler } from "./backlog-scheduler/nudge.ts";
+import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { recordPlanStatus } from "./plan-status.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
@@ -70,8 +70,9 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
       .set({ status: "failed", error: { code: "cancelled", message: "run was cancelled" }, finishedAt: sql`now()` })
       .where(and(eq(nodeExecutions.runId, runId), inArray(nodeExecutions.status, ["pending", "waiting"])));
     await appendEvents(tx, runId, [{ type: "run.cancelled", payload: { reason: opts.reason ?? null } }]);
-    // A cancelled run frees a slot, and a failed one no longer holds the project.
+    // A cancelled run frees a slot, and a failed one no longer holds the project. Runs held on its paths check again.
     await nudgeScheduler(tx, run.projectId);
+    await wakeOverlapHeld(tx, run.projectId);
     return run;
   });
   await stopRunPreviews(db, runId);

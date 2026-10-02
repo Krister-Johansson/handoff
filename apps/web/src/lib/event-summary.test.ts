@@ -41,6 +41,15 @@ test("summarizes a status write on the plan and one that was skipped, with the r
   );
 });
 
+test("summarizes an overlap hold with the shared paths and the other run", () => {
+  expect(
+    summarizeEvent({
+      type: "run.overlap_held",
+      payload: { nodeKey: "coder", runId: "1a2b3c4d-0000-4000-8000-000000000000", paths: ["apps/board", "pnpm-lock.yaml"] },
+    }),
+  ).toBe("Waiting: shares apps/board, pnpm-lock.yaml with run 1a2b3c4d");
+});
+
 test("returns an empty string for unknown events", () => {
   expect(summarizeEvent({ type: "something.new", payload: {} })).toBe("");
 });

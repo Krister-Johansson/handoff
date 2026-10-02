@@ -3,6 +3,7 @@ import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
 import { trackDescendants } from "@handoff/cli-adapter";
 import { extraPathsOf, memoryOf, passEnvProblem, pickEnv, redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
+import { baseOf, dirOf, LOCKFILES, WORKSPACE_FILE } from "./package-files.ts";
 
 const execFileAsync = promisify(execFile);
 const TAIL_LINES = 200;
@@ -111,12 +112,6 @@ export function isOwned(file: string, patterns: string[]): boolean {
   return patterns.some((p) => (hasGlob(p) ? matchesGlob(file, p) : file === p || file.startsWith(`${p.replace(/\/$/, "")}/`)));
 }
 
-/** Files a package manager writes along with package.json, kept next to it or, in a workspace, at the root. */
-const LOCKFILES = new Set(["pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "bun.lock", "bun.lockb"]);
-const WORKSPACE_FILE = "pnpm-workspace.yaml";
-
-const dirOf = (file: string) => (file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "");
-const baseOf = (file: string) => file.slice(file.lastIndexOf("/") + 1);
 
 /**
  * The changed files outside the allowed paths. Package manager files count as one unit with

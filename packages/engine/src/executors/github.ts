@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type PlanStatus, type ProjectsPort, type RepoRef } from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, type Db } from "@handoff/db";
-import { nudgeScheduler } from "../backlog-scheduler/nudge.ts";
+import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
@@ -392,9 +392,11 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
         // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless.
         await movePlan(deps.projects, ctx, "Done");
         // Closed issues may unblock other runs of the project waiting at their Start, and tasks the scheduler may start.
+        // Runs held on overlap check again, since the merged work is on the base now.
         if (db) {
           await wakeDependents(db, ctx.project.id);
           await nudgeScheduler(db, ctx.project.id);
+          await wakeOverlapHeld(db, ctx.project.id);
         }
         return done({ kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } });
       } catch (error) {

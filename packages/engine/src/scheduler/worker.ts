@@ -5,6 +5,8 @@ import { promisify } from "node:util";
 import { join } from "node:path";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { brief, redactSecrets, runPath, RunStateSchema } from "@handoff/core";
+import { overlapKey } from "../backlog-scheduler/nudge.ts";
+import { overlapWith } from "../backlog-scheduler/overlap.ts";
 import { notifyFrom } from "../notify.ts";
 import { stopWorkerPreviews } from "../preview/preview.ts";
 import {
@@ -249,6 +251,11 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     return;
   }
 
+  if (node.type === "coder" && row.attempt === 1 && run.startedBy === "scheduler" && state.plan) {
+    if (await holdOnOverlap(deps, row, run, state.plan.ownedPaths)) return;
+    row = { ...row, waitKey: null };
+  }
+
   const controller = new AbortController();
   const abort = () => controller.abort();
   outerSignal?.addEventListener("abort", abort, { once: true });
@@ -377,6 +384,35 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     else throw error;
   }
   await releaseIfFinished(deps, run.id, project);
+}
+
+const OVERLAP_RECHECK_MS = 10 * 60_000;
+
+/**
+ * Before the coder's first attempt of a run the scheduler started, a plan that shares paths with
+ * another active run of the project waits, holding no Claude slot, until a run ends or a merge lands
+ * (or ten minutes pass) and checks again. The wait key is set before the check, so a run that ends
+ * during it still wakes this one. Returns whether the execution waits.
+ */
+async function holdOnOverlap(deps: EngineDeps, row: NodeExecutionRow, run: typeof runs.$inferSelect, ownedPaths: string[]): Promise<boolean> {
+  const { db, workerId } = deps;
+  const key = overlapKey(run.projectId);
+  await db.update(nodeExecutions).set({ waitKey: key }).where(eq(nodeExecutions.id, row.id));
+  const overlap = await overlapWith(db, run, ownedPaths);
+  if (!overlap) {
+    await db.update(nodeExecutions).set({ waitKey: null }).where(eq(nodeExecutions.id, row.id));
+    return false;
+  }
+  try {
+    await db.transaction(async (tx) => {
+      await appendEvents(tx, run.id, [{ type: "run.overlap_held", payload: { nodeKey: row.nodeKey, ...overlap }, nodeExecutionId: row.id }]);
+      await yieldWaiting(tx, { row, workerId, wait: { kind: "timer", key, deadlineAt: new Date(Date.now() + OVERLAP_RECHECK_MS) } });
+    });
+  } catch (error) {
+    if (error instanceof LeaseLostError) deps.log?.("lease lost at overlap hold", { id: row.id });
+    else throw error;
+  }
+  return true;
 }
 
 /**
