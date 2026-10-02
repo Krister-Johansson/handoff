@@ -1,6 +1,11 @@
 import { Octokit } from "octokit";
 import {
+  AddPlanBlockerDocument,
   AddPlanItemDocument,
+  CreatePlanLabelDocument,
+  CreatePlanIssueDocument,
+  IssueCreateRefsDocument,
+  IssueNodeIdDocument,
   CreatePlanProjectDocument,
   IssuePlanDocument,
   LinkPlanRepositoryDocument,
@@ -10,7 +15,10 @@ import {
   SetPlanStatusDocument,
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
+  type CreatePlanIssueMutation,
   type CreatePlanProjectMutation,
+  type IssueCreateRefsQuery,
+  type IssueNodeIdQuery,
   type IssuePlanQuery,
   type PlanItemsQuery,
   type PlanOwnerIdsQuery,
@@ -19,16 +27,14 @@ import {
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
-import { kindOf } from "./kinds.ts";
-import { STATUS_OPTIONS, type PlanItem, type PlanProject, type PlanStatus, type SetStatusResult } from "./types.ts";
+import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "./kinds.ts";
+import type { PlanAncestor, PlanItem, PlanKind, PlanProject, PlanStatus, ProjectsPort, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
 type GqlItem = NonNullable<NonNullable<NonNullable<PlanItemsQuery["user"]>["projectV2"]>["items"]["nodes"]>[number];
 
 const present = <T>(items: readonly (T | null | undefined)[] | null | undefined): T[] => (items ?? []).filter((x): x is T => x != null);
-
-const asStatus = (name: string | null | undefined): PlanStatus | undefined => STATUS_OPTIONS.find((s) => s === name);
 
 /** How many ancestors a parent chain has, counted up to three. */
 function depthOf(parent: { parent?: { parent?: unknown } | null } | null | undefined): number {
@@ -38,7 +44,7 @@ function depthOf(parent: { parent?: { parent?: unknown } | null } | null | undef
 }
 
 /** ProjectsPort over Octokit with a classic personal token: GitHub Apps cannot reach user-owned Projects. */
-export class OctokitProjects {
+export class OctokitProjects implements ProjectsPort {
   private constructor(private readonly octokit: Octokit) {}
 
   /** `throttle: false` turns off Octokit's spacing of GraphQL calls one second apart, for tests. */
@@ -50,6 +56,38 @@ export class OctokitProjects {
         ...(opts.throttle === false ? { throttle: { enabled: false } } : {}),
       }),
     );
+  }
+
+  async scopes(): Promise<{ project: boolean; classic: boolean }> {
+    const { headers } = await this.octokit.request("GET /user");
+    // Only classic tokens list their scopes; a fine-grained token cannot reach user-owned Projects.
+    const header = headers["x-oauth-scopes"];
+    if (header === undefined) return { project: false, classic: false };
+    const scopes = String(header)
+      .split(",")
+      .map((s) => s.trim());
+    return { project: scopes.includes("project"), classic: true };
+  }
+
+  async getProject(login: string, number: number): Promise<PlanProject | undefined> {
+    const project = await this.projectNode(login, number);
+    if (!project) return undefined;
+    return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(project.field)) };
+  }
+
+  async getStatus(repo: RepoRef, project: number, issue: number): Promise<PlanStatus | undefined> {
+    const { item } = await this.issuePlan(repo, project, issue);
+    return item?.status?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? statusOf(item.status.name) : undefined;
+  }
+
+  async ensureLabels(repo: RepoRef): Promise<void> {
+    const refs = await this.octokit.graphql<IssueCreateRefsQuery>(IssueCreateRefsDocument.toString(), { owner: repo.owner, name: repo.name, parent: 0, withParent: false });
+    if (!refs.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
+    const have = new Set(present(refs.repository.labels?.nodes).map((l) => l.name.toLowerCase()));
+    for (const kind of PLAN_KINDS) {
+      if (have.has(kind)) continue;
+      await this.octokit.graphql(CreatePlanLabelDocument.toString(), { repositoryId: refs.repository.id, name: kind, ...KIND_LABELS[kind] });
+    }
   }
 
   async listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]> {
@@ -95,14 +133,71 @@ export class OctokitProjects {
     return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(updated.updateProjectV2Field?.projectV2Field)) };
   }
 
+  async createIssue(
+    repo: RepoRef,
+    input: { project: number; title: string; body: string; labels: string[]; parent?: number; blockedBy?: number[] },
+  ): Promise<{ number: number; url: string }> {
+    const refs = await this.octokit.graphql<IssueCreateRefsQuery>(IssueCreateRefsDocument.toString(), {
+      owner: repo.owner,
+      name: repo.name,
+      parent: input.parent ?? 0,
+      withParent: input.parent !== undefined,
+    });
+    if (!refs.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
+    const known = present(refs.repository.labels?.nodes);
+    const labelIds = input.labels.map((name) => {
+      const label = known.find((l) => l.name.toLowerCase() === name.toLowerCase());
+      if (!label) throw new Error(`label "${name}" does not exist on ${repo.owner}/${repo.name}`);
+      return label.id;
+    });
+    if (input.parent !== undefined && !refs.repository.parent) throw new Error(`parent issue #${input.parent} not found`);
+    // Look the blockers up before creating, so a wrong number creates nothing.
+    const blockerIds = [];
+    for (const blocker of input.blockedBy ?? []) blockerIds.push(await this.issueNodeId(repo, blocker));
+
+    const created = await this.octokit.graphql<CreatePlanIssueMutation>(CreatePlanIssueDocument.toString(), {
+      repositoryId: refs.repository.id,
+      title: input.title,
+      body: input.body,
+      labelIds,
+      parentIssueId: refs.repository.parent?.id,
+    });
+    const issue = created.createIssue?.issue;
+    if (!issue) throw new Error(`creating the issue "${input.title}" returned nothing`);
+    for (const blockingIssueId of blockerIds) await this.octokit.graphql(AddPlanBlockerDocument.toString(), { issueId: issue.id, blockingIssueId });
+    await this.setStatus(repo, input.project, issue.number, "Shaping", { add: true });
+    return { number: issue.number, url: issue.url };
+  }
+
+  async lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
+    const { issue: found } = await this.issuePlan(repo, undefined, issue);
+    const parent = found.parent;
+    const grandparent = parent?.parent;
+    return [parent, grandparent].flatMap((p) =>
+      p ? [{ number: p.number, title: p.title, body: p.body, kind: kindOf(present(p.labels?.nodes).map((l) => l.name), p.issueType?.name, depthOf(p.parent)) }] : [],
+    );
+  }
+
+  private async issueNodeId(repo: RepoRef, number: number): Promise<string> {
+    const data = await this.octokit.graphql<IssueNodeIdQuery>(IssueNodeIdDocument.toString(), { owner: repo.owner, name: repo.name, number });
+    const id = data.repository?.issue?.id;
+    if (!id) throw new Error(`issue ${repo.owner}/${repo.name}#${number} not found`);
+    return id;
+  }
+
   /** A user's Project with its Status field, or undefined when there is none the token can see. */
   private async projectNode(login: string, number: number) {
-    const data = await this.octokit.graphql<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
-    return data.user?.projectV2 ?? undefined;
+    try {
+      const data = await this.octokit.graphql<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
+      return data.user?.projectV2 ?? undefined;
+    } catch (error) {
+      if (isNotFound(error)) return undefined;
+      throw error;
+    }
   }
 
   /** The issue and its item in the repository owner's Project `project`, if it is one. */
-  private async issuePlan(repo: RepoRef, project: number, number: number) {
+  private async issuePlan(repo: RepoRef, project: number | undefined, number: number) {
     const { repository } = await this.octokit.graphql<IssuePlanQuery>(IssuePlanDocument.toString(), { owner: repo.owner, name: repo.name, number });
     const issue = repository?.issue;
     if (!repository || !issue) throw new Error(`issue ${repo.owner}/${repo.name}#${number} not found`);
@@ -112,6 +207,19 @@ export class OctokitProjects {
 }
 
 type StatusFieldConfig = { __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
+
+/** A GraphQL answer whose only errors are NOT_FOUND, as for a Project number nobody has. */
+function isNotFound(error: unknown): boolean {
+  const errors = (error as { errors?: { type?: string }[] } | null)?.errors;
+  return Array.isArray(errors) && errors.length > 0 && errors.every((e) => e.type === "NOT_FOUND");
+}
+
+/** The kind labels on the repository, so GitHub's issue list and filters show the hierarchy. */
+const KIND_LABELS: Record<PlanKind, { color: string; description: string }> = {
+  epic: { color: "5319e7", description: "A goal, made of stories" },
+  story: { color: "1d76db", description: "A slice of an epic, made of tasks" },
+  task: { color: "0e8a16", description: "One pull request's worth of work" },
+};
 
 /** How handoff's Status options look on GitHub's board. An existing Done option keeps its own look. */
 const STATUS_STYLE: Record<PlanStatus, Pick<ProjectV2SingleSelectFieldOptionInput, "color" | "description">> = {
@@ -145,7 +253,7 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef): PlanItem[] {
       url: issue.url,
       state: issue.state === "CLOSED" ? "closed" : "open",
       kind: kindOf(labels, issue.issueType?.name, depthOf(issue.parent)),
-      status: item.status?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? asStatus(item.status.name) : undefined,
+      status: item.status?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? statusOf(item.status.name) : undefined,
       parent: issue.parent?.number,
       labels,
       assignees: present(issue.assignees.nodes).map((a) => a.login),

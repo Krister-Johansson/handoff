@@ -1,27 +1,6 @@
 import { expect, test } from "vitest";
 import { OctokitGitHub } from "./octokit-client.ts";
-
-type Call = { method: string; url: string; body: unknown };
-
-function fakeFetch(routes: Record<string, (body: unknown) => { status?: number; json?: unknown; text?: string; headers?: Record<string, string> }>) {
-  const calls: Call[] = [];
-  const fetch = async (input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const method = init?.method ?? "GET";
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method, url, body });
-    const path = new URL(url).pathname;
-    const key = Object.keys(routes).find((k) => {
-      const [m, p] = k.split(" ");
-      return m === method && new RegExp(`^${p}$`).test(path);
-    });
-    if (!key) return new Response(JSON.stringify({ message: `no route for ${method} ${path}` }), { status: 404, headers: { "content-type": "application/json" } });
-    const r = routes[key]!(body);
-    if (r.text !== undefined) return new Response(r.text, { status: r.status ?? 200, headers: { "content-type": "text/plain", ...r.headers } });
-    return new Response(JSON.stringify(r.json ?? {}), { status: r.status ?? 200, headers: { "content-type": "application/json", ...r.headers } });
-  };
-  return { fetch, calls };
-}
+import { fakeFetch } from "./testing/fake-fetch.ts";
 
 const repo = { owner: "octo", name: "sample" };
 

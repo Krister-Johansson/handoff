@@ -44,6 +44,32 @@ mutation LinkPlanRepository($projectId: ID!, $repositoryId: ID!) {
   }
 }
 
+mutation CreatePlanIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $parentIssueId: ID) {
+  createIssue(input: { repositoryId: $repositoryId, title: $title, body: $body, labelIds: $labelIds, parentIssueId: $parentIssueId }) {
+    issue {
+      id
+      number
+      url
+    }
+  }
+}
+
+mutation AddPlanBlocker($issueId: ID!, $blockingIssueId: ID!) {
+  addBlockedBy(input: { issueId: $issueId, blockingIssueId: $blockingIssueId }) {
+    issue {
+      id
+    }
+  }
+}
+
+mutation CreatePlanLabel($repositoryId: ID!, $name: String!, $color: String!, $description: String!) {
+  createLabel(input: { repositoryId: $repositoryId, name: $name, color: $color, description: $description }) {
+    label {
+      id
+    }
+  }
+}
+
 mutation AddPlanItem($projectId: ID!, $contentId: ID!) {
   addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
     item {

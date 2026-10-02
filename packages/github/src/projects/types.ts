@@ -1,11 +1,7 @@
 import type { RepoRef } from "../types.ts";
+import type { PLAN_KINDS, STATUS_OPTIONS } from "./kinds.ts";
 
-/** The Status options of a plan's GitHub Project, in board order. */
-export const STATUS_OPTIONS = ["Shaping", "Ready", "Running", "In review", "Done"] as const;
 export type PlanStatus = (typeof STATUS_OPTIONS)[number];
-
-/** The kinds of issue in a plan, from the top of the hierarchy down. */
-export const PLAN_KINDS = ["epic", "story", "task"] as const;
 export type PlanKind = (typeof PLAN_KINDS)[number];
 
 /** An issue of the project's repository that is an item of its GitHub Project. */

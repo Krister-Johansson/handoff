@@ -27,6 +27,14 @@ export function fakeFetch(routes: Record<string, (body: unknown) => FakeResponse
 
 export type GraphqlCall = { operation: string; variables: Record<string, unknown> };
 
+/** A GraphQL answer with `errors` next to its data, as GitHub sends for a number it cannot resolve. */
+export class GraphqlErrors {
+  constructor(
+    readonly data: unknown,
+    readonly errors: { type?: string; message: string; path?: string[] }[],
+  ) {}
+}
+
 /**
  * A fetch that answers `POST /graphql` by operation name. Each handler gets the variables and returns
  * the `data` of the response. `operations` lists the calls in order, for asserting what was sent.
@@ -41,7 +49,9 @@ export function fakeGraphql(handlers: Record<string, (variables: Record<string, 
       operations.push({ operation, variables });
       const handler = handlers[operation];
       if (!handler) return { json: { errors: [{ message: `no handler for ${operation}` }] } };
-      return { json: { data: handler(variables) } };
+      const answer = handler(variables);
+      if (answer instanceof GraphqlErrors) return { json: { data: answer.data, errors: answer.errors } };
+      return { json: { data: answer } };
     },
   });
   return { fetch, calls, operations };

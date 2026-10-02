@@ -134,6 +134,25 @@ export type StatusState =
   /** Status is successful. */
   | 'SUCCESS';
 
+export type IssueNodeIdQueryVariables = Exact<{
+  owner: string;
+  name: string;
+  number: number;
+}>;
+
+
+export type IssueNodeIdQuery = { repository: { issue: { id: string } | null } | null };
+
+export type IssueCreateRefsQueryVariables = Exact<{
+  owner: string;
+  name: string;
+  parent: number;
+  withParent: boolean;
+}>;
+
+
+export type IssueCreateRefsQuery = { repository: { id: string, labels: { nodes: Array<{ id: string, name: string } | null> | null } | null, parent?: { id: string } | null } | null };
+
 export type IssuePlanQueryVariables = Exact<{
   owner: string;
   name: string;
@@ -144,7 +163,7 @@ export type IssuePlanQueryVariables = Exact<{
 export type IssuePlanQuery = { repository: { owner:
       | { id: string }
       | { id: string }
-    , issue: { id: string, number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, projectItems: { nodes: Array<{ id: string, project: { id: string, number: number, owner:
+    , issue: { id: string, number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, parent: { number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, parent: { number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null } | null } | null, projectItems: { nodes: Array<{ id: string, project: { id: string, number: number, owner:
               | { id: string }
               | { id: string }
               | { id: string }
@@ -233,6 +252,35 @@ export type LinkPlanRepositoryMutationVariables = Exact<{
 
 
 export type LinkPlanRepositoryMutation = { linkProjectV2ToRepository: { repository: { id: string } | null } | null };
+
+export type CreatePlanIssueMutationVariables = Exact<{
+  repositoryId: string | number;
+  title: string;
+  body: string;
+  labelIds?: Array<string | number> | string | number | null | undefined;
+  parentIssueId?: string | number | null | undefined;
+}>;
+
+
+export type CreatePlanIssueMutation = { createIssue: { issue: { id: string, number: number, url: string } | null } | null };
+
+export type AddPlanBlockerMutationVariables = Exact<{
+  issueId: string | number;
+  blockingIssueId: string | number;
+}>;
+
+
+export type AddPlanBlockerMutation = { addBlockedBy: { issue: { id: string } | null } | null };
+
+export type CreatePlanLabelMutationVariables = Exact<{
+  repositoryId: string | number;
+  name: string;
+  color: string;
+  description: string;
+}>;
+
+
+export type CreatePlanLabelMutation = { createLabel: { label: { id: string } | null } | null };
 
 export type AddPlanItemMutationVariables = Exact<{
   projectId: string | number;
@@ -323,6 +371,31 @@ export class TypedDocumentString<TResult, TVariables>
   }
 }
 
+export const IssueNodeIdDocument = new TypedDocumentString(`
+    query IssueNodeId($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<IssueNodeIdQuery, IssueNodeIdQueryVariables>;
+export const IssueCreateRefsDocument = new TypedDocumentString(`
+    query IssueCreateRefs($owner: String!, $name: String!, $parent: Int!, $withParent: Boolean!) {
+  repository(owner: $owner, name: $name) {
+    id
+    labels(first: 100) {
+      nodes {
+        id
+        name
+      }
+    }
+    parent: issue(number: $parent) @include(if: $withParent) {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<IssueCreateRefsQuery, IssueCreateRefsQueryVariables>;
 export const IssuePlanDocument = new TypedDocumentString(`
     query IssuePlan($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -341,6 +414,41 @@ export const IssuePlanDocument = new TypedDocumentString(`
       }
       issueType {
         name
+      }
+      parent {
+        number
+        title
+        body
+        labels(first: 20) {
+          nodes {
+            name
+          }
+        }
+        issueType {
+          name
+        }
+        parent {
+          number
+          title
+          body
+          labels(first: 20) {
+            nodes {
+              name
+            }
+          }
+          issueType {
+            name
+          }
+          parent {
+            number
+            parent {
+              number
+              parent {
+                number
+              }
+            }
+          }
+        }
       }
       projectItems(first: 20) {
         nodes {
@@ -502,6 +610,50 @@ export const LinkPlanRepositoryDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<LinkPlanRepositoryMutation, LinkPlanRepositoryMutationVariables>;
+export const CreatePlanIssueDocument = new TypedDocumentString(`
+    mutation CreatePlanIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $parentIssueId: ID) {
+  createIssue(
+    input: {
+      repositoryId: $repositoryId
+      title: $title
+      body: $body
+      labelIds: $labelIds
+      parentIssueId: $parentIssueId
+    }
+  ) {
+    issue {
+      id
+      number
+      url
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreatePlanIssueMutation, CreatePlanIssueMutationVariables>;
+export const AddPlanBlockerDocument = new TypedDocumentString(`
+    mutation AddPlanBlocker($issueId: ID!, $blockingIssueId: ID!) {
+  addBlockedBy(input: { issueId: $issueId, blockingIssueId: $blockingIssueId }) {
+    issue {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<AddPlanBlockerMutation, AddPlanBlockerMutationVariables>;
+export const CreatePlanLabelDocument = new TypedDocumentString(`
+    mutation CreatePlanLabel($repositoryId: ID!, $name: String!, $color: String!, $description: String!) {
+  createLabel(
+    input: {
+      repositoryId: $repositoryId
+      name: $name
+      color: $color
+      description: $description
+    }
+  ) {
+    label {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreatePlanLabelMutation, CreatePlanLabelMutationVariables>;
 export const AddPlanItemDocument = new TypedDocumentString(`
     mutation AddPlanItem($projectId: ID!, $contentId: ID!) {
   addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {

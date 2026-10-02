@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { fakeGraphql } from "../testing/fake-fetch.ts";
+import { fakeGraphql, GraphqlErrors } from "../testing/fake-fetch.ts";
 import { OctokitProjects } from "./octokit-projects.ts";
 
 const repo = { owner: "octo", name: "sample" };
@@ -257,6 +257,121 @@ test("createProject creates a user Project, renames the Status options keeping D
   expect(options[4]).toEqual({ id: "o_done", name: "Done", color: "PURPLE", description: "This has been completed" });
   expect(options.slice(0, 4).every((o) => o.id === undefined)).toBe(true);
   expect(operations[3]!.variables).toEqual({ projectId: "PVT_9", repositoryId: "R_sample" });
+});
+
+test("createIssue sends the parent, the labels and the blockers, and leaves the issue in Shaping", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({
+      repository: {
+        id: "R_sample",
+        labels: { nodes: [{ id: "L_epic", name: "epic" }, { id: "L_task", name: "task" }, { id: "L_db", name: "db" }] },
+        parent: { id: "I_11" },
+      },
+    }),
+    IssueNodeId: (v) => ({ repository: { issue: { id: `I_${v.number}` } } }),
+    CreatePlanIssue: () => ({ createIssue: { issue: { id: "I_20", number: 20, url: "https://github.com/octo/sample/issues/20" } } }),
+    AddPlanBlocker: (v) => ({ addBlockedBy: { issue: { id: v.issueId } } }),
+    // GitHub may already have added the sub-issue to its parent's Project; here it has not.
+    IssuePlan: () => issuePlan(20, []),
+    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    AddPlanItem: () => ({ addProjectV2ItemById: { item: { id: "PVTI_20" } } }),
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
+  });
+  const projects = port(fetch);
+
+  const created = await projects.createIssue(repo, { project: 3, title: "Add the migration", body: "## Goal\nA column.", labels: ["task", "db"], parent: 11, blockedBy: [3, 4] });
+
+  expect(created).toEqual({ number: 20, url: "https://github.com/octo/sample/issues/20" });
+  const sent = (name: string) => operations.filter((o) => o.operation === name).map((o) => o.variables);
+  expect(sent("IssueCreateRefs")).toEqual([{ owner: "octo", name: "sample", parent: 11, withParent: true }]);
+  expect(sent("CreatePlanIssue")).toEqual([
+    { repositoryId: "R_sample", title: "Add the migration", body: "## Goal\nA column.", labelIds: ["L_task", "L_db"], parentIssueId: "I_11" },
+  ]);
+  expect(sent("AddPlanBlocker")).toEqual([
+    { issueId: "I_20", blockingIssueId: "I_3" },
+    { issueId: "I_20", blockingIssueId: "I_4" },
+  ]);
+  expect(sent("SetPlanStatus")).toEqual([{ projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_status", optionId: "o_shaping" }]);
+  // The status is written last, after every link is in place.
+  expect(operations.at(-1)!.operation).toBe("SetPlanStatus");
+});
+
+test("createIssue refuses a label the repository does not have, before creating anything", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] } } }),
+  });
+  const projects = port(fetch);
+
+  await expect(projects.createIssue(repo, { project: 3, title: "T", body: "B", labels: ["story"] })).rejects.toThrow('label "story"');
+  expect(operations.map((o) => o.operation)).toEqual(["IssueCreateRefs"]);
+});
+
+test("lineage walks parent then grandparent with their bodies and kinds", async () => {
+  const ancestor = (number: number, over: Record<string, unknown>) => ({ number, title: `Issue ${number}`, body: "", labels: { nodes: [] }, issueType: null, parent: null, ...over });
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: (v) =>
+      v.number === 12
+        ? issuePlan(12, [], {
+            parent: ancestor(11, {
+              title: "Shaping with the assistant",
+              body: "## Acceptance criteria\n- [ ] cards",
+              labels: { nodes: [{ name: "story" }] },
+              // The grandparent has no kind label and no parent of its own: by depth it is the epic.
+              parent: ancestor(10, { title: "Project management", body: "## Goal\nA plan.", parent: null }),
+            }),
+          })
+        : issuePlan(30, []),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.lineage(repo, 12)).toEqual([
+    { number: 11, title: "Shaping with the assistant", body: "## Acceptance criteria\n- [ ] cards", kind: "story" },
+    { number: 10, title: "Project management", body: "## Goal\nA plan.", kind: "epic" },
+  ]);
+  expect(operations[0]!.variables).toEqual({ owner: "octo", name: "sample", number: 12 });
+  expect(await projects.lineage(repo, 30)).toEqual([]);
+});
+
+test("getProject reads a user's Project with its Status option ids, and is undefined when GitHub cannot resolve it", async () => {
+  const { fetch } = fakeGraphql({
+    PlanProject: (v) =>
+      v.number === 3
+        ? { user: { projectV2: { ...planProject(3), url: "https://github.com/users/octo/projects/3", title: "sample plan" } } }
+        : // GitHub answers a Project number it cannot resolve with a NOT_FOUND error next to the null.
+          new GraphqlErrors({ user: { projectV2: null } }, [{ type: "NOT_FOUND", path: ["user", "projectV2"], message: `Could not resolve to a ProjectV2 with the number ${v.number}.` }]),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getProject("octo", 3)).toEqual({
+    number: 3,
+    url: "https://github.com/users/octo/projects/3",
+    title: "sample plan",
+    statusOptions: { Shaping: "o_shaping", Ready: "o_ready", Running: "o_running", "In review": "o_review", Done: "o_done" },
+  });
+  expect(await projects.getProject("octo", 99)).toBeUndefined();
+});
+
+test("getStatus reads the issue's Status in the Project, and is undefined when the issue is not an item", async () => {
+  const { fetch } = fakeGraphql({
+    IssuePlan: (v) => (v.number === 12 ? issuePlan(12, [{ id: "PVTI_3", project: planProject(3), status: "Running" }]) : issuePlan(13, [{ id: "PVTI_2", project: planProject(2), status: "Ready" }])),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getStatus(repo, 3, 12)).toBe("Running");
+  expect(await projects.getStatus(repo, 3, 13)).toBeUndefined();
+});
+
+test("ensureLabels creates only the kind labels the repository is missing", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_bug", name: "bug" }, { id: "L_epic", name: "Epic" }] } } }),
+    CreatePlanLabel: (v) => ({ createLabel: { label: { id: `L_${v.name}` } } }),
+  });
+  const projects = port(fetch);
+
+  await projects.ensureLabels(repo);
+  const created = operations.filter((o) => o.operation === "CreatePlanLabel").map((o) => o.variables);
+  expect(created.map((v) => v.name)).toEqual(["story", "task"]);
+  expect(created.every((v) => v.repositoryId === "R_sample" && /^[0-9a-f]{6}$/.test(String(v.color)) && String(v.description).length > 0)).toBe(true);
 });
 
 test("setStatus reports no-option when the Project's Status has no such option", async () => {
