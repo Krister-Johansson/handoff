@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { LinkedIssue } from "@handoff/core";
 import { graphs, graphVersions, projects, runs, type Db, type DbExecutor } from "@handoff/db";
-import type { GitHubPort, ProjectsPort } from "@handoff/github";
+import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { recordPlanStatus } from "./plan-status.ts";
 import { createRun } from "./runs.ts";
 import type { RunRow } from "./types.ts";
@@ -17,6 +17,8 @@ export type StartRunInput = {
   again?: boolean | undefined;
   /** Who starts the run: dashboard, claude-code, assistant, webmcp, cli or scheduler. */
   startedBy?: string | undefined;
+  /** The plan's items as the caller already read them: the Ready gate uses them instead of reading the Project again. */
+  items?: PlanItem[] | undefined;
 };
 
 export type StartRunPorts = { github?: GitHubPort | undefined; projects?: ProjectsPort | undefined };
@@ -41,7 +43,9 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
   const issues = await linkIssues(input.issues ?? [], repo, github, plan);
-  if (plan && project.planProjectNumber !== null && issues.length > 0 && !input.again) await refuseUnready(plan, repo, project.planProjectNumber, issues);
+  if (plan && project.planProjectNumber !== null && issues.length > 0 && !input.again) {
+    refuseUnready(input.items ?? (await plan.listItems(repo.owner, project.planProjectNumber, repo)), issues);
+  }
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
   if (!task) throw new Error("Describe the task, or link at least one issue.");
@@ -76,8 +80,8 @@ const andList = (items: string[]) => (items.length < 2 ? items.join("") : `${ite
  * With a plan, Ready is the gate: a run starts only on tasks in Ready. Issues outside the plan's
  * Project are unplanned and start as before.
  */
-async function refuseUnready(plan: ProjectsPort, repo: Repo, number: number, issues: LinkedIssue[]) {
-  const items = new Map((await plan.listItems(repo.owner, number, repo)).map((item) => [item.number, item]));
+function refuseUnready(planItems: PlanItem[], issues: LinkedIssue[]) {
+  const items = new Map(planItems.map((item) => [item.number, item]));
   for (const issue of issues) {
     const item = items.get(issue.number);
     if (!item) continue;

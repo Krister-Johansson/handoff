@@ -1,8 +1,8 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { afterAll, beforeEach, expect, test } from "vitest";
-import { runs } from "@handoff/db";
+import { afterAll, beforeEach, expect, test, vi } from "vitest";
+import { eq, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { startRun } from "./start-run.ts";
 import { inspect, seedGraph } from "./testing/harness.ts";
 
@@ -45,4 +45,29 @@ test("startRun records startedBy on the run and in run.created", async () => {
   expect(run.startedBy).toBe("scheduler");
   const { events } = await inspect(db, run.id);
   expect(events.find((e) => e.type === "run.created")?.payload).toMatchObject({ issues: [11], startedBy: "scheduler" });
+});
+
+test("startRun with the Project items already read applies the Ready gate without reading the Project again", async () => {
+  const github = new FakeGitHub();
+  const plan = new FakeProjects(github);
+  const repo = { owner: "octo", name: "sample" };
+  const { number } = await plan.createProject("octo", repo, "sample plan");
+  const { project } = await seedGraph(db, linear);
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
+  const task = async (title: string) => {
+    const created = (await plan.createIssue(repo, { project: number, title, body: "", labels: ["task"] })).number;
+    plan.itemsOf(repo).get(created)!.status = "Ready";
+    return created;
+  };
+  const first = await task("Ready on the Project, Shaping in the items read");
+  const second = await task("Ready in the items read");
+  // The caller's read is what counts, whatever the Project says now.
+  const read = (await plan.listItems("octo", number, repo)).map((item) => (item.number === first ? { ...item, status: "Shaping" as const } : item));
+  const listItems = vi.spyOn(plan, "listItems");
+  const start = (issue: number) => startRun(db, { projectId: project.id, graphName: "g", task: "", issues: [issue], startedBy: "scheduler", items: read }, { github, projects: plan });
+
+  await expect(start(first)).rejects.toThrow(`#${first} is in Shaping on the plan`);
+  await expect(start(second)).resolves.toMatchObject({ status: "queued" });
+  expect(listItems).not.toHaveBeenCalled();
+  expect(await plan.getStatus(repo, number, second)).toBe("Running");
 });
