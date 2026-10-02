@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { LinkedIssue } from "@handoff/core";
 import { graphs, graphVersions, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
+import { assignStarter } from "./assign-starter.ts";
 import { recordPlanStatus } from "./plan-status.ts";
 import { createRun } from "./runs.ts";
 import type { RunRow } from "./types.ts";
@@ -80,6 +81,8 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");
+  // The person who starts the work is the token's user: an issue nobody has yet is assigned to them.
+  await assignStarter(db, run.id, github, repo, issues.map((i) => i.number));
   return run;
 }
 

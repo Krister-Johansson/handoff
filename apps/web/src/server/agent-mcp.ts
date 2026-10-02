@@ -5,6 +5,7 @@ import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, reque
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
 import { projectReadiness } from "./readiness";
+import { assignmentOf, setIssueAssignees } from "./assignees";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
@@ -182,7 +183,22 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Graphs page.`);
       if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
       const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [], startedBy: actor }, github, plan);
-      return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };
+      const { assigned, notAssigned } = await assignmentOf(db, run.id);
+      return {
+        run_id: run.id,
+        status: run.status,
+        graph: graphName,
+        branch: run.branchName,
+        url: url(runPath(detail.project.id, run.id)),
+        assigned,
+        not_assigned: notAssigned,
+      };
+    },
+
+    assign: async ({ project, issue, logins, me }: { project: string; issue: number; logins: string[]; me?: boolean }) => {
+      const found = await findProject(db, project);
+      const result = await setIssueAssignees(db, github, found.id, issue, { logins, me });
+      return { ...result, url: `https://github.com/${found.repoOwner}/${found.repoName}/issues/${issue}` };
     },
 
     list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {

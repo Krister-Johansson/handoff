@@ -277,6 +277,36 @@ test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });
 
+test("start_run reports that it assigned the token's user to an issue nobody had, and why it assigned nobody", async () => {
+  github.issues.get(12)!.assignees = ["ann"];
+  expect(await call("start_run", { project: "sandbox", issues: [11, 12] })).toMatchObject({ assigned: [{ issue: 11, login: "octocat" }], not_assigned: [] });
+  expect(github.issues.get(12)!.assignees).toEqual(["ann"]);
+
+  github.login = undefined;
+  github.issues.set(13, { number: 13, title: "Issue 13", url: "https://github.com/octo/sample/issues/13", body: "", state: "open" });
+  expect(await call("start_run", { project: "sandbox", issues: [13] })).toMatchObject({
+    assigned: [],
+    not_assigned: [{ issue: 13, reason: "a GitHub App has no user to assign" }],
+  });
+});
+
+test("assign sets an issue's assignees, adds the token's user for me, clears them with none, and leaves the plan's Status alone", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  github.assignable = [
+    { login: "octocat", avatarUrl: "a1" },
+    { login: "ann", avatarUrl: "a2" },
+  ];
+  expect(await call("assign", { project: "sandbox", issue: ready, logins: ["ann"] })).toMatchObject({ issue: ready, assignees: ["ann"] });
+  expect(await call("assign", { project: "sandbox", issue: ready, logins: ["ann"], me: true })).toMatchObject({ assignees: ["ann", "octocat"] });
+  expect(await call("assign", { project: "sandbox", issue: ready, logins: [] })).toMatchObject({ assignees: [] });
+  expect(await statusOf(ready)).toBe("Ready");
+  expect(await call("assign", { project: "sandbox", issue: ready, logins: ["stranger"] })).toEqual({ error: expect.stringContaining("stranger cannot be assigned") });
+
+  github.login = undefined;
+  expect(await call("assign", { project: "sandbox", issue: ready, logins: [], me: true })).toEqual({ error: expect.stringContaining("GitHub App") });
+});
+
 const repo = { owner: "octo", name: "sample" };
 
 /** Gives the sandbox project a plan on its repository's GitHub Project, with `task` to add a task in a status. */

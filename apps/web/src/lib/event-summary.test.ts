@@ -50,6 +50,17 @@ test("summarizes an overlap hold with the shared paths and the other run", () =>
   ).toBe("Waiting: shares apps/board, pnpm-lock.yaml with run 1a2b3c4d");
 });
 
+test("summarizes the assignment of a run's issue to the token's user and one that was skipped, with the reason", () => {
+  expect(summarizeEvent({ type: "issue.assigned", payload: { issue: 16, login: "Krister-Johansson" } })).toBe("#16 assigned to Krister-Johansson");
+  expect(summarizeEvent({ type: "issue.assign.skipped", payload: { issue: 16, reason: "no-user" } })).toBe(
+    "#16 not assigned: a GitHub App has no user to assign",
+  );
+  expect(summarizeEvent({ type: "issue.assign.skipped", payload: { issue: 16, reason: "not-assignable" } })).toBe(
+    "#16 not assigned: GitHub cannot assign the token's user in this repository",
+  );
+  expect(summarizeEvent({ type: "issue.assign.skipped", payload: { issue: 16, reason: "Validation Failed" } })).toBe("#16 not assigned: Validation Failed");
+});
+
 test("returns an empty string for unknown events", () => {
   expect(summarizeEvent({ type: "something.new", payload: {} })).toBe("");
 });

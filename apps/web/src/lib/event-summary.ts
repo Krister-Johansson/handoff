@@ -40,8 +40,19 @@ export function summarizeEvent(event: EventLike): string {
   if (event.type === "run.overlap_held" && Array.isArray(p.paths)) return `Waiting: shares ${p.paths.join(", ")} with run ${String(p.runId).slice(0, 8)}`;
   if (event.type === "plan.status")return `#${String(p.issue)} to ${String(p.status)}`;
   if (event.type === "plan.skipped") return `#${String(p.issue)} not moved to ${String(p.status)}: ${SKIP_REASONS[String(p.reason)] ?? String(p.reason)}`;
+  if (event.type === "issue.assigned") return `#${String(p.issue)} assigned to ${String(p.login)}`;
+  if (event.type === "issue.assign.skipped") return `#${String(p.issue)} not assigned: ${assignSkipReason(String(p.reason))}`;
   return "";
 }
+
+/** Why assigning a run's issue was skipped, for the codes assignStarter records; other reasons are GitHub's own message. */
+const ASSIGN_SKIP_REASONS: Record<string, string> = {
+  "no-user": "a GitHub App has no user to assign",
+  "not-assignable": "GitHub cannot assign the token's user in this repository",
+};
+
+/** Why assigning a run's issue was skipped, as a phrase. */
+export const assignSkipReason = (reason: string) => ASSIGN_SKIP_REASONS[reason] ?? reason;
 
 /** Why a status write on the plan was skipped, for the codes writePlanStatus records; other reasons are GitHub's own message. */
 const SKIP_REASONS: Record<string, string> = {

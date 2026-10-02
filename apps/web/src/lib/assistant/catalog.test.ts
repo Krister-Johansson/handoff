@@ -19,6 +19,7 @@ test("tools that change state are marked confirm and never read only", () => {
     "add_project",
     "answer_permission",
     "answer_question",
+    "assign",
     "cancel_run",
     "create_epic",
     "create_story",
@@ -85,6 +86,12 @@ test("shaping writes are confirm and openWorld and their summaries name the kind
   expect(toolSpec("move_to_shaping").summarize({ project: "handoff", issues: [57] })).toBe("Move task #57 back to Shaping in handoff");
   expect(toolSpec("setup_plan").summarize({ project: "handoff", use: 3 })).toMatch(/^Use GitHub Project #3 as the plan of handoff/);
   expect(toolSpec("list_plan")).toMatchObject({ confirm: false, readOnly: true, untrusted: true });
+});
+
+test("assign is confirm and its summary names who gets the issue, or says it clears them", () => {
+  expect(toolSpec("assign")).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true });
+  expect(toolSpec("assign").summarize({ project: "handoff", issue: 16, logins: ["ann"], me: true })).toBe("Assign #16 in handoff to ann, you");
+  expect(toolSpec("assign").summarize({ project: "handoff", issue: 16, logins: [] })).toBe("Clear the assignees of #16 in handoff");
 });
 
 test("schedule is confirm and its summary names every issue with its dates", () => {

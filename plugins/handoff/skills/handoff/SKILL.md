@@ -40,8 +40,9 @@ For a project without a plan, or work too small to shape:
 
 1. Break the work into issues the user agrees with. Create each in the project's repository with `gh issue create --title ... --body ...` (add `--repo owner/name` outside the repository's folder). Write the body as a brief for the agents: the goal, where in the code, and how to tell it is done.
 2. `list_backlog` shows the issues no run works on yet.
-3. `start_run` with the project and the issue numbers. Leave the task empty to use the issue titles. One run can take several related issues.
-4. `get_run` shows where the run stands: its steps, the pull request once opened, and any question or failure. Share the dashboard link from each result.
+3. `start_run` with the project and the issue numbers. Leave the task empty to use the issue titles. One run can take several related issues. `start_run` assigns the user (the GitHub user of the dashboard's token) to each issue that has no assignee, and its result says whom it assigned.
+4. `assign` sets who is assigned an issue: give logins, or `me` when the user says they will work on it. It asks the user first and leaves the plan's Status alone.
+5. `get_run` shows where the run stands: its steps, the pull request once opened, and any question or failure. Share the dashboard link from each result.
 
 ## When a run needs the user
 
