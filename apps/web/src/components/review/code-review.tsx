@@ -249,7 +249,12 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
         go(at);
         return `Now on file ${named}`;
       },
-      page_set_diff_view: undefined,
+      page_set_diff_view: ({ mode: nextMode, layout: nextLayout }) => {
+        if (nextMode) setMode(nextMode);
+        if (nextLayout) setLayout(nextLayout);
+        const shown = (nextMode ?? mode) === "whole" ? "the whole file" : "the changes";
+        return `Showing ${shown}, ${(nextLayout ?? layout) === "split" ? "side by side" : "in one column"}.`;
+      },
       page_expand_files: undefined,
       page_mark_viewed: undefined,
       page_comment_on_lines: undefined,
@@ -257,7 +262,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
       page_set_note: undefined,
       page_submit_review: undefined,
     },
-    () => ({ questionId, runId, from, current: files.length ? current + 1 : null }),
+    () => ({ questionId, runId, from, current: files.length ? current + 1 : null, mode, layout }),
   );
 
   return (

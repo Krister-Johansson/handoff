@@ -394,3 +394,21 @@ test("page_go_to_file moves by path, index and direction, and opens the file", a
   expect(await call("page_go_to_file", { index: 4 })).toEqual({ text: "There is no file 4. The files run from 1 to 3.", isError: true });
   expect(fileCursor()).toHaveTextContent("pnpm-lock.yaml 3 of 3");
 });
+
+test("page_set_diff_view switches mode and layout", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(within(fileA()).queryByText("line 1")).not.toBeInTheDocument();
+
+  expect(await call("page_set_diff_view", { mode: "whole" })).toEqual({ text: "Showing the whole file, in one column.", isError: false });
+  expect(screen.getByRole("radio", { name: "Whole file" })).toBeChecked();
+  expect(within(fileA()).getByText("line 1")).toBeInTheDocument();
+
+  expect(await call("page_set_diff_view", { layout: "split" })).toEqual({ text: "Showing the whole file, side by side.", isError: false });
+  expect(screen.getByRole("radio", { name: "Split" })).toBeChecked();
+  expect(within(within(fileA()).getByText("old 10").closest("tr")!).getByText("new 10")).toBeInTheDocument();
+
+  expect(await call("page_set_diff_view", { mode: "changes", layout: "unified" })).toEqual({ text: "Showing the changes, in one column.", isError: false });
+  expect(screen.getByRole("radio", { name: "Changes" })).toBeChecked();
+  expect(screen.getByRole("radio", { name: "Unified" })).toBeChecked();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ mode: "changes", layout: "unified" });
+});
