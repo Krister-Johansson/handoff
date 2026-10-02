@@ -118,7 +118,7 @@ Checked on 2026-10-02.
 ### Rate limits
 
 - https://docs.github.com/en/graphql/overview/rate-limits-and-node-limits-for-the-graphql-api: "5,000 points per hour per user"; cost is the sum of requests per unique connection assuming every `first` is reached, "Divide the number by 100 and round the result to the nearest whole number", minimum 1; secondary limits "No more than 100 concurrent requests", "no more than 2,000 points per minute are allowed for the GraphQL API endpoint", 900 points per minute for REST, "No more than 80 content-generating requests per minute". `rateLimit { limit cost remaining used resetAt }` reports the cost.
-- Applied: one page of `items(first: 100) { fieldValues(first: 20) content { ... } }` is 1 (project) + 1 (items) + 100 (field values) = 102 requests, 1 point, and the live measurement (1 point for 58 items) agrees. The query Planner 1 built (#351) also reads each item's labels, assignees, blockers and pull requests, four lists per item, which by the same formula is about 4 points per 100 items (not yet measured). A 200-item board is then about 8 points, and polling every 30 seconds while the Plan page is open about 960 points per hour of the 5,000.
+- Applied: one page of `items(first: 100) { fieldValues(first: 20) content { ... } }` is 1 (project) + 1 (items) + 100 (field values) = 102 requests, 1 point, and the live measurement (1 point for 58 items) agrees. The query Planner 1 built (#351) also reads each item's labels, assignees, blockers and pull requests, four lists per item. Measured live on 2026-10-02, one page costs 4 points (`rateLimit { cost }`, nodeCount 6100), the same for 1 item or 100 since the cost comes from the `first:` arguments. A 200-item board is 8 points per read, and polling every 30 seconds while the Plan page is open is 960 points per hour of the 5,000.
 
 ### The codebase
 
@@ -133,14 +133,19 @@ Checked on 2026-10-02.
 - Project page: `apps/web/src/app/projects/[projectId]/page.tsx` renders one tab from `?tab=` (`PROJECT_TABS = runs, issues, pulls, graphs, settings` in `lib/project-tab.ts`); the Issues tab is `components/projects/backlog.tsx` with filters `?issues=todo|started|all`, `StartRunDialog`, `BlockedRunButton` and `LinkDependenciesButton`. Paths in `lib/paths.ts`; the inbox narrows with `?project=<id>`.
 - `packages/db/src/schema/projects.ts`: `projects` has `repoId`, `repoOwner`, `repoName`, `defaultBranch`, `isDemo`, `library`, `setupCommand`; no plan columns. `runs.issues` is `{ number, title, url }[]`; bodies live in run state.
 
+### The live check (Planner 1, 2026-10-02)
+
+The manual step of #351 ran the port against throwaway user Project 4; the results are on the PR.
+
+- A Project made with `createProjectV2` for a user has the "Item added to project" workflow turned off, so nothing races handoff's write of Shaping. An added issue read Shaping right after and 20 seconds later.
+- "Item closed", "Pull request merged", "Auto-close issue" and "Auto-add sub-issues to project" are on; "Pull request linked to issue" is off. handoff does not rely on the sub-issue workflow; `createIssue` adds the item itself when it is missing.
+- With the Status options renamed and `Done` kept, closing an issue moved it to Done within 30 seconds.
+
 ## Unverified
 
-- Whether a Project created with `createProjectV2` for a user gets the "Item added to project" workflow, and whether it is enabled. Project 1 (older) has two workflows, Project 3 has six including it. If enabled, it sets a Status option on add and could race handoff's own write of Shaping. PR 1's manual step creates a throwaway Project and records its `workflows`; handoff writes Shaping after every add regardless.
-- Whether the default workflows "Item closed" and "Pull request merged" keep working after handoff renames the Status options. The plan keeps an option named `Done` and renames the others, which no page covers. PR 1's manual step closes a test issue and checks the column.
 - Whether `createIssue(parentIssueId)` adds the new issue to the parent's Project (the changelog says sub-issues inherit the Project "by default", in the context of the web UI). The port reads `projectItems` after creating and adds the item when it is missing, so the answer only changes a call count.
 - Whether `addProjectV2ItemById` on content that is already in the Project returns the existing item or errors. The port checks `issue.projectItems` first, so this only matters for a race.
 - An explicit docs sentence that issue types are unavailable to personal accounts. The evidence is the organization-only docs, the `/orgs/` endpoints, the gh changelog sentence and the live `null`.
-- Whether the `Auto-add sub-issues to project` workflow is on by default for new Projects. Seen enabled on Project 3; not on Project 1. Not relied on.
 - Whether a fine-grained PAT will support user Projects later. Not relied on; the Plan needs a classic token and says so.
 - The REST `DELETE` for a user Project's item (absent from the fetched reference page). Not used; GraphQL `deleteProjectV2Item` is.
 - Whether the roadmap layout's "Start date" and "Target date" field choice can be set through the API. `ProjectV2View` has no such fields and `createProjectV2View` takes an opaque `configuration`; the person sets "Date fields" once on GitHub, and `setup_plan` says so. The GraphQL reference's `ProjectV2ViewConfiguration` type would confirm it.
