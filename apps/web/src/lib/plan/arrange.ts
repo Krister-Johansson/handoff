@@ -1,5 +1,5 @@
 import { spreadHours } from "./load";
-import { inBlockerOrder, stackBars, type BarTask } from "./schedule";
+import { endHour, inBlockerOrder, stackBars, startHour, type BarTask, type PlannedSpan } from "./schedule";
 import { addDays } from "./timeline-scale";
 
 /**
@@ -33,10 +33,25 @@ export function arrange(tasks: readonly ArrangeTask[], planned: readonly Arrange
   const fixedBars = stackBars(fixed, capacity);
   const placed: BarTask[] = [];
 
+  // Planned tasks without a duration end with their Target day; with only a Start their end is unknown.
+  const datedEnds = new Map(
+    planned.flatMap((t) => {
+      const span: PlannedSpan | undefined = t.target ? { start: t.start ?? t.target, end: t.target, openStart: !t.start, openEnd: false } : undefined;
+      return t.hours === undefined && span ? [[t.number, endHour(span, capacity)!] as const] : [];
+    }),
+  );
+
   const fits = (candidate: BarTask) => {
     const before = stackBars([...fixed, ...placed], capacity);
     const after = stackBars([...fixed, ...placed, candidate], capacity);
-    if ((after.get(candidate.number)!.offsetHours ?? 0) >= capacity - EPSILON) return false;
+    const bar = after.get(candidate.number)!;
+    if ((bar.offsetHours ?? 0) >= capacity - EPSILON) return false;
+    const starts = startHour(bar, capacity)!;
+    for (const blocker of candidate.blockers) {
+      const blockerBar = after.get(blocker);
+      const ends = blockerBar ? endHour(blockerBar, capacity) : datedEnds.get(blocker);
+      if (ends !== undefined && starts < ends - EPSILON) return false;
+    }
     for (const [number, bar] of fixedBars) if (after.get(number)!.offsetHours !== bar.offsetHours) return false;
     const was = loadOf(before, capacity);
     for (const [day, hours] of loadOf(after, capacity)) if (hours > (was.get(day) ?? 0) + EPSILON && hours > capacity + EPSILON) return false;
