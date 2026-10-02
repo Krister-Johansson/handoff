@@ -3,7 +3,7 @@
 import { useState, useSyncExternalStore, useTransition, type ReactNode, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClockIcon, CalendarIcon, ClockAlertIcon, InfoIcon,
- LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon } from "lucide-react";
+ LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon, TimerIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
 import { addDateFieldsAction, addEstimateFieldsAction } from "@/app/projects/actions";
@@ -27,6 +27,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { planPath } from "@/lib/paths";
 import type { Timeline, TimelineItem } from "@/lib/plan/schedule";
 import type { PlanFilters } from "@/lib/plan/filters";
+import { formatDuration } from "@/lib/plan/duration";
 import { BAR_TONE, taskColumn } from "@/lib/plan/task";
 import { chartRange } from "@/lib/plan/timeline-rows";
 import { defaultZoom, shortDay, timeScale, ZOOMS, type Zoom } from "@/lib/plan/timeline-scale";
@@ -162,8 +163,8 @@ const ZOOM_NAME: Record<Zoom, string> = { days: "Days", weeks: "Weeks", months: 
 const numbers = (list: number[]) => list.map((n) => `#${n}`).join(", ");
 
 /**
- * What a task says about its time as chips, in the hover card of its bar: late, blocked, overdue, or
- * outside its parent's window.
+ * What a task says about its time as chips, in the hover card of its bar: late, blocked, overdue or over
+ * forecast, starting before a blocker ends, or outside its parent's window.
  */
 export function TimeChips({ task, entry, window }: { task: PlanTask; entry: TimelineItem; window: "story" | "epic" }) {
   const done = taskColumn(task) === "Done";
@@ -185,6 +186,18 @@ export function TimeChips({ task, entry, window }: { task: PlanTask; entry: Time
       <Tag key="overdue" tone="attention">
         <CalendarClockIcon aria-hidden />
         Overdue by {entry.overdueDays === 1 ? "1 day" : `${entry.overdueDays} days`}
+      </Tag>
+    ),
+    entry.overForecastMinutes !== undefined && (
+      <Tag key="over" tone="danger">
+        <TimerIcon aria-hidden />
+        Over forecast by {formatDuration(entry.overForecastMinutes / 60, Infinity)}
+      </Tag>
+    ),
+    !entry.late && entry.startsBeforeBlocker.length > 0 && (
+      <Tag key="early" tone="danger">
+        <TriangleAlertIcon aria-hidden />
+        Starts before {numbers(entry.startsBeforeBlocker)} ends
       </Tag>
     ),
     entry.outsideParent && (

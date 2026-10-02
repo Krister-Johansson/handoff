@@ -769,3 +769,42 @@ test("the load row shows hours per day and marks a day over capacity", () => {
   expect(within(axis).getByTitle("Oct 4: 2h of 6h")).toBeInTheDocument();
   expect(within(axis).queryByTitle(/^Oct 5:/)).not.toBeInTheDocument();
 });
+
+test("strips start under the bar at its scale and the hover card gives clock times", async () => {
+  // #142's run has gone 1h 40m against M's 50 minutes; an earlier run took an hour.
+  const runs: TimelineRun[] = [
+    { id: "a1b2c3d4-0000-4000-8000-000000000001", status: "failed", issues: [142], startedAt: "2026-10-01T08:00:00Z", finishedAt: "2026-10-01T09:00:00Z" },
+    { id: "e5f6a7b8-0000-4000-8000-000000000002", status: "running", issues: [142], startedAt: "2026-10-02T10:20:00Z", finishedAt: null },
+  ];
+  const { container } = renderSized({ runs });
+  const bar = barOf(142);
+  // After #141's 25 minutes on Oct 1.
+  expect(leftOf(bar)).toBeCloseTo(OCT_1 + 6.67, 1);
+
+  const [running, failed] = within(row(/^Task #142 /)).getAllByRole("link", { name: /^Run / });
+  expect(leftOf(running!)).toBeCloseTo(leftOf(bar), 5);
+  expect(widthOf(running!)).toBeCloseTo(13.33, 1);
+  expect(leftOf(failed!)).toBeCloseTo(leftOf(bar), 5);
+  expect(widthOf(failed!)).toBeCloseTo(13.33, 1);
+  // What runs past the duration is the overrun: 50 minutes and 10 minutes.
+  const overruns = [...container.querySelectorAll<HTMLElement>("[data-overrun]")];
+  expect(overruns.map((o) => Math.round(widthOf(o) * 100) / 100)).toEqual([13.33, 2.67]);
+  expect(leftOf(overruns[0]!)).toBeCloseTo(leftOf(bar) + 13.33, 1);
+
+  // Over forecast replaces Overdue while the run is active.
+  expect(within(row(/^Task #142 /)).getByRole("button", { name: "Over forecast by 50m" })).toBeInTheDocument();
+
+  fireEvent.focus(bar);
+  const card = await screen.findByText("#142 R2 Geist type");
+  const details = card.closest<HTMLElement>("[data-slot=hover-card-content]")!;
+  const at = (iso: string) => {
+    const d = new Date(iso);
+    const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(day.slice(5, 7)) - 1]} ${Number(day.slice(8))}, ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  expect(details).toHaveTextContent("SizeM");
+  expect(details).toHaveTextContent("Forecast~50m, the median of 12 finished M runsagent 30m, queue 5m, waiting on you 15m, about $0.90");
+  expect(details).toHaveTextContent("Actual1h 40m so far, 50m over");
+  expect(details).toHaveTextContent(`${at("2026-10-02T10:20:00Z")} to now`);
+  expect(details).toHaveTextContent(`${at("2026-10-01T08:00:00Z")} to ${at("2026-10-01T09:00:00Z").split(", ")[1]}`);
+});

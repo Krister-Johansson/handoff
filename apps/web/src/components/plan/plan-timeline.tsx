@@ -20,7 +20,7 @@ import { formatDuration } from "@/lib/plan/duration";
 import { hoursByDay } from "@/lib/plan/load";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
-import { durationInWords, hoursInWords } from "@/lib/plan/size-text";
+import { durationInWords, hoursInWords, usually } from "@/lib/plan/size-text";
 import { BAR_TONE, hasActiveRun, prNumberOf, taskColumn } from "@/lib/plan/task";
 import {
   arrowPath,
@@ -33,6 +33,7 @@ import {
   progressOf,
   scheduleNotes,
   spanText,
+  stripClock,
   stripDates,
   timelineRows,
   type TimelineRow,
@@ -99,6 +100,73 @@ function barBox(scale: TimeScale, span: DaySpan & Partial<PlannedSpan>, capacity
 /** What the chart knows about one item, for its hover card. */
 type CardContext = { items: Map<number, PlanItem>; entries: Map<number, TimelineItem>; projectId: string; move: MoveContext };
 
+/** Minutes as hours and minutes whatever the capacity: "1h 40m". */
+const minutesText = (minutes: number) => formatDuration(minutes / 60, Infinity);
+
+/**
+ * A task's size, the forecast or manual estimate its bar uses, and while a run is active how long it has
+ * gone against that, in the bar's hover card.
+ */
+function DurationRows({ task, entry, ctx }: { task: PlanTask; entry: TimelineItem; ctx: CardContext }) {
+  const { forecasts, capacity } = ctx.move;
+  if (!forecasts || capacity === undefined) return null;
+  const duration = durationIn(ctx.move, task);
+  const size = task.size ?? task.proposal?.size;
+  const forecast = size ? forecasts[size] : undefined;
+  const active = entry.actual.find((s) => s.active);
+  const elapsed = active && (Date.parse(active.end) - Date.parse(active.start)) / 60_000;
+  const over = entry.overForecastMinutes;
+  return (
+    <>
+      <dt className="text-muted-foreground">Size</dt>
+      <dd>{task.size ?? (task.proposal ? `${task.proposal.size}, proposed by the planner` : "Not set")}</dd>
+      {forecast && (
+        <>
+          <dt className="text-muted-foreground">Forecast</dt>
+          <dd className="flex flex-col">
+            <span>
+              ~{usually(forecast, capacity)},{" "}
+              {forecast.source === "runs" ? `the median of ${forecast.runs} finished ${forecast.size} runs` : `the default for ${forecast.size}; ${forecast.runs} finished ${forecast.size} runs so far`}
+            </span>
+            {forecast.parts && (
+              <span className="text-muted-foreground">
+                agent {minutesText(forecast.parts.agent)}, queue {minutesText(forecast.parts.queue)}, waiting on you {minutesText(forecast.parts.waiting)}
+                {forecast.costUsd !== null && `, about $${forecast.costUsd.toFixed(2)}`}
+              </span>
+            )}
+          </dd>
+        </>
+      )}
+      {duration?.source === "estimate" && (
+        <>
+          <dt className="text-muted-foreground">Estimate</dt>
+          <dd>{hoursInWords(duration.hours)}, manual</dd>
+        </>
+      )}
+      {elapsed !== undefined && duration && (
+        <>
+          <dt className="text-muted-foreground">Actual</dt>
+          <dd className={cn(over !== undefined && "font-medium text-danger")}>
+            {minutesText(elapsed)} so far{over !== undefined && `, ${minutesText(over)} over`}
+          </dd>
+        </>
+      )}
+    </>
+  );
+}
+
+/** A task's Target: the day its bar ends when its duration sets it, with GitHub's own Target when that differs. */
+function TargetText({ item, entry }: { item: PlanItem; entry: TimelineItem }) {
+  const span = entry.planned;
+  if (span?.hours === undefined) return <>{item.target ? shortDay(item.target) : "Not set"}</>;
+  return (
+    <>
+      {shortDay(span.end)} <span className="text-muted-foreground">from the {item.estimate !== undefined ? "estimate" : "forecast"}</span>
+      {span.targetOnGitHub && <span className="block text-muted-foreground">Target on GitHub: {shortDay(span.targetOnGitHub)}</span>}
+    </>
+  );
+}
+
 /** The hover card of a bar or a row title: kind, status, dates and where they come from, blockers, latest run and pull request. */
 function ItemCard({ row, entry, ctx, children }: { row: TimelineRow; entry: TimelineItem; ctx: CardContext; children: ReactNode }) {
   const item = row.item!;
@@ -124,10 +192,13 @@ function ItemCard({ row, entry, ctx, children }: { row: TimelineRow; entry: Time
               </dd>
             </>
           )}
+          {task && <DurationRows task={task} entry={entry} ctx={ctx} />}
           <dt className="text-muted-foreground">Start</dt>
           <dd>{item.start ? shortDay(item.start) : "Not set"}</dd>
           <dt className="text-muted-foreground">Target</dt>
-          <dd>{item.target ? shortDay(item.target) : "Not set"}</dd>
+          <dd>
+            <TargetText item={item} entry={entry} />
+          </dd>
           <dt className="text-muted-foreground">Span</dt>
           <dd>{entry.derived && !entry.planned ? `${span}, ${spanText(entry.derived)}` : span}</dd>
           {progress && (
@@ -166,6 +237,16 @@ function ItemCard({ row, entry, ctx, children }: { row: TimelineRow; entry: Time
                   "None yet"
                 )}
               </dd>
+              {entry.actual.length > 0 && (
+                <>
+                  <dt className="text-muted-foreground">Runs</dt>
+                  <dd className="flex flex-col gap-0.5 tabular-nums">
+                    {entry.actual.map((strip) => (
+                      <span key={strip.runId}>{stripClock(strip)}</span>
+                    ))}
+                  </dd>
+                </>
+              )}
               <dt className="text-muted-foreground">Pull request</dt>
               <dd>{pr !== undefined ? `#${pr}` : "None"}</dd>
             </>
@@ -341,12 +422,24 @@ function PlannedBar({ move, ...props }: Omit<BarProps, "span"> & { todayX: numbe
   return props.row.task ? <TaskBar {...props} span={span} move={move} /> : <SpanBar {...props} span={span} />;
 }
 
-/** One strip per run that linked the task, newest at the top, each opening its run. */
-function Strips({ row, entry, scale, projectId }: { row: TimelineRow; entry: TimelineItem; scale: TimeScale; projectId: string }) {
+/** Where a sized task's strips start and their scale: under its bar, an hour as wide as the bar's hours. */
+type StripScale = { left: number; hourWidth: number; hours: number };
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * One strip per run that linked the task, newest at the top, each opening its run. Under a sized bar every
+ * strip starts at the bar's left edge at the bar's scale, and what runs past the duration is a red overrun;
+ * otherwise a strip sits at its clock time.
+ */
+function Strips({ row, entry, scale, projectId, under }: { row: TimelineRow; entry: TimelineItem; scale: TimeScale; projectId: string; under: StripScale | undefined }) {
   const item = row.item!;
   return entry.actual.map((strip, i) => {
-    const left = scale.xAt(strip.start);
-    const width = Math.max(2, scale.xAt(strip.end) - left);
+    const hours = (Date.parse(strip.end) - Date.parse(strip.start)) / HOUR_MS;
+    const left = under ? under.left : scale.xAt(strip.start);
+    const full = under ? hours * under.hourWidth : scale.xAt(strip.end) - left;
+    const width = Math.max(2, under ? Math.min(hours, under.hours) * under.hourWidth : full);
+    const overrun = under && hours > under.hours ? (hours - under.hours) * under.hourWidth : 0;
     const short = strip.runId.slice(0, 8);
     return (
       <Fragment key={strip.runId}>
@@ -354,12 +447,21 @@ function Strips({ row, entry, scale, projectId }: { row: TimelineRow; entry: Tim
           href={runPath(projectId, strip.runId)}
           data-bar
           aria-label={`Run ${short} of #${item.number} ${item.title}, ${strip.status}, ${stripDates(strip)}`}
-          title={`#${item.number} ${item.title}, ${strip.status}`}
-          className={cn("absolute z-[2] h-1.5 rounded-[2px] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", STRIP_TONE[statusTone(strip.status)])}
+          title={`#${item.number} ${item.title}, ${strip.status}, ${stripClock(strip)}`}
+          className={cn("absolute z-[2] h-1.5 rounded-[2px] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none", overrun > 0 && "rounded-r-none", STRIP_TONE[statusTone(strip.status)])}
           style={{ left, width, top: stripTop(i) }}
         />
-        {width > ID_BESIDE && scale.zoom === "weeks" && (
-          <span aria-hidden data-bar className="absolute z-[2] font-mono text-[9.5px] leading-[10px] whitespace-nowrap text-muted-foreground" style={{ left: left + width + 4, top: stripTop(i) - 2 }}>
+        {overrun > 0 && (
+          <span
+            aria-hidden
+            data-bar
+            data-overrun
+            className="absolute z-[2] h-1.5 rounded-r-[2px] bg-[repeating-linear-gradient(135deg,var(--danger-dot)_0_3px,color-mix(in_oklab,var(--danger-dot)_35%,transparent)_3px_6px)]"
+            style={{ left: left + width, width: overrun, top: stripTop(i) }}
+          />
+        )}
+        {full > ID_BESIDE && scale.zoom === "weeks" && !under && (
+          <span aria-hidden data-bar className="absolute z-[2] font-mono text-[9.5px] leading-[10px] whitespace-nowrap text-muted-foreground" style={{ left: left + full + 4, top: stripTop(i) - 2 }}>
             {short}
           </span>
         )}
@@ -803,6 +905,12 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   };
 
   const load = sizing && loadOf(entries, items, sizing.capacity);
+  /** A sized bar's strips start under it at its scale. */
+  const stripScale = (entry: TimelineItem): StripScale | undefined => {
+    const span = entry.planned;
+    if (!sizing || span?.hours === undefined) return undefined;
+    return { left: barBox(scale, span, sizing.capacity).left, hourWidth: hourWidthAt(scale, span.start, sizing.capacity), hours: span.hours };
+  };
 
   const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
 
@@ -938,7 +1046,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                     />
                     <div role="gridcell" className={cn("relative flex-1 border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ minWidth: scale.width }}>
                       {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} ctx={ctx} move={row.task && moveOf(row.task, entry)} />}
-                      {entry && row.task && <Strips row={row} entry={entry} scale={scale} projectId={projectId} />}
+                      {entry && row.task && <Strips row={row} entry={entry} scale={scale} projectId={projectId} under={stripScale(entry)} />}
                     </div>
                   </div>
                 );

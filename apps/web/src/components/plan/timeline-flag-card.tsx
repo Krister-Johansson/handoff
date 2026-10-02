@@ -10,6 +10,7 @@ import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import type { DaySpan, TimelineItem } from "@/lib/plan/schedule";
+import { formatDuration } from "@/lib/plan/duration";
 import { KIND_NAME, spanText } from "@/lib/plan/timeline-rows";
 import { hasActiveRun, taskColumn } from "@/lib/plan/task";
 import { issuePath, runPath } from "@/lib/paths";
@@ -32,6 +33,8 @@ type Window = { item: PlanItem; span: DaySpan };
 
 const numbers = (list: number[]) => list.map((n) => `#${n}`).join(", ");
 const dayCount = (days: number) => (days === 1 ? "1 day" : `${days} days`);
+/** Minutes as hours and minutes: "1h 40m". */
+const minutesText = (minutes: number) => formatDuration(minutes / 60, Infinity);
 
 /** The nearest story or epic above a task with both a Start and a Target, as the schedule finds it. */
 function windowOf(task: PlanTask, ctx: FlagContext): Window | undefined {
@@ -52,11 +55,12 @@ function flagsOf(task: PlanTask, entry: TimelineItem, bounds: PlanItem | undefin
     entry.late && `Late: waiting on ${numbers(entry.waitingOn)}`,
     !entry.late && !done && entry.waitingOn.length > 0 && `Blocked by ${numbers(entry.waitingOn)}`,
     entry.overdueDays !== undefined && `Overdue by ${dayCount(entry.overdueDays)}`,
+    entry.overForecastMinutes !== undefined && `Over forecast by ${minutesText(entry.overForecastMinutes)}`,
     !entry.late && entry.startsBeforeBlocker.length > 0 && `Starts before ${numbers(entry.startsBeforeBlocker)} ends`,
     entry.outsideParent && `Outside ${bounds?.kind === "epic" ? "epic" : "story"} window`,
     waitingOnYou && "Waiting on you",
   ].filter((f): f is string => Boolean(f));
-  const tone = entry.late || entry.startsBeforeBlocker.length > 0 ? "text-danger" : entry.overdueDays !== undefined || waitingOnYou ? "text-attention" : "text-muted-foreground";
+  const tone = entry.late || entry.startsBeforeBlocker.length > 0 || entry.overForecastMinutes !== undefined ? "text-danger" : entry.overdueDays !== undefined || waitingOnYou ? "text-attention" : "text-muted-foreground";
   return { flags, tone };
 }
 
@@ -102,6 +106,12 @@ function TimeRows({ task, entry, bounds, ctx }: { task: PlanTask; entry: Timelin
           <dd>
             Target was {task.target ? shortDay(task.target) : "not set"}, {dayCount(entry.overdueDays)} ago
           </dd>
+        </>
+      )}
+      {entry.overForecastMinutes !== undefined && (
+        <>
+          <dt className="font-medium text-danger">Over forecast</dt>
+          <dd>The active run is {minutesText(entry.overForecastMinutes)} past the duration its bar shows</dd>
         </>
       )}
       {!entry.late && entry.startsBeforeBlocker.length > 0 && entry.planned && (
@@ -177,7 +187,7 @@ function RunRows({ task, waitingOnYou, projectId }: { task: PlanTask; waitingOnY
 }
 
 /**
- * The warning icon after a task's title on the timeline: blocked, late, overdue, starting before a blocker ends, outside its window,
+ * The warning icon after a task's title on the timeline: blocked, late, overdue or over forecast, starting before a blocker ends, outside its window,
  * or waiting on you. Its accessible name lists the flags. Hover or focus opens a card, in the style
  * of the bar's, with what each flag stands for; Escape closes it, and a tap or a click opens it on
  * touch screens.
