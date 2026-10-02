@@ -66,6 +66,49 @@ test("renderContextPacket lists linked issues after the task, with long bodies c
   expect(md.length).toBeLessThan(9_000);
 });
 
+test("a linked issue with a story and an epic renders Part of before its body, story first", () => {
+  const md = renderContextPacket({
+    ...packet,
+    issues: [
+      {
+        number: 57,
+        title: "Add the migration",
+        url: "https://github.com/o/r/issues/57",
+        body: "Add plan_project_number to projects.",
+        lineage: [
+          { kind: "story", number: 41, title: "Shaping with the assistant", body: "As a person I shape work with the assistant." },
+          { kind: "epic", number: 12, title: "Project management", body: "Plan work on GitHub Projects." },
+        ],
+      },
+    ],
+  });
+  const section = md.slice(md.indexOf("## #57 Add the migration"), md.indexOf("# Run state"));
+  expect(section).toContain('Story #41 "Shaping with the assistant": As a person I shape work with the assistant.');
+  expect(section).toContain('Epic #12 "Project management": Plan work on GitHub Projects.');
+  const partOf = section.indexOf("Part of");
+  expect(partOf).toBeGreaterThan(-1);
+  expect(partOf).toBeLessThan(section.indexOf("Story #41"));
+  expect(section.indexOf("Story #41")).toBeLessThan(section.indexOf("Epic #12"));
+  expect(section.indexOf("Epic #12")).toBeLessThan(section.indexOf("Add plan_project_number to projects."));
+});
+
+test("a parent body longer than 4,000 characters is cut with a note", () => {
+  const md = renderContextPacket({
+    ...packet,
+    issues: [
+      {
+        number: 57,
+        title: "Add the migration",
+        url: "https://github.com/o/r/issues/57",
+        body: "Task body.",
+        lineage: [{ kind: "story", number: 41, title: "Long story", body: `${"s".repeat(4_000)}TAIL` }],
+      },
+    ],
+  });
+  expect(md).toContain(`Story #41 "Long story": ${"s".repeat(4_000)}\n\n(story body cut at 4000 characters)`);
+  expect(md).not.toContain("TAIL");
+});
+
 test("a step's instructions follow the task", () => {
   const md = renderContextPacket({ ...packet, instructions: "Review the plan, not code." });
   const headings = md.split("\n").filter((l) => l.startsWith("# "));

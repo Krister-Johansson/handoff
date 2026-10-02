@@ -9,8 +9,21 @@ export const NodeResultSchema = z.object({
   lastFailure: z.object({ checks: z.array(z.unknown()), error: z.unknown() }).optional(),
 });
 
-/** A GitHub issue a run works on, with its body as it was when the run started. */
-export const LinkedIssueSchema = z.object({ number: z.number().int(), title: z.string(), url: z.string(), body: z.string() });
+/** A parent of a linked issue: a story or an epic it is part of. */
+export const IssueAncestorSchema = z.object({ kind: z.enum(["epic", "story", "task"]).optional(), number: z.number().int(), title: z.string(), body: z.string() });
+export type IssueAncestor = z.infer<typeof IssueAncestorSchema>;
+
+/**
+ * A GitHub issue a run works on, with its body as it was when the run started. `lineage` holds its
+ * parent and grandparent, nearest first; it is absent when the issue has none or they could not be read.
+ */
+export const LinkedIssueSchema = z.object({
+  number: z.number().int(),
+  title: z.string(),
+  url: z.string(),
+  body: z.string(),
+  lineage: z.array(IssueAncestorSchema).optional(),
+});
 export type LinkedIssue = z.infer<typeof LinkedIssueSchema>;
 
 export const RunStateSchema = z
