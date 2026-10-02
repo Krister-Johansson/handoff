@@ -87,3 +87,23 @@ test("where_am_i on the inbox lists the ids of every card by group", async () =>
   expect(ids).toEqual(["perm-1", "q-review", "q-ask", "q-try", "r5", "x6", "r7", "x8"]);
   for (const id of ids) expect(document.getElementById(id)).not.toBeNull();
 });
+
+test("page_show_item scrolls a card into view and focuses it, and an unknown id is refused", async () => {
+  const scroll = vi.spyOn(Element.prototype, "scrollIntoView");
+  try {
+    const { call } = await withAssistant(view);
+    expect(await call("page_show_item", { id: "q-ask" })).toEqual({ text: "Showing the question of #12 License (todooverkill).", isError: false });
+    const card = document.getElementById("q-ask")!;
+    expect(scroll.mock.contexts).toEqual([card]);
+    expect(document.activeElement).toBe(card);
+
+    expect(await call("page_show_item", { id: "x6" })).toEqual({ text: "Showing the failed step of #15 Broken (todooverkill).", isError: false });
+    expect(document.activeElement).toBe(document.getElementById("x6"));
+
+    expect(await call("page_show_item", { id: "nope" })).toEqual({ text: "No card in the Inbox has the id nope. where_am_i lists the cards' ids.", isError: true });
+    expect(scroll).toHaveBeenCalledTimes(2);
+    expect(document.activeElement).toBe(document.getElementById("x6"));
+  } finally {
+    scroll.mockRestore();
+  }
+});

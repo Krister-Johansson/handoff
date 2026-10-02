@@ -37,6 +37,32 @@ function describeInbox(view: InboxView, project: { id: string; name: string } | 
  * `view` is what the page shows, narrowed to `project` when it is.
  */
 export function InboxPageTools({ view, project }: { view: InboxView; project: { id: string; name: string } | null }) {
-  usePageTools("inbox", { page_show_item: () => "" }, () => describeInbox(view, project));
+  usePageTools(
+    "inbox",
+    {
+      page_show_item: ({ id }) => {
+        const shown = describeInbox(view, project);
+        const group = GROUPS.find((g) => shown[g.key].some((item) => item.id === id));
+        const item = group && shown[group.key].find((i) => i.id === id);
+        const card = item && document.getElementById(id);
+        if (!group || !item || !card) throw new Error(`No card in the Inbox has the id ${id}. where_am_i lists the cards' ids.`);
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        card.focus({ preventScroll: true });
+        return `Showing the ${group.name} of ${item.task} (${item.project}).`;
+      },
+    },
+    () => describeInbox(view, project),
+  );
   return null;
 }
+
+/** The Inbox's groups as where_am_i keys them, and what one of their cards is called. */
+const GROUPS = [
+  { key: "permissions", name: "permission request" },
+  { key: "reviews", name: "review" },
+  { key: "questions", name: "question" },
+  { key: "readyToMerge", name: "pull request ready to merge" },
+  { key: "failedRuns", name: "failed step" },
+  { key: "stuckRuns", name: "run out of rounds" },
+  { key: "pullRequests", name: "pull request to review" },
+] as const;
