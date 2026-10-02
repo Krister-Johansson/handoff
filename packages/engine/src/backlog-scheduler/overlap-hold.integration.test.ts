@@ -89,6 +89,23 @@ test("a held run does not take the Claude slot", async () => {
   expect(running!.n).toBe(0);
 });
 
+test("two scheduler-started runs that share paths never hold each other: the newer one waits", async () => {
+  const seeded = await seedGraph(db, linear);
+  const older = await createRun(db, { projectId: seeded.project.id, graphVersionId: seeded.graphVersion.id, task: "Card drag", startedBy: "scheduler" });
+  const newer = await createRun(db, { projectId: seeded.project.id, graphVersionId: seeded.graphVersion.id, task: "Card colors", startedBy: "scheduler" });
+  // The older run stays active at its pull request.
+  const executors = { ...planning(["apps/board"]), pr: scripted({ kind: "waiting", wait: { kind: "github_pr", key: "pr:test" } }) };
+
+  await drain(engineDeps(db, executors));
+
+  expect(executors.coder.calls.map((c) => c.run.id)).toEqual([older.id]);
+  expect((await inspect(db, newer.id)).events.find((e) => e.type === "run.overlap_held")?.payload).toEqual({
+    nodeKey: "coder",
+    runId: older.id,
+    paths: ["apps/board"],
+  });
+});
+
 test("the held run's coder starts when the other run ends", async () => {
   // A run a person cancels.
   const seeded = await seedGraph(db, linear);

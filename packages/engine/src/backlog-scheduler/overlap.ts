@@ -1,5 +1,6 @@
+import { and, asc, eq, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { RunStateSchema } from "@handoff/core";
-import { and, asc, eq, inArray, ne, runs, type DbExecutor } from "@handoff/db";
+import { runs, type DbExecutor } from "@handoff/db";
 import { baseOf, dirOf, LOCKFILES, WORKSPACE_FILE } from "../contract/package-files.ts";
 
 const hasGlob = (p: string) => /[*?[{]/.test(p);
@@ -60,13 +61,22 @@ export type Overlap = { runId: string; paths: string[] };
 
 /**
  * The first other active run of the project, oldest first, whose plan owns paths this run's plan
- * also owns. Runs without a plan own nothing yet.
+ * also owns. Runs without a plan own nothing yet. A run the scheduler started yields only to runs
+ * started before it and to runs a person started, which are never held, so two held runs never wait
+ * on each other.
  */
-export async function overlapWith(db: DbExecutor, run: { id: string; projectId: string }, ownedPaths: string[]): Promise<Overlap | undefined> {
+export async function overlapWith(db: DbExecutor, run: { id: string; projectId: string; createdAt: Date }, ownedPaths: string[]): Promise<Overlap | undefined> {
   const others = await db
     .select({ id: runs.id, state: runs.state })
     .from(runs)
-    .where(and(eq(runs.projectId, run.projectId), ne(runs.id, run.id), inArray(runs.status, ["queued", "running", "waiting"])))
+    .where(
+      and(
+        eq(runs.projectId, run.projectId),
+        ne(runs.id, run.id),
+        inArray(runs.status, ["queued", "running", "waiting"]),
+        or(lt(runs.createdAt, run.createdAt), isNull(runs.startedBy), ne(runs.startedBy, "scheduler")),
+      ),
+    )
     .orderBy(asc(runs.createdAt));
   for (const other of others) {
     const paths = overlaps(ownedPaths, RunStateSchema.parse(other.state).plan?.ownedPaths ?? []);
