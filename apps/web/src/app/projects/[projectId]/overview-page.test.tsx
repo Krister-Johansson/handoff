@@ -18,12 +18,12 @@ vi.mock("@/server/project-page", () => ({
 vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), repairAction: vi.fn(), cancelAction: vi.fn(), resolveLoopAction: vi.fn(), answerPermissionAction: vi.fn() }));
 vi.mock("@/app/projects/actions", () => ({ requestMergeAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), listGitHubProjectsAction: vi.fn(), setupPlanAction: vi.fn() }));
 
-test("the project's own address shows its Overview: the repository, the plan on GitHub, New run and the sections in order", async () => {
+test("the project's own address shows its Home page: the repository, the plan on GitHub, New run and the sections in order", async () => {
   loadOverview.mockResolvedValue(QUIET);
   render(await ProjectPage({ params: Promise.resolve({ projectId: "p1" }), searchParams: Promise.resolve({}) }));
 
   expect(loadOverview).toHaveBeenCalledWith(expect.anything(), undefined, undefined, "p1");
-  expect(screen.getByRole("heading", { level: 1, name: "Overview" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Home" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Krister-Johansson/handoff" })).toHaveAttribute("href", "https://github.com/Krister-Johansson/handoff");
   expect(screen.getByRole("link", { name: "handoff plan" })).toHaveAttribute("href", "https://github.com/users/Krister-Johansson/projects/5");
   expect(screen.getByRole("button", { name: "New run" })).toBeInTheDocument();

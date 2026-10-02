@@ -7,7 +7,7 @@ import { loadPlan, type PlanEpic, type PlanProgress, type PlanTask, type PlanUna
 import { listRuns } from "./queries";
 import { runLines, type RunLine } from "./run-lines";
 
-/** A run on the Overview: its row in the runs list, what it is doing now, and whether it waits on a person. */
+/** A run on a project's Home page: its row in the runs list, what it is doing now, and whether it waits on a person. */
 export type OverviewRun = Awaited<ReturnType<typeof listRuns>>[number] & { line: RunLine; needsYou: boolean };
 
 /** A plan task with whether its latest run waits on a person, which shows as the Needs you chip. */
@@ -80,7 +80,7 @@ async function readPlan(db: Db, github: GitHubPort | undefined, plan: ProjectsPo
 }
 
 /**
- * What a project's Overview shows: what waits on a person, the runs at work, the features in progress
+ * What a project's Home page shows: what waits on a person, the runs at work, the features in progress
  * and the work ready to start, and the runs that finished in the last day.
  */
 export async function loadOverview(db: Db, github: GitHubPort | undefined, plan: ProjectsPort | undefined, projectId: string, opts: { now?: Date } = {}): Promise<Overview> {

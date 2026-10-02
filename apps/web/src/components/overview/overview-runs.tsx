@@ -30,7 +30,7 @@ const DOT: Record<StatusTone, string> = {
   muted: "bg-muted-foreground/50",
 };
 
-/** The Plan's Needs you chip; on the Overview it leads to the run's card in Needs you. */
+/** The Plan's Needs you chip; on the Home page it leads to the run's card in Needs you. */
 export function NeedsYouChip() {
   return (
     <Link
@@ -102,7 +102,7 @@ function RunRow({ run, repoUrl, when, aside, children }: { run: OverviewRun; rep
   );
 }
 
-/** A busy day finishes dozens of runs; the Overview shows the latest few and Runs holds the rest. */
+/** A busy day finishes dozens of runs; the Home page shows the latest few and Runs holds the rest. */
 const FINISHED_SHOWN = 5;
 
 /** Runs that succeeded in the last day, the latest first, with their pull request and when they finished. */

@@ -9,7 +9,7 @@ const redirect = vi.hoisted(() =>
   }),
 );
 vi.mock("next/navigation", () => ({ redirect }));
-// The Overview's reads; an old link never gets that far.
+// The Home page's reads; an old link never gets that far.
 vi.mock("@/lib/db", () => ({ getDb: () => ({}) }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => undefined, getProjects: () => undefined }));
 vi.mock("@/server/overview", () => ({ loadOverview: vi.fn() }));
@@ -30,7 +30,7 @@ test("/projects redirects to Settings, Projects", () => {
   expect(() => ProjectsPage()).toThrow("redirect /settings?tab=projects");
 });
 
-test("/ opens the Overview of the project used last, else of the first project, else Settings, Projects to add one", () => {
+test("/ opens the Home page of the project used last, else of the first project, else Settings, Projects to add one", () => {
   const projects = [{ id: "p1" }, { id: "p2" }];
   expect(homePath(projects, "p2")).toBe("/projects/p2");
   expect(homePath(projects, undefined)).toBe("/projects/p1");

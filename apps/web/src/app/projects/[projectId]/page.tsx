@@ -11,7 +11,7 @@ import { projectPage, repoUrl, sectionCrumbs } from "@/server/project-page";
 export const dynamic = "force-dynamic";
 
 /**
- * A project's own address: its Overview. A link from before the project's pages became routes carries
+ * A project's own address: its Home page. A link from before the project's pages became routes carries
  * ?tab= and lands on that tab's route.
  */
 export default async function ProjectPage({
@@ -30,8 +30,8 @@ export default async function ProjectPage({
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 max-sm:px-4">
       <PageHeader
-        crumbs={sectionCrumbs(project, "Overview")}
-        title="Overview"
+        crumbs={sectionCrumbs(project, "Home")}
+        title="Home"
         description={
           <>
             <a className="font-mono text-xs hover:underline hover:underline-offset-3" href={repoUrl(project)}>

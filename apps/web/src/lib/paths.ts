@@ -5,12 +5,12 @@ import { PROJECT_SECTIONS, type PlanViewName, type ProjectSection } from "./proj
 /** Settings, Projects: where projects are added, edited and deleted. */
 export const PROJECTS_SETTINGS_PATH = "/settings?tab=projects";
 
-/** A project's page: its Overview without a section, else the section's route. */
+/** A project's page: its Home page without a section, else the section's route. */
 export const projectPath = (projectId: string, section?: ProjectSection) => `/projects/${projectId}${section ? `/${section}` : ""}`;
 
 /**
  * The project and its section a dashboard path is under, such as p1 and runs for /projects/p1/runs/r1;
- * undefined outside a project. The section is undefined on the project's Overview.
+ * undefined outside a project. The section is undefined on the project's Home page.
  */
 export function projectAt(pathname: string): { projectId: string; section?: ProjectSection } | undefined {
   const [, root, projectId, section] = pathname.split("/");

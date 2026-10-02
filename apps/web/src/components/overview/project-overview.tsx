@@ -5,7 +5,7 @@ import { NeedsYou } from "./needs-you";
 import { ReadyToStart } from "./ready";
 import { FinishedRuns, RunningNow } from "./overview-runs";
 
-/** The project the Overview is about, with its repository as owner/name. */
+/** The project the Home page is about, with its repository as owner/name. */
 export type OverviewProject = { id: string; name: string; repo: string };
 
 /** How a run starts from this page: the project's graphs and the default one; no default, no Start run. */

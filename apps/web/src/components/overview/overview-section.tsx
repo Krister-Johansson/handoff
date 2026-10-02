@@ -7,7 +7,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/
 import { cn } from "@/lib/utils";
 
 /**
- * One question the Overview answers: a heading with its count (left out when there is nothing) and a
+ * One question the Home page answers: a heading with its count (left out when there is nothing) and a
  * link to the page that holds all of it, then its content.
  */
 export function OverviewSection({

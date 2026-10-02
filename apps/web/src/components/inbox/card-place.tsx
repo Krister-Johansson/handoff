@@ -13,7 +13,7 @@ const CardPlaceContext = createContext<CardPlace>("inbox");
 /** The place the surrounding page gives the cards. */
 export const useCardPlace = () => use(CardPlaceContext);
 
-/** Cards on one project's page, such as its Overview. */
+/** Cards on one project's page, such as its Home page. */
 export function ProjectCards({ children }: { children: ReactNode }) {
   return <CardPlaceContext value="project">{children}</CardPlaceContext>;
 }
