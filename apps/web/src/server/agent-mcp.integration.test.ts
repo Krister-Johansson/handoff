@@ -116,6 +116,15 @@ test("a failed run is repaired at its failed step, and a run can be cancelled", 
   expect((await call("get_run", { run_id })).status).toBe("cancelled");
 });
 
+test("repair_run allows the files it is given outside the plan for the repaired step", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  await db.update(nodeExecutions).set({ status: "failed", error: { code: "paths_outside_plan", message: "files outside the plan: pnpm-lock.yaml" } }).where(eq(nodeExecutions.runId, run_id));
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
+  expect(await call("repair_run", { run_id, allow_paths: ["pnpm-lock.yaml"] })).toMatchObject({ node: "planner", attempt: 2 });
+  const [row] = await db.select().from(runs).where(eq(runs.id, run_id));
+  expect(row!.state).toMatchObject({ memory: { planner: { extraPaths: [expect.objectContaining({ path: "pnpm-lock.yaml", by: "person" })] } } });
+});
+
 test("what needs attention comes with links to the dashboard", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run_id));

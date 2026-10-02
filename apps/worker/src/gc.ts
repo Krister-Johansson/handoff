@@ -2,7 +2,8 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, assistantConversations, inArray, lt, runs, type Db } from "@handoff/db";
+import { and, assistantConversations, eq, inArray, isNotNull, lt, projects, runs, type Db } from "@handoff/db";
+import { releaseWorktree, type WorkdirProvider } from "@handoff/engine";
 
 /**
  * Claude keeps a transcript per session under CLAUDE_CONFIG_DIR/projects/<encoded cwd>. A run's cwd
@@ -25,6 +26,24 @@ export async function gcClaudeSessions(db: Db, opts: { home: string; olderThanDa
       rmSync(path, { recursive: true, force: true });
       removed.push(path);
     }
+  }
+  return removed;
+}
+
+/**
+ * A failed run keeps its worktree for a person to look at and repair. Removes the worktrees of runs
+ * that failed more than `olderThanDays` ago, and returns their paths.
+ */
+export async function gcFailedWorktrees(db: Db, opts: { workdirs: WorkdirProvider; olderThanDays: number }): Promise<string[]> {
+  const cutoff = new Date(Date.now() - opts.olderThanDays * 86_400_000);
+  const stale = await db
+    .select({ run: runs, project: projects })
+    .from(runs)
+    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .where(and(eq(runs.status, "failed"), lt(runs.finishedAt, cutoff), isNotNull(runs.worktreePath)));
+  const removed: string[] = [];
+  for (const { run, project } of stale) {
+    if (await releaseWorktree({ db, workdirs: opts.workdirs }, run, project)) removed.push(run.worktreePath!);
   }
   return removed;
 }

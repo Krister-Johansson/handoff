@@ -57,7 +57,9 @@
       "attributes": {
         "type": "coder",
         "label": "Code",
-        "config": {},
+        "config": {
+          "maxTurns": "auto"
+        },
         "x": 900,
         "y": 0
       }

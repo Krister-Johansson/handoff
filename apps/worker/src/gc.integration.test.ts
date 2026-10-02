@@ -1,10 +1,25 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { assistantConversations, assistantMessages, eq, runs } from "@handoff/db";
+import { assistantConversations, assistantMessages, eq, projects, runs } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
-import { gcAssistantConversations, gcClaudeSessions } from "./gc.ts";
+import { GitWorktreeProvider } from "@handoff/engine";
+import { gcAssistantConversations, gcClaudeSessions, gcFailedWorktrees } from "./gc.ts";
+
+/** A bare repository with one commit on main, as a project's remote. */
+function originRepo(): string {
+  const work = mkdtempSync(join(tmpdir(), "handoff-seed-"));
+  const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@example.com", ...args], { cwd });
+  git(work, "init", "-q", "-b", "main");
+  writeFileSync(join(work, "README.md"), "# sample\n");
+  git(work, "add", "-A");
+  git(work, "commit", "-qm", "initial");
+  const origin = mkdtempSync(join(tmpdir(), "handoff-origin-"));
+  git(origin, "clone", "-q", "--bare", work, ".");
+  return origin;
+}
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -31,6 +46,26 @@ test("gc removes transcripts of runs that finished before the cutoff and keeps t
   expect(existsSync(dirs.old)).toBe(false);
   expect(existsSync(dirs.recent)).toBe(true);
   expect(existsSync(dirs.active)).toBe(true);
+});
+
+test("gc removes the worktrees of runs that failed before the cutoff and keeps the rest", async () => {
+  const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
+  const origin = originRepo();
+  const failedRun = async (daysAgo: number) => {
+    const { project, run } = await seedRun(db);
+    const branchName = `handoff/${run.id}`;
+    await db.update(projects).set({ localClonePath: origin }).where(eq(projects.id, project.id));
+    const workdir = await workdirs.acquire({ runId: run.id, remoteUrl: origin, baseBranch: "main", branchName });
+    await db.update(runs).set({ status: "failed", branchName, finishedAt: new Date(Date.now() - daysAgo * 86_400_000), worktreePath: workdir.path }).where(eq(runs.id, run.id));
+    return workdir.path;
+  };
+  const old = await failedRun(10);
+  const recent = await failedRun(1);
+
+  const removed = await gcFailedWorktrees(db, { workdirs, olderThanDays: 7 });
+  expect(removed).toEqual([old]);
+  expect(existsSync(old)).toBe(false);
+  expect(existsSync(recent)).toBe(true);
 });
 
 test("handoff gc removes assistant conversations older than the given days and their transcripts", async () => {

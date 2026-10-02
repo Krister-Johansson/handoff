@@ -1,12 +1,12 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { compileGraph, parseSkillMarkdown, suggestProjectName, type LinkedIssue } from "@handoff/core";
 import { importSkillRepository } from "@handoff/engine/library-import";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
-import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
+import { answerQuestion, cancelRun, createRun, GitWorktreeProvider, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
-import { dashboardAssistantHome, gcAssistantConversations, gcClaudeSessions } from "./gc.ts";
+import { dashboardAssistantHome, gcAssistantConversations, gcClaudeSessions, gcFailedWorktrees } from "./gc.ts";
 
 /** github and projects: undefined reads credentials from the environment; null skips GitHub (tests). */
 export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; github?: GitHubPort | null; projects?: ProjectsPort | null };
@@ -211,6 +211,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     const home = process.env.HANDOFF_HOME ?? "./.handoff";
     const removed = await gcClaudeSessions(db, { home, olderThanDays: Number(values.days ?? 7) });
     out(`removed ${removed.length} Claude session folders`);
+    const worktrees = await gcFailedWorktrees(db, { workdirs: new GitWorktreeProvider({ root: resolve(home) }), olderThanDays: Number(values.days ?? 7) });
+    out(`removed ${worktrees.length} worktrees of failed runs${worktrees.length ? `:\n${worktrees.map((p) => `  ${p}`).join("\n")}` : ""}`);
     const assistant = await gcAssistantConversations(db, { assistantHome: dashboardAssistantHome(process.env.HANDOFF_HOME), olderThanDays: Number(values["assistant-days"] ?? 30) });
     out(`removed ${assistant.conversations} assistant conversations and ${assistant.transcripts.length} transcripts`);
     return;

@@ -117,6 +117,11 @@ function previousReviewOf(node: CompiledNode, state: RunState, sentBackTo: strin
   };
 }
 
+/** `maxTurns: "auto"`: a turn budget that grows with the plan, 40 plus 4 per step, at most 150. */
+function autoTurns(state: RunState): number {
+  return Math.min(150, 40 + 4 * (state.plan?.steps.length ?? 0));
+}
+
 export function selectContext(node: CompiledNode, state: RunState, execution: NodeExecutionRow, sentBackTo: string[] = []): ContextPacket {
   const selector = node.contextSelector;
   const defaultKeys = ["plan", "prNumber", ...(selector.includeFeedback ? ["feedback"] : [])];
@@ -125,7 +130,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
   const configTools = node.config.allowedTools;
   const allowedTools =
     node.config.allTools === true ? ALL_TOOLS : Array.isArray(configTools) ? configTools.map(String) : nodeCatalog[node.type].allowedTools;
-  const maxTurns = typeof node.config.maxTurns === "number" ? node.config.maxTurns : DEFAULT_MAX_TURNS;
+  const maxTurns = typeof node.config.maxTurns === "number" ? node.config.maxTurns : node.config.maxTurns === "auto" ? autoTurns(state) : DEFAULT_MAX_TURNS;
 
   const acceptance = acceptanceOf(state);
   const packet: ContextPacket = {

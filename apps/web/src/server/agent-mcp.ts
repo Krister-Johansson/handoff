@@ -277,7 +277,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { decision: row.status, url: await urlOf(row.runId) };
     },
 
-    repair_run: async ({ run_id, node, note }: { run_id: string; node?: string; note?: string }) => {
+    repair_run: async ({ run_id, node, note, allow_paths }: { run_id: string; node?: string; note?: string; allow_paths?: string[] }) => {
       const [failed] = await db
         .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey })
         .from(nodeExecutions)
@@ -285,7 +285,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
         .limit(1);
       if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
-      const retry = await repairNodeExecution(db, failed.id, note ? { note } : {});
+      const retry = await repairNodeExecution(db, failed.id, { ...(note ? { note } : {}), ...(allow_paths?.length ? { allowPaths: allow_paths } : {}) });
       return { node: retry.nodeKey, attempt: retry.attempt, url: await urlOf(run_id) };
     },
 

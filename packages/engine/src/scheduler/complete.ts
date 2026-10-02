@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
-import { appendEvents, edgeTraversals, nodeExecutions, projects, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
+import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeMemory, type NodeResult, type RunState } from "@handoff/core";
+import { appendEvents, edgeTraversals, nodeExecutions, projects, questions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
 
@@ -148,6 +148,14 @@ function rememberAttempt(state: RunState, row: NodeExecutionRow, output: unknown
   return extraPaths.length || notes.length ? remember(state, row.nodeKey, { extraPaths, notes }) : state;
 }
 
+/** Additions to the memory of one or more nodes, by node key. */
+export type MemoryAdditions = Record<string, Partial<NodeMemory>>;
+
+/** Appends to nodes' memory in the state read under the run's lock. */
+function addMemory(state: RunState, additions: MemoryAdditions | undefined): RunState {
+  return Object.entries(additions ?? {}).reduce((next, [nodeKey, add]) => remember(next, nodeKey, add), state);
+}
+
 /**
  * Tells a person how the run ended, when the node that ended it has that kind on. The notification
  * commits with the run's end.
@@ -211,6 +219,8 @@ export async function completePassed(
     statePatch?: Record<string, unknown> | undefined;
     checks: CheckResult[];
     cost?: { usd?: number | undefined; usage?: unknown } | undefined;
+    /** What to add to nodes' memory, appended to the run's current state under its lock so no concurrent write is lost. */
+    memory?: MemoryAdditions | undefined;
   },
 ) {
   const { row } = input;
@@ -241,7 +251,7 @@ export async function completePassed(
     attempt: row.attempt,
     ...(updated.executorSessionId ? { sessionId: updated.executorSessionId } : {}),
   };
-  const merged = rememberAttempt(mergeState(state, row.nodeKey, result, input.statePatch), row, input.output);
+  const merged = addMemory(rememberAttempt(mergeState(state, row.nodeKey, result, input.statePatch), row, input.output), input.memory);
   const routed = await route(tx, input.graph, row, "passed", input.output, merged);
   lead.push(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
@@ -269,6 +279,7 @@ export async function completeFailed(
     error: ExecutionError;
     output?: unknown;
     checks?: CheckResult[] | undefined;
+    cost?: { usd?: number | undefined; usage?: unknown } | undefined;
   },
 ) {
   const { row } = input;
@@ -281,6 +292,8 @@ export async function completeFailed(
         status: "failed",
         error: input.error,
         checks: input.checks ?? [],
+        ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd.toFixed(6) } : {}),
+        ...(input.cost?.usage !== undefined ? { usage: input.cost.usage } : {}),
         ...(input.output !== undefined ? { output: input.output } : {}),
         finishedAt: sql`now()`,
       })
@@ -346,6 +359,145 @@ export async function yieldWaiting(
       nodeExecutionId: row.id,
     },
   ]);
+}
+
+/** The answers to a paths question: allow the files for this run, send the work back, or fail the step. */
+export const PATHS_OPTIONS = ["allow", "send_back", "fail"] as const;
+
+/**
+ * A step whose only failing check is the path check waits for a person instead of failing. Its output,
+ * checks and cost stay on the execution; the question names the files outside the plan.
+ */
+export async function askAboutPaths(
+  tx: DbTx,
+  input: {
+    row: NodeExecutionRow;
+    workerId: string;
+    graph: CompiledGraph;
+    output: unknown;
+    checks: CheckResult[];
+    files: string[];
+    cost?: { usd?: number | undefined; usage?: unknown } | undefined;
+  },
+) {
+  const { row, files } = input;
+  const [kept] = await tx
+    .update(nodeExecutions)
+    .set({
+      output: input.output,
+      checks: input.checks,
+      ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd.toFixed(6) } : {}),
+      ...(input.cost?.usage !== undefined ? { usage: input.cost.usage } : {}),
+    })
+    .where(owned(row, input.workerId))
+    .returning({ id: nodeExecutions.id });
+  if (!kept) throw new LeaseLostError(row.id);
+  const text = `${row.nodeKey} changed files outside the plan: ${files.map((f) => `\`${f}\``).join(", ")}`;
+  const summary = `${row.nodeKey} changed ${files.length === 1 ? "a file" : `${files.length} files`} outside the plan`;
+  const [question] = await tx
+    .insert(questions)
+    .values({ runId: row.runId, nodeExecutionId: row.id, question: text, options: [...PATHS_OPTIONS], context: { reason: "paths", from: row.nodeKey, files, summary } })
+    .returning();
+  const events: NewEvent[] = [
+    ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
+    { type: "human.asked", payload: { questionId: question!.id, question: text, options: question!.options }, nodeExecutionId: row.id },
+  ];
+  const node = input.graph.node(row.nodeKey);
+  if (notifies(node, "input")) {
+    const [run] = await tx.select({ projectId: runs.projectId, project: projects.name }).from(runs).innerJoin(projects, eq(projects.id, runs.projectId)).where(eq(runs.id, row.runId));
+    if (!run) throw new Error(`run ${row.runId} not found`);
+    await notifyFrom(tx, node, "input", { id: row.runId, projectId: run.projectId }, { title: `${run.project}: ${summary}`, body: brief(files.join(", ")), href: runPath(run.projectId, row.runId) });
+  }
+  await appendEvents(tx, row.runId, events);
+  await yieldWaiting(tx, { row, workerId: input.workerId, wait: { kind: "human", token: question!.id } });
+}
+
+/**
+ * Fails the attempt and starts the node's next attempt at once with a note, the way a repair does,
+ * so the run goes on without routing the failure. `reason` says why: a person sent files outside the
+ * plan back, or the attempt ran out of turns and the next one continues its work.
+ */
+export async function failAndRetry(
+  tx: DbTx,
+  input: {
+    row: NodeExecutionRow;
+    workerId: string;
+    error: ExecutionError;
+    checks: CheckResult[];
+    note: string;
+    reason: "paths" | "continue";
+    cost?: { usd?: number | undefined; usage?: unknown } | undefined;
+  },
+) {
+  const { row, error } = input;
+  const { state } = await lockRun(tx, row.runId);
+  const [updated] = await tx
+    .update(nodeExecutions)
+    .set({
+      ...releasedLease,
+      status: "failed",
+      error,
+      finishedAt: sql`now()`,
+      ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd.toFixed(6) } : {}),
+      ...(input.cost?.usage !== undefined ? { usage: input.cost.usage } : {}),
+    })
+    .where(owned(row, input.workerId))
+    .returning();
+  if (!updated) throw new LeaseLostError(row.id);
+  const failed: NodeResult = { output: row.output, executionId: row.id, attempt: row.attempt, lastFailure: { checks: input.checks, error } };
+  const next = rememberAttempt(mergeState(state, row.nodeKey, failed), row, row.output);
+  const [{ attempt } = { attempt: row.attempt }] = await tx
+    .select({ attempt: sql<number>`coalesce(max(${nodeExecutions.attempt}), 0)::int` })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, row.runId), eq(nodeExecutions.nodeKey, row.nodeKey)));
+  const [created] = await tx
+    .insert(nodeExecutions)
+    .values({
+      runId: row.runId,
+      nodeKey: row.nodeKey,
+      nodeType: row.nodeType,
+      executorKind: row.executorKind,
+      attempt: attempt + 1,
+      repairedFromExecutionId: row.id,
+      repairNote: input.note,
+      trigger: { kind: "repair", fromExecutionId: row.id, reason: input.reason },
+    })
+    .returning({ id: nodeExecutions.id, attempt: nodeExecutions.attempt });
+  await tx.update(runs).set({ state: next, stateVersion: sql`${runs.stateVersion} + 1`, status: "running" }).where(eq(runs.id, row.runId));
+  await appendEvents(tx, row.runId, [
+    { type: "node.failed", payload: { nodeKey: row.nodeKey, attempt: row.attempt, error }, nodeExecutionId: row.id },
+    { type: "node.created", payload: { nodeKey: row.nodeKey, attempt: created!.attempt, via: input.reason }, nodeExecutionId: created!.id },
+  ]);
+}
+
+type PathsQuestion = { option: string | null; answer: string | null; answeredBy: string | null; context: Record<string, unknown> };
+
+/**
+ * Carries out a person's answer to a paths question on the execution that waited for it. Allow
+ * passes the attempt with the files in the node's memory, so its later attempts may change them too.
+ */
+export async function resolvePaths(tx: DbTx, input: { row: NodeExecutionRow; workerId: string; graph: CompiledGraph; question: PathsQuestion }) {
+  const { row, question } = input;
+  const files = Array.isArray(question.context.files) ? question.context.files.map(String) : [];
+  const by = question.answeredBy ?? "a person";
+  const note = question.answer && question.answer !== question.option ? question.answer.trim() : "";
+  const checks = (row.checks ?? []) as CheckResult[];
+  const listed = files.map((f) => `\`${f}\``).join(", ");
+  const error: ExecutionError = { code: "paths_outside_plan", message: `files outside the plan: ${files.join(", ")}`, detail: { files } };
+  if (question.option === "fail") return completeFailed(tx, { row, workerId: input.workerId, graph: input.graph, error, output: row.output, checks });
+  // An answer without a known option (a text answer over MCP, say) sends the work back with it rather than guessing.
+  if (question.option !== "allow") {
+    const told = [
+      `${by} sent this back because it changed files outside the plan: ${listed}.`,
+      "Undo your changes to them. If the task cannot be done without one, keep it and list it in extraPaths with the reason.",
+      ...(note ? [`They said: ${note}`] : []),
+    ].join(" ");
+    return failAndRetry(tx, { row, workerId: input.workerId, error, checks, note: told, reason: "paths" });
+  }
+  const reason = `Allowed by ${by} for this run${note ? `: ${note}` : "."}`;
+  const allowed = checks.map((c) => (c.kind === "diff_within_paths" && !c.passed ? { ...c, passed: true, detail: `files outside owned paths allowed by ${by}: ${files.join(", ")}` } : c));
+  const extraPaths = files.map((path) => ({ path, reason, attempt: row.attempt, by: "person" as const }));
+  await completePassed(tx, { row, workerId: input.workerId, graph: input.graph, output: row.output, checks: allowed, memory: { [row.nodeKey]: { extraPaths } } });
 }
 
 export async function releaseForReclaim(tx: DbTx, input: { row: NodeExecutionRow; workerId: string }) {

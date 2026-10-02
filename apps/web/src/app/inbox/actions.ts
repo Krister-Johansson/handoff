@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, resolveExhaustedLoop, restartTryIt } from "@handoff/engine/operations";
+import { allowPathsOf } from "@/lib/allow-paths";
 import { getDb } from "@/lib/db";
 import { getProjects } from "@/lib/github";
 import { runPathOf } from "@/server/run-path";
@@ -38,7 +39,8 @@ export async function answerAction(_: InboxActionState, form: FormData): Promise
 export async function repairAction(_: InboxActionState, form: FormData): Promise<InboxActionState> {
   try {
     const note = field(form, "note");
-    await repairNodeExecution(getDb(), field(form, "executionId"), note ? { note } : {});
+    const allowPaths = allowPathsOf(field(form, "allowPaths"));
+    await repairNodeExecution(getDb(), field(form, "executionId"), { ...(note ? { note } : {}), ...(allowPaths.length ? { allowPaths } : {}) });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

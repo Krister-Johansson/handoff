@@ -16,6 +16,7 @@ import {
   stopWorker,
   nodeExecutions,
   projects,
+  questions,
   reapExpiredLeases,
   reapExpiredWaits,
   runs,
@@ -31,7 +32,7 @@ import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
-import { completeFailed, completePassed, LeaseLostError, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
+import { askAboutPaths, completeFailed, completePassed, failAndRetry, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
 export type EngineDeps = {
   db: Db;
@@ -182,6 +183,7 @@ async function reap(deps: EngineDeps) {
   const { db } = deps;
   const leases = await reapExpiredLeases(db, { maxReclaims: deps.maxReclaims ?? 2 });
   const waits = await reapExpiredWaits(db);
+  await releaseEnded(deps);
   const ids = [...leases.reclaimed, ...leases.failed, ...waits];
   if (ids.length === 0) return;
   const rows = await db.select().from(nodeExecutions).where(inArray(nodeExecutions.id, ids));
@@ -232,6 +234,19 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     void started;
     await appendEvents(tx, run.id, events);
   });
+
+  // An attempt that waited on a paths question goes on with the person's answer; its agent does not run again.
+  const paths = row.waitToken ? await answeredPathsQuestion(db, row.waitToken) : undefined;
+  if (paths) {
+    try {
+      await db.transaction((tx) => resolvePaths(tx, { row, workerId, graph, question: paths }));
+    } catch (error) {
+      if (error instanceof LeaseLostError) deps.log?.("lease lost at completion", { id: row.id });
+      else throw error;
+    }
+    await releaseIfFinished(deps, run.id, project);
+    return;
+  }
 
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -364,12 +379,37 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
   await releaseIfFinished(deps, run.id, project);
 }
 
-const TERMINAL_RUN = new Set(["succeeded", "failed", "cancelled"]);
+const CONTINUE_NOTE =
+  "Continue: the previous attempt ran out of turns. Its work is committed on this branch; read what it did with git, then finish the task from there.";
 
-/** A finished run gives its worktree back; the branch stays so a repair can re-create it. */
-async function releaseIfFinished(deps: EngineDeps, runId: string, project: typeof projects.$inferSelect) {
-  const [run] = await deps.db.select().from(runs).where(eq(runs.id, runId));
-  if (!run || !TERMINAL_RUN.has(run.status)) return;
+/**
+ * A coder that ran out of turns, even after its wrap-up turn, but committed work gets one new attempt
+ * that continues from the branch. An attempt that was itself such a continuation fails instead.
+ */
+async function continuesAfterMaxTurns(row: NodeExecutionRow, type: string, error: { code: string }, workdir: Workdir | undefined, baseBranch: string): Promise<boolean> {
+  if (error.code !== "cli_error_max_turns" || type !== "coder" || !workdir || row.trigger?.reason === "continue") return false;
+  const ahead = await run("git", ["rev-list", "--count", `origin/${baseBranch}..HEAD`], { cwd: workdir.path }).then(
+    (r) => Number(r.stdout.trim()),
+    () => 0,
+  );
+  return ahead > 0;
+}
+
+/** The answered paths question an execution waited on, if that is what woke it. */
+async function answeredPathsQuestion(db: Db, token: string) {
+  const [question] = await db.select().from(questions).where(eq(questions.id, token));
+  return question && question.context.reason === "paths" && question.answer !== null ? question : undefined;
+}
+
+/**
+ * Runs that gave up their worktree: a run that succeeded or was cancelled. A failed run keeps its
+ * worktree, with what setup installed and what the failed attempt left, until a person repairs or
+ * cancels it, or `handoff gc` removes it.
+ */
+const RELEASING_RUN = new Set(["succeeded", "cancelled"]);
+
+/** Removes a run's worktree and forgets its path; the branch stays so a repair can re-create it. */
+export async function releaseWorktree(deps: Pick<EngineDeps, "db" | "workdirs" | "remoteUrl" | "log">, run: typeof runs.$inferSelect, project: typeof projects.$inferSelect) {
   try {
     await deps.workdirs.release({
       runId: run.id,
@@ -377,9 +417,28 @@ async function releaseIfFinished(deps: EngineDeps, runId: string, project: typeo
       baseBranch: run.baseBranch,
       branchName: run.branchName,
     });
+    await deps.db.update(runs).set({ worktreePath: null }).where(eq(runs.id, run.id));
+    return true;
   } catch (error) {
-    deps.log?.("workdir release failed", { runId, error: String(error) });
+    deps.log?.("workdir release failed", { runId: run.id, error: String(error) });
+    return false;
   }
+}
+
+async function releaseIfFinished(deps: EngineDeps, runId: string, project: typeof projects.$inferSelect) {
+  const [run] = await deps.db.select().from(runs).where(eq(runs.id, runId));
+  if (run && RELEASING_RUN.has(run.status)) await releaseWorktree(deps, run, project);
+}
+
+/** Worktrees of runs that ended without a step to release them, such as a failed run a person cancelled. */
+async function releaseEnded(deps: EngineDeps) {
+  const ended = await deps.db
+    .select({ run: runs, project: projects })
+    .from(runs)
+    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .where(and(inArray(runs.status, [...RELEASING_RUN] as ("succeeded" | "cancelled")[]), isNotNull(runs.worktreePath)))
+    .limit(10);
+  for (const { run, project } of ended) await releaseWorktree(deps, run, project);
 }
 
 async function applyOutcome(
@@ -404,8 +463,12 @@ async function applyOutcome(
       });
       if (contract.passed) {
         await db.transaction((tx) =>
-          completePassed(tx, { row, workerId, graph, output: contract.output, statePatch: outcome.statePatch, checks: contract.checks, cost: outcome.cost }),
+          completePassed(tx, { row, workerId, graph, output: contract.output, statePatch: outcome.statePatch, memory: outcome.memory, checks: contract.checks, cost: outcome.cost }),
         );
+      } else if (contract.pathsOutside) {
+        // Only files outside the plan are wrong: a person decides whether they belong to the change.
+        const files = contract.pathsOutside;
+        await db.transaction((tx) => askAboutPaths(tx, { row, workerId, graph, output: contract.output, checks: contract.checks, files, cost: outcome.cost }));
       } else {
         await db.transaction((tx) =>
           completeFailed(tx, {
@@ -430,7 +493,13 @@ async function applyOutcome(
         await db.transaction((tx) => scheduleRetry(tx, { row, workerId, error: outcome.error, delayMs }));
         return;
       }
-      await db.transaction((tx) => completeFailed(tx, { row, workerId, graph, error: outcome.error }));
+      if (await continuesAfterMaxTurns(row, node.type, outcome.error, workdir, baseBranch)) {
+        const last = (outcome.error.detail as { lastMessage?: unknown } | undefined)?.lastMessage;
+        const note = [CONTINUE_NOTE, ...(typeof last === "string" && last ? [`Its last message: ${last}`] : [])].join("\n\n");
+        await db.transaction((tx) => failAndRetry(tx, { row, workerId, error: outcome.error, checks: [], note, reason: "continue", cost: outcome.cost }));
+        return;
+      }
+      await db.transaction((tx) => completeFailed(tx, { row, workerId, graph, error: outcome.error, cost: outcome.cost }));
       return;
     }
     case "interrupted":

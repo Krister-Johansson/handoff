@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, type NodeType } from "@handoff/core";
 import type { Db } from "@handoff/db";
 import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
-import type { CliExecutor, CliRunOptions, CliRunRequest, CliSession } from "@handoff/cli-adapter";
+import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
 /**
@@ -125,6 +125,17 @@ function mcpInitProblems(payload: unknown, required: string[]): string[] {
   return problems;
 }
 
+/** The text of an assistant message on the stream, or undefined when it has none (only tool calls). */
+function textOf(payload: unknown): string | undefined {
+  const content = (payload as { message?: { content?: unknown } } | undefined)?.message?.content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .flatMap((part) => ((part as { type?: unknown }).type === "text" && typeof (part as { text?: unknown }).text === "string" ? [(part as { text: string }).text] : []))
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
 const RESUME_PROMPT = "Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
 
 /** Planner, Coder and Reviewer: one Claude CLI turn per execution, validated against the node's contract. */
@@ -152,6 +163,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       let mcpProblems: string[] = [];
       let fatalRetryError: string | undefined;
       let rateLimited = false;
+      let lastMessage: string | undefined;
       const local = new AbortController();
       const forward = () => local.abort();
       if (ctx.signal.aborted) local.abort();
@@ -198,6 +210,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         signal: local.signal,
         onEvent: (event) => {
           if (event.type === "cli.system.init") mcpProblems = mcpInitProblems(event.payload, requiredServers);
+          if (event.type === "cli.assistant") lastMessage = textOf(event.payload) ?? lastMessage;
           if (event.type === "cli.system.api_retry") {
             const error = (event.payload as { error?: string } | undefined)?.error;
             if (error && FATAL_API_ERRORS.has(error)) {
@@ -213,13 +226,22 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         holdIdle: () => permissionWatch?.waiting() ?? false,
       };
       let result;
+      // Turns and cost over every claude run of this execution, the wrap-up turn included.
+      let turns: number | undefined;
+      let spent: number | undefined;
+      const count = (r: CliRunResult) => {
+        if (r.numTurns !== undefined) turns = (turns ?? 0) + r.numTurns;
+        if (r.costUsd !== undefined) spent = (spent ?? 0) + r.costUsd;
+      };
       try {
         result = await options.cli.run({ ...base, prompt, session, maxTurns: ctx.packet.constraints.maxTurns ?? options.maxTurns }, runOptions);
+        count(result);
         if (result.outcome === "error_max_turns" && !local.signal.aborted) {
           // One short resumed turn to wrap up, instead of failing work that is nearly done.
           const id = result.sessionId ?? session.id;
           ctx.emit("node.finishing", { reason: "max_turns" });
           result = await options.cli.run({ ...base, prompt: FINISH_PROMPT, session: { mode: "resume", id }, maxTurns: FINISH_TURNS }, runOptions);
+          count(result);
         }
       } finally {
         await permissionWatch?.stop();
@@ -267,13 +289,19 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
             error: {
               code: `cli_${result.outcome}`,
               message: result.errorMessage ?? `claude ended with ${result.outcome}`,
+              // Why it stopped, as a person reads it: how it ended, how far it got, what it cost and what it said last.
               detail: {
+                subtype: result.outcome,
+                ...(turns !== undefined ? { turns } : {}),
+                ...(spent !== undefined ? { costUsd: spent } : {}),
+                ...(lastMessage ? { lastMessage } : {}),
                 exitCode: result.exitCode,
                 stderrTail: result.stderrTail,
                 validationIssues: result.validationIssues,
                 permissionDenials: result.permissionDenials,
               },
             },
+            ...(spent !== undefined ? { cost: { usd: spent, usage: result.usage } } : {}),
             retryable: result.outcome === "timeout",
           };
       }

@@ -8,6 +8,8 @@ export type ContractResult = {
   checks: CheckResult[];
   issues?: core.$ZodIssue[];
   reason?: string;
+  /** Set when the path check is the only check that failed: the files outside the plan, for a person to decide on. */
+  pathsOutside?: string[];
 };
 
 /**
@@ -31,7 +33,9 @@ export async function validateContract(contract: Contract, output: unknown, ctx:
     }
   }
   const failed = checks.filter((c) => !c.passed);
+  const pathsOnly = failed.length > 0 && failed.every((c) => c.kind === "diff_within_paths" && c.files?.length);
   return {
+    ...(pathsOnly ? { pathsOutside: [...new Set(failed.flatMap((c) => c.files ?? []))] } : {}),
     passed: failed.length === 0,
     output: parsed.data,
     checks,
