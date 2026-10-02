@@ -16,6 +16,14 @@ beforeEach(() => {
 
 const run = { runId: "r1", projectId: "p1", task: "#7 Todo CRUD", projectName: "todooverkill" };
 
+test("a sentence-long option wraps inside the card", () => {
+  const option = "Keep the chip border visible on hover with a separator: while the card is hovered, give the chip a bg-background fill.";
+  render(<QuestionCard item={{ ...run, id: "q1", question: "How should I handle the hover state?", options: [option], nodeKey: "human_gate-2", reason: "needs_input" }} />);
+  const button = screen.getByRole("button", { name: option });
+  expect(button).toHaveClass("whitespace-normal", "h-auto", "max-w-full", "shrink");
+  expect(button).not.toHaveClass("whitespace-nowrap", "h-8", "shrink-0");
+});
+
 test("a question names its project, run and node, and an option answers it", async () => {
   render(<QuestionCard item={{ ...run, id: "q1", question: "Roll back on any error?", options: ["any error", "only 4xx"], nodeKey: "coder", reason: "needs_input" }} />);
   expect(screen.getByRole("link", { name: "todooverkill" })).toHaveAttribute("href", "/projects/p1");

@@ -181,7 +181,15 @@ function AnswerCard({ item, compact }: { item: QuestionItem; compact: boolean })
         {item.options.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {item.options.map((option) => (
-              <Button key={option} type="submit" name="option" value={option} variant={quiet(option) ? "outline" : "default"} disabled={pending}>
+              <Button
+                key={option}
+                type="submit"
+                name="option"
+                value={option}
+                variant={quiet(option) ? "outline" : "default"}
+                disabled={pending}
+                className="h-auto min-h-8 max-w-full shrink justify-start py-1.5 text-left whitespace-normal"
+              >
                 {option}
               </Button>
             ))}
