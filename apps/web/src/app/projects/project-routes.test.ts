@@ -9,6 +9,11 @@ const redirect = vi.hoisted(() =>
   }),
 );
 vi.mock("next/navigation", () => ({ redirect }));
+// The Overview's reads; an old link never gets that far.
+vi.mock("@/lib/db", () => ({ getDb: () => ({}) }));
+vi.mock("@/lib/github", () => ({ getGitHub: () => undefined, getProjects: () => undefined }));
+vi.mock("@/server/overview", () => ({ loadOverview: vi.fn() }));
+vi.mock("@/server/project-page", () => ({ projectPage: vi.fn(), repoUrl: vi.fn(), sectionCrumbs: vi.fn() }));
 
 const open = (query: Record<string, string>) => ProjectPage({ params: Promise.resolve({ projectId: "p1" }), searchParams: Promise.resolve(query) });
 
@@ -18,8 +23,6 @@ test("an old ?tab= link redirects to its route", async () => {
   await expect(open({ tab: "graphs" })).rejects.toThrow("redirect /projects/p1/graphs");
   await expect(open({ tab: "settings" })).rejects.toThrow("redirect /projects/p1/settings");
   await expect(open({ tab: "runs" })).rejects.toThrow("redirect /projects/p1/runs");
-  // Until the project Overview exists, the project's own address opens its runs.
-  await expect(open({})).rejects.toThrow("redirect /projects/p1/runs");
   await expect(open({ tab: "nowhere" })).rejects.toThrow("redirect /projects/p1/runs");
 });
 
@@ -27,7 +30,7 @@ test("/projects redirects to Settings, Projects", () => {
   expect(() => ProjectsPage()).toThrow("redirect /settings?tab=projects");
 });
 
-test("/ opens the project used last, else the first project, else Settings, Projects to add one", () => {
+test("/ opens the Overview of the project used last, else of the first project, else Settings, Projects to add one", () => {
   const projects = [{ id: "p1" }, { id: "p2" }];
   expect(homePath(projects, "p2")).toBe("/projects/p2");
   expect(homePath(projects, undefined)).toBe("/projects/p1");

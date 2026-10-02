@@ -10,7 +10,7 @@ export function lastProject<P extends { id: string }>(projects: P[], lastProject
   return projects.find((p) => p.id === lastProjectId) ?? projects[0];
 }
 
-/** Where / goes: the project used last, or Settings, Projects to add one when there is none. */
+/** Where / goes: the Overview of the project used last, or Settings, Projects to add one when there is none. */
 export function homePath(projects: { id: string }[], lastProjectId: string | undefined): string {
   const project = lastProject(projects, lastProjectId);
   return project ? `/projects/${project.id}` : PROJECTS_SETTINGS_PATH;

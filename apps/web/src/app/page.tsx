@@ -6,7 +6,7 @@ import { listProjects } from "@/server/graphs";
 
 export const dynamic = "force-dynamic";
 
-/** The dashboard opens on the project used last, or on the projects page when there is none to open. */
+/** The dashboard opens on the Overview of the project used last, or on Settings, Projects when there is none to open. */
 export default async function Home() {
   const [projects, cookieStore] = await Promise.all([listProjects(getDb()), cookies()]);
   redirect(homePath(projects, cookieStore.get(LAST_PROJECT_COOKIE)?.value));
