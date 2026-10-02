@@ -194,7 +194,9 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                 onSelectionChange={onSelectionChange}
                 fitView
                 minZoom={0.15}
-                deleteKeyCode={["Backspace", "Delete"]}
+                nodesDraggable={!locked}
+                nodesConnectable={!locked}
+                deleteKeyCode={locked ? null : ["Backspace", "Delete"]}
               >
                 <CanvasBackground />
                 <Controls className={CONTROLS_CLASS} showInteractive={false}>

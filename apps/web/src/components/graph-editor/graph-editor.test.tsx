@@ -11,19 +11,28 @@ const document = {
   nodes: [{ key: "planner", attributes: { type: "planner", label: "Planner", config: {} } }],
   edges: [],
 };
+/** A Planner that hands its plan to a Coder: two nodes and the edge between them. */
+const twoNodes = {
+  attributes: { startNode: "planner" },
+  nodes: [
+    { key: "planner", attributes: { type: "planner", label: "Planner", x: 0, y: 0, config: {} } },
+    { key: "coder", attributes: { type: "coder", label: "Coder", x: 300, y: 0, config: {} } },
+  ],
+  edges: [{ key: "planner->coder", source: "planner", target: "coder", attributes: { loop: false } }],
+};
 const versions = [
   { version: 4, createdAt: "2026-09-30T10:00:00.000Z", createdBy: "dashboard" },
   { version: 3, createdAt: "2026-09-29T10:00:00.000Z", createdBy: "cli" },
 ];
 
-const renderEditor = () =>
+const renderEditor = (graph: unknown = document) =>
   render(
     <TooltipProvider>
       <GraphEditor
         projectId="p1"
         graphName="plan-review"
         version={3}
-        document={document}
+        document={graph}
         library={{ skills: [], mcp: [], agents: [], groups: [] }}
         versions={versions}
         trail={<nav>Projects</nav>}
@@ -113,4 +122,22 @@ test("the inspector keeps the Graph help and no longer lists the versions", () =
   expect(within(inspector).queryByText(/history/i)).not.toBeInTheDocument();
   expect(within(inspector).queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
   expect(within(inspector).queryByText("v4")).not.toBeInTheDocument();
+});
+
+const canvasNode = (container: HTMLElement, id: string) => container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)!;
+const nodeCount = (container: HTMLElement) => container.querySelectorAll(".react-flow__node").length;
+
+test("a locked graph cannot be added to, deleted from, connected or dragged", () => {
+  const { container } = renderEditor(twoNodes);
+  fireEvent.click(screen.getByRole("button", { name: "Add Coder" }));
+  expect(nodeCount(container)).toBe(2);
+  expect(canvasNode(container, "planner")).not.toHaveClass("draggable");
+  expect(container.querySelectorAll(".react-flow__handle.connectable, .react-flow__handle.connectablestart")).toHaveLength(0);
+  fireEvent.click(canvasNode(container, "planner"));
+  const inspector = screen.getByRole("complementary", { name: "Inspector" });
+  expect(within(inspector).getByRole("button", { name: "Delete node" })).toBeDisabled();
+  fireEvent.keyDown(window.document.body, { key: "Backspace" });
+  fireEvent.keyDown(window.document.body, { key: "Delete" });
+  expect(nodeCount(container)).toBe(2);
+  expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
 });

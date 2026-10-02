@@ -152,12 +152,14 @@ function KeyField({ node, dispatch, onSelect }: { node: FlowNode; dispatch: Disp
 function NodeInspector({
   node,
   graph,
+  locked,
   library,
   dispatch,
   onSelect,
 }: {
   node: FlowNode;
   graph: FlowGraph;
+  locked: boolean;
   library: LibraryChoices;
   dispatch: Dispatch<EditorAction>;
   onSelect: (nodeId: string) => void;
@@ -266,7 +268,7 @@ function NodeInspector({
       <NotificationSettings node={node} dispatch={dispatch} />
       <NodeEdges node={node} graph={graph} />
       <InspectorSection>
-        <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" onClick={() => dispatch({ type: "remove", ids: [node.id] })}>
+        <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" disabled={locked} onClick={() => dispatch({ type: "remove", ids: [node.id] })}>
           <TrashIcon data-icon="inline-start" />
           Delete node
         </Button>
@@ -807,7 +809,7 @@ function AdvancedEdgeFields({ edge, gates, dispatch }: { edge: FlowEdge; gates: 
   );
 }
 
-function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowGraph; dispatch: Dispatch<EditorAction> }) {
+function EdgeInspector({ edge, graph, locked, dispatch }: { edge: FlowEdge; graph: FlowGraph; locked: boolean; dispatch: Dispatch<EditorAction> }) {
   const gates = graph.nodes.filter((n) => n.data.nodeType === "human_gate");
   const label = (id: string) => graph.nodes.find((n) => n.id === id)?.data.label ?? id;
   const port = edge.data.port?.replace("_", " ");
@@ -839,7 +841,7 @@ function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowG
         </details>
       </InspectorSection>
       <InspectorSection>
-        <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" onClick={() => dispatch({ type: "remove", ids: [edge.id] })}>
+        <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" disabled={locked} onClick={() => dispatch({ type: "remove", ids: [edge.id] })}>
           <TrashIcon data-icon="inline-start" />
           Delete edge
         </Button>
@@ -866,8 +868,8 @@ export function Inspector({
 }) {
   const node = selection.nodeId ? graph.nodes.find((n) => n.id === selection.nodeId) : undefined;
   const edge = selection.edgeId ? graph.edges.find((e) => e.id === selection.edgeId) : undefined;
-  if (node) return <NodeInspector key={node.id} node={node} graph={graph} library={library} dispatch={dispatch} onSelect={onSelect} />;
-  if (edge) return <EdgeInspector key={edge.id} edge={edge} graph={graph} dispatch={dispatch} />;
+  if (node) return <NodeInspector key={node.id} node={node} graph={graph} locked={locked} library={library} dispatch={dispatch} onSelect={onSelect} />;
+  if (edge) return <EdgeInspector key={edge.id} edge={edge} graph={graph} locked={locked} dispatch={dispatch} />;
   return (
     <InspectorSection title="Graph">
       {locked ? (

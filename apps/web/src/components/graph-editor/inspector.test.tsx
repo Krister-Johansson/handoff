@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import type { FlowGraph } from "@handoff/core";
 import { Inspector } from "./inspector";
@@ -211,4 +211,12 @@ test("Finish's earlier notify switch shows as Run finished, and changing it move
   expect(dispatch).toHaveBeenCalledWith({ type: "replaceNodeConfig", id: "finish", config: {} });
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "finish", patch: { notify: { finished: true } } });
   expect(screen.queryByText("Notify when done")).not.toBeInTheDocument();
+});
+
+test("a locked graph's edge and node cannot be deleted from the inspector", () => {
+  render(<Inspector graph={graph} selection={{ edgeId: "reviewer->planner" }} locked library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Delete edge" })).toBeDisabled();
+  cleanup();
+  render(<Inspector graph={graph} selection={{ nodeId: "reviewer" }} locked library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Delete node" })).toBeDisabled();
 });
