@@ -1,5 +1,5 @@
 import { getDb } from "@/lib/db";
-import { getGitHub } from "@/lib/github";
+import { getGitHub, getProjects } from "@/lib/github";
 import { handleMcpRequest } from "@/server/agent-endpoint";
 import { createHandoffMcpServer } from "@/server/agent-mcp";
 import { AgentTokenStore, defaultAgentTokenFile } from "@/server/agent-token";
@@ -11,7 +11,7 @@ async function handle(request: Request) {
   const baseUrl = new URL(request.url).origin;
   return handleMcpRequest(request, {
     tokens: new AgentTokenStore(defaultAgentTokenFile()),
-    makeServer: () => createHandoffMcpServer({ db: getDb(), github: getGitHub(), baseUrl }),
+    makeServer: () => createHandoffMcpServer({ db: getDb(), github: getGitHub(), projects: getProjects(), baseUrl }),
   });
 }
 

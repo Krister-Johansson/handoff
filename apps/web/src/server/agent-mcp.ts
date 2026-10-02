@@ -2,7 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
 import { and, desc, eq, events, listLibraryIndex, nodeExecutions, projects, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
-import type { GitHubPort } from "@handoff/github";
+import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
+import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
 import { projectReadiness } from "./readiness";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
@@ -10,6 +11,7 @@ import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGr
 import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
+import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, setupPlan } from "./shaping";
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
@@ -17,8 +19,11 @@ import { reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
 import { listNotifications } from "./notifications";
 
-/** `actor` is who answers through these tools, recorded on questions and permission requests: claude-code by default. */
-export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; baseUrl: string; actor?: string };
+/**
+ * `actor` is who answers through these tools, recorded on questions and permission requests: claude-code by default.
+ * `projects` reaches the plan on GitHub Projects; without it runs record plan.skipped and shaping tools refuse.
+ */
+export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; projects?: ProjectsPort | undefined; baseUrl: string; actor?: string };
 
 const EVENTS_DEFAULT = 50;
 const EVENTS_MAX = 200;
@@ -26,6 +31,8 @@ const EVENTS_MAX = 200;
 const INSTRUCTIONS = `handoff runs graphs of coding agents on GitHub repositories. A project is a repository; its backlog is the open issues no run works on yet.
 
 To work on issues: list_backlog, then start_run with the issue numbers (the task can stay empty), then get_run to follow the run. Every result links to the dashboard.
+
+A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. Each of these writes asks the person first.
 
 A run may stop to ask a question (a Human gate) or fail. Tell the user what it asks or why it failed. Answer a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
 
@@ -105,11 +112,12 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
 type Handlers = Record<string, (args: never) => Promise<unknown>>;
 
 function handlersFor(deps: HandoffMcpDeps): Handlers {
-  const { db, github, baseUrl } = deps;
+  const { db, github, projects: plan, baseUrl } = deps;
   const actor = deps.actor ?? "claude-code";
   // The dashboard address of a run known only by id, under its project.
   const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
   const url = (href: string) => `${baseUrl}${href}`;
+  const shaping = { db, github, projects: plan };
 
   return {
     list_projects: async () =>
@@ -144,13 +152,13 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     setup_project: async ({ project }: { project: string }) => ({
-      ...(await projectReadiness(db, github, (await findProject(db, project)).id)),
+      ...(await projectReadiness(db, github, (await findProject(db, project)).id, plan)),
       guide: "Follow the handoff-setup skill to fix the items marked todo, one at a time, asking the user before changing their repository.",
     }),
 
     list_backlog: async ({ project, include_started }: { project: string; include_started?: boolean }) => {
       const projectId = (await findProject(db, project)).id;
-      const backlog = await listBacklog(db, github, projectId);
+      const backlog = await listBacklog(db, github, projectId, plan);
       if ("error" in backlog) throw new Error(backlog.error);
       return backlog.issues
         .filter((issue) => include_started || isTodo(issue))
@@ -169,7 +177,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       const graphName = graph ?? detail?.defaultGraph;
       if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Settings tab.`);
       if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
-      const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github);
+      const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github, plan);
       return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };
     },
 
@@ -250,7 +258,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     resolve_loop: async ({ run_id, action }: { run_id: string; action: "retry" | "continue" | "stop" }) => {
-      await resolveExhaustedLoop(db, run_id, action);
+      await resolveExhaustedLoop(db, run_id, action, { projects: plan });
       return { resolved: action, url: await urlOf(run_id) };
     },
 
@@ -308,14 +316,60 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     cancel_run: async ({ run_id, reason }: { run_id: string; reason?: string }) => {
-      await cancelRun(db, run_id, reason ? { reason } : {});
+      await cancelRun(db, run_id, { ...(reason ? { reason } : {}), projects: plan });
       return { cancelled: true, url: await urlOf(run_id) };
     },
 
     run_again: async ({ run_id }: { run_id: string }) => {
-      const run = await runAgain(db, run_id);
+      const run = await runAgain(db, run_id, { projects: plan });
       return { run_id: run.id, status: run.status, url: url(runPath(run.projectId, run.id)) };
     },
+
+    list_plan: async ({ project, epic }: { project: string; epic?: number }) => {
+      const projectId = (await findProject(db, project)).id;
+      const view = await loadPlan(db, github, plan, projectId);
+      if ("error" in view) throw new Error(view.reason === "no-plan" ? `${view.error} Set one up with setup_plan.` : view.error);
+      const item = (i: PlanItem) => ({ number: i.number, kind: i.kind ?? null, title: i.title, status: i.status ?? null, state: i.state, url: i.url });
+      const task = (t: PlanTask) => ({
+        ...item(t),
+        blocked_by: t.blockedBy,
+        run: t.run ? { id: t.run.id, status: t.run.status, url: url(runPath(projectId, t.run.id)) } : null,
+        pr: t.run?.prNumber ?? t.prNumbers[0] ?? null,
+      });
+      const progress = (p: PlanProgress) => `${p.done} of ${p.total} done`;
+      return {
+        project: { number: view.project.number, title: view.project.title, url: view.project.url },
+        epics: view.epics
+          .filter((e) => epic === undefined || e.number === epic)
+          .map((e) => ({
+            ...item(e),
+            progress: progress(e.progress),
+            stories: e.stories.map((s) => ({ ...item(s), progress: progress(s.progress), tasks: s.tasks.map(task) })),
+            tasks: e.tasks.map(task),
+          })),
+        unparented: epic === undefined ? view.unparented.map((t) => ({ ...task(t), parent: t.parent ?? null })) : [],
+        unplanned: epic === undefined ? view.unplanned.map((i) => ({ number: i.number, title: i.title, url: i.url })) : [],
+      };
+    },
+
+    list_github_projects: async ({ project }: { project: string }) => listGitHubProjects(shaping, (await findProject(db, project)).id),
+
+    setup_plan: async ({ project, use }: { project: string; use?: number }) => setupPlan(shaping, (await findProject(db, project)).id, use !== undefined ? { use } : {}),
+
+    create_epic: async ({ project, title, goal }: { project: string; title: string; goal: string }) => createEpic(shaping, (await findProject(db, project)).id, { title, goal }),
+
+    create_story: async ({ project, ...input }: { project: string; epic: number; title: string; acceptance: string[] }) =>
+      createStory(shaping, (await findProject(db, project)).id, input),
+
+    create_task: async ({ project, blocked_by, ...input }: { project: string; story: number; title: string; brief: string; acceptance?: string[]; blocked_by?: number[] }) =>
+      createTask(shaping, (await findProject(db, project)).id, { ...input, ...(blocked_by ? { blockedBy: blocked_by } : {}) }),
+
+    move_to_ready: async ({ project, issues }: { project: string; issues: number[] }) => moveToReady(shaping, (await findProject(db, project)).id, issues),
+
+    move_to_shaping: async ({ project, issues }: { project: string; issues: number[] }) => moveToShaping(shaping, (await findProject(db, project)).id, issues),
+
+    plan_issue: async ({ project, issue, story }: { project: string; issue: number; story?: number }) =>
+      planIssue(shaping, (await findProject(db, project)).id, { issue, ...(story !== undefined ? { story } : {}) }),
 
     list_library: async () => {
       const { skills, mcp, agents, groups } = await listLibraryIndex(db);

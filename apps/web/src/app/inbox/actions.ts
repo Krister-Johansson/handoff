@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, resolveExhaustedLoop, restartTryIt } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
+import { getProjects } from "@/lib/github";
 import { runPathOf } from "@/server/run-path";
 import { markViewed } from "@/server/review";
 import { allowToolForNode } from "@/server/allow-tool";
@@ -47,7 +48,7 @@ export async function repairAction(_: InboxActionState, form: FormData): Promise
 
 export async function cancelAction(_: InboxActionState, form: FormData): Promise<InboxActionState> {
   try {
-    await cancelRun(getDb(), field(form, "runId"), { reason: "cancelled from the dashboard" });
+    await cancelRun(getDb(), field(form, "runId"), { reason: "cancelled from the dashboard", projects: getProjects() });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
@@ -106,7 +107,7 @@ export async function resolveLoopAction(input: z.input<typeof ResolveLoopSchema>
   const parsed = ResolveLoopSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That decision cannot be sent." };
   try {
-    await resolveExhaustedLoop(getDb(), parsed.data.runId, parsed.data.action);
+    await resolveExhaustedLoop(getDb(), parsed.data.runId, parsed.data.action, { projects: getProjects() });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

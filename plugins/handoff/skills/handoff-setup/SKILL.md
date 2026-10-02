@@ -87,6 +87,17 @@ When issues build on each other, add a line such as `Depends on: #12` to the lat
 
 CI results and reviews wake a waiting run at once when webhooks reach handoff. Without them, runs notice on their next check, every few minutes. While runs are active, keep `pnpm dev:webhooks <owner>/<repo>` running in the handoff checkout, or install handoff's GitHub App.
 
+### A plan on GitHub Projects
+
+A plan is optional. It holds epics, stories and tasks on a GitHub Project of the user's, and only tasks in Ready reach the backlog. `setup_plan` creates:
+
+- the labels `epic`, `story` and `task` on the repository;
+- a GitHub Project owned by the user, named after the project, with the Status columns Shaping, Ready, Running, In review and Done, linked to the repository.
+
+Call `list_github_projects` first and ask the user whether to use one of their existing Projects instead (`setup_plan` with `use`). Using one renames Status options that already match apart from case or emoji, adds the missing ones, and keeps every other option. Running `setup_plan` again creates nothing new: it adds labels someone removed and reports Status options the Project lacks.
+
+The plan needs the dashboard's `GITHUB_TOKEN` to be a classic token with the `project` scope. Run `gh auth refresh -s project`, then set `GITHUB_TOKEN=$(gh auth token)` in handoff's `.env` and restart the dashboard and the worker. A GitHub App cannot reach a Project owned by a user, and a fine-grained token cannot either.
+
 ## 3. After the setup
 
 Run `setup_project` again and tell the user what is in place and what is left. Then the normal flow applies (see the `handoff` skill): plan the work as issues, `start_run`, and follow it with `get_run`.

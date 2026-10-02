@@ -283,6 +283,22 @@ export type AddPlanBlockerMutationVariables = Exact<{
 
 export type AddPlanBlockerMutation = { addBlockedBy: { issue: { id: string } | null } | null };
 
+export type AddPlanLabelsMutationVariables = Exact<{
+  labelableId: string | number;
+  labelIds: Array<string | number> | string | number;
+}>;
+
+
+export type AddPlanLabelsMutation = { addLabelsToLabelable: { clientMutationId: string | null } | null };
+
+export type AddPlanSubIssueMutationVariables = Exact<{
+  issueId: string | number;
+  subIssueId: string | number;
+}>;
+
+
+export type AddPlanSubIssueMutation = { addSubIssue: { issue: { id: string } | null } | null };
+
 export type CreatePlanLabelMutationVariables = Exact<{
   repositoryId: string | number;
   name: string;
@@ -319,6 +335,47 @@ export type PlanOwnerIdsQueryVariables = Exact<{
 
 
 export type PlanOwnerIdsQuery = { user: { id: string } | null, repository: { id: string } | null };
+
+export type PlanProjectChoiceFragment = { id: string, number: number, title: string, url: string, closed: boolean, field:
+    | { __typename: 'ProjectV2Field' }
+    | { __typename: 'ProjectV2IterationField' }
+    | { __typename: 'ProjectV2MultiSelectField' }
+    | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+   | null, repositories: { nodes: Array<{ id: string, name: string, owner:
+        | { login: string }
+        | { login: string }
+       } | null> | null } };
+
+export type PlanProjectsQueryVariables = Exact<{
+  login: string;
+}>;
+
+
+export type PlanProjectsQuery = { user: { projectsV2: { nodes: Array<{ id: string, number: number, title: string, url: string, closed: boolean, field:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+         | null, repositories: { nodes: Array<{ id: string, name: string, owner:
+              | { login: string }
+              | { login: string }
+             } | null> | null } } | null> | null } } | null };
+
+export type PlanProjectSetupQueryVariables = Exact<{
+  login: string;
+  number: number;
+}>;
+
+
+export type PlanProjectSetupQuery = { user: { projectV2: { id: string, number: number, title: string, url: string, closed: boolean, field:
+        | { __typename: 'ProjectV2Field' }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+       | null, repositories: { nodes: Array<{ id: string, name: string, owner:
+            | { login: string }
+            | { login: string }
+           } | null> | null } } | null } | null };
 
 export type PlanProjectQueryVariables = Exact<{
   login: string;
@@ -420,6 +477,36 @@ export const IssueAncestorsFragmentDoc = new TypedDocumentString(`
   }
 }
     `, {"fragmentName":"IssueAncestors"}) as unknown as TypedDocumentString<IssueAncestorsFragment, unknown>;
+export const PlanProjectChoiceFragmentDoc = new TypedDocumentString(`
+    fragment PlanProjectChoice on ProjectV2 {
+  id
+  number
+  title
+  url
+  closed
+  field(name: "Status") {
+    __typename
+    ... on ProjectV2SingleSelectField {
+      id
+      options {
+        id
+        name
+        color
+        description
+      }
+    }
+  }
+  repositories(first: 50) {
+    nodes {
+      id
+      name
+      owner {
+        login
+      }
+    }
+  }
+}
+    `, {"fragmentName":"PlanProjectChoice"}) as unknown as TypedDocumentString<PlanProjectChoiceFragment, unknown>;
 export const IssueParentsDocument = new TypedDocumentString(`
     query IssueParents($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -732,6 +819,22 @@ export const AddPlanBlockerDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<AddPlanBlockerMutation, AddPlanBlockerMutationVariables>;
+export const AddPlanLabelsDocument = new TypedDocumentString(`
+    mutation AddPlanLabels($labelableId: ID!, $labelIds: [ID!]!) {
+  addLabelsToLabelable(input: { labelableId: $labelableId, labelIds: $labelIds }) {
+    clientMutationId
+  }
+}
+    `) as unknown as TypedDocumentString<AddPlanLabelsMutation, AddPlanLabelsMutationVariables>;
+export const AddPlanSubIssueDocument = new TypedDocumentString(`
+    mutation AddPlanSubIssue($issueId: ID!, $subIssueId: ID!) {
+  addSubIssue(input: { issueId: $issueId, subIssueId: $subIssueId }) {
+    issue {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<AddPlanSubIssueMutation, AddPlanSubIssueMutationVariables>;
 export const CreatePlanLabelDocument = new TypedDocumentString(`
     mutation CreatePlanLabel($repositoryId: ID!, $name: String!, $color: String!, $description: String!) {
   createLabel(
@@ -783,6 +886,80 @@ export const PlanOwnerIdsDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<PlanOwnerIdsQuery, PlanOwnerIdsQueryVariables>;
+export const PlanProjectsDocument = new TypedDocumentString(`
+    query PlanProjects($login: String!) {
+  user(login: $login) {
+    projectsV2(first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
+      nodes {
+        ...PlanProjectChoice
+      }
+    }
+  }
+}
+    fragment PlanProjectChoice on ProjectV2 {
+  id
+  number
+  title
+  url
+  closed
+  field(name: "Status") {
+    __typename
+    ... on ProjectV2SingleSelectField {
+      id
+      options {
+        id
+        name
+        color
+        description
+      }
+    }
+  }
+  repositories(first: 50) {
+    nodes {
+      id
+      name
+      owner {
+        login
+      }
+    }
+  }
+}`) as unknown as TypedDocumentString<PlanProjectsQuery, PlanProjectsQueryVariables>;
+export const PlanProjectSetupDocument = new TypedDocumentString(`
+    query PlanProjectSetup($login: String!, $number: Int!) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      ...PlanProjectChoice
+    }
+  }
+}
+    fragment PlanProjectChoice on ProjectV2 {
+  id
+  number
+  title
+  url
+  closed
+  field(name: "Status") {
+    __typename
+    ... on ProjectV2SingleSelectField {
+      id
+      options {
+        id
+        name
+        color
+        description
+      }
+    }
+  }
+  repositories(first: 50) {
+    nodes {
+      id
+      name
+      owner {
+        login
+      }
+    }
+  }
+}`) as unknown as TypedDocumentString<PlanProjectSetupQuery, PlanProjectSetupQueryVariables>;
 export const PlanProjectDocument = new TypedDocumentString(`
     query PlanProject($login: String!, $number: Int!) {
   user(login: $login) {

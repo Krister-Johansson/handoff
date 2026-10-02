@@ -62,6 +62,20 @@ mutation AddPlanBlocker($issueId: ID!, $blockingIssueId: ID!) {
   }
 }
 
+mutation AddPlanLabels($labelableId: ID!, $labelIds: [ID!]!) {
+  addLabelsToLabelable(input: { labelableId: $labelableId, labelIds: $labelIds }) {
+    clientMutationId
+  }
+}
+
+mutation AddPlanSubIssue($issueId: ID!, $subIssueId: ID!) {
+  addSubIssue(input: { issueId: $issueId, subIssueId: $subIssueId }) {
+    issue {
+      id
+    }
+  }
+}
+
 mutation CreatePlanLabel($repositoryId: ID!, $name: String!, $color: String!, $description: String!) {
   createLabel(input: { repositoryId: $repositoryId, name: $name, color: $color, description: $description }) {
     label {

@@ -17,7 +17,7 @@ import { ArchivePullButton, PullFilters } from "@/components/pulls/pull-filters"
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { getDb } from "@/lib/db";
-import { getGitHub } from "@/lib/github";
+import { getGitHub, getProjects } from "@/lib/github";
 import { parseBacklogFilter, parseProjectTab } from "@/lib/project-tab";
 import { parsePullFilter } from "@/lib/pull-filter";
 import { cn } from "@/lib/utils";
@@ -83,7 +83,7 @@ async function PullsTab({ projectId, repoUrl, filter }: { projectId: string; rep
 }
 
 async function IssuesTab({ project, graphs, graphName, filter }: { project: Detail["project"]; graphs: string[]; graphName: string | undefined; filter: BacklogFilter }) {
-  const backlog = await listBacklogOnce(project.id, getGitHub(), getDb());
+  const backlog = await listBacklogOnce(project.id, getGitHub(), getDb(), getProjects());
   if ("error" in backlog || !graphName) {
     return (
       <SectionCard title={BACKLOG_TITLE} description={BACKLOG_DESCRIPTION}>
@@ -175,7 +175,7 @@ async function DefaultLibraryCard({ project }: { project: Detail["project"] }) {
 
 /** The number of issues still to do, for the Issues tab, as its To do filter counts them; nothing when GitHub cannot be asked. */
 async function IssueCount({ projectId }: { projectId: string }) {
-  const backlog = await listBacklogOnce(projectId, getGitHub(), getDb());
+  const backlog = await listBacklogOnce(projectId, getGitHub(), getDb(), getProjects());
   return "error" in backlog ? null : <Count n={backlog.counts.todo} />;
 }
 

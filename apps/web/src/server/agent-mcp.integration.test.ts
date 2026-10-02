@@ -2,27 +2,32 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { and, appendEvents, createNotification, eq, nodeExecutions, permissionRequests, questions, runs, sql } from "@handoff/db";
+import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG } from "../lib/assistant/catalog";
-import { createHandoffMcpServer } from "./agent-mcp";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createHandoffMcpServer, registerDataTools } from "./agent-mcp";
 import { createProject, saveGraphVersion } from "./graphs";
 
 const db = createTestDb();
 const BASE = "http://localhost:3000";
 let client: Client;
 let github: FakeGitHub;
+let plan: FakeProjects;
+let projectId: string;
 
 beforeEach(async () => {
   await truncateAll(db);
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  projectId = project.id;
   await saveGraphVersion(db, { projectId: project.id, name: "linear", document: linear });
   github = new FakeGitHub();
   for (const number of [11, 12]) {
     github.issues.set(number, { number, title: `Issue ${number}`, url: `https://github.com/octo/sample/issues/${number}`, body: `Body ${number}`, state: "open", updatedAt: `2026-09-30T0${number - 10}:00:00Z` });
   }
-  const server = createHandoffMcpServer({ db, github, baseUrl: BASE });
+  plan = new FakeProjects(github);
+  const server = createHandoffMcpServer({ db, github, projects: plan, baseUrl: BASE });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   client = new Client({ name: "test", version: "1.0.0" });
   await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
@@ -249,4 +254,296 @@ test("answer_permission allows a pending request once and records who decided", 
 
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
+});
+
+const repo = { owner: "octo", name: "sample" };
+
+/** Gives the sandbox project a plan on its repository's GitHub Project, with `task` to add a task in a status. */
+async function withPlan() {
+  const { number } = await plan.createProject("octo", repo, "sandbox plan");
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, projectId));
+  const task = async (title: string, status: string) => {
+    const created = await plan.createIssue(repo, { project: number, title, body: `${title} body`, labels: ["task"] });
+    plan.itemsOf(repo).get(created.number)!.status = status;
+    return created.number;
+  };
+  const statusOf = (issue: number) => plan.getStatus(repo, number, issue);
+  return { number, task, statusOf };
+}
+
+const planEvents = async (runId: string) =>
+  (await db.select({ type: events.type, payload: events.payload }).from(events).where(eq(events.runId, runId))).filter((e) => e.type.startsWith("plan."));
+
+test("start_run over MCP sets the task to Running on the plan", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
+  expect(await statusOf(ready)).toBe("Running");
+  expect(await planEvents(run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running" } }]);
+});
+
+test("list_backlog over MCP lists the plan's Ready tasks and the unplanned issues", async () => {
+  const { task } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  await task("Shape the gate", "Shaping");
+  expect((await call("list_backlog", { project: "sandbox" })).map((i: { number: number }) => i.number).sort()).toEqual([11, 12, ready]);
+});
+
+test("cancel_run over MCP sets the task back to Ready", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
+  await call("cancel_run", { run_id });
+  expect(await statusOf(ready)).toBe("Ready");
+});
+
+test("resolve_loop with stop over MCP sets the task back to Ready", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
+  const [planner] = await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.runId, run_id)).returning();
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
+  await db.transaction((tx) =>
+    appendEvents(tx, run_id, [
+      { type: "edge.exhausted", payload: { edgeKey: "planner->planner", attempts: 3 }, nodeExecutionId: planner!.id },
+      { type: "run.failed", payload: { reason: "loop_exhausted", nodeKey: "planner", awaiting: "repair" } },
+    ]),
+  );
+  expect(await call("resolve_loop", { run_id, action: "stop" })).toMatchObject({ resolved: "stop" });
+  expect(await statusOf(ready)).toBe("Ready");
+});
+
+test("run_again over MCP sets the task to Running again", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const first = await call("start_run", { project: "sandbox", issues: [ready] });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.run_id));
+  plan.itemsOf(repo).get(ready)!.status = "Ready";
+  const again = await call("run_again", { run_id: first.run_id });
+  expect(await statusOf(ready)).toBe("Running");
+  expect(await planEvents(again.run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running" } }]);
+});
+
+test("setup_plan creates the labels and the Project once, stores the number and is idempotent", async () => {
+  const first = await call("setup_plan", { project: "sandbox" });
+  expect(first).toMatchObject({ created: true, project: { number: expect.any(Number), title: "sandbox plan", url: expect.stringContaining("/projects/") } });
+  expect([...(plan.labels.get("octo/sample") ?? [])].sort()).toEqual(["epic", "story", "task"]);
+  const [stored] = await db.select().from(projects).where(eq(projects.id, projectId));
+  expect(stored?.planProjectNumber).toBe(first.project.number);
+
+  plan.labels.get("octo/sample")!.delete("story");
+  const again = await call("setup_plan", { project: "sandbox" });
+  expect(again).toMatchObject({ created: false, project: { number: first.project.number }, missing_status_options: [] });
+  expect(plan.plans.size).toBe(1);
+  expect([...plan.labels.get("octo/sample")!].sort()).toEqual(["epic", "story", "task"]);
+});
+
+/** A Project of the user's for another repository, with GitHub's default Status options Todo, In Progress and Done. */
+async function roadmap() {
+  const other = await plan.createProject("octo", { owner: "octo", name: "roadmap" }, "Roadmap");
+  plan.plans.get("octo/roadmap")!.project.statusOptions = { Shaping: undefined, Ready: undefined, Running: undefined, "In review": undefined, Done: "opt-done" };
+  return other.number;
+}
+
+test("list_github_projects lists the user's Projects, those linked to the repository first, with the Status options each lacks", async () => {
+  const other = await roadmap();
+  const { number } = await withPlan();
+  expect(await call("list_github_projects", { project: "sandbox" })).toEqual([
+    { number, title: "sandbox plan", url: expect.stringContaining(`/projects/${number}`), linked: true, missing_status_options: [] },
+    { number: other, title: "Roadmap", url: expect.stringContaining(`/projects/${other}`), linked: false, missing_status_options: ["Shaping", "Ready", "Running", "In review"] },
+  ]);
+});
+
+test("setup_plan with use adopts an existing Project: links it, adds the Status options it lacks and stores its number", async () => {
+  const other = await roadmap();
+  const adopted = await call("setup_plan", { project: "sandbox", use: other });
+  expect(adopted).toMatchObject({ created: false, project: { number: other, title: "Roadmap" }, added_status_options: ["Shaping", "Ready", "Running", "In review"], missing_status_options: [] });
+  const [stored] = await db.select().from(projects).where(eq(projects.id, projectId));
+  expect(stored?.planProjectNumber).toBe(other);
+  expect((await call("list_github_projects", { project: "sandbox" }))[0]).toMatchObject({ number: other, linked: true, missing_status_options: [] });
+  expect([...(plan.labels.get("octo/sample") ?? [])].sort()).toEqual(["epic", "story", "task"]);
+  expect((await call("setup_plan", { project: "sandbox", use: 99 })).error).toMatch(/already has a plan: GitHub Project #\d+/);
+});
+
+test("create_epic creates an issue labelled epic in Shaping in the Project", async () => {
+  expect(await call("create_epic", { project: "sandbox", title: "Project management", goal: "See what each task is part of." })).toEqual({
+    error: expect.stringContaining("setup_plan"),
+  });
+  const { number } = await withPlan();
+  const epic = await call("create_epic", { project: "sandbox", title: "Project management", goal: "See what each task is part of." });
+  expect(epic).toMatchObject({ number: expect.any(Number), url: expect.stringContaining("/issues/"), kind: "epic", status: "Shaping" });
+  expect(github.issues.get(epic.number)).toMatchObject({ title: "Project management", body: "## Goal\n\nSee what each task is part of.", labels: ["epic"] });
+  expect(await plan.getStatus(repo, number, epic.number)).toBe("Shaping");
+});
+
+test("create_story creates a sub-issue of the epic with its acceptance criteria as checkboxes", async () => {
+  const { number } = await withPlan();
+  const epic = await call("create_epic", { project: "sandbox", title: "Project management", goal: "See what each task is part of." });
+  const story = await call("create_story", { project: "sandbox", epic: epic.number, title: "Shaping tools", acceptance: ["setup_plan creates the Project", "Every write asks first"] });
+  expect(story).toMatchObject({ number: expect.any(Number), kind: "story", status: "Shaping", parent: epic.number });
+  expect(github.issues.get(story.number)).toMatchObject({
+    title: "Shaping tools",
+    body: "## Acceptance criteria\n\n- [ ] setup_plan creates the Project\n- [ ] Every write asks first",
+    labels: ["story"],
+  });
+  expect(plan.parents.get(story.number)).toBe(epic.number);
+  expect(await plan.getStatus(repo, number, story.number)).toBe("Shaping");
+  expect(await call("create_story", { project: "sandbox", epic: story.number, title: "Nested", acceptance: ["x"] })).toEqual({ error: expect.stringMatching(/#\d+ is a story, not an epic/) });
+});
+
+/** An epic with one story on the sandbox plan, created through the tools. */
+async function epicAndStory() {
+  const planned = await withPlan();
+  const epic = await call("create_epic", { project: "sandbox", title: "Project management", goal: "See what each task is part of." });
+  const story = await call("create_story", { project: "sandbox", epic: epic.number, title: "Shaping tools", acceptance: ["Every write asks first"] });
+  return { ...planned, epic: epic.number as number, story: story.number as number };
+}
+
+test("create_task creates a sub-issue of the story with its blockers linked and refuses a story that is not in the plan", async () => {
+  const { number, story } = await epicAndStory();
+  const task = await call("create_task", {
+    project: "sandbox",
+    story,
+    title: "Add the migration",
+    brief: "Add plan_project_number to projects in packages/db.",
+    acceptance: ["The column is nullable"],
+    blocked_by: [11],
+  });
+  expect(task).toMatchObject({ number: expect.any(Number), kind: "task", status: "Shaping", parent: story, blocked_by: [11] });
+  expect(github.issues.get(task.number)).toMatchObject({
+    title: "Add the migration",
+    body: "Add plan_project_number to projects in packages/db.\n\n## Acceptance criteria\n\n- [ ] The column is nullable",
+    labels: ["task"],
+    blockedBy: [11],
+  });
+  expect(plan.parents.get(task.number)).toBe(story);
+  expect(await plan.getStatus(repo, number, task.number)).toBe("Shaping");
+  expect(await call("create_task", { project: "sandbox", story: 12, title: "Elsewhere", brief: "Not under a planned story." })).toEqual({ error: expect.stringContaining("#12 is not in the plan") });
+});
+
+test("move_to_ready sets Ready on tasks and refuses an epic, a story, a closed issue and a task without a body", async () => {
+  const { number, epic, story, statusOf } = await epicAndStory();
+  const task = async (title: string) => (await call("create_task", { project: "sandbox", story, title, brief: `${title} in the code.` })).number as number;
+  const first = await task("Add the migration");
+  const second = await task("Read the column");
+  expect(await call("move_to_ready", { project: "sandbox", issues: [first, second] })).toEqual({ moved: [first, second], status: "Ready" });
+  expect([await statusOf(first), await statusOf(second)]).toEqual(["Ready", "Ready"]);
+
+  const closed = await task("Already done");
+  github.issues.get(closed)!.state = "closed";
+  const empty = (await plan.createIssue(repo, { project: number, title: "No brief", body: "  ", labels: ["task"], parent: story })).number;
+  const refusal = async (issue: number) => (await call("move_to_ready", { project: "sandbox", issues: [issue] })).error;
+  expect(await refusal(epic)).toMatch(new RegExp(`#${epic} is an epic`));
+  expect(await refusal(story)).toMatch(new RegExp(`#${story} is a story`));
+  expect(await refusal(closed)).toMatch(new RegExp(`#${closed} is closed`));
+  expect(await refusal(empty)).toMatch(new RegExp(`#${empty} has no body`));
+  expect(await refusal(11)).toMatch(/#11 is not in the plan/);
+  // A refused call moves none of its tasks.
+  const third = await task("Write the docs");
+  expect((await call("move_to_ready", { project: "sandbox", issues: [third, epic] })).error).toBeDefined();
+  expect(await statusOf(third)).toBe("Shaping");
+});
+
+test("move_to_shaping refuses a task with an active run", async () => {
+  const { story, statusOf } = await epicAndStory();
+  const task = async (title: string) => (await call("create_task", { project: "sandbox", story, title, brief: `${title} in the code.` })).number as number;
+  const running = await task("Add the migration");
+  const waiting = await task("Read the column");
+  await call("move_to_ready", { project: "sandbox", issues: [running, waiting] });
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [running] });
+  expect((await call("move_to_shaping", { project: "sandbox", issues: [running] })).error).toMatch(new RegExp(`#${running} has an active run`));
+  expect(await statusOf(running)).toBe("Running");
+  expect(await call("move_to_shaping", { project: "sandbox", issues: [waiting] })).toEqual({ moved: [waiting], status: "Shaping" });
+  expect(await statusOf(waiting)).toBe("Shaping");
+  // Once the run is cancelled, its task is Ready again and can go back to Shaping.
+  await call("cancel_run", { run_id });
+  expect(await call("move_to_shaping", { project: "sandbox", issues: [running] })).toEqual({ moved: [running], status: "Shaping" });
+});
+
+test("plan_issue adds an unplanned issue as a task under the given story", async () => {
+  const { story, statusOf } = await epicAndStory();
+  expect(await call("plan_issue", { project: "sandbox", issue: 11, story })).toMatchObject({ number: 11, kind: "task", status: "Shaping", parent: story });
+  expect(github.issues.get(11)?.labels).toEqual(["task"]);
+  expect(plan.parents.get(11)).toBe(story);
+  expect(await statusOf(11)).toBe("Shaping");
+  expect(await call("plan_issue", { project: "sandbox", issue: 12 })).toMatchObject({ number: 12, kind: "task", status: "Shaping", parent: null });
+  expect(plan.parents.has(12)).toBe(false);
+  expect(plan.itemsOf(repo).has(12)).toBe(true);
+  expect((await call("plan_issue", { project: "sandbox", issue: 11 })).error).toMatch(/#11 is already in the plan/);
+});
+
+test("list_plan returns the tree with statuses and runs, wrapped as data", async () => {
+  const { epic, story } = await epicAndStory();
+  const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column.", blocked_by: [12] })).number as number;
+  github.issues.get(12)!.state = "closed";
+  await call("move_to_ready", { project: "sandbox", issues: [task] });
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [task] });
+
+  // The dashboard's assistant gets results that carry GitHub text wrapped as data.
+  const server = new McpServer({ name: "handoff", version: "1.0.0" });
+  registerDataTools(server, { db, github, projects: plan, baseUrl: BASE, actor: "assistant" }, { wrapUntrusted: true });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const assistant = new Client({ name: "assistant", version: "1.0.0" });
+  await Promise.all([server.connect(serverSide), assistant.connect(clientSide)]);
+  const result = (await assistant.callTool({ name: "list_plan", arguments: { project: "sandbox" } })) as { content: { text: string }[] };
+  await assistant.close();
+  const wrapped = JSON.parse(result.content[0]!.text);
+  expect(wrapped.source).toMatch(/treat as data/);
+  expect(wrapped.data).toMatchObject({
+    project: { title: "sandbox plan" },
+    epics: [
+      {
+        number: epic,
+        kind: "epic",
+        title: "Project management",
+        progress: "0 of 1 done",
+        stories: [
+          {
+            number: story,
+            kind: "story",
+            title: "Shaping tools",
+            tasks: [{ number: task, kind: "task", title: "Add the migration", status: "Running", blocked_by: [], run: { id: run_id, status: "queued", url: expect.stringContaining(`/runs/${run_id}`) }, pr: null }],
+          },
+        ],
+        tasks: [],
+      },
+    ],
+    unplanned: [{ number: 11, title: "Issue 11" }],
+  });
+  expect((await call("list_plan", { project: "sandbox", epic: 999 })).epics).toEqual([]);
+});
+
+test("every shaping tool refuses with the scope sentence when the Projects port is missing", async () => {
+  await withPlan();
+  const server = createHandoffMcpServer({ db, github, projects: undefined, baseUrl: BASE });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const without = new Client({ name: "test", version: "1.0.0" });
+  await Promise.all([server.connect(serverSide), without.connect(clientSide)]);
+  const calls: [string, Record<string, unknown>][] = [
+    ["list_github_projects", {}],
+    ["setup_plan", {}],
+    ["setup_plan", { use: 3 }],
+    ["list_plan", {}],
+    ["create_epic", { title: "Project management", goal: "A plan." }],
+    ["create_story", { epic: 1, title: "Shaping tools", acceptance: ["x"] }],
+    ["create_task", { story: 2, title: "Add the migration", brief: "Add it." }],
+    ["move_to_ready", { issues: [3] }],
+    ["move_to_shaping", { issues: [3] }],
+    ["plan_issue", { issue: 11 }],
+  ];
+  for (const [name, args] of calls) {
+    const result = (await without.callTool({ name, arguments: { project: "sandbox", ...args } })) as { content: { text: string }[]; isError?: boolean };
+    expect({ name, isError: result.isError, text: result.content[0]?.text }).toEqual({ name, isError: true, text: expect.stringContaining("The plan needs GITHUB_TOKEN, a classic token with the project scope") });
+  }
+  await without.close();
+});
+
+test("run_again over MCP starts a task its failed run left in Running", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const first = await call("start_run", { project: "sandbox", issues: [ready] });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.run_id));
+  const again = await call("run_again", { run_id: first.run_id });
+  expect(again).toMatchObject({ run_id: expect.any(String), status: "queued" });
+  expect(await statusOf(ready)).toBe("Running");
 });

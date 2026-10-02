@@ -2,7 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { eq, projects, registerWorker, webhookDeliveries } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion } from "./graphs";
 import { projectReadiness } from "./readiness";
 
@@ -33,6 +33,7 @@ test("a fresh project says what it still needs, and how to fix each thing", asyn
     acceptance: "todo",
     dependencies: "info",
     webhooks: "info",
+    plan: "info",
   });
   const launchCheck = readiness.checks.find((c) => c.id === "launch")!;
   expect(launchCheck.fix).toContain(".claude/launch.json");
@@ -63,9 +64,30 @@ test("a project set up for handoff is ready, and says what it found", async () =
     acceptance: "ok",
     dependencies: "ok",
     webhooks: "ok",
+    plan: "info",
   });
   expect(readiness.checks.find((c) => c.id === "launch")!.detail).toContain("web");
   expect(readiness.checks.find((c) => c.id === "acceptance")!.detail).toContain("2 of 2");
+});
+
+test("the plan check is info without a plan, ok with one, and todo when the token cannot reach it", async () => {
+  const project = await createProject(db, { name: "sample", repo: "octo/sample", defaultBranch: "main" });
+  const github = new FakeGitHub();
+  const plan = new FakeProjects(github);
+  const planCheck = async (port: FakeProjects | undefined) => (await projectReadiness(db, github, project.id, port)).checks.find((c) => c.id === "plan")!;
+
+  expect(await planCheck(plan)).toMatchObject({ status: "info", required: false, fix: expect.stringContaining("setup_plan") });
+
+  const { number, url } = await plan.createProject("octo", { owner: "octo", name: "sample" }, "sample plan");
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
+  expect(await planCheck(plan)).toMatchObject({ status: "ok", detail: expect.stringContaining(url) });
+
+  expect(await planCheck(undefined)).toMatchObject({ status: "todo", fix: expect.stringContaining("gh auth refresh -s project") });
+  plan.scopesAnswer = { project: false, classic: true };
+  expect(await planCheck(plan)).toMatchObject({ status: "todo", detail: expect.stringContaining("lacks the project scope") });
+  plan.scopesAnswer = { project: true, classic: true };
+  await db.update(projects).set({ planProjectNumber: number + 10 }).where(eq(projects.id, project.id));
+  expect(await planCheck(plan)).toMatchObject({ status: "todo", detail: expect.stringContaining(`#${number + 10}`) });
 });
 
 test("a launch file that does not parse says why", async () => {
