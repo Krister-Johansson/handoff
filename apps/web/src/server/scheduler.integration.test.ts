@@ -165,6 +165,39 @@ test("a paused scheduler says where a person paused it from", async () => {
   expect((await loadSchedulerCard(db, projectId)).pausedFrom).toBeNull();
 });
 
+test("Next up comes from the plan the page read while the last check has none", async () => {
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  const number = [...plan.plans.values()][0]!.project.number;
+  const ready = async (title: string, labels = ["task"]) => {
+    const created = await plan.createIssue(repo, { project: number, title, body: "", labels });
+    plan.itemsOf(repo).get(created.number)!.status = "Ready";
+    return created.number;
+  };
+  const first = await ready("First");
+  const human = await ready("Screen reader pass", ["task", "human"]);
+  const cancelled = await taskWithRun("cancelled");
+  const second = await ready("Second");
+  const items = await plan.listItems("octo", number, repo);
+
+  // Turned on and not checked yet: the card runs the scheduler's own choice on the plan.
+  const fresh = await loadSchedulerCard(db, projectId, { items, priorityOptions: undefined });
+  expect(fresh.next).toEqual([
+    { number: first, title: "First" },
+    { number: second, title: "Second" },
+  ]);
+  expect(fresh.skipped).toEqual([
+    { number: human, title: "Screen reader pass", reason: "labelled human" },
+    { number: cancelled.issue, title: "Add the migration", reason: "cancelled run; start it by hand", releasable: true },
+  ]);
+
+  // Once a check found candidates, the card shows what the check found.
+  await db.update(projectSchedulers).set({ lastResult: { state: "full", candidates: [{ number: second, title: "Second" }], skipped: [] } }).where(eq(projectSchedulers.projectId, projectId));
+  expect((await loadSchedulerCard(db, projectId, { items, priorityOptions: undefined })).next).toEqual([{ number: second, title: "Second" }]);
+  // Off, nothing is next.
+  await stopScheduler(db, projectId, "dashboard");
+  expect((await loadSchedulerCard(db, projectId, { items, priorityOptions: undefined })).next).toEqual([]);
+});
+
 test("only a task whose latest run was cancelled can be let to the scheduler", async () => {
   await startScheduler(deps(), projectId, {}, "dashboard");
   const failed = await taskWithRun("failed");

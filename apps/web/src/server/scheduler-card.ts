@@ -1,4 +1,6 @@
 import { and, desc, eq, inArray, runs, schedulerEvents, type Db } from "@handoff/db";
+import { candidates, issueRuns, releasedRuns, type Candidate, type Skipped } from "@handoff/engine/backlog-scheduler";
+import type { PlanItem } from "@handoff/github";
 import { runPath } from "../lib/paths";
 import { describeSchedulerEvent } from "../lib/scheduler-text";
 import type { StatusTone } from "../lib/status";
@@ -34,7 +36,16 @@ export type SchedulerCard = {
   events: SchedulerEventView[];
   /** Where a person paused the scheduler from (dashboard, claude-code, ...); null unless a person paused it. */
   pausedFrom: string | null;
+  /** The first three tasks it starts next, from the last check, or from the plan while the check has none. */
+  next: Candidate[];
+  skipped: SkippedView[];
 };
+
+/** A skipped Ready task; `releasable` when a person cancelled its run and can let the scheduler take it again. */
+export type SkippedView = Skipped & { releasable?: true };
+
+/** The plan as the page read it, for Next up while the last check has none. */
+export type PlanRead = { items: PlanItem[]; priorityOptions: string[] | undefined };
 
 /** How many events the All events sheet shows. */
 const EVENTS = 50;
@@ -80,15 +91,42 @@ async function pausedFrom(db: Db, projectId: string, status: SchedulerStatus): P
   return typeof event?.payload.by === "string" ? event.payload.by : null;
 }
 
-/** The project's scheduler for the dashboard: its status with the runs and holds named, its events as sentences and who paused it. */
-export async function loadSchedulerCard(db: Db, projectId: string): Promise<SchedulerCard> {
+/**
+ * What the scheduler starts next and what it skips. A check that is held, full or waits on a run
+ * still planning reads no plan and keeps no candidates, and neither does a scheduler not checked yet;
+ * then the plan the page already read gives them, through the scheduler's own choice.
+ */
+async function nextUp(db: Db, projectId: string, status: SchedulerStatus, plan: PlanRead | undefined): Promise<{ next: Candidate[]; skipped: SkippedView[] }> {
+  if (status.state === "off" || !status.settings) return { next: [], skipped: [] };
+  const [byIssue, released] = await Promise.all([issueRuns(db, projectId), releasedRuns(db, projectId)]);
+  const fromPlan =
+    status.next.length === 0 && plan
+      ? candidates(plan.items, byIssue, { order: status.settings.order, priorityOptions: plan.priorityOptions, skipLabel: status.settings.skipLabel, released })
+      : undefined;
+  const skipped = fromPlan?.skipped ?? status.skipped;
+  const releasable = (s: Skipped) => {
+    const run = byIssue.get(s.number);
+    return run?.status === "cancelled" && !released.has(run.id);
+  };
+  return {
+    next: fromPlan ? fromPlan.candidates.slice(0, 3) : status.next,
+    skipped: skipped.map((s) => (releasable(s) ? { ...s, releasable: true as const } : s)),
+  };
+}
+
+/**
+ * The project's scheduler for the dashboard: its status with the runs and holds named, its events as
+ * sentences, who paused it, and what it starts next, from `plan` while the last check has no candidates.
+ */
+export async function loadSchedulerCard(db: Db, projectId: string, plan?: PlanRead): Promise<SchedulerCard> {
   const status = await getScheduler(db, projectId);
-  const [active, holdIssues, eventRows, from] = await Promise.all([
+  const [active, holdIssues, eventRows, from, next] = await Promise.all([
     activeRunViews(db, projectId, status),
     runIssues(db, [...new Set(status.holds.map((h) => h.runId))]),
     db.select().from(schedulerEvents).where(eq(schedulerEvents.projectId, projectId)).orderBy(desc(schedulerEvents.id)).limit(EVENTS),
     pausedFrom(db, projectId, status),
+    nextUp(db, projectId, status, plan),
   ]);
   const events = eventRows.map((e) => ({ id: e.id, type: e.type, text: describeSchedulerEvent(e), at: e.createdAt }));
-  return { status, runs: active, holdIssues, events, pausedFrom: from };
+  return { status, runs: active, holdIssues, events, pausedFrom: from, ...next };
 }
