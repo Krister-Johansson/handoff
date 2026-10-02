@@ -3,10 +3,11 @@ import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, notifies, ReviewerOutputSchema, type CoderOutput, type Notification } from "@handoff/core";
-import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type RepoRef } from "@handoff/github";
+import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type PlanStatus, type ProjectsPort, type RepoRef } from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, type Db } from "@handoff/db";
 import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
+import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
 
@@ -148,6 +149,12 @@ async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv): 
   }
 }
 
+/** Sets the run's linked tasks to `status` on the plan and records what happened; never throws. */
+async function movePlan(projects: ProjectsPort | undefined, ctx: ExecutorContext, status: PlanStatus) {
+  const written = await writePlanStatus(projects, ctx.project, (ctx.state.issues ?? []).map((i) => i.number), status);
+  for (const event of written) ctx.emit(event.type, event.payload);
+}
+
 /** Whether the graph sends this node's `port` output anywhere. */
 const routes = (ctx: ExecutorContext, port: string) => ctx.graph.outEdges(ctx.node.key).some((e) => e.port === port);
 
@@ -158,7 +165,7 @@ const title = (task: string) => (task.length > 72 ? `${task.slice(0, 69)}...` : 
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
  */
-export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number; db?: Db }): NodeExecutor {
+export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number; db?: Db; projects?: ProjectsPort }): NodeExecutor {
   return {
     needsWorkdir: true,
     async execute(ctx): Promise<ExecutorOutcome> {
@@ -202,6 +209,9 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number;
         const pr = (await deps.github.findPrByHead(repo, ctx.run.branchName)) ?? (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, ...prText(ctx, shots) }));
         number = pr.number;
         await ctx.recordPrNumber(number);
+        // The first time the run knows its pull request, its tasks wait for review. Run state only gets the
+        // number when this node passes, so a wake while CI runs finds it again; the run's column says it is not new.
+        if (ctx.run.prNumber === null) await movePlan(deps.projects, ctx, "In review");
       } else if (pushing && (coderOutput(ctx)?.pr || shots.length)) {
         // A later round rewrote the description of the change or took new screenshots; the pull request follows it.
         await deps.github.updatePr(repo, number, prText(ctx, shots));
@@ -319,7 +329,7 @@ const QUEUE_RECHECK_MS = 60_000;
  * auto, asked to merge by a person. At its turn a pull request that conflicts with the base branch or
  * is behind it goes back on the update edge to catch up, keeping its place. Merging wakes the queue.
  */
-export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db }): NodeExecutor {
+export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?: ProjectsPort }): NodeExecutor {
   return {
     needsWorkdir: false,
     async execute(ctx): Promise<ExecutorOutcome> {
