@@ -194,6 +194,15 @@ test("the planner is asked for a short plan, and the coder for a PR title and de
   expect(cli.requests[1]!.prompt).toContain("Do not restate the plan.");
 });
 
+test("the planner's size reaches run state", async () => {
+  const cli = new FakeCliExecutor([{ output: { ...plannerOut, size: "M" } }, { output: { status: "done", summary: "wrote it" } }]);
+  const { run } = await startRun(db, linear);
+  await drain(engineDeps(db, registry(cli)));
+  expect(cli.requests[0]!.prompt).toContain("Set size to S for a change in one place, M for a feature across a few files, L for a change across several areas.");
+  const { run: row } = await inspect(db, run.id);
+  expect(row.state).toMatchObject({ plan: { ...plannerOut, size: "M" } });
+});
+
 test("the planner is told ownedPaths is the whole list of files the change may touch", async () => {
   const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
   await startRun(db, linear);
