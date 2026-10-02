@@ -159,3 +159,20 @@ test("tasks on one day sit in blocker order, then by number, and a later task's 
     [11, 0, "2026-10-13"],
   ]);
 });
+
+test("a task with a duration and no Start is unscheduled", () => {
+  const items = [
+    item(1, { kind: "story" }),
+    item(2, { parent: 1 }),
+    // A Target alone does not place a task with a duration: the bar needs a Start to run from.
+    item(3, { parent: 1, target: "2026-10-16" }),
+    // Without a duration a Target alone still gives a one-day span.
+    item(4, { target: "2026-10-16" }),
+  ];
+  const timeline = deriveSpans(items, [], NOW, { durations: hours({ 2: 3, 3: 3 }), capacity: 6 });
+  const of = (n: number) => timeline.items.find((i) => i.number === n)!;
+  expect(of(2)).toMatchObject({ planned: undefined, unscheduled: true });
+  expect(of(3)).toMatchObject({ planned: undefined, unscheduled: true });
+  expect(of(1)).toMatchObject({ derived: undefined, unscheduled: true });
+  expect(of(4)).toMatchObject({ planned: { start: "2026-10-16", end: "2026-10-16", openStart: true }, unscheduled: false });
+});

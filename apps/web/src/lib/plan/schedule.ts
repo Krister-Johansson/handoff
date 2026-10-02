@@ -125,7 +125,8 @@ export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date, o
   const today = dayOf(now);
   const byNumber = new Map(items.map((i) => [i.number, i]));
   const bars = opts ? sizedBars(items, opts) : new Map<number, PlannedSpan>();
-  const planned = new Map(items.map((i) => [i.number, bars.get(i.number) ?? plannedOf(i)]));
+  // A task with a duration runs from its Start; without one it waits in Unscheduled whatever its Target says.
+  const planned = new Map(items.map((i) => [i.number, opts?.durations.has(i.number) ? bars.get(i.number) : plannedOf(i)]));
   const children = new Map<number, PlanItem[]>();
   for (const i of items) if (i.parent !== undefined && byNumber.has(i.parent)) children.set(i.parent, [...(children.get(i.parent) ?? []), i]);
 
