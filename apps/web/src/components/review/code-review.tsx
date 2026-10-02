@@ -254,6 +254,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
   const [selection, setSelection] = useState<LineSelection>();
   const [current, go] = useFileCursor(files.length);
   const last = earlier.at(-1);
+  const [followUp, setFollowUp] = useState(findings?.followUp);
 
   const select = (path: string, side: Side, n: number, extend: boolean) =>
     !readOnly &&
@@ -369,6 +370,17 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
       comments,
       note: readOnly ? "" : draft.note,
       readOnly,
+      ...(findings
+        ? {
+            findings: {
+              by: findings.by,
+              verdict: findings.verdict,
+              items: findings.comments.map((f, i) => ({ index: i + 1, severity: f.severity ?? "should_fix", path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body })),
+              followUp: followUp ?? null,
+              followUpNote: "The person opens a follow-up issue from picked findings with the Create follow-up issue button. No page tool does it.",
+            },
+          }
+        : {}),
     }),
   );
 
@@ -379,6 +391,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
           findings={findings}
           by={findings.by}
           followUp={findings.followUp}
+          onFollowUp={setFollowUp}
           runId={runId}
           questionId={questionId}
           files={files}

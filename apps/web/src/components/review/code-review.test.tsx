@@ -520,3 +520,38 @@ test("an answered review binds only navigation and view tools", async () => {
   expect(actions.answerReviewAction).not.toHaveBeenCalled();
   expect(actions.markViewedAction).not.toHaveBeenCalled();
 });
+
+test("page_remove_line_comment removes the drafted comment that starts at a line, and names the drafted ones when none does", async () => {
+  const { call } = await withAssistant();
+  await call("page_comment_on_lines", { path: "src/a.ts", line: 9, endLine: 11, body: "Explain this." });
+  await call("page_comment_on_lines", { path: "src/b.ts", line: 1, body: "Fine." });
+  expect(await call("page_remove_line_comment", { path: "src/a.ts", line: 10 })).toEqual({
+    text: "No drafted comment starts at line 10 of src/a.ts. The drafted comments are on: src/a.ts lines 9 to 11; src/b.ts line 1.",
+    isError: true,
+  });
+  expect(await call("page_remove_line_comment", { path: "src/a.ts", line: 9 })).toEqual({ text: "Removed the comment on lines 9 to 11 of src/a.ts. 1 comment drafted.", isError: false });
+  expect(within(fileA()).queryByText("Explain this.")).not.toBeInTheDocument();
+  expect(screen.getByText("1 comment drafted")).toBeInTheDocument();
+});
+
+test("where_am_i lists the code reviewer's findings by severity and says the follow-up issue is the page's button", async () => {
+  const { whereAmI } = await withAssistant({ findings: graded });
+  expect((await whereAmI()).page?.state.data).toMatchObject({
+    findings: {
+      by: "code_review-1",
+      verdict: "request_changes",
+      items: [
+        { index: 1, severity: "should_fix", path: "src/a.ts", line: 10, body: "Name the constant." },
+        { index: 2, severity: "blocking", path: "src/b.ts", line: 2, body: "Crashes on an empty list." },
+        { index: 3, severity: "follow_up", path: "docs/notes.md", body: "Link the ADR." },
+      ],
+      followUp: null,
+      followUpNote: "The person opens a follow-up issue from picked findings with the Create follow-up issue button. No page tool does it.",
+    },
+  });
+
+  followUp.createFollowUpAction.mockResolvedValue({ ok: true, issue: { number: 57, url: "https://github.com/o/r/issues/57" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
+  expect(await screen.findByRole("link", { name: "#57" })).toBeInTheDocument();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ findings: { followUp: { number: 57, url: "https://github.com/o/r/issues/57" } } });
+});
