@@ -35,6 +35,17 @@ test("correlationKeys returns nothing for unrelated events or payloads without a
   expect(correlationKeys("pull_request", { pull_request: { number: 7 } })).toEqual([]);
 });
 
+test("sub_issues and issue_dependencies deliveries wake nothing", () => {
+  const parent = { number: 41 };
+  const child = { number: 57 };
+  expect(correlationKeys("sub_issues", { action: "sub_issue_added", repository, parent_issue: parent, sub_issue: child })).toEqual([]);
+  expect(correlationKeys("sub_issues", { action: "parent_issue_removed", repository, parent_issue: parent, sub_issue: child })).toEqual([]);
+  expect(
+    correlationKeys("issue_dependencies", { action: "blocked_by_added", repository, blocked_issue: child, blocking_issue: { number: 55 } }),
+  ).toEqual([]);
+  expect(correlationKeys("issues", { action: "labeled", repository, issue: child })).toEqual([]);
+});
+
 test("headBranch reads the branch from check and workflow payloads", async () => {
   const { headBranch } = await import("./webhook-events.ts");
   expect(headBranch("check_suite", { check_suite: { head_branch: "b1" } })).toBe("b1");

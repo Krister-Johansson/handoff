@@ -281,7 +281,9 @@ Local delivery during development: ngrok with a free static domain (installed an
 
 ## Event stream
 
-Event types: `run.created|started|finished|failed|cancelled`, `node.created|claimed|waiting|woken|passed|failed|repaired|interrupted|reclaimed`, `edge.taken|exhausted`, `join.arrived|fired`, `contract.checked` (one per check), `github.webhook`, `human.asked|answered`, and the `cli.*` family.
+Event types: `run.created|started|finished|failed|cancelled`, `node.created|claimed|waiting|woken|passed|failed|repaired|interrupted|reclaimed`, `edge.taken|exhausted`, `join.arrived|fired`, `contract.checked` (one per check), `github.webhook`, `human.asked|answered`, `plan.status|skipped`, and the `cli.*` family.
+
+`plan.status { issue, status }` records a Status written on the project's GitHub Project for a linked task: Running when the run starts, In review when the PR node opens the pull request, Done after the merge closes the issue, Ready when the task's latest run is cancelled. `plan.skipped { issue, status, reason }` records a write that did not happen; the run carries on. `reason` is `not-in-project` (the issue is not an item of the Project), `no-option` (the Project's Status field has no option with that name), `no-access` (no classic `GITHUB_TOKEN` with the `project` scope), or the message of the error GitHub returned. A project without a plan gets neither event.
 
 SSE route (`api/runs/[runId]/events/route.ts`, `runtime = 'nodejs'`, `dynamic = 'force-dynamic'`): cursor from `Last-Event-ID`, else `?after=`, else 0; loop while the request signal is open: `select ... where run_id = $1 and seq > $cursor order by seq limit 500`, write `id: <seq>\nevent: <type>\ndata: <json>\n\n`, sleep 750 ms when empty, `: ping` every 15 s, stop when the run is terminal and drained. Browsers resend `Last-Event-ID` on reconnect.
 

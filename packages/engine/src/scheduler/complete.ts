@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { brief, matchingEdges, mergeState, notifies, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
+import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
@@ -74,7 +74,8 @@ async function route(
     let trigger: Trigger = { kind: "edge", edgeKey: edge.key, from: row.nodeKey, fromExecutionId: row.id };
     if (edge.loop) {
       const attempts = next.loops[edge.key]?.attempts ?? 0;
-      if (attempts >= (edge.maxAttempts ?? 0)) {
+      // A loop without a limit (a question gate's answers) counts its rounds but never runs out.
+      if (edge.maxAttempts !== undefined && attempts >= edge.maxAttempts) {
         events.push({ type: "edge.exhausted", payload: { edgeKey: edge.key, attempts }, nodeExecutionId: row.id });
         const gate = edge.onExhausted ?? graph.document.attributes.exhaustedGate;
         if (!gate) {
@@ -137,6 +138,14 @@ async function route(
     events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
   }
   return { events, created, arrived, exhausted, state: next };
+}
+
+/** Records what this attempt adds to its node's memory, so later attempts of the node are told it too. */
+function rememberAttempt(state: RunState, row: NodeExecutionRow, output: unknown): RunState {
+  const extraPaths = extraPathsOf(output).map((e) => ({ ...e, attempt: row.attempt }));
+  // The repaired attempt reads its own note from its row; the attempts after it read it from here.
+  const notes = row.repairNote ? [{ note: row.repairNote, attempt: row.attempt }] : [];
+  return extraPaths.length || notes.length ? remember(state, row.nodeKey, { extraPaths, notes }) : state;
 }
 
 /**
@@ -232,7 +241,7 @@ export async function completePassed(
     attempt: row.attempt,
     ...(updated.executorSessionId ? { sessionId: updated.executorSessionId } : {}),
   };
-  const merged = mergeState(state, row.nodeKey, result, input.statePatch);
+  const merged = rememberAttempt(mergeState(state, row.nodeKey, result, input.statePatch), row, input.output);
   const routed = await route(tx, input.graph, row, "passed", input.output, merged);
   lead.push(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
@@ -290,7 +299,7 @@ export async function completeFailed(
     attempt: row.attempt,
     lastFailure: { checks: input.checks ?? [], error: input.error },
   };
-  const merged = mergeState(state, row.nodeKey, failed);
+  const merged = rememberAttempt(mergeState(state, row.nodeKey, failed), row, input.output);
   const routed = await route(tx, input.graph, row, "failed", input.output, merged);
   const lead: NewEvent[] = [
     ...(input.checks ?? []).map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),

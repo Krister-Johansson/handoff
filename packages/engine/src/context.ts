@@ -1,4 +1,4 @@
-import { acceptanceOf, ALL_TOOLS, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
+import { acceptanceOf, ALL_TOOLS, memoryOf, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
 import type { NodeExecutionRow } from "@handoff/db";
 
 export const DEFAULT_MAX_TURNS = 60;
@@ -166,5 +166,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     };
   }
   if (execution.repairNote) packet.repairNote = execution.repairNote;
+  const memory = memoryOf(state, node.key);
+  if (memory.extraPaths.length || memory.notes.length || memory.answers.length) packet.memory = memory;
   return packet;
 }

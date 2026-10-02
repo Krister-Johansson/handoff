@@ -17,14 +17,17 @@ const keyOf = (repo: RepoRef) => `${repo.owner}/${repo.name}`.toLowerCase();
  */
 export class FakeProjects implements ProjectsPort {
   readonly plans = new Map<string, FakePlan>();
-  /** Parent issue number by issue number: GitHub's sub-issue relation. */
-  readonly parents = new Map<number, number>();
   /** Labels created on each repository, by repository key. */
   readonly labels = new Map<string, Set<string>>();
   scopesAnswer = { project: true, classic: true };
   private nextProject = 1;
 
   constructor(readonly github: FakeGitHub = new FakeGitHub()) {}
+
+  /** Parent issue number by issue number: GitHub's sub-issue relation, kept in the FakeGitHub. */
+  get parents(): Map<number, number> {
+    return this.github.parents;
+  }
 
   /** The items of the repository's Project; throws when it has none. */
   itemsOf(repo: RepoRef): Map<number, FakePlanItem> {
@@ -125,13 +128,7 @@ export class FakeProjects implements ProjectsPort {
   }
 
   async lineage(_repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
-    const ancestors: PlanAncestor[] = [];
-    for (let p = this.parents.get(issue); p !== undefined && ancestors.length < 2; p = this.parents.get(p)) {
-      const found = this.github.issues.get(p);
-      if (!found) break;
-      ancestors.push({ number: p, title: found.title, body: found.body, kind: kindOf(found.labels ?? [], undefined, this.depthOf(p)) });
-    }
-    return ancestors;
+    return this.github.ancestorsOf(issue);
   }
 
   async scopes() {
@@ -144,8 +141,6 @@ export class FakeProjects implements ProjectsPort {
   }
 
   private depthOf(issue: number): number {
-    let depth = 0;
-    for (let p = this.parents.get(issue); p !== undefined && depth < 3; p = this.parents.get(p)) depth++;
-    return depth;
+    return this.github.depthOf(issue);
   }
 }

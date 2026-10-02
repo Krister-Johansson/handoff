@@ -134,6 +134,17 @@ export type StatusState =
   /** Status is successful. */
   | 'SUCCESS';
 
+export type IssueAncestorsFragment = { parent: { number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, parent: { number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null } | null } | null };
+
+export type IssueParentsQueryVariables = Exact<{
+  owner: string;
+  name: string;
+  number: number;
+}>;
+
+
+export type IssueParentsQuery = { repository: { issue: { parent: { number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, parent: { number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null } | null } | null } | null } | null };
+
 export type IssueNodeIdQueryVariables = Exact<{
   owner: string;
   name: string;
@@ -370,7 +381,90 @@ export class TypedDocumentString<TResult, TVariables>
     return this.value;
   }
 }
-
+export const IssueAncestorsFragmentDoc = new TypedDocumentString(`
+    fragment IssueAncestors on Issue {
+  parent {
+    number
+    title
+    body
+    labels(first: 20) {
+      nodes {
+        name
+      }
+    }
+    issueType {
+      name
+    }
+    parent {
+      number
+      title
+      body
+      labels(first: 20) {
+        nodes {
+          name
+        }
+      }
+      issueType {
+        name
+      }
+      parent {
+        number
+        parent {
+          number
+          parent {
+            number
+          }
+        }
+      }
+    }
+  }
+}
+    `, {"fragmentName":"IssueAncestors"}) as unknown as TypedDocumentString<IssueAncestorsFragment, unknown>;
+export const IssueParentsDocument = new TypedDocumentString(`
+    query IssueParents($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      ...IssueAncestors
+    }
+  }
+}
+    fragment IssueAncestors on Issue {
+  parent {
+    number
+    title
+    body
+    labels(first: 20) {
+      nodes {
+        name
+      }
+    }
+    issueType {
+      name
+    }
+    parent {
+      number
+      title
+      body
+      labels(first: 20) {
+        nodes {
+          name
+        }
+      }
+      issueType {
+        name
+      }
+      parent {
+        number
+        parent {
+          number
+          parent {
+            number
+          }
+        }
+      }
+    }
+  }
+}`) as unknown as TypedDocumentString<IssueParentsQuery, IssueParentsQueryVariables>;
 export const IssueNodeIdDocument = new TypedDocumentString(`
     query IssueNodeId($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {

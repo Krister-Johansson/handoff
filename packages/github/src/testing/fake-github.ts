@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { kindOf } from "../projects/kinds.ts";
+import type { PlanAncestor } from "../projects/types.ts";
 import type { GitHubPort, IssueDetail, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
 type FakePr = PrSnapshot & { base: string; body: string };
@@ -14,6 +16,8 @@ export class FakeGitHub implements GitHubPort {
   repos: RepoSummary[] = [];
   readonly closedIssues: { number: number; comment: string }[] = [];
   readonly issues = new Map<number, IssueDetail & Partial<IssueSummary>>();
+  /** Parent issue number by issue number: GitHub's sub-issue relation. */
+  readonly parents = new Map<number, number>();
   /** Files on the default branch, by path. */
   readonly files = new Map<string, string>();
   private next = 1;
@@ -44,10 +48,28 @@ export class FakeGitHub implements GitHubPort {
     found.blockedBy = [...new Set([...(found.blockedBy ?? []), blocker])];
   }
 
-  async getIssue(_repo: RepoRef, number: number): Promise<IssueDetail> {
+  async getIssue(_repo: RepoRef, number: number, opts: { parents?: boolean } = {}): Promise<IssueDetail> {
     const issue = this.issues.get(number);
     if (!issue) throw new Error(`no issue ${number}`);
-    return { number: issue.number, title: issue.title, url: issue.url, body: issue.body, state: issue.state };
+    return { number: issue.number, title: issue.title, url: issue.url, body: issue.body, state: issue.state, ...(opts.parents ? { parents: this.ancestorsOf(number) } : {}) };
+  }
+
+  /** The parent and the grandparent of an issue, nearest first, with their kinds as GitHub would tell them. */
+  ancestorsOf(issue: number): PlanAncestor[] {
+    const ancestors: PlanAncestor[] = [];
+    for (let p = this.parents.get(issue); p !== undefined && ancestors.length < 2; p = this.parents.get(p)) {
+      const found = this.issues.get(p);
+      if (!found) break;
+      ancestors.push({ number: p, title: found.title, body: found.body, kind: kindOf(found.labels ?? [], undefined, this.depthOf(p)) });
+    }
+    return ancestors;
+  }
+
+  /** How many ancestors an issue has, counted up to three. */
+  depthOf(issue: number): number {
+    let depth = 0;
+    for (let p = this.parents.get(issue); p !== undefined && depth < 3; p = this.parents.get(p)) depth++;
+    return depth;
   }
 
   async closeIssue(_repo: RepoRef, number: number, comment: string) {

@@ -65,6 +65,15 @@ test("webhook route accepts events that match no execution", async () => {
   expect(response.status).toBe(202);
 });
 
+test("an issues delivery is stored with its repository id and action", async () => {
+  const payload = { action: "labeled", repository: { id: 42 }, issue: { number: 57, title: "Add the migration" }, label: { name: "task" } };
+  const response = await handleGitHubWebhook(db, request("issues", payload, { delivery: "d-issues" }), secret);
+  expect(response.status).toBe(202);
+  const [delivery] = await db.select().from(webhookDeliveries);
+  expect(delivery).toMatchObject({ deliveryId: "d-issues", eventName: "issues", action: "labeled", repoId: 42, correlationKeys: [], wokeExecutionIds: [] });
+  expect(delivery?.payload).toEqual(payload);
+});
+
 test("a check event without pull requests wakes the PR node of the run on that branch", async () => {
   const { run, project } = await seedRun(db, { status: "waiting" });
   await db.update(projects).set({ repoId: 42 }).where(eq(projects.id, project.id));

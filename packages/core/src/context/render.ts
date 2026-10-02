@@ -1,3 +1,5 @@
+import type { NodeMemory } from "../schema/run-state.ts";
+
 export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined };
 
 /** A comment on code (path and line) or on a quoted part of a text such as a plan. */
@@ -30,7 +32,14 @@ export type ContextPacket = {
   decisions?: { gate: string; note?: string | undefined; comments: ({ quote?: string | undefined; body: string } & Place)[] }[];
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
   suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
-  issues?: { number: number; title: string; url: string; body: string }[];
+  /** The linked issues; `lineage` holds each one's parent and grandparent, nearest first. */
+  issues?: {
+    number: number;
+    title: string;
+    url: string;
+    body: string;
+    lineage?: { kind?: string | undefined; number: number; title: string; body: string }[] | undefined;
+  }[];
   /** The run's app, started from its worktree for this step to walk through in a browser. */
   app?: { url: string };
   /** What a person will check in the running app to see the task is done. */
@@ -40,6 +49,8 @@ export type ContextPacket = {
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
   repairNote?: string;
+  /** What earlier attempts of this step were told in this run: allowed files, operator notes, answers. */
+  memory?: NodeMemory;
   /** The base branch moved and now changes the same lines as this branch: the work is to merge it in. */
   conflict?: { base: string; baseSha: string; files: string[] };
 };
@@ -71,9 +82,30 @@ function renderConflict({ base, baseSha, files }: NonNullable<ContextPacket["con
   ];
 }
 
+/** What earlier attempts of the step were told, which still holds for this attempt. */
+function renderMemory({ extraPaths, notes, answers }: NodeMemory): string[] {
+  if (!extraPaths.length && !notes.length && !answers.length) return [];
+  const out = ["# Earlier in this run", "", "Earlier attempts of this step were told the following. It still holds for this attempt.", ""];
+  if (extraPaths.length) {
+    out.push("## Files outside the plan you may change", "", "An earlier attempt changed these with a reason. You may keep and change them without listing them in extraPaths again.", "");
+    out.push(...extraPaths.map((e) => `- \`${e.path}\`: ${e.reason}`), "");
+  }
+  if (notes.length) out.push("## Notes from the operator", "", ...notes.map((n) => `- ${n.note}`), "");
+  if (answers.length) {
+    out.push("## Answers to your questions", "", "A person answered these. Keep to the answers.", "");
+    out.push(...answers.map((a) => `- ${quoted(a.question)} ${a.option && a.option !== a.answer ? `${a.option}: ` : ""}${a.answer}`), "");
+  }
+  return out;
+}
+
 const LOG_TAIL_LINES = 80;
 const ISSUE_BODY_CHARS = 4000;
 
+/** "Story", "Epic" or "Task" for a parent's kind; "Parent" when it has none. */
+const kindName = (kind: string | undefined) => (kind ? `${kind[0]!.toUpperCase()}${kind.slice(1)}` : "Parent");
+/** A body cut at ISSUE_BODY_CHARS, with a note naming what was cut. */
+const cutBody = (body: string, what: string) =>
+  body.length > ISSUE_BODY_CHARS ? `${body.slice(0, ISSUE_BODY_CHARS)}\n\n(${what} body cut at ${ISSUE_BODY_CHARS} characters)` : body;
 const tail = (text: string, n: number) => text.split("\n").slice(-n).join("\n");
 const list = (items: string[], empty: string) => (items.length ? items.map((i) => `- ${i}`).join("\n") : empty);
 
@@ -115,9 +147,17 @@ export function renderContextPacket(packet: ContextPacket): string {
     out.push("# Linked issues", "", "The task works on these GitHub issues. The pull request closes them when it merges.", "");
     for (const issue of packet.issues) {
       const body = issue.body.trim();
-      const cut = body.length > ISSUE_BODY_CHARS;
       out.push(`## #${issue.number} ${issue.title}`, "", issue.url, "");
-      if (body) out.push(cut ? `${body.slice(0, ISSUE_BODY_CHARS)}\n\n(issue body cut at ${ISSUE_BODY_CHARS} characters)` : body, "");
+      if (issue.lineage?.length) {
+        // The story and the epic are context: the issue's own body says what to build.
+        out.push("### Part of", "");
+        for (const parent of issue.lineage) {
+          const kind = kindName(parent.kind);
+          out.push(`${kind} #${parent.number} ${quoted(parent.title)}: ${cutBody(parent.body.trim(), kind.toLowerCase())}`, "");
+        }
+        if (body) out.push("### This issue", "");
+      }
+      if (body) out.push(cutBody(body, "issue"), "");
     }
   }
   if (packet.acceptance?.items.length) {
@@ -184,6 +224,7 @@ export function renderContextPacket(packet: ContextPacket): string {
     "Give the question a `summary` of at most 80 characters that names the decision. Notifications show the summary; the person reads the full `text` when they answer.",
     "",
   );
+  if (packet.memory) out.push(...renderMemory(packet.memory));
   if (packet.priorAttempt || packet.humanAnswer || packet.repairNote) {
     out.push("# Previous attempt", "");
     if (packet.priorAttempt?.summary) out.push(packet.priorAttempt.summary, "");

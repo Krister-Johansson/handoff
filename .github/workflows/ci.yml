@@ -5,9 +5,74 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  test:
+  generated:
+    name: generated files
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: GraphQL types are up to date
+        run: pnpm --filter @handoff/github codegen && git diff --exit-code packages/github/src/gql
+      - name: The Claude Code plugin's bundled bridge is up to date
+        run: pnpm build:plugin && git diff --exit-code plugins/
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm typecheck
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm lint
+
+  react-doctor:
+    name: react doctor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: npx -y react-doctor@latest . --yes --no-telemetry --blocking error
+        working-directory: apps/web
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm --filter @handoff/web build
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm test:unit
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - run: pnpm test:web
+
+  # Integration files run one at a time against one database, so each shard gets its own Postgres.
+  integration:
+    name: integration ${{ matrix.shard }}/4
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: postgres:17-alpine
@@ -27,18 +92,16 @@ jobs:
       HANDOFF_TEST_DOCKER: "1"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup
       - run: docker pull node:22-alpine
-      - name: GraphQL types are up to date
-        run: pnpm --filter @handoff/github codegen && git diff --exit-code packages/github/src/gql
-      - name: The Claude Code plugin's bundled bridge is up to date
-        run: pnpm build:plugin && git diff --exit-code plugins/
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - run: pnpm test
-      - run: pnpm --filter @handoff/web build
+      - run: pnpm vitest run --project integration --shard=${{ matrix.shard }}/4
+
+  # The one check the main branch ruleset requires: it passes only when every job above passed.
+  test:
+    if: always()
+    needs: [generated, typecheck, lint, react-doctor, build, unit, web, integration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        run: |
+          echo '${{ toJSON(needs) }}' | jq -e 'all(.[]; .result == "success")'

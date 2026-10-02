@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { OctokitGitHub } from "./octokit-client.ts";
-import { fakeFetch } from "./testing/fake-fetch.ts";
+import { fakeFetch, fakeGraphql } from "./testing/fake-fetch.ts";
 
 const repo = { owner: "octo", name: "sample" };
 
@@ -244,6 +244,46 @@ test("getIssue reads an issue with its body", async () => {
   });
   const gh = OctokitGitHub.withToken("t", { fetch });
   expect(await gh.getIssue(repo, 12)).toEqual({ number: 12, title: "Slugify drops digits", url: "https://github.com/octo/sample/issues/12", body: "", state: "open" });
+});
+
+test("getIssue reads the parent chain when asked", async () => {
+  const labels = (...names: string[]) => ({ nodes: names.map((name) => ({ name })) });
+  const { fetch, operations } = fakeGraphql(
+    {
+      IssueParents: () => ({
+        repository: {
+          issue: {
+            parent: {
+              number: 41,
+              title: "Shaping with the assistant",
+              body: "Stories have acceptance criteria.",
+              labels: labels("story"),
+              issueType: null,
+              parent: { number: 12, title: "Project management", body: "Plan on GitHub Projects.", labels: labels(), issueType: { name: "Epic" }, parent: null },
+            },
+          },
+        },
+      }),
+    },
+    {
+      "GET /repos/octo/sample/issues/57": () => ({
+        json: { number: 57, title: "Add the migration", html_url: "https://github.com/octo/sample/issues/57", body: "Task body.", state: "open" },
+      }),
+    },
+  );
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect(await gh.getIssue(repo, 57, { parents: true })).toEqual({
+    number: 57,
+    title: "Add the migration",
+    url: "https://github.com/octo/sample/issues/57",
+    body: "Task body.",
+    state: "open",
+    parents: [
+      { number: 41, title: "Shaping with the assistant", body: "Stories have acceptance criteria.", kind: "story" },
+      { number: 12, title: "Project management", body: "Plan on GitHub Projects.", kind: "epic" },
+    ],
+  });
+  expect(operations).toEqual([{ operation: "IssueParents", variables: { owner: "octo", name: "sample", number: 57 } }]);
 });
 
 test("closeIssue comments on the issue and closes it as completed", async () => {
