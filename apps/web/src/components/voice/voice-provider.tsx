@@ -6,6 +6,7 @@ import { approvalAnswer } from "@/lib/voice/approval-answer";
 import { isTyping } from "@/lib/voice/is-typing";
 import { readVoicePrefs, useVoicePrefs } from "@/lib/voice/prefs";
 import { languageName } from "@/lib/voice/recognition";
+import { elevenLabsPlayer } from "@/lib/voice/elevenlabs-player";
 import { createSpeaker, spokenReply, type Speaker, type SpeakerState, type SpeechPriority } from "@/lib/voice/speaker";
 import { useVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
 import { useSpeechInput, type InputState, type ListenMode } from "@/lib/voice/use-speech-input";
@@ -80,10 +81,21 @@ const noSubscribe = () => () => {};
  * header button or V starts it, and it never starts while the dashboard is speaking. A session
  * started from a text field dictates; one started elsewhere hears one command.
  */
-export function VoiceProvider({ children, support: given, speaker: givenSpeaker }: { children: ReactNode; support?: VoiceSupport; speaker?: Speaker }) {
+export function VoiceProvider({
+  children,
+  support: given,
+  speaker: givenSpeaker,
+  speechAvailable = false,
+}: {
+  children: ReactNode;
+  support?: VoiceSupport;
+  speaker?: Speaker;
+  /** Whether the dashboard can speak: it has an ElevenLabs key. */
+  speechAvailable?: boolean;
+}) {
   const browser = useVoiceSupport();
   const support = given ?? browser;
-  const speaker = useMemo(() => givenSpeaker ?? (support.synth ? createSpeaker(support.synth, readVoicePrefs) : undefined), [givenSpeaker, support.synth]);
+  const speaker = useMemo(() => givenSpeaker ?? (speechAvailable ? createSpeaker(elevenLabsPlayer(), readVoicePrefs) : undefined), [givenSpeaker, speechAvailable]);
   const speech = useSyncExternalStore(speaker?.subscribe ?? noSubscribe, speaker?.getState ?? (() => SILENT), () => SILENT);
   const [readable, setReadable] = useState<Readable>();
   const prefs = useVoicePrefs();

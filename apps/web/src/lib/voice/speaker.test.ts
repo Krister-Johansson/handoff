@@ -1,12 +1,12 @@
 import { expect, test } from "vitest";
 import { DEFAULT_VOICE_PREFS, type VoicePrefs } from "./prefs";
-import { createSpeaker, pickVoice, splitSentences } from "./speaker";
-import { FakeSpeechSynthesis, FakeUtterance, fakeVoice } from "./testing/fake-speech-synthesis";
+import { createSpeaker, splitSentences, spokenReply } from "./speaker";
+import { FakePlayer } from "./testing/fake-player";
 
-const prefs = (patch: Partial<VoicePrefs> = {}) => ({ ...DEFAULT_VOICE_PREFS, ...patch });
-const setup = (patch: Partial<VoicePrefs> = {}, synth = new FakeSpeechSynthesis()) => {
-  const speaker = createSpeaker(synth as unknown as SpeechSynthesis, () => prefs(patch), (text) => new FakeUtterance(text) as unknown as SpeechSynthesisUtterance);
-  return { synth, speaker, said: () => synth.spoken.map((u) => u.text) };
+const setup = (patch: Partial<VoicePrefs> = {}) => {
+  const player = new FakePlayer();
+  const speaker = createSpeaker(player, () => ({ ...DEFAULT_VOICE_PREFS, ...patch }));
+  return { player, speaker };
 };
 
 test("splitSentences keeps abbreviations and code fences together and labels code blocks as skipped", () => {
@@ -25,60 +25,52 @@ test("splitSentences keeps abbreviations and code fences together and labels cod
   ]);
 });
 
-test("pickVoice prefers a local voice in the recognition language and never a remote voice unless allowed", () => {
-  const voices = [fakeVoice("Google US English", "en-US", false), fakeVoice("Alva", "sv-SE"), fakeVoice("Samantha", "en-US")];
-  expect(pickVoice(voices, prefs())?.name).toBe("Samantha");
-  expect(pickVoice([fakeVoice("Google US English", "en-US", false), fakeVoice("Alva", "sv-SE")], prefs())?.name).toBe("Alva");
-  expect(pickVoice([fakeVoice("Google US English", "en-US", false)], prefs())).toBeUndefined();
-  expect(pickVoice([fakeVoice("Google US English", "en-US", false)], prefs({ allowRemoteVoices: true }))?.name).toBe("Google US English");
+test("spokenReply keeps three sentences and points to the screen for the rest", () => {
+  expect(spokenReply("One. Two.")).toBe("One. Two.");
+  expect(spokenReply("One. Two. Three. Four.")).toBe("One. Two. Three. The rest is on screen.");
 });
 
-test("pickVoice honours a stored voiceURI that still exists and falls back when it is gone", () => {
-  const voices = [fakeVoice("Samantha", "en-US"), fakeVoice("Albert", "en-US")];
-  expect(pickVoice(voices, prefs({ voiceURI: "Albert" }))?.name).toBe("Albert");
-  expect(pickVoice(voices, prefs({ voiceURI: "Gone" }))?.name).toBe("Samantha");
-  // A stored remote voice is not used once remote voices are switched off.
-  expect(pickVoice([...voices, fakeVoice("Google UK English", "en-GB", false)], prefs({ voiceURI: "Google UK English" }))?.name).toBe("Samantha");
-});
-
-test("speak queues one utterance per sentence and stop cancels the rest", () => {
-  const { synth, speaker, said } = setup({ rate: 1.25 });
+test("speak plays one sentence at a time with the preferences, fetches the next one while it plays, and stop cancels the rest", () => {
+  const { player, speaker } = setup({ rate: 1.25, elevenLabsVoiceId: "v1" });
   speaker.speak("One. Two. Three.", { priority: "read", title: "Run summary" });
-  expect(said()).toEqual(["One."]);
-  expect(synth.current).toMatchObject({ lang: "en-US", rate: 1.25, voice: expect.objectContaining({ name: "Samantha" }) });
+  expect(player.spoken).toEqual(["One."]);
+  expect(player.prefetched).toEqual(["Two."]);
+  expect(player.lastPrefs).toMatchObject({ rate: 1.25, elevenLabsVoiceId: "v1" });
   expect(speaker.getState()).toMatchObject({ speaking: true, title: "Run summary", sentence: 1, total: 3 });
-  synth.finishCurrent();
-  expect(said()).toEqual(["One.", "Two."]);
+  player.finishCurrent();
+  expect(player.spoken).toEqual(["One.", "Two."]);
+  expect(player.prefetched).toEqual(["Two.", "Three."]);
   expect(speaker.getState()).toMatchObject({ sentence: 2, total: 3 });
   speaker.stop();
-  expect(synth.cancels).toBeGreaterThan(0);
-  synth.finishCurrent();
-  expect(said()).toEqual(["One.", "Two."]);
-  expect(speaker.getState()).toMatchObject({ speaking: false });
+  expect(player.cancels).toBe(1);
+  player.finishCurrent();
+  expect(player.spoken).toEqual(["One.", "Two."]);
   expect(speaker.isSpeaking()).toBe(false);
 });
 
 test("a notification queues behind a reply and ahead of a long read", () => {
-  const { synth, speaker, said } = setup();
+  const { player, speaker } = setup();
   speaker.speak("Read one. Read two. Read three.", { priority: "read", title: "Plan" });
   speaker.speak("Reply one. Reply two.", { priority: "reply" });
   speaker.speak("A run failed.", { priority: "notification" });
-  // The read was already speaking its first sentence; then the reply, then the notification, then the rest of the read.
-  for (let i = 0; i < 5; i++) synth.finishCurrent();
-  expect(said()).toEqual(["Read one.", "Reply one.", "Reply two.", "A run failed.", "Read two.", "Read three."]);
-  synth.finishCurrent();
+  for (let i = 0; i < 5; i++) player.finishCurrent();
+  expect(player.spoken).toEqual(["Read one.", "Reply one.", "Reply two.", "A run failed.", "Read two.", "Read three."]);
+  player.finishCurrent();
   expect(speaker.isSpeaking()).toBe(false);
 });
 
 test("nothing is spoken on construction", () => {
-  const { synth } = setup();
-  expect(synth.spoken).toEqual([]);
-  expect(synth.cancels).toBe(0);
+  const { player } = setup();
+  expect(player.spoken).toEqual([]);
 });
 
-test("with no usable voice nothing is spoken and the state says why", () => {
-  const { synth, speaker } = setup({}, new FakeSpeechSynthesis([fakeVoice("Google US English", "en-US", false)]));
-  speaker.speak("Hello.", { priority: "reply" });
-  expect(synth.spoken).toEqual([]);
-  expect(speaker.getState()).toMatchObject({ speaking: false, error: "No local voice for en-US." });
+test("a sentence that cannot be spoken ends the speech with its reason", () => {
+  const { player, speaker } = setup();
+  speaker.speak("One. Two.", { priority: "reply" });
+  player.failCurrent("ElevenLabs answered 401.");
+  expect(speaker.getState()).toEqual({ speaking: false, sentence: 0, total: 0, error: "ElevenLabs answered 401." });
+  expect(player.spoken).toEqual(["One."]);
+  // A new reply speaks again.
+  speaker.speak("Three.", { priority: "reply" });
+  expect(player.spoken).toEqual(["One.", "Three."]);
 });

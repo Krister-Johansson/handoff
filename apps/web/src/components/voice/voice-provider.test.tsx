@@ -3,7 +3,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { DEFAULT_VOICE_PREFS } from "@/lib/voice/prefs";
 import { createSpeaker } from "@/lib/voice/speaker";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
-import { FakeSpeechSynthesis, FakeUtterance } from "@/lib/voice/testing/fake-speech-synthesis";
+import { FakePlayer } from "@/lib/voice/testing/fake-player";
 import { VoiceTestApp } from "./testing/voice-test-app";
 
 beforeEach(() => {
@@ -12,7 +12,7 @@ beforeEach(() => {
 });
 
 test("starting to listen stops the speech first", async () => {
-  const speaker = createSpeaker(new FakeSpeechSynthesis() as unknown as SpeechSynthesis, () => DEFAULT_VOICE_PREFS, (t) => new FakeUtterance(t) as unknown as SpeechSynthesisUtterance);
+  const speaker = createSpeaker(new FakePlayer(), () => DEFAULT_VOICE_PREFS);
   speaker.speak("A run failed.", { priority: "notification" });
   render(<VoiceTestApp speaker={speaker} />);
   expect(speaker.isSpeaking()).toBe(true);

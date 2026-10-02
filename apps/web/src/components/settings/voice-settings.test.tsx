@@ -1,34 +1,27 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { readVoicePrefs } from "@/lib/voice/prefs";
 import type { VoiceSupport } from "@/lib/voice/support";
 import { VoiceSettings } from "./voice-settings";
 
-afterEach(() => localStorage.clear());
+const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+const VOICES = { voices: [{ id: "v1", name: "George" }, { id: "v2", name: "Rachel" }] };
 
-// jsdom has no speech synthesis; the component builds its utterance with the browser's constructor.
-vi.stubGlobal(
-  "SpeechSynthesisUtterance",
-  class {
-    voice: SpeechSynthesisVoice | null = null;
-    rate = 1;
-    lang = "";
-    constructor(readonly text: string) {}
-  },
-);
-
-const voice = (name: string, lang: string, localService: boolean) => ({ name, lang, localService, voiceURI: name, default: false }) as SpeechSynthesisVoice;
-
-function fakeSynth(voices: SpeechSynthesisVoice[]) {
-  return Object.assign(new EventTarget(), { getVoices: () => voices, speak: vi.fn(), cancel: vi.fn() }) as unknown as SpeechSynthesis & { speak: ReturnType<typeof vi.fn> };
-}
+beforeEach(() => {
+  fetchMock.mockReset();
+  vi.stubGlobal("fetch", fetchMock);
+});
+afterEach(() => {
+  localStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 class OnDevice {
   static available = async () => "available" as const;
 }
 
 test("the Voice tab says recognition is unavailable when no constructor exists and keeps the speaking switches", () => {
-  render(<VoiceSettings support={{ synth: fakeSynth([]), onDeviceCheck: false }} />);
+  render(<VoiceSettings support={{ onDeviceCheck: false }} elevenLabs={VOICES} />);
   expect(screen.getByRole("note")).toHaveTextContent("This browser has no speech recognition, so the microphone button is hidden. Replies and notifications can still be read aloud.");
   expect(screen.getByRole("switch", { name: "Server-based recognition" })).toBeDisabled();
   expect(screen.getByLabelText("Language")).toBeDisabled();
@@ -38,61 +31,52 @@ test("the Voice tab says recognition is unavailable when no constructor exists a
   expect(screen.getByRole("switch", { name: "Speak notifications" })).toBeEnabled();
 });
 
-test("turning on server recognition writes allowServerRecognition true", () => {
+test("turning on server recognition writes allowServerRecognition true, and without ElevenLabs the speaking settings say what to add", () => {
   render(<VoiceSettings support={{ recognition: OnDevice as unknown as VoiceSupport["recognition"], onDeviceCheck: true }} />);
   const toggle = screen.getByRole("switch", { name: "Server-based recognition" });
   expect(toggle).not.toBeChecked();
   fireEvent.click(toggle);
   expect(readVoicePrefs().allowServerRecognition).toBe(true);
-  // Without speech synthesis the speaking settings are off with a note.
-  expect(screen.getByText("This browser cannot speak, so the speaking settings are off.")).toBeInTheDocument();
+  expect(screen.getByText(/Add ELEVENLABS_API_KEY to the dashboard's environment and restart it\./)).toBeInTheDocument();
   expect(screen.getByRole("switch", { name: "Speak replies" })).toBeDisabled();
+  expect(screen.queryByLabelText("ElevenLabs voice")).not.toBeInTheDocument();
 });
 
 test("a browser without the on-device check says listening needs server recognition", () => {
-  render(<VoiceSettings support={{ recognition: class {} as unknown as VoiceSupport["recognition"], onDeviceCheck: false }} />);
+  render(<VoiceSettings support={{ recognition: class {} as unknown as VoiceSupport["recognition"], onDeviceCheck: false }} elevenLabs={VOICES} />);
   expect(screen.getByText(/cannot check for on-device recognition/)).toBeInTheDocument();
 });
 
-test("the voice list groups voices on this device before online ones, which show only when allowed, and Test voice speaks with the choice", () => {
-  const synth = fakeSynth([voice("Google US English", "en-US", false), voice("Samantha", "en-US", true), voice("Alva", "sv-SE", true)]);
-  render(<VoiceSettings support={{ synth, onDeviceCheck: false }} />);
-  const select = screen.getByLabelText("Voice");
-  const groups = () => within(select).getAllByRole("group").map((g) => [g.getAttribute("label"), within(g).getAllByRole("option").map((o) => o.textContent)]);
-  expect(within(select).getAllByRole("option")[0]).toHaveTextContent("Automatic");
-  expect(groups()).toEqual([["On this device", ["Samantha (en-US)", "Alva (sv-SE)"]]]);
-
-  fireEvent.click(screen.getByRole("switch", { name: "Online voices" }));
-  expect(groups()).toEqual([
-    ["On this device", ["Samantha (en-US)", "Alva (sv-SE)"]],
-    ["Online", ["Google US English (en-US)"]],
-  ]);
+test("the ElevenLabs voices come from the server, the choice and rate are kept, and Test voice speaks with them", async () => {
+  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:1", revokeObjectURL: vi.fn() }));
+  render(<VoiceSettings support={{ onDeviceCheck: false }} elevenLabs={VOICES} />);
+  expect(screen.getByText("The dashboard speaks with ElevenLabs: the text read aloud goes to ElevenLabs.")).toBeInTheDocument();
+  const select = screen.getByLabelText("ElevenLabs voice");
+  expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Default voice", "George", "Rachel"]);
+  fireEvent.change(select, { target: { value: "v2" } });
+  fireEvent.change(screen.getByLabelText("Rate"), { target: { value: "1.25" } });
+  expect(readVoicePrefs()).toMatchObject({ elevenLabsVoiceId: "v2", rate: 1.25 });
   expect(within(screen.getByLabelText("Rate")).getByRole("option", { name: "1x, normal" })).toBeInTheDocument();
 
-  fireEvent.change(select, { target: { value: "Samantha" } });
-  fireEvent.change(screen.getByLabelText("Rate"), { target: { value: "1.25" } });
-  expect(readVoicePrefs()).toMatchObject({ voiceURI: "Samantha", rate: 1.25, allowRemoteVoices: true });
-
+  fetchMock.mockResolvedValueOnce(new Response(new Blob([new Uint8Array([1])])));
   fireEvent.click(screen.getByRole("button", { name: "Test voice" }));
-  const utterance = synth.speak.mock.calls[0]![0] as SpeechSynthesisUtterance;
-  expect(utterance).toMatchObject({ text: "This is how handoff sounds.", rate: 1.25, lang: "en-US" });
-  expect(utterance.voice?.name).toBe("Samantha");
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith("/api/voice/speak", expect.objectContaining({ body: JSON.stringify({ text: "This is how handoff sounds.", voiceId: "v2" }) })),
+  );
+});
+
+test("when the server could not list ElevenLabs voices the row says why", () => {
+  render(<VoiceSettings support={{ onDeviceCheck: false }} elevenLabs={{ error: "ElevenLabs answered 401." }} />);
+  expect(screen.getByText("ElevenLabs answered 401.")).toBeInTheDocument();
+  expect(screen.getByLabelText("ElevenLabs voice")).toBeDisabled();
 });
 
 test("Also finished and merged runs is a checkbox available only while notifications are spoken", () => {
-  render(<VoiceSettings support={{ synth: fakeSynth([]), onDeviceCheck: false }} />);
+  render(<VoiceSettings support={{ onDeviceCheck: false }} elevenLabs={VOICES} />);
   expect(screen.getByRole("checkbox", { name: "Also finished and merged runs" })).toBeDisabled();
   fireEvent.click(screen.getByRole("switch", { name: "Speak notifications" }));
   const also = screen.getByRole("checkbox", { name: "Also finished and merged runs" });
   expect(also).toBeEnabled();
   fireEvent.click(also);
   expect(readVoicePrefs()).toMatchObject({ speakNotifications: true, speakFinished: true });
-});
-
-test("voices that load after the first look still show, as Chrome fills the list late", async () => {
-  const voices = [voice("Samantha", "en-US", true)];
-  let calls = 0;
-  const synth = Object.assign(new EventTarget(), { getVoices: () => (calls++ === 0 ? [] : voices), speak: vi.fn(), cancel: vi.fn() }) as unknown as SpeechSynthesis;
-  render(<VoiceSettings support={{ synth, onDeviceCheck: false }} />);
-  expect(await within(screen.getByLabelText("Voice")).findByRole("option", { name: "Samantha (en-US)" })).toBeInTheDocument();
 });

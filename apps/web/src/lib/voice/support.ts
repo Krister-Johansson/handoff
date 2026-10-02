@@ -8,20 +8,17 @@ export type RecognitionCtor = (new () => unknown) & {
 
 export type VoiceSupport = {
   recognition?: RecognitionCtor;
-  synth?: SpeechSynthesis;
   /** Whether the browser can say if an on-device language pack exists (`SpeechRecognition.available`). */
   onDeviceCheck: boolean;
 };
 
-type VoiceWindow = { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor; speechSynthesis?: SpeechSynthesis };
+type VoiceWindow = { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
 
-/** What this browser offers for voice: recognition (unprefixed first), synthesis, and the on-device check. */
+/** What this browser offers for listening: recognition (unprefixed first) and the on-device check. Speaking is ElevenLabs. */
 export function detectVoiceSupport(win: VoiceWindow): VoiceSupport {
   const recognition = win.SpeechRecognition ?? win.webkitSpeechRecognition;
-  const synth = win.speechSynthesis;
   return {
     ...(recognition ? { recognition } : {}),
-    ...(synth ? { synth } : {}),
     onDeviceCheck: typeof recognition?.available === "function",
   };
 }
