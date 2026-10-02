@@ -9,6 +9,7 @@ export class FakeAssistantTransport implements AssistantTransport {
   stored = new Map<string, StoredConversation>();
   readonly turns: { conversationId: string; text: string; source: string }[] = [];
   readonly replies: { turnId: string; requestId: string; approved: boolean; note?: string }[] = [];
+  readonly uiReplies: { turnId: string; requestId: string; text: string; isError: boolean }[] = [];
   readonly stops: string[] = [];
   private emitter: ((event: TurnStreamEvent) => void) | undefined;
   private finish: (() => void) | undefined;
@@ -32,6 +33,9 @@ export class FakeAssistantTransport implements AssistantTransport {
   }
   async reply(turnId: string, requestId: string, decision: { approved: boolean; note?: string }) {
     this.replies.push({ turnId, requestId, ...decision });
+  }
+  async uiReply(turnId: string, requestId: string, result: { text: string; isError: boolean }) {
+    this.uiReplies.push({ turnId, requestId, ...result });
   }
   async stop(turnId: string) {
     this.stops.push(turnId);

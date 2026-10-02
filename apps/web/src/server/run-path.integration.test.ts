@@ -14,6 +14,7 @@ test("an old /runs link finds the run's place under its project", async () => {
   const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Build a todo app" });
   expect(await runPathOf(db, run.id)).toBe(`/projects/${project.id}/runs/${run.id}`);
   expect(await runPathOf(db, run.id, "q1")).toBe(`/projects/${project.id}/runs/${run.id}/review/q1`);
+  expect(await runPathOf(db, run.id, "q1", "try")).toBe(`/projects/${project.id}/runs/${run.id}/try/q1`);
   expect(await runPathOf(db, crypto.randomUUID())).toBeUndefined();
   expect(await runPathOf(db, "not-a-uuid")).toBeUndefined();
 });

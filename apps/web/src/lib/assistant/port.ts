@@ -8,7 +8,17 @@ export type PendingRequest = { requestId: string; toolUseId?: string | undefined
 
 export type ChatMessage =
   | { id: string; role: "user"; text: string }
-  | { id: string; role: "assistant"; text: string; calls: ToolCallView[]; requests: PendingRequest[]; status: "streaming" | "done" | "stopped" | "error"; error?: string };
+  | {
+      id: string;
+      role: "assistant";
+      text: string;
+      calls: ToolCallView[];
+      requests: PendingRequest[];
+      /** Where the assistant took the page during the reply, such as "Opened Inbox". */
+      notes?: { id: string; text: string }[];
+      status: "streaming" | "done" | "stopped" | "error";
+      error?: string;
+    };
 
 /** A reply as it streams: per delta with done false, and once with the full text and done true. */
 export type ReplyUpdate = { id: string; text: string; done: boolean };

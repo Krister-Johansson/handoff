@@ -7,6 +7,7 @@ export type TurnEvent =
   | { type: "tool_result"; id: string; result: string; isError: boolean }
   | { type: "confirm"; requestId: string; toolUseId: string | undefined; name: string; title: string; summary: string; args: unknown }
   | { type: "confirmed"; requestId: string; approved: boolean; note?: string }
+  | { type: "ui_call"; requestId: string; name: string; args: unknown }
   | { type: "done"; text: string; costUsd?: number }
   | { type: "interrupted"; text: string }
   | { type: "error"; message: string };
@@ -14,7 +15,11 @@ export type TurnEvent =
 /** What the person answered on an approval card. */
 export type Approval = { approved: boolean; note?: string };
 
+/** What the page answered to a UI tool call. */
+export type UiResult = { text: string; isError: boolean };
+
 type Pending = { resolve: (answer: Approval) => void; timer: NodeJS.Timeout };
+type PendingUi = { resolve: (result: UiResult) => void; timer: NodeJS.Timeout };
 
 /**
  * A turn while it runs: its token for the turn's MCP endpoint, the events it streamed (so a panel that
@@ -30,6 +35,7 @@ export class LiveTurn {
   readonly approvals = new Map<string, Approval & { at: string }>();
   private readonly listeners = new Set<(event: TurnEvent) => void>();
   private readonly pending = new Map<string, Pending>();
+  private readonly pendingUi = new Map<string, PendingUi>();
   ended = false;
 
   constructor(readonly conversationId: string) {}
@@ -72,9 +78,34 @@ export class LiveTurn {
     return true;
   }
 
-  /** Denies every open approval, as stopping the turn does. */
+  /** Asks the page to run a UI tool and waits for its answer; no answer in time is an error for the model. */
+  requestUi(call: { name: string; args: unknown }, timeoutMs: number): Promise<UiResult> {
+    if (this.ended) return Promise.resolve({ text: "The turn has ended.", isError: true });
+    const requestId = randomUUID();
+    return new Promise<UiResult>((resolve) => {
+      const settle = (result: UiResult) => {
+        clearTimeout(this.pendingUi.get(requestId)?.timer);
+        this.pendingUi.delete(requestId);
+        resolve(result);
+      };
+      const timer = setTimeout(() => settle({ text: "The page did not answer. The person may have closed the dashboard.", isError: true }), timeoutMs);
+      this.pendingUi.set(requestId, { resolve: settle, timer });
+      this.emit({ type: "ui_call", requestId, ...call });
+    });
+  }
+
+  /** The page's answer to a UI tool call. False when the call is no longer waiting. */
+  answerUi(requestId: string, result: UiResult): boolean {
+    const pending = this.pendingUi.get(requestId);
+    if (!pending) return false;
+    pending.resolve(result);
+    return true;
+  }
+
+  /** Denies every open approval and ends every waiting UI call, as stopping the turn does. */
   denyAll(note: string) {
     for (const pending of [...this.pending.values()]) pending.resolve({ approved: false, note });
+    for (const pending of [...this.pendingUi.values()]) pending.resolve({ text: note, isError: true });
   }
 }
 

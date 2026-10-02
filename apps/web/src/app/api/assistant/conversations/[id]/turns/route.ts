@@ -30,7 +30,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let n = 0;
-      controller.enqueue(encoder.encode(`event: turn\ndata: ${JSON.stringify({ turnId: turn.id })}\n\n`));
+      controller.enqueue(encoder.encode(`event: turn\ndata: ${JSON.stringify({ type: "turn", turnId: turn.id })}\n\n`));
       unsubscribe = turn.subscribe((event) => {
         controller.enqueue(encoder.encode(`id: ${n++}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
         if (TERMINAL.has(event.type)) {

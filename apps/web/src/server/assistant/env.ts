@@ -12,6 +12,8 @@ export type AssistantConfig = {
   maxTurns: number;
   /** How long an approval card waits for the person before the call is denied. */
   approvalTimeoutMs: number;
+  /** How long a UI tool call waits for the page to answer. */
+  uiTimeoutMs: number;
   /** How long one turn may run before it is stopped. */
   turnTimeoutMs: number;
 };
@@ -29,6 +31,7 @@ export function assistantConfig(env: Record<string, string | undefined> = proces
     effort: env.HANDOFF_ASSISTANT_EFFORT || "low",
     maxTurns: number(env.HANDOFF_ASSISTANT_MAX_TURNS, 12),
     approvalTimeoutMs: number(env.HANDOFF_ASSISTANT_APPROVAL_TIMEOUT_MS, 5 * 60_000),
+    uiTimeoutMs: 30_000,
     turnTimeoutMs: number(env.HANDOFF_ASSISTANT_TURN_TIMEOUT_MS, 15 * 60_000),
   };
 }

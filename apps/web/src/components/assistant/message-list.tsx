@@ -13,7 +13,7 @@ const PROSE = "prose prose-sm max-w-none text-[13px] text-foreground dark:prose-
 export function MessageList({ messages }: { messages: ChatMessage[] }) {
   const end = useRef<HTMLDivElement>(null);
   const last = messages.at(-1);
-  const tail = last?.role === "assistant" ? `${last.text.length}:${last.calls.length}:${last.requests.length}` : String(messages.length);
+  const tail = last?.role === "assistant" ? `${last.text.length}:${last.calls.length}:${last.requests.length}:${last.notes?.length ?? 0}` : String(messages.length);
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [tail]);
@@ -31,6 +31,11 @@ export function MessageList({ messages }: { messages: ChatMessage[] }) {
             ))}
             {message.requests.map((request) => (
               <ApprovalCard key={request.requestId} request={request} />
+            ))}
+            {message.notes?.map((note) => (
+              <p key={note.id} role="status" className="text-xs text-muted-foreground">
+                {note.text}
+              </p>
             ))}
             {message.text && (
               <div className={PROSE}>
