@@ -1,4 +1,4 @@
-import { PAGE_TOOLS, type PageKind } from "./page-tools";
+import { PAGE_TOOLS, type PageKind, type PageToolSpec } from "./page-tools";
 
 /** A page tool's handler: it acts in the page and says what it did, or throws to refuse. */
 export type PageToolHandler = (args: never) => string | Promise<string>;
@@ -9,6 +9,14 @@ export type OpenPage = {
   handlers: Readonly<Partial<Record<string, PageToolHandler>>>;
   describe(): unknown;
 };
+
+/**
+ * The specs of the tools the page bound right now, in the kind's order. where_am_i lists them; the
+ * turn (which tools to register for the model) and WebMCP (which to register in the browser) use the same list.
+ */
+export function boundTools(page: OpenPage): PageToolSpec[] {
+  return PAGE_TOOLS[page.kind].filter((spec) => page.handlers[spec.name]);
+}
 
 /** What a page tool call did: the text for the model, and whether it is an error. */
 export type PageToolOutcome = { text: string; isError: boolean };

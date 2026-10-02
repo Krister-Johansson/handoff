@@ -12,7 +12,9 @@ export type PageKind = (typeof PAGE_KINDS)[number];
  */
 export type PageToolSpec<I extends z.ZodRawShape = z.ZodRawShape> = Omit<ToolSpec<I>, "kind"> & { kind: "page" };
 
-const spec = <I extends z.ZodRawShape>(s: Omit<PageToolSpec<I>, "kind">) => ({ ...s, kind: "page" }) as unknown as PageToolSpec;
+/** A spec that keeps its name and input types, so a page's handlers can be typed from its specs. */
+type TypedSpec<N extends string, I extends z.ZodRawShape> = PageToolSpec<I> & { name: N };
+const spec = <const N extends string, I extends z.ZodRawShape>(s: Omit<PageToolSpec<I>, "kind" | "name"> & { name: N }): TypedSpec<N, I> => ({ ...s, kind: "page" });
 
 const quoted = (text: string, max = 60) => (text.length > max ? `"${text.slice(0, max - 1)}…"` : `"${text}"`);
 const lines = (a: { line: number; endLine?: number | undefined }) => (a.endLine && a.endLine !== a.line ? `lines ${a.line} to ${a.endLine}` : `line ${a.line}`);
@@ -40,8 +42,7 @@ const submitReview = spec({
   summarize: (a) => (a.option === "approve" ? "Approve the review" : a.option === "fix" ? "Approve after fixes, sending the comments back" : "Request changes, sending the comments back"),
 });
 
-/** Every page's tools, once: the source of truth for the turn's MCP server, where_am_i and WebMCP. */
-export const PAGE_TOOLS: Record<PageKind, PageToolSpec[]> = {
+const TOOLS = {
   run: [
     spec({
       name: "page_show_view",
@@ -358,4 +359,17 @@ export const PAGE_TOOLS: Record<PageKind, PageToolSpec[]> = {
       summarize: (a) => `Show item ${a.id}`,
     }),
   ],
+} satisfies Record<PageKind, unknown[]>;
+
+/** Every page's tools, once: the source of truth for the turn's MCP server, where_am_i and WebMCP. */
+export const PAGE_TOOLS = TOOLS as unknown as Record<PageKind, PageToolSpec[]>;
+
+type ToolOf<K extends PageKind> = (typeof TOOLS)[K][number];
+
+/**
+ * The handlers a page binds: one key per tool of its kind, so none is forgotten and no other name is
+ * accepted. A tool the page does not offer right now (a submit on an answered review) is undefined.
+ */
+export type PageHandlers<K extends PageKind> = {
+  [T in ToolOf<K> as T["name"]]: ((args: z.infer<T["input"]>) => string | Promise<string>) | undefined;
 };

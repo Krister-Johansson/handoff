@@ -1,4 +1,4 @@
-import type { OpenPage } from "./run-page-tool";
+import { boundTools, type OpenPage } from "./run-page-tool";
 import { planUiTool, UiToolError } from "./ui-tools";
 
 /** What a UI tool call did in the page: the text for the model, and for a navigation, what the panel says. */
@@ -37,7 +37,7 @@ async function pageShown(href: string, before: { path: string; heading: HTMLElem
  */
 export async function runUiTool(
   call: { name: string; args: unknown },
-  { push, timeoutMs = 10_000 }: { push: (href: string) => void; page?: () => OpenPage | undefined; timeoutMs?: number },
+  { push, page, timeoutMs = 10_000 }: { push: (href: string) => void; page?: () => OpenPage | undefined; timeoutMs?: number },
 ): Promise<UiToolOutcome> {
   let plan;
   try {
@@ -46,7 +46,11 @@ export async function runUiTool(
     return { text: error instanceof UiToolError ? error.message : `The page could not run ${call.name}.`, isError: true };
   }
   if (plan.kind === "where") {
-    return { text: JSON.stringify({ path: here(), title: document.title, heading: headingText(heading()) }), isError: false };
+    const open = page?.();
+    const where = { path: here(), title: document.title, heading: headingText(heading()) };
+    if (!open) return { text: JSON.stringify(where), isError: false };
+    const tools = boundTools(open).map((spec) => ({ name: spec.name, title: spec.title }));
+    return { text: JSON.stringify({ ...where, page: { kind: open.kind, tools } }), isError: false };
   }
   const before = { path: here(), heading: heading(), text: headingText(heading()) };
   push(plan.href);
