@@ -1,13 +1,23 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, type ComponentProps } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import type { DiffFile, DiffLine } from "@handoff/core";
+import { AssistantProvider, useAssistant } from "@/components/assistant/assistant-provider";
+import type { AssistantPort } from "@/lib/assistant/port";
+import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { CodeReview } from "./code-review";
 
 const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn(), markViewedAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
 const followUp = vi.hoisted(() => ({ createFollowUpAction: vi.fn() }));
 vi.mock("@/app/inbox/follow-up-action", () => followUp);
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/projects/p1/runs/r1/review/q1",
+}));
 beforeEach(() => {
+  Element.prototype.scrollIntoView = vi.fn();
   followUp.createFollowUpAction.mockReset();
   actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true });
   actions.markViewedAction.mockReset().mockResolvedValue({ ok: true });
@@ -325,4 +335,223 @@ test("Create follow-up issue opens one issue with the chosen findings", async ()
 test("a code review without findings says the reviewer found nothing", () => {
   render(<CodeReview {...props} findings={{ verdict: "approve", by: "code_review-1", comments: [] }} />);
   expect(screen.getByRole("heading", { name: "Code review found nothing" })).toBeInTheDocument();
+});
+
+function Grab({ onPort }: { onPort: (port: AssistantPort) => void }) {
+  const port = useAssistant();
+  useEffect(() => {
+    onPort(port);
+  }, [onPort, port]);
+  return null;
+}
+
+/**
+ * The code review inside the assistant, with a turn running so the test can call the page's tools as
+ * the model would: `call` emits a ui_call and resolves with the page's answer.
+ */
+async function withAssistant(overrides: Partial<ComponentProps<typeof CodeReview>> = {}) {
+  const transport = new FakeAssistantTransport();
+  let port: AssistantPort | undefined;
+  const onPort = (p: AssistantPort) => (port = p);
+  render(
+    <AssistantProvider transport={transport} available>
+      <Grab onPort={onPort} />
+      <CodeReview {...props} {...overrides} />
+    </AssistantProvider>,
+  );
+  act(() => void port!.send("what is on this page"));
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  let next = 1;
+  const call = async (name: string, args: unknown = {}) => {
+    const requestId = `u${next++}`;
+    act(() => transport.emit({ type: "ui_call", requestId, name, args }));
+    await waitFor(() => expect(transport.uiReplies.find((r) => r.requestId === requestId)).toBeDefined());
+    const { text, isError } = transport.uiReplies.find((r) => r.requestId === requestId)!;
+    return { text, isError };
+  };
+  const whereAmI = async () => JSON.parse((await call("where_am_i")).text) as { page?: { kind: string; tools: { name: string }[]; state: { data: Record<string, unknown> } } };
+  return { call, whereAmI, transport };
+}
+
+const fileCursor = () => screen.getByRole("button", { name: / of 3$/ });
+
+test("page_go_to_file moves by path, index and direction, and opens the file", async () => {
+  const { call, whereAmI } = await withAssistant();
+  fireEvent.click(within(screen.getByRole("region", { name: "src/b.ts" })).getByRole("button", { name: "Collapse src/b.ts" }));
+
+  expect(await call("page_go_to_file", { path: "src/b.ts" })).toEqual({ text: "Now on file 2 of 3: src/b.ts.", isError: false });
+  expect(fileCursor()).toHaveTextContent("src/b.ts 2 of 3");
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByText("export const b = 1;")).toBeInTheDocument();
+
+  expect(await call("page_go_to_file", { index: 3 })).toEqual({ text: "Now on file 3 of 3: pnpm-lock.yaml.", isError: false });
+  expect(await call("page_go_to_file", { direction: "previous" })).toEqual({ text: "Now on file 2 of 3: src/b.ts.", isError: false });
+  expect(await call("page_go_to_file", { direction: "next" })).toEqual({ text: "Now on file 3 of 3: pnpm-lock.yaml.", isError: false });
+  expect(await call("page_go_to_file")).toEqual({ text: "Already on the last file, 3 of 3: pnpm-lock.yaml.", isError: false });
+  expect((await whereAmI()).page?.state.data).toMatchObject({ current: 3 });
+
+  expect(await call("page_go_to_file", { path: "src/c.ts" })).toEqual({ text: "src/c.ts is not in this review. The files are: 1. src/a.ts; 2. src/b.ts; 3. pnpm-lock.yaml.", isError: true });
+  expect(await call("page_go_to_file", { index: 4 })).toEqual({ text: "There is no file 4. The files run from 1 to 3.", isError: true });
+  expect(fileCursor()).toHaveTextContent("pnpm-lock.yaml 3 of 3");
+});
+
+test("page_set_diff_view switches mode and layout", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(within(fileA()).queryByText("line 1")).not.toBeInTheDocument();
+
+  expect(await call("page_set_diff_view", { mode: "whole" })).toEqual({ text: "Showing the whole file, in one column.", isError: false });
+  expect(screen.getByRole("radio", { name: "Whole file" })).toBeChecked();
+  expect(within(fileA()).getByText("line 1")).toBeInTheDocument();
+
+  expect(await call("page_set_diff_view", { layout: "split" })).toEqual({ text: "Showing the whole file, side by side.", isError: false });
+  expect(screen.getByRole("radio", { name: "Split" })).toBeChecked();
+  expect(within(within(fileA()).getByText("old 10").closest("tr")!).getByText("new 10")).toBeInTheDocument();
+
+  expect(await call("page_set_diff_view", { mode: "changes", layout: "unified" })).toEqual({ text: "Showing the changes, in one column.", isError: false });
+  expect(screen.getByRole("radio", { name: "Changes" })).toBeChecked();
+  expect(screen.getByRole("radio", { name: "Unified" })).toBeChecked();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ mode: "changes", layout: "unified" });
+});
+
+test("page_comment_on_lines adds a draft comment with the quoted code, and a line outside the file is refused with its range", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(await call("page_comment_on_lines", { path: "src/a.ts", line: 9, endLine: 11, body: "Explain this." })).toEqual({
+    text: "Drafted a comment on lines 9 to 11 of src/a.ts. 1 comment drafted.",
+    isError: false,
+  });
+  expect(within(fileA()).getByText("Explain this.")).toBeInTheDocument();
+  expect(screen.getByText("1 comment drafted")).toBeInTheDocument();
+  expect(await call("page_comment_on_lines", { path: "src/a.ts", line: 10, side: "old", body: "Why remove it?" })).toEqual({
+    text: "Drafted a comment on old line 10 of src/a.ts. 2 comments drafted.",
+    isError: false,
+  });
+  expect((await whereAmI()).page?.state.data).toMatchObject({
+    comments: [
+      { path: "src/a.ts", side: "new", line: 9, endLine: 11, quote: "line 9\nnew 10\nline 11", body: "Explain this." },
+      { path: "src/a.ts", side: "old", line: 10, quote: "old 10", body: "Why remove it?" },
+    ],
+  });
+
+  expect(await call("page_comment_on_lines", { path: "src/a.ts", line: 25, body: "Here?" })).toEqual({ text: "src/a.ts has no new line 25. Its new lines run from 1 to 20.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "src/b.ts", line: 1, endLine: 3, body: "Here?" })).toEqual({ text: "src/b.ts has no new line 3. Its new lines run from 1 to 2.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "src/b.ts", line: 1, side: "old", body: "Here?" })).toEqual({ text: "src/b.ts has no old lines to comment on.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "pnpm-lock.yaml", line: 1, body: "Here?" })).toEqual({ text: "pnpm-lock.yaml has no new lines to comment on.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "src/c.ts", line: 1, body: "Here?" })).toMatchObject({ text: expect.stringContaining("src/c.ts is not in this review."), isError: true });
+  expect(screen.getByText("2 comments drafted")).toBeInTheDocument();
+});
+
+test("page_mark_viewed saves the mark and collapses the file", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(await call("page_mark_viewed", { path: "src/a.ts", viewed: true })).toEqual({ text: "Marked src/a.ts as viewed and collapsed it. 1 of 3 viewed.", isError: false });
+  expect(actions.markViewedAction).toHaveBeenCalledWith({ runId: "r1", path: "src/a.ts", blobSha: "b1", viewed: true });
+  expect(within(fileA()).getByRole("checkbox", { name: "Viewed" })).toBeChecked();
+  expect(within(fileA()).queryByText("new 10")).not.toBeInTheDocument();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ files: [{ index: 1, path: "src/a.ts", viewed: true, open: false }, { path: "src/b.ts", viewed: false, open: true }, { path: "pnpm-lock.yaml" }] });
+
+  expect(await call("page_mark_viewed", { path: "src/a.ts", viewed: false })).toEqual({ text: "Marked src/a.ts as not viewed and expanded it. 0 of 3 viewed.", isError: false });
+  expect(within(fileA()).getByRole("checkbox", { name: "Viewed" })).not.toBeChecked();
+  expect(within(fileA()).getByText("new 10")).toBeInTheDocument();
+
+  // A file the review shows no content of has no Viewed box.
+  expect(await call("page_mark_viewed", { path: "pnpm-lock.yaml", viewed: true })).toEqual({ text: "pnpm-lock.yaml cannot be marked viewed: the review does not show its content.", isError: true });
+  // What the save refuses comes back as the tool's error.
+  actions.markViewedAction.mockResolvedValueOnce({ ok: false, error: "That file cannot be marked." });
+  expect(await call("page_mark_viewed", { path: "src/b.ts", viewed: true })).toEqual({ text: "That file cannot be marked.", isError: true });
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByRole("checkbox", { name: "Viewed" })).not.toBeChecked();
+  expect(actions.markViewedAction).toHaveBeenCalledTimes(3);
+});
+
+/** What a server action that redirects rejects with in the browser, once Next has started the navigation. */
+const redirectTo = (path: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${path};303;` });
+
+test("page_submit_review changes with no comment and no note is refused, and with a comment sends it", async () => {
+  const { call, whereAmI } = await withAssistant();
+  for (const option of ["changes", "fix"]) {
+    expect(await call("page_submit_review", { option })).toEqual({ text: "Add a comment or an overall comment first, so there is something to fix.", isError: true });
+  }
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+
+  await call("page_comment_on_lines", { path: "src/b.ts", line: 2, body: "Drop c." });
+  expect(await call("page_set_note", { note: "Nearly there." })).toEqual({ text: 'Set the overall comment to "Nearly there."', isError: false });
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  expect(screen.getByLabelText("Overall comment")).toHaveValue("Nearly there.");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ note: "Nearly there." });
+
+  // What the action refuses comes back as the tool's error, and the draft stays.
+  actions.answerReviewAction.mockResolvedValueOnce({ ok: false, error: "This question was already answered." });
+  expect(await call("page_submit_review", { option: "changes" })).toEqual({ text: "This question was already answered.", isError: true });
+  expect(screen.getByText("1 comment drafted")).toBeInTheDocument();
+
+  // On success the action redirects to the run page, which Next reports to the caller as a rejection.
+  actions.answerReviewAction.mockRejectedValueOnce(redirectTo("/projects/p1/runs/r1"));
+  expect(await call("page_submit_review", { option: "changes" })).toEqual({ text: "Requested changes from coder-1 with 1 comment and the overall comment. The run page opens.", isError: false });
+  expect(actions.answerReviewAction).toHaveBeenLastCalledWith({
+    questionId: "q1",
+    runId: "r1",
+    option: "changes",
+    note: "Nearly there.",
+    comments: [{ path: "src/b.ts", side: "new", line: 2, quote: "export const c = 2;", body: "Drop c." }],
+  });
+});
+
+test("an answered review binds only navigation and view tools", async () => {
+  const answered = [{ path: "src/a.ts", side: "new" as const, line: 10, quote: "new 10", body: "Name it." }];
+  const { call, whereAmI } = await withAssistant({ answered });
+  const page = (await whereAmI()).page!;
+  expect(page.tools.map((t) => t.name)).toEqual(["page_go_to_file", "page_set_diff_view", "page_expand_files"]);
+  expect(page.state.data).toMatchObject({ readOnly: true, comments: answered });
+
+  expect(await call("page_go_to_file", { index: 2 })).toEqual({ text: "Now on file 2 of 3: src/b.ts.", isError: false });
+  expect(await call("page_set_diff_view", { layout: "split" })).toEqual({ text: "Showing the changes, side by side.", isError: false });
+
+  expect(await call("page_expand_files", { all: false })).toEqual({ text: "Collapsed every file.", isError: false });
+  expect(within(fileA()).queryByText("new 10")).not.toBeInTheDocument();
+  expect(await call("page_expand_files", { path: "src/a.ts", open: true })).toEqual({ text: "Expanded src/a.ts.", isError: false });
+  expect(within(fileA()).getByText("new 10")).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).queryByText("export const b = 1;")).not.toBeInTheDocument();
+  expect(await call("page_expand_files", { path: "src/a.ts", open: false })).toEqual({ text: "Collapsed src/a.ts.", isError: false });
+  expect(await call("page_expand_files", { all: true })).toEqual({ text: "Expanded every file.", isError: false });
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByText("export const b = 1;")).toBeInTheDocument();
+  expect(await call("page_expand_files")).toEqual({ text: "Say all, or a path with open.", isError: true });
+
+  for (const name of ["page_mark_viewed", "page_comment_on_lines", "page_remove_line_comment", "page_set_note", "page_submit_review"]) {
+    expect(await call(name, { path: "src/a.ts", line: 9, viewed: true, body: "x", note: "x", option: "approve" })).toMatchObject({ isError: true, text: expect.stringContaining(`${name} is not available here`) });
+  }
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+  expect(actions.markViewedAction).not.toHaveBeenCalled();
+});
+
+test("page_remove_line_comment removes the drafted comment that starts at a line, and names the drafted ones when none does", async () => {
+  const { call } = await withAssistant();
+  await call("page_comment_on_lines", { path: "src/a.ts", line: 9, endLine: 11, body: "Explain this." });
+  await call("page_comment_on_lines", { path: "src/b.ts", line: 1, body: "Fine." });
+  expect(await call("page_remove_line_comment", { path: "src/a.ts", line: 10 })).toEqual({
+    text: "No drafted comment starts at line 10 of src/a.ts. The drafted comments are on: src/a.ts lines 9 to 11; src/b.ts line 1.",
+    isError: true,
+  });
+  expect(await call("page_remove_line_comment", { path: "src/a.ts", line: 9 })).toEqual({ text: "Removed the comment on lines 9 to 11 of src/a.ts. 1 comment drafted.", isError: false });
+  expect(within(fileA()).queryByText("Explain this.")).not.toBeInTheDocument();
+  expect(screen.getByText("1 comment drafted")).toBeInTheDocument();
+});
+
+test("where_am_i lists the code reviewer's findings by severity and says the follow-up issue is the page's button", async () => {
+  const { whereAmI } = await withAssistant({ findings: graded });
+  expect((await whereAmI()).page?.state.data).toMatchObject({
+    findings: {
+      by: "code_review-1",
+      verdict: "request_changes",
+      items: [
+        { index: 1, severity: "should_fix", path: "src/a.ts", line: 10, body: "Name the constant." },
+        { index: 2, severity: "blocking", path: "src/b.ts", line: 2, body: "Crashes on an empty list." },
+        { index: 3, severity: "follow_up", path: "docs/notes.md", body: "Link the ADR." },
+      ],
+      followUp: null,
+      followUpNote: "The person opens a follow-up issue from picked findings with the Create follow-up issue button. No page tool does it.",
+    },
+  });
+
+  followUp.createFollowUpAction.mockResolvedValue({ ok: true, issue: { number: 57, url: "https://github.com/o/r/issues/57" } });
+  fireEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
+  expect(await screen.findByRole("link", { name: "#57" })).toBeInTheDocument();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ findings: { followUp: { number: 57, url: "https://github.com/o/r/issues/57" } } });
 });

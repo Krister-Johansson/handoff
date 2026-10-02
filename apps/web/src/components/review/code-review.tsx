@@ -13,13 +13,14 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { commentedAt, placeEarlier, type EarlierRound } from "@/lib/earlier";
 import { placeFindings, type Findings, type FollowUp } from "@/lib/findings";
 import type { LineTokens } from "@/lib/highlight-types";
-import { numberOn, type LineComment, type LineSelection, type Side } from "@/lib/line-comments";
+import type { LineComment, LineSelection, Side } from "@/lib/line-comments";
 import { useReviewDraft } from "@/lib/use-review-draft";
 import { cn } from "@/lib/utils";
 import { viewState, type View, type ViewState } from "@/lib/viewed";
 import { FileDiff } from "./file-diff";
 import { FindingsSummary } from "./findings-summary";
 import { CARD, PROSE, PROSE_TIGHT } from "./styles";
+import { quoteOf, useCodeReviewTools } from "./code-review-tools";
 import { SubmitReview } from "./submit-review";
 
 /** The design's segmented control: two or more choices in one soft well, the chosen one raised. */
@@ -28,19 +29,6 @@ const SEG_ITEM = "h-6 min-w-0 rounded-[4px] px-2.5 text-xs text-muted-foreground
 
 type Mode = "changes" | "whole";
 type Layout = "unified" | "split";
-
-/** The code of the selected lines on one side of a file, for the coder to find after lines move. */
-function quoteOf(file: DiffFile, side: Side, start: number, end: number) {
-  return file.hunks
-    .flatMap((h) => h.lines)
-    .filter((l) => (side === "new" ? l.kind !== "del" : l.kind !== "add"))
-    .filter((l) => {
-      const n = numberOn(l, side);
-      return n !== undefined && n >= start && n <= end;
-    })
-    .map((l) => l.text)
-    .join("\n");
-}
 
 const isTyping = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 
@@ -168,10 +156,19 @@ function useViewed(runId: string, files: DiffFile[], views: View[], earlier: Ear
     const own = clicked.get(file.path);
     return own === undefined ? (initial.get(file.path) ?? { viewed: false }) : own ? { viewed: true } : { viewed: false };
   };
-  const mark = (file: DiffFile, viewed: boolean) => {
-    if (!enabled || !file.blob) return;
+  /** Marks a file and saves the mark; resolves to why it could not be saved, when it could not. */
+  const mark = async (file: DiffFile, viewed: boolean) => {
+    if (!enabled || !file.blob) return undefined;
     setClicked((map) => new Map(map).set(file.path, viewed));
-    void markViewedAction({ runId, path: file.path, blobSha: file.blob, viewed });
+    const result = await markViewedAction({ runId, path: file.path, blobSha: file.blob, viewed });
+    if (!result?.error) return undefined;
+    // A mark that was not saved does not stay on the page.
+    setClicked((map) => {
+      const next = new Map(map);
+      next.delete(file.path);
+      return next;
+    });
+    return result.error;
   };
   return { stateOf, mark, initial };
 }
@@ -193,6 +190,9 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
   const [selection, setSelection] = useState<LineSelection>();
   const [current, go] = useFileCursor(files.length);
   const last = earlier.at(-1);
+  // The follow-up issue the person opens here; until then, the one opened before.
+  const [opened, setOpened] = useState<FollowUp>();
+  const followUp = opened ?? findings?.followUp;
 
   const select = (path: string, side: Side, n: number, extend: boolean) =>
     !readOnly &&
@@ -217,6 +217,20 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
 
   const drafted = readOnly ? 0 : comments.length;
 
+  useCodeReviewTools({
+    questionId,
+    runId,
+    from,
+    files,
+    findings: findings && { ...findings, followUp },
+    readOnly,
+    comments,
+    draft,
+    view: { mode, setMode, layout, setLayout, closed, setClosed, setOpen, current, go },
+    viewed: { stateOf, mark },
+  });
+
+
   return (
     <div className="flex flex-col gap-4">
       {findings ? (
@@ -224,6 +238,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
           findings={findings}
           by={findings.by}
           followUp={findings.followUp}
+          onFollowUp={setOpened}
           runId={runId}
           questionId={questionId}
           files={files}
@@ -303,7 +318,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
             readOnly
               ? undefined
               : (viewed) => {
-                  mark(file, viewed);
+                  void mark(file, viewed);
                   setOpen(file.path, !viewed);
                 }
           }
