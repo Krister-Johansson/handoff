@@ -108,6 +108,28 @@ test("an answered review shows each criterion's result and asks nothing more", (
   expect(screen.getByText("The app stopped when this was answered.")).toBeInTheDocument();
 });
 
+test("new warnings from the server log and the console are marked new", () => {
+  const warnings = [
+    { source: "server" as const, level: "error" as const, text: "Error: could not load tasks", new: true },
+    { source: "server" as const, level: "warning" as const, text: "Warning: the old API is deprecated", new: false },
+    { source: "console" as const, level: "warning" as const, text: "Image is missing an alt attribute", new: true },
+  ];
+  render(<TryReview {...props} warnings={warnings} />);
+  const list = section("Warnings and errors");
+  const item = (text: string) => within(list).getByText(text).closest("li")!;
+  expect(within(list).getByText("2 new since the previous demo")).toBeInTheDocument();
+  expect(within(item("Error: could not load tasks")).getByText("New")).toBeInTheDocument();
+  expect(within(item("Error: could not load tasks")).getByText("Server log")).toBeInTheDocument();
+  expect(within(item("Image is missing an alt attribute")).getByText("New")).toBeInTheDocument();
+  expect(within(item("Image is missing an alt attribute")).getByText("Console")).toBeInTheDocument();
+  expect(within(item("Warning: the old API is deprecated")).queryByText("New")).not.toBeInTheDocument();
+});
+
+test("a demo without warnings shows no warnings section", () => {
+  render(<TryReview {...props} />);
+  expect(screen.queryByRole("region", { name: "Warnings and errors" })).not.toBeInTheDocument();
+});
+
 function Grab({ onPort }: { onPort: (port: AssistantPort) => void }) {
   const port = useAssistant();
   useEffect(() => {

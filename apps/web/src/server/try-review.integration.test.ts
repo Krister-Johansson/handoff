@@ -18,12 +18,13 @@ async function asked(context: Record<string, unknown>) {
   return { project, run, question: question! };
 }
 
-test("a Try it question reads as the app, the criteria, the screenshots and where the work goes back", async () => {
+test("a Try it question reads as the app, the criteria, the screenshots, the warnings and where the work goes back", async () => {
   const { project, run, question } = await asked({
     reason: "try",
     acceptance: ["A user can create a new project"],
     preview: { id: "p1", url: "http://localhost:41000", status: "running" },
     shots: [{ id: "a1", caption: "The dialog", criterion: "A user can create a new project", works: true }],
+    warnings: [{ source: "console", level: "warning", text: "Image is missing an alt attribute", new: true }],
   });
   expect(await getTryReview(db, run.id, question.id)).toEqual({
     id: question.id,
@@ -36,6 +37,7 @@ test("a Try it question reads as the app, the criteria, the screenshots and wher
     acceptance: ["A user can create a new project"],
     preview: { id: "p1", url: "http://localhost:41000", status: "running" },
     shots: [{ id: "a1", caption: "The dialog", criterion: "A user can create a new project", works: true }],
+    warnings: [{ source: "console", level: "warning", text: "Image is missing an alt attribute", new: true }],
     answered: null,
   });
   await db.update(questions).set({ answer: "Approved.", option: "approve", answeredBy: "krister", answeredAt: new Date() }).where(eq(questions.id, question.id));
