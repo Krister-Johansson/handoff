@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
-import { appendEvents, edgeTraversals, nodeExecutions, projects, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
+import { appendEvents, edgeTraversals, nodeExecutions, projects, questions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
 
@@ -346,6 +346,57 @@ export async function yieldWaiting(
       nodeExecutionId: row.id,
     },
   ]);
+}
+
+/** The answers to a paths question: allow the files for this run, send the work back, or fail the step. */
+export const PATHS_OPTIONS = ["allow", "send_back", "fail"] as const;
+
+/**
+ * A step whose only failing check is the path check waits for a person instead of failing. Its output,
+ * checks and cost stay on the execution; the question names the files outside the plan.
+ */
+export async function askAboutPaths(
+  tx: DbTx,
+  input: {
+    row: NodeExecutionRow;
+    workerId: string;
+    graph: CompiledGraph;
+    output: unknown;
+    checks: CheckResult[];
+    files: string[];
+    cost?: { usd?: number | undefined; usage?: unknown } | undefined;
+  },
+) {
+  const { row, files } = input;
+  const [kept] = await tx
+    .update(nodeExecutions)
+    .set({
+      output: input.output,
+      checks: input.checks,
+      ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd.toFixed(6) } : {}),
+      ...(input.cost?.usage !== undefined ? { usage: input.cost.usage } : {}),
+    })
+    .where(owned(row, input.workerId))
+    .returning({ id: nodeExecutions.id });
+  if (!kept) throw new LeaseLostError(row.id);
+  const text = `${row.nodeKey} changed files outside the plan: ${files.map((f) => `\`${f}\``).join(", ")}`;
+  const summary = `${row.nodeKey} changed ${files.length === 1 ? "a file" : `${files.length} files`} outside the plan`;
+  const [question] = await tx
+    .insert(questions)
+    .values({ runId: row.runId, nodeExecutionId: row.id, question: text, options: [...PATHS_OPTIONS], context: { reason: "paths", from: row.nodeKey, files, summary } })
+    .returning();
+  const events: NewEvent[] = [
+    ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
+    { type: "human.asked", payload: { questionId: question!.id, question: text, options: question!.options }, nodeExecutionId: row.id },
+  ];
+  const node = input.graph.node(row.nodeKey);
+  if (notifies(node, "input")) {
+    const [run] = await tx.select({ projectId: runs.projectId, project: projects.name }).from(runs).innerJoin(projects, eq(projects.id, runs.projectId)).where(eq(runs.id, row.runId));
+    if (!run) throw new Error(`run ${row.runId} not found`);
+    await notifyFrom(tx, node, "input", { id: row.runId, projectId: run.projectId }, { title: `${run.project}: ${summary}`, body: brief(files.join(", ")), href: runPath(run.projectId, row.runId) });
+  }
+  await appendEvents(tx, row.runId, events);
+  await yieldWaiting(tx, { row, workerId: input.workerId, wait: { kind: "human", token: question!.id } });
 }
 
 export async function releaseForReclaim(tx: DbTx, input: { row: NodeExecutionRow; workerId: string }) {

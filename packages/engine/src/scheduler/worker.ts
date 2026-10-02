@@ -31,7 +31,7 @@ import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
-import { completeFailed, completePassed, LeaseLostError, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
+import { askAboutPaths, completeFailed, completePassed, LeaseLostError, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
 export type EngineDeps = {
   db: Db;
@@ -406,6 +406,10 @@ async function applyOutcome(
         await db.transaction((tx) =>
           completePassed(tx, { row, workerId, graph, output: contract.output, statePatch: outcome.statePatch, checks: contract.checks, cost: outcome.cost }),
         );
+      } else if (contract.pathsOutside) {
+        // Only files outside the plan are wrong: a person decides whether they belong to the change.
+        const files = contract.pathsOutside;
+        await db.transaction((tx) => askAboutPaths(tx, { row, workerId, graph, output: contract.output, checks: contract.checks, files, cost: outcome.cost }));
       } else {
         await db.transaction((tx) =>
           completeFailed(tx, {

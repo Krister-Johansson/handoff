@@ -1,6 +1,7 @@
 import type { NodeMemory } from "../schema/run-state.ts";
 
-export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined };
+/** A deterministic check's result; a path check that failed names the files outside the plan in `files`. */
+export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined; files?: string[] | undefined };
 
 /** A comment on code (path and line) or on a quoted part of a text such as a plan. */
 export type ReviewComment = {

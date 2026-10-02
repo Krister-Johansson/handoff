@@ -166,7 +166,7 @@ export async function runCheck(check: DeterministicCheck, ctx: CheckContext): Pr
       const outside = outsideOwned(files, allowed);
       return outside.length === 0
         ? done(true, `${files.length} changed files within owned paths`)
-        : done(false, `files outside owned paths: ${outside.join(", ")}`);
+        : { ...done(false, `files outside owned paths: ${outside.join(", ")}`), files: outside };
     }
     case "no_uncommitted_changes": {
       const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: needWorkdir(check, ctx) });
