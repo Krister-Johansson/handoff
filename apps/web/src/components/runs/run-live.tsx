@@ -274,9 +274,10 @@ export function RunLive({
   );
 
   const live = status === "queued" || status === "running" || status === "waiting";
-  const stepName = (step: ExecutionView) => `${labels[step.nodeKey] ?? step.nodeKey} (${step.nodeKey})`;
+  // How a tool's answer names a node: its label, then its key.
+  const nodeName = (key: string) => `${labels[key] ?? key} (${key})`;
 
-  usePageTools(
+  usePageTools<"run">(
     "run",
     {
       page_show_view: ({ view }) => {
@@ -286,17 +287,17 @@ export function RunLive({
       page_open_step: ({ step, attempt }) => {
         const execution = findStep(executions, step, attempt);
         setSelectedId(execution.id);
-        return `Opened ${stepName(execution)}, attempt ${execution.attempt}.`;
+        return `Opened ${nodeName(execution.nodeKey)}, attempt ${execution.attempt}.`;
       },
       page_close_step: () => {
         setSelectedId(null);
         setPoppedOut(false);
-        return selected ? `Closed ${stepName(selected)}.` : "No step was open.";
+        return selected ? `Closed ${nodeName(selected.nodeKey)}.` : "No step was open.";
       },
       page_pop_out: ({ open }) => {
         if (!selected) throw new Error("No step is open. Open one with page_open_step first.");
         setPoppedOut(open);
-        return open ? `Popped out ${stepName(selected)}.` : `Put ${stepName(selected)} back in the drawer.`;
+        return open ? `Popped out ${nodeName(selected.nodeKey)}.` : `Put ${nodeName(selected.nodeKey)} back in the drawer.`;
       },
       page_filter_events: ({ node, cli }) => {
         if (node && !nodeKeys.includes(node)) throw new Error(`No step has the key ${node}. ${stepsList(nodeKeys)}`);
@@ -306,7 +307,7 @@ export function RunLive({
         setNodeFilter(nextNode);
         setShowCli(nextCli);
         setView("events");
-        return `Showing the events of ${nextNode ? `${labels[nextNode] ?? nextNode} (${nextNode})` : "every node"}${nextCli ? ", with the Claude CLI's events" : ""}.`;
+        return `Showing the events of ${nextNode ? nodeName(nextNode) : "every node"}${nextCli ? ", with the Claude CLI's events" : ""}.`;
       },
     },
     () => ({
