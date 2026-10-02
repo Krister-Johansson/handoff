@@ -68,14 +68,17 @@ function plannedOf(item: PlanItem): PlannedSpan | undefined {
   return undefined;
 }
 
+/** A task with a Start and a duration in hours, as its bar is laid out; `target` is its Target on GitHub. */
+export type BarTask = { number: number; start: string; target?: string | undefined; blockers: readonly number[]; hours: number };
+
 /**
  * A task's bar from its Start for its hours at the capacity per day, starting `offsetHours` into its first day.
  * Its end is the day its last hour falls on; every day counts.
  */
-function barOf(item: PlanItem, hours: number, offsetHours: number, capacity: number): PlannedSpan {
-  const start = item.start!;
+function barOf(task: BarTask, offsetHours: number, capacity: number): PlannedSpan {
+  const { start, target, hours } = task;
   const end = addDays(start, Math.max(0, Math.ceil((offsetHours + hours) / capacity - EPSILON) - 1));
-  return { start, end, openStart: false, openEnd: false, hours, offsetHours, ...(item.target && item.target !== end ? { targetOnGitHub: item.target } : {}) };
+  return { start, end, openStart: false, openEnd: false, hours, offsetHours, ...(target && target !== end ? { targetOnGitHub: target } : {}) };
 }
 
 /**
@@ -98,33 +101,38 @@ export function inBlockerOrder<T extends { number: number; blockers: readonly nu
 const blockersOf = (item: PlanItem) => item.blockers ?? item.blockedBy;
 
 /**
- * The bars of the tasks with a duration and a Start. The tasks that start on one day sit one after another
- * in blocker order, then by number, so a later task starts after the hours of the ones before it.
+ * The bars of tasks with a Start and a duration. The tasks that start on one day sit one after another in
+ * blocker order, then by number, so a later task starts after the hours of the ones before it.
  */
-export function sizedBars(items: readonly PlanItem[], opts: SpanOptions): Map<number, PlannedSpan> {
-  const byDay = new Map<string, { number: number; blockers: number[]; item: PlanItem; hours: number }[]>();
-  for (const item of items) {
-    const duration = opts.durations.get(item.number);
-    if (!duration || !item.start) continue;
-    byDay.set(item.start, [...(byDay.get(item.start) ?? []), { number: item.number, blockers: blockersOf(item), item, hours: duration.hours }]);
-  }
+export function stackBars(tasks: readonly BarTask[], capacity: number): Map<number, PlannedSpan> {
+  const byDay = new Map<string, BarTask[]>();
+  for (const task of tasks) byDay.set(task.start, [...(byDay.get(task.start) ?? []), task]);
   const bars = new Map<number, PlannedSpan>();
   for (const day of byDay.values()) {
     let used = 0;
     for (const task of inBlockerOrder(day)) {
-      bars.set(task.number, barOf(task.item, task.hours, used, opts.capacity));
+      bars.set(task.number, barOf(task, used, capacity));
       used += task.hours;
     }
   }
   return bars;
 }
 
+/** The bars of the plan's items that have a duration and a Start. */
+export function sizedBars(items: readonly PlanItem[], opts: SpanOptions): Map<number, PlannedSpan> {
+  const tasks = items.flatMap((item): BarTask[] => {
+    const duration = opts.durations.get(item.number);
+    return duration && item.start ? [{ number: item.number, start: item.start, target: item.target, blockers: blockersOf(item), hours: duration.hours }] : [];
+  });
+  return stackBars(tasks, opts.capacity);
+}
+
 /** Hours from the start of 1970-01-01 to `offsetHours` into a day, at the capacity per day. */
 const hourOf = (day: string, offsetHours: number, capacity: number) => daysBetween("1970-01-01", day) * capacity + offsetHours;
-/** Where a bar starts, in hours: a sized bar after its offset, a dated one at the start of its Start day. */
-const startHour = (span: PlannedSpan, capacity: number) => (span.openStart ? undefined : hourOf(span.start, span.offsetHours ?? 0, capacity));
-/** Where a bar ends, in hours: a sized bar after its hours, a dated one at the end of its Target day. */
-const endHour = (span: PlannedSpan, capacity: number) =>
+/** Where a bar starts, in hours of capacity: a sized bar after its offset, a dated one at the start of its Start day. */
+export const startHour = (span: PlannedSpan, capacity: number) => (span.openStart ? undefined : hourOf(span.start, span.offsetHours ?? 0, capacity));
+/** Where a bar ends, in hours of capacity: a sized bar after its hours, a dated one at the end of its Target day. */
+export const endHour = (span: PlannedSpan, capacity: number) =>
   span.hours !== undefined ? hourOf(span.start, (span.offsetHours ?? 0) + span.hours, capacity) : span.openEnd ? undefined : hourOf(addDays(span.end, 1), 0, capacity);
 
 /** Minutes the newest active run has worked past the duration; undefined while inside it or without either. */
