@@ -1,19 +1,34 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useEffectEvent, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { CalendarClockIcon, CalendarIcon, ChevronRightIcon, ClockAlertIcon, ExternalLinkIcon, LockIcon, MoreHorizontalIcon, MoveHorizontalIcon } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CalendarClockIcon, CalendarIcon, ChevronRightIcon, ClockAlertIcon, ExternalLinkIcon, LocateFixedIcon, LockIcon, MoreHorizontalIcon, MoveHorizontalIcon, PlusIcon } from "lucide-react";
 import type { PlanItem, PlanProject } from "@handoff/github";
+import { addDateFieldsAction } from "@/app/projects/actions";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { FieldError } from "@/components/ui/field";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanTask } from "@/server/plan";
 import { Tag } from "@/components/tag";
 import type { DaySpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
@@ -21,7 +36,7 @@ import type { PlanFilters } from "@/lib/plan/filters";
 import { taskColumn } from "@/lib/plan/task";
 import { arrowPath, placeItem, timelineRows, type TimelineRow } from "@/lib/plan/timeline-rows";
 import { addDays, dayOfInstant, defaultZoom, shortDay, timeScale, visibleRange, type TimeScale, type Zoom } from "@/lib/plan/timeline-scale";
-import { runPath } from "@/lib/paths";
+import { planPath, runPath } from "@/lib/paths";
 import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { TaskActions, type StartRunContext } from "./plan-actions";
@@ -309,6 +324,113 @@ function Strips({ row, entry, scale, projectId }: { row: TimelineRow; entry: Tim
   });
 }
 
+const LEGEND: { label: string; swatch: string }[] = [
+  ...(["Shaping", "Ready", "Running", "In review", "Done"] as const).map((c) => ({ label: c, swatch: cn("h-2 rounded-[2px] border", BAR_TONE[c]) })),
+  { label: "Derived", swatch: "h-2 rounded-[2px] border border-dashed border-muted-foreground/60" },
+  { label: "Run", swatch: "h-1 rounded-[2px] bg-active-dot" },
+  { label: "Blocks", swatch: "h-0 border-t-[1.5px] border-muted-foreground" },
+  { label: "Late", swatch: "h-0 border-t-[1.5px] border-danger-dot" },
+];
+
+/** The chart's header: the legend, then Today, the zoom and the menu that points to GitHub's roadmap. */
+function ChartHeader({ zoom, project, onZoom, onToday }: { zoom: Zoom; project: PlanProject; onZoom: (zoom: Zoom) => void; onToday: () => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3.5 border-b py-2 pr-2.5 pl-3.5">
+      <ul aria-label="Legend" className="flex flex-wrap items-center gap-3 text-[11.5px] text-muted-foreground">
+        {LEGEND.map((l) => (
+          <li key={l.label} className="inline-flex items-center gap-1.5">
+            <span aria-hidden className={cn("w-3.5 shrink-0", l.swatch)} />
+            {l.label}
+          </li>
+        ))}
+      </ul>
+      <div className="ml-auto flex items-center gap-2">
+        <Button variant="outline" size="sm" onClick={onToday}>
+          <LocateFixedIcon data-icon="inline-start" />
+          Today
+        </Button>
+        <ToggleGroup type="single" variant="outline" size="sm" value={zoom} onValueChange={(v) => v && onZoom(v as Zoom)} aria-label="Zoom">
+          <ToggleGroupItem value="weeks">Weeks</ToggleGroupItem>
+          <ToggleGroupItem value="months">Months</ToggleGroupItem>
+        </ToggleGroup>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label="Timeline menu">
+              <MoreHorizontalIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuLabel className="flex gap-2 text-xs font-normal text-muted-foreground">
+              <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              Drag dates on GitHub&apos;s roadmap. This timeline shows the Project; it does not move dates.
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem asChild>
+                <a href={project.url}>
+                  <ExternalLinkIcon />
+                  Open {project.title} on GitHub
+                </a>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+}
+
+/** A Project without Start or Target: says so and offers to add them, behind a confirmation. */
+function DateFieldsBanner({ projectId, project }: { projectId: string; project: PlanProject }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string>();
+  const [pending, startTransition] = useTransition();
+  const add = () =>
+    startTransition(async () => {
+      const result = await addDateFieldsAction({ projectId });
+      if (result.ok) setOpen(false);
+      else setError(result.error ?? "GitHub did not add the fields.");
+    });
+  return (
+    <div className="p-2.5">
+      <Alert className="border-attention-dot/35 bg-attention-bg">
+        <CalendarIcon className="text-attention" />
+        <AlertTitle>This Project has no Start and Target fields</AlertTitle>
+        <AlertDescription className="text-xs">GitHub&apos;s roadmap also needs them picked once under &quot;Date fields&quot;.</AlertDescription>
+        <AlertAction className="top-1/2 -translate-y-1/2">
+          <Button size="sm" onClick={() => setOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            Add date fields
+          </Button>
+        </AlertAction>
+      </Alert>
+      <AlertDialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          setError(undefined);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add Start and Target to {project.title}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              handoff creates two Date fields, Start and Target, on the GitHub Project. Nothing else changes. To see them on GitHub&apos;s roadmap, pick them once under &quot;Date fields&quot;.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {error && <FieldError>{error}</FieldError>}
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
+            <Button type="button" disabled={pending} onClick={add}>
+              Add date fields
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
 type UnscheduledGroup = { title: string; items: PlanItem[] };
 
 /** Items with neither dates nor a derived span, grouped by epic, each with a Schedule button. */
@@ -358,7 +480,9 @@ function Unscheduled({ groups, undated, onSchedule }: { groups: UnscheduledGroup
  * The plan as a Gantt chart: a fixed column of row labels in the tree's order and a time pane that
  * scrolls sideways, with planned bars, run strips and dependency arrows.
  */
-export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, readAt, graphs, graphName }: Props) {
+export function PlanTimeline({ projectId, project, epics, unparented, timeline, zoom, filters, readAt, graphs, graphName }: Props) {
+  const router = useRouter();
+  const scroller = useRef<HTMLDivElement>(null);
   const collapsed = useCollapsed(projectId);
   const [scheduling, setScheduling] = useState<PlanItem>();
   const byNumber = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
@@ -394,6 +518,14 @@ export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, rea
   const range = visibleRange(spans, timeline.today);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
+  /** Puts today in the middle of the time pane. */
+  const scrollToToday = (behavior: ScrollBehavior) => {
+    const pane = scroller.current;
+    pane?.scrollTo({ left: Math.max(0, todayX - (pane.clientWidth - LABEL_WIDTH) / 2), behavior });
+  };
+  const centerToday = useEffectEvent(() => scrollToToday("instant"));
+  // The chart opens on today, and again when the zoom changes the scale; a refresh keeps the scroll.
+  useEffect(() => centerToday(), [scale.zoom]);
 
   const barOf = (n: number) => {
     const span = byNumber.get(n)?.planned ?? byNumber.get(n)?.derived;
@@ -421,7 +553,14 @@ export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, rea
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
-      <div className="relative overflow-x-auto">
+      <ChartHeader
+        zoom={scale.zoom}
+        project={project}
+        onZoom={(next) => router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: next }), { scroll: false })}
+        onToday={() => scrollToToday("smooth")}
+      />
+      {(!project.dateFields?.start || !project.dateFields.target) && <DateFieldsBanner projectId={projectId} project={project} />}
+      <div ref={scroller} className="relative overflow-x-auto">
         <div role="grid" aria-label="Timeline" aria-rowcount={rows.length + 1} className="relative text-[13px]" style={{ width: LABEL_WIDTH + scale.width }}>
           <div role="rowgroup">
             <div role="row" aria-label="Time axis" className="flex h-12">

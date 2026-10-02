@@ -238,3 +238,65 @@ test("the schedule dialog is prefilled, refuses a Target before Start, and saves
   await waitFor(() => expect(actions.scheduleAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 58, start: "2026-10-21", target: null }));
   expect(await within(empty).findByText("This Project has no Start and Target fields.")).toBeInTheDocument();
 });
+
+test("the Weeks and Months zoom and the Today button live in the URL and scroll to today", () => {
+  const scrollTo = vi.spyOn(Element.prototype, "scrollTo");
+  const { unmount } = render(
+    <PlanTimeline
+      projectId="p1"
+      repoUrl={REPO_URL}
+      project={PROJECT_WITH_DATES}
+      epics={view.epics}
+      unparented={[]}
+      timeline={timelineOf(view, [], NOW)}
+      zoom={undefined}
+      filters={parsePlanFilters({ epic: "12" })}
+      needsYou={[]}
+      graphs={["loop"]}
+      graphName="loop"
+      readAt={NOW.getTime()}
+    />,
+  );
+  // Under ten weeks of dates: Weeks by default, and the chart opens on today.
+  const zoom = screen.getByRole("radiogroup", { name: "Zoom" });
+  expect(within(zoom).getByRole("radio", { name: "Weeks" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByText("W40")).toBeInTheDocument();
+  expect(scrollTo).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(within(zoom).getByRole("radio", { name: "Months" }));
+  expect(router.replace).toHaveBeenCalledWith("/projects/p1/plan?view=timeline&epic=12&zoom=months", { scroll: false });
+
+  fireEvent.click(screen.getByRole("button", { name: "Today" }));
+  expect(scrollTo).toHaveBeenCalledTimes(2);
+  expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: "smooth", left: expect.any(Number) }));
+  unmount();
+
+  renderTimeline({ zoom: "months" });
+  expect(within(screen.getByRole("radiogroup", { name: "Zoom" })).getByRole("radio", { name: "Months" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByText("Q4 2026")).toBeInTheDocument();
+  expect(screen.queryByText("W40")).not.toBeInTheDocument();
+  scrollTo.mockRestore();
+});
+
+test("a Project without date fields shows the banner and Add date fields", async () => {
+  const { unmount } = renderTimeline();
+  expect(screen.queryByText("This Project has no Start and Target fields")).not.toBeInTheDocument();
+  unmount();
+
+  actions.addDateFieldsAction.mockResolvedValueOnce({ ok: false, error: "GitHub refused the field." });
+  renderTimeline({ project: { ...PROJECT, dateFields: { start: "f-start", target: undefined } } });
+  const banner = screen.getByRole("alert");
+  expect(within(banner).getByText("This Project has no Start and Target fields")).toBeInTheDocument();
+  expect(within(banner).getByText('GitHub\'s roadmap also needs them picked once under "Date fields".')).toBeInTheDocument();
+
+  fireEvent.click(within(banner).getByRole("button", { name: "Add date fields" }));
+  const confirm = await screen.findByRole("alertdialog", { name: "Add Start and Target to handoff plan?" });
+  expect(actions.addDateFieldsAction).not.toHaveBeenCalled();
+  fireEvent.click(within(confirm).getByRole("button", { name: "Add date fields" }));
+  await waitFor(() => expect(actions.addDateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
+  expect(await within(confirm).findByText("GitHub refused the field.")).toBeInTheDocument();
+
+  fireEvent.click(within(confirm).getByRole("button", { name: "Add date fields" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  expect(actions.addDateFieldsAction).toHaveBeenCalledTimes(2);
+});

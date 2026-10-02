@@ -1,5 +1,6 @@
 import type { PlanStatus } from "@handoff/github";
 import type { RunFilter } from "./plan/filters";
+import type { Zoom } from "./plan/timeline-scale";
 import { PROJECT_SECTIONS, type PlanViewName, type ProjectSection } from "./project-tab";
 
 /** Settings, Projects: where projects are added, edited and deleted. */
@@ -18,13 +19,17 @@ export function projectAt(pathname: string): { projectId: string; section?: Proj
   return { projectId, section: (PROJECT_SECTIONS as readonly string[]).includes(section ?? "") ? (section as ProjectSection) : undefined };
 }
 
-/** A project's Plan page, with the view (the tree unless given), an epic (or the unplanned issues), statuses and a run filter to narrow it to. */
-export function planPath(projectId: string, opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter } = {}) {
+/**
+ * A project's Plan page, with the view (the tree unless given), an epic (or the unplanned issues),
+ * statuses and a run filter to narrow it to, and the timeline's zoom.
+ */
+export function planPath(projectId: string, opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; zoom?: Zoom } = {}) {
   const query = [
     opts.view && opts.view !== "tree" ? `view=${opts.view}` : undefined,
     opts.epic !== undefined ? `epic=${opts.epic}` : undefined,
     opts.status?.length ? `status=${opts.status.map(encodeURIComponent).join(",")}` : undefined,
     opts.run && opts.run !== "any" ? `run=${opts.run}` : undefined,
+    opts.view === "timeline" && opts.zoom ? `zoom=${opts.zoom}` : undefined,
   ].filter(Boolean);
   return `/projects/${projectId}/plan${query.length ? `?${query.join("&")}` : ""}`;
 }
