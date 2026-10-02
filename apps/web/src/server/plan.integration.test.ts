@@ -204,6 +204,23 @@ test("loadPlan gives each task its size, estimate, proposal and duration, and th
   expect(view.board.Shaping.find((t) => t.number === sized)!.duration).toEqual({ hours: 2, source: "default" });
 });
 
+test("a task with a Size ignores a planner's proposal", async () => {
+  const { github, plan, project, number, issue, status } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  const story = await issue("Forecasts", ["story"], await issue("Estimates", ["epic"]));
+  const sized = await issue("Sized after its run", ["task"], story);
+  status(sized, "Ready");
+  const run = await proposed(project.id, github, sized, "L");
+  plan.itemsOf(repo).get(sized)!.size = "S";
+
+  const view = await loadPlan(db, github, plan, project.id);
+  if ("error" in view) throw new Error(view.error);
+  const task = view.epics[0]!.stories[0]!.tasks[0]!;
+  // The S default sets the duration; the disagreeing proposal stays for the hover card to name.
+  expect(task.duration).toEqual({ hours: 0.5, source: "default" });
+  expect(task.proposal).toMatchObject({ size: "L", runId: run.id });
+});
+
 test("without a plan number loadPlan says there is no plan, and without the project scope it says what is missing", async () => {
   const { github, plan, project } = await planned();
   const bare = await createProject(db, { name: "bare", repo: "octo/bare", defaultBranch: "main" });
