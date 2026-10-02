@@ -6,7 +6,7 @@ import { cancelRun } from "@handoff/engine/operations";
 import { OctokitProjects } from "@handoff/github";
 import { fakeGraphql, FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
-import { addEstimateFields, moveItem, moveToReady, planIssue, schedule, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
+import { addEstimateFields, moveItem, moveToReady, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -299,4 +299,45 @@ test("moveItem writes Start, Target and Estimate in one request and refuses a Ta
   await expect(moveItem(deps, projectId, { issue: 22, start: "2026-10-06", target: "2026-10-06", estimate: -2 })).rejects.toThrow("An estimate is hours from 0 to 1000.");
   await expect(moveItem(deps, projectId, { issue: 99, start: "2026-10-06", target: "2026-10-06" })).rejects.toThrow("#99 could not be moved: it is not in the Project.");
   expect(writes).toHaveBeenCalledTimes(4);
+});
+
+test("saveArrange writes the tasks' Start and Target in one batch and reports a task GitHub refused", async () => {
+  const items = await sizedPlan();
+  for (const number of [23, 24, 25]) {
+    github.issues.set(number, { number, title: `Issue ${number}`, url: `https://github.com/octo/sample/issues/${number}`, body: "", state: "open", labels: ["task"] });
+    items.set(number, { status: "Shaping", size: "M" });
+  }
+  const listItems = vi.spyOn(plan, "listItems");
+  const writes = vi.spyOn(plan, "setManyPlanFields");
+
+  // The preview's placements go out together, not a request per task, and nothing reads the whole plan first.
+  expect(
+    await saveArrange(deps, projectId, [
+      { issue: 23, start: "2026-10-05", target: "2026-10-05" },
+      { issue: 24, start: "2026-10-05", target: "2026-10-06" },
+    ]),
+  ).toEqual({ saved: [23, 24], refused: [] });
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(writes).toHaveBeenLastCalledWith(repo, 1, [
+    { issue: 23, fields: { start: "2026-10-05", target: "2026-10-05" } },
+    { issue: 24, fields: { start: "2026-10-05", target: "2026-10-06" } },
+  ]);
+  expect(listItems).not.toHaveBeenCalled();
+  expect(items.get(23)).toMatchObject({ start: "2026-10-05", target: "2026-10-05" });
+  expect(items.get(24)).toMatchObject({ start: "2026-10-05", target: "2026-10-06" });
+
+  // GitHub refuses #99, which is not in the Project: #25 is still written, and #99 is named with the reason.
+  expect(
+    await saveArrange(deps, projectId, [
+      { issue: 25, start: "2026-10-07", target: "2026-10-07" },
+      { issue: 99, start: "2026-10-07", target: "2026-10-07" },
+    ]),
+  ).toEqual({ saved: [25], refused: [{ issue: 99, reason: "it is not in the Project" }] });
+  expect(items.get(25)).toMatchObject({ start: "2026-10-07", target: "2026-10-07" });
+
+  // Dates are checked before anything is written.
+  writes.mockClear();
+  await expect(saveArrange(deps, projectId, [{ issue: 23, start: "2026-10-08", target: "2026-10-07" }])).rejects.toThrow("#23: Target 2026-10-07 is before its Start 2026-10-08.");
+  await expect(saveArrange(deps, projectId, [])).rejects.toThrow("Give at least one task to arrange.");
+  expect(writes).not.toHaveBeenCalled();
 });

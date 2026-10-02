@@ -10,6 +10,7 @@ import {
   type PlanSize,
   type PlanStatus,
   type ProjectsPort,
+  type SetFieldsResult,
 } from "@handoff/github";
 import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import { recordPlanStatus } from "@handoff/engine/plan-status";
@@ -406,6 +407,36 @@ export async function moveItem(deps: ShapingDeps, projectId: string, input: Move
     throw new Error(`#${input.issue} could not be moved: ${why}.`);
   }
   return { issue: input.issue, start: input.start, target: input.target, ...(estimate !== undefined ? { estimate } : {}) };
+}
+
+/** Where Arrange by estimate put a task: the Start and Target the person saw in the preview. */
+export type ArrangeInput = { issue: number; start: string; target: string };
+
+/** Why GitHub refused a task's fields, as a clause. */
+const REFUSED: Record<Exclude<SetFieldsResult, "set">, string> = {
+  "not-in-project": "it is not in the Project",
+  "no-field": "the Project has no Start or Target field; run setup_plan",
+  "no-option": "the Project has no Start or Target field; run setup_plan",
+};
+
+/**
+ * Writes the Start and Target of the tasks an Arrange preview placed, all in one batched write: a few
+ * requests, not one per task. Checks every date first and writes nothing when one is wrong. A task GitHub
+ * refuses is left out and the others are written; the result names each refused task with why. Like a drop
+ * it reads no other item: the preview already placed the tasks around the plan the page showed.
+ */
+export async function saveArrange(deps: ShapingDeps, projectId: string, items: ArrangeInput[]) {
+  if (!items.length) throw new Error("Give at least one task to arrange.");
+  for (const item of items) checkDates(`#${item.issue}`, item.start, item.target);
+  const { plan, repo, number } = await plannedProject(deps, projectId);
+  const write = (list: ArrangeInput[]) => plan.setManyPlanFields(repo, number, list.map(({ issue, start, target }) => ({ issue, fields: { start, target } })));
+
+  // setManyPlanFields writes nothing when any issue is refused, so the rest go out again without them.
+  const first = await write(items);
+  const refused = first.flatMap(({ issue, result }) => (result === "set" ? [] : [{ issue, reason: REFUSED[result] }]));
+  const rest = items.filter((i) => !refused.some((r) => r.issue === i.issue));
+  if (refused.length && rest.length) await write(rest);
+  return { saved: (refused.length ? rest : items).map((i) => i.issue), refused };
 }
 
 /**
