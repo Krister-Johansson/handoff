@@ -1,5 +1,22 @@
-import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "../projects/kinds.ts";
-import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanItem, PlanIteration, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "../projects/types.ts";
+import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "../projects/kinds.ts";
+import type {
+  AdoptedProject,
+  NewPlanIssue,
+  PlanAncestor,
+  PlanDateFieldIds,
+  PlanDates,
+  PlanEstimateFieldIds,
+  PlanFields,
+  PlanItem,
+  PlanIteration,
+  PlanProject,
+  PlanProjectChoice,
+  PlanStatus,
+  ProjectsPort,
+  SetDatesResult,
+  SetFieldsResult,
+  SetStatusResult,
+} from "../projects/types.ts";
 import type { RepoRef } from "../types.ts";
 import { FakeGitHub } from "./fake-github.ts";
 
@@ -14,6 +31,10 @@ export type FakePlanItem = {
   iteration?: PlanIteration | undefined;
   /** The option name of the Priority field; listItems reads it only while the Project has `priorityOptions`. */
   priority?: string | undefined;
+  /** The option name of the Size field, so a test can pick an option that is not S, M or L; read only while the Project has the field. */
+  size?: string | undefined;
+  /** Hours in the Estimate field; read only while the Project has the field, and 0 or less reads as none. */
+  estimate?: number | undefined;
 };
 
 type FakePlan = { login: string; project: PlanProject; items: Map<number, FakePlanItem> };
@@ -81,6 +102,8 @@ export class FakeProjects implements ProjectsPort {
           start: item.start,
           target: item.target,
           iteration: item.iteration,
+          size: plan.project.estimateFields?.size ? sizeOf(item.size) : undefined,
+          estimate: plan.project.estimateFields?.estimate && item.estimate !== undefined && item.estimate > 0 ? item.estimate : undefined,
         },
       ];
     });
@@ -182,14 +205,40 @@ export class FakeProjects implements ProjectsPort {
   }
 
   async setDates(repo: RepoRef, project: number, issue: number, dates: PlanDates): Promise<SetDatesResult> {
+    const result = await this.setPlanFields(repo, project, issue, dates);
+    if (result === "no-option") throw new Error(`setDates got no-option for #${issue}`);
+    return result;
+  }
+
+  async setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult> {
     const plan = this.planOf(repo, project);
     const item = plan?.items.get(issue);
     if (!plan || !item) return "not-in-project";
-    const fields = plan.project.dateFields;
-    if ((dates.start !== undefined && !fields?.start) || (dates.target !== undefined && !fields?.target)) return "no-field";
-    if (dates.start !== undefined) item.start = dates.start ?? undefined;
-    if (dates.target !== undefined) item.target = dates.target ?? undefined;
+    const { dateFields, estimateFields } = plan.project;
+    const has = { start: dateFields?.start, target: dateFields?.target, size: estimateFields?.size, estimate: estimateFields?.estimate };
+    if ((Object.keys(has) as (keyof typeof has)[]).some((key) => fields[key] !== undefined && !has[key])) return "no-field";
+    if (fields.size && !estimateFields?.size?.options[fields.size]) return "no-option";
+    if (fields.start !== undefined) item.start = fields.start ?? undefined;
+    if (fields.target !== undefined) item.target = fields.target ?? undefined;
+    if (fields.size !== undefined) item.size = fields.size ?? undefined;
+    if (fields.estimate !== undefined) item.estimate = fields.estimate ?? undefined;
     return "set";
+  }
+
+  async ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds> {
+    const plan = [...this.plans.values()].find((p) => p.login === login && p.project.number === number);
+    if (!plan) throw new Error(`GitHub Project #${number} of ${login} not found`);
+    const current = plan.project.estimateFields;
+    const options = current?.size?.options;
+    const fields: PlanEstimateFieldIds = {
+      size: {
+        id: current?.size?.id ?? "field-size",
+        options: Object.fromEntries(PLAN_SIZES.map((s) => [s, options?.[s] ?? `opt-size-${s.toLowerCase()}`])) as NonNullable<PlanEstimateFieldIds["size"]>["options"],
+      },
+      estimate: current?.estimate ?? "field-estimate",
+    };
+    plan.project.estimateFields = fields;
+    return structuredClone(fields);
   }
 
   async ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds> {

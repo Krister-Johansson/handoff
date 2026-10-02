@@ -165,6 +165,18 @@ export interface ProjectsPort {
    * Throws when a field of that name exists but is not a date field.
    */
   ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds>;
+  /**
+   * Sets or clears (null) an issue's Start, Target, Size and Estimate in one request after one read; a
+   * field left out stays as it is. Checks every field first: "no-field" when the Project lacks a field
+   * it would write, "no-option" when its Size field lacks the size, and then nothing changes.
+   */
+  setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult>;
+  /**
+   * Creates the Size single select field with S, M and L and the Estimate number field on a user's
+   * Project when missing, and adds S, M and L to an existing Size field after its own options, which
+   * keep their ids. Returns the ids. Throws when a field of that name exists with another type.
+   */
+  ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds>;
   /** Whether the token can write Projects: `project` among a classic token's scopes. */
   scopes(): Promise<{ project: boolean; classic: boolean }>;
 }
