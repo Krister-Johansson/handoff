@@ -1,4 +1,5 @@
 import { alias, and, desc, eq, events, nodeExecutions, not, notificationReads, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { brief, questionBrief } from "../lib/brief";
 import { describePermission } from "../lib/permission";
 import { reviewPath, runPath, tryPath } from "../lib/paths";
 import type { NotificationFilter, NotificationItem, NotificationKind } from "../lib/notifications";
@@ -70,7 +71,7 @@ type Row = Awaited<ReturnType<ReturnType<typeof feed>["execute"]>>[number];
 
 function toItem(row: Row, until: Date | undefined): NotificationItem {
   const payload = row.payload as Payload;
-  const base = { id: `event:${row.id}`, kind: payload.kind, body: row.task, href: runPath(row.projectId, row.runId), createdAt: row.createdAt, done: row.done };
+  const base = { id: `event:${row.id}`, kind: payload.kind, body: brief(row.task), href: runPath(row.projectId, row.runId), createdAt: row.createdAt, done: row.done };
   const unread = !row.done && (!until || row.createdAt.getTime() > until.getTime());
   const name = row.projectName;
   switch (payload.kind) {
@@ -80,7 +81,7 @@ function toItem(row: Row, until: Date | undefined): NotificationItem {
       return { ...base, title: `${name}: PR #${payload.number} is ready to merge`, unread };
     case "permission": {
       const { action, detail } = describePermission(row.toolName ?? "a tool", row.toolInput ?? {});
-      return { ...base, title: `${name}: ${payload.nodeKey ?? "a step"} ${action}`, body: detail || row.task, unread };
+      return { ...base, title: `${name}: ${payload.nodeKey ?? "a step"} ${action}`, body: brief(detail || row.task), unread };
     }
     case "merged":
       return { ...base, title: `${name}: PR #${payload.number} merged`, unread };
@@ -89,7 +90,7 @@ function toItem(row: Row, until: Date | undefined): NotificationItem {
       const review = context?.review;
       if (context?.reason === "try" && payload.questionId) return { ...base, title: `${name}: the app is ready for you to try`, href: tryPath(row.projectId, row.runId, payload.questionId), unread };
       if (review && payload.questionId) return { ...base, title: `${name}: the ${review.kind} from ${review.from} needs your review`, href: reviewPath(row.projectId, row.runId, payload.questionId), unread };
-      return { ...base, title: `${name}: ${payload.nodeKey ?? "a gate"} asks a question`, body: row.question ?? row.task, unread };
+      return { ...base, title: `${name}: ${payload.nodeKey ?? "a gate"} asks a question`, body: row.question ? questionBrief(row.question, context) : base.body, unread };
     }
     default:
       return { ...base, title: `${name}: run ${payload.kind}`, unread };

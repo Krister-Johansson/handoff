@@ -30,7 +30,7 @@ const label = (n: number) => (n === 0 ? "No unread notifications" : `${n} unread
 const TOAST_LIMIT = 3;
 
 /** A toast's icon is its kind's tile, which needs more room than sonner's 16px icon slot. */
-const TOAST_CLASSES = { icon: "size-7! mr-1! ml-0! self-start", description: "text-muted-foreground!", actionButton: "self-start" };
+const TOAST_CLASSES = { icon: "size-7! mr-1! ml-0! self-start", description: "text-muted-foreground! line-clamp-2", actionButton: "self-start" };
 
 /** Shows one new notification as a toast: a start quietly, a question or a failure for longer. */
 function toastFor(item: NotificationJson, open: (href: string) => void) {

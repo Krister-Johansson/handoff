@@ -1,4 +1,5 @@
 import { and, appendEvents, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
+import { brief, questionBrief } from "../lib/brief";
 import { reviewPath, runPath } from "../lib/paths";
 import type { AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";
@@ -77,24 +78,24 @@ export async function listAttention(db: Db): Promise<AttentionItem[]> {
     ...inbox.questions.map((q): AttentionItem => {
       const review = (q.context as { review?: { from?: string; kind?: string } }).review;
       return review
-        ? { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: the ${review.kind} from ${review.from} needs your approval`, body: q.task, href: reviewPath(q.projectId, q.runId, q.id) }
-        : { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: q.question, href: runPath(q.projectId, q.runId) };
+        ? { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: the ${review.kind} from ${review.from} needs your approval`, body: brief(q.task), href: reviewPath(q.projectId, q.runId, q.id) }
+        : { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: questionBrief(q.question, q.context), href: runPath(q.projectId, q.runId) };
     }),
-    ...inbox.failedRuns.map((f): AttentionItem => ({ id: `failed:${f.executionId}`, kind: "failed", title: `${f.projectName}: run failed at ${f.nodeKey}`, body: f.task, href: runPath(f.projectId, f.runId) })),
+    ...inbox.failedRuns.map((f): AttentionItem => ({ id: `failed:${f.executionId}`, kind: "failed", title: `${f.projectName}: run failed at ${f.nodeKey}`, body: brief(f.task), href: runPath(f.projectId, f.runId) })),
     ...reviews.map((r): AttentionItem => ({
       id: `review:${r.executionId}:${r.pr!.number}`,
       kind: "review",
       title: `${r.projectName}: PR #${r.pr!.number} waits for your review`,
-      body: r.task,
+      body: brief(r.task),
       href: runPath(r.projectId, r.runId),
     })),
     ...stuck.map((s): AttentionItem => ({
       id: `stuck:${s.runId}`,
       kind: "failed",
       title: `${s.projectName}: ${s.failure?.nodeKey ?? "a step"} ran out of rounds`,
-      body: s.task,
+      body: brief(s.task),
       href: runPath(s.projectId, s.runId),
     })),
-    ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: f.task, href: runPath(f.projectId, f.runId) })),
+    ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: brief(f.task), href: runPath(f.projectId, f.runId) })),
   ];
 }

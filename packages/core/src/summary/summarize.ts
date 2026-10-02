@@ -29,13 +29,13 @@ export function summarizeOutput(output: unknown): string | undefined {
   const planner = PlannerOutputSchema.safeParse(output);
   if (planner.success) {
     const { status, question, plan, steps } = planner.data;
-    if (status === "needs_input" && question) return join(`Asked: ${question.text}`);
+    if (status === "needs_input" && question) return join(`Asked: ${question.summary ?? question.text}`);
     return join(plan, plural(steps.length, "step"));
   }
   const coder = CoderOutputSchema.safeParse(output);
   if (coder.success) {
     const { status, summary, question, filesChanged } = coder.data;
-    if (status === "needs_input" && question) return join(`Asked: ${question.text}`);
+    if (status === "needs_input" && question) return join(`Asked: ${question.summary ?? question.text}`);
     return join(summary || status, filesChanged?.length ? `${plural(filesChanged.length, "file")} changed` : undefined);
   }
   const tester = TesterOutputSchema.safeParse(output);

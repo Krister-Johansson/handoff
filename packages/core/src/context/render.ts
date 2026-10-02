@@ -181,6 +181,7 @@ export function renderContextPacket(packet: ContextPacket): string {
     "",
     `Finish by returning structured output that matches the \`${packet.outputContract}\` schema.`,
     "If you cannot proceed without a decision from a person, return status `needs_input` with a question instead of guessing.",
+    "Give the question a `summary` of at most 80 characters that names the decision. Notifications show the summary; the person reads the full `text` when they answer.",
     "",
   );
   if (packet.priorAttempt || packet.humanAnswer || packet.repairNote) {

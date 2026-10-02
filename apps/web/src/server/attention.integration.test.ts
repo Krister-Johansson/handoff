@@ -43,6 +43,22 @@ test("questions, failed runs and pull requests waiting for review each become on
   );
 });
 
+test("a question is told by its summary, or cut short when it has none", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Pick a license" });
+  const long = `${"The repository has no license file and the README names two. ".repeat(4)}Which license?`;
+  const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId: run.id, nodeExecutionId: gate.id, question: long, context: { reason: "needs_input", summary: "MIT or Apache-2.0?" } });
+  const gate2 = await seedExecution(db, run.id, { nodeKey: "gate2", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId: run.id, nodeExecutionId: gate2.id, question: long });
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
+  const bodies = Object.fromEntries((await listAttention(db)).map((item) => [item.title, item.body]));
+  expect(bodies["sandbox: gate asks a question"]).toBe("MIT or Apache-2.0?");
+  expect(bodies["sandbox: gate2 asks a question"]).toMatch(/^The repository has no license file .*…$/);
+  expect(bodies["sandbox: gate2 asks a question"]!.length).toBeLessThanOrEqual(140);
+});
+
 test("a review at a human gate says what needs approval and links to the review page", async () => {
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
   await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });

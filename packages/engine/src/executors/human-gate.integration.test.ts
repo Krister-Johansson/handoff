@@ -27,8 +27,8 @@ function registry(cli: FakeCliExecutor, overrides: Partial<ExecutorRegistry> = {
   };
 }
 
-async function askingRun() {
-  const cli = new FakeCliExecutor([{ output: outputs.planner }, { output: outputs.coderAsks }]);
+async function askingRun(asks: unknown = outputs.coderAsks) {
+  const cli = new FakeCliExecutor([{ output: outputs.planner }, { output: asks }]);
   const { run } = await startRun(db, loop);
   const deps = engineDeps(db, registry(cli));
   await drain(deps);
@@ -44,6 +44,13 @@ test("Human gate stores the Coder's question and yields waiting on its token", a
   expect(gate).toMatchObject({ status: "waiting", waitKind: "human", waitToken: question!.id });
   expect(row.status).toBe("waiting");
   expect(types).toContain("human.asked");
+});
+
+test("Human gate keeps the summary the Coder wrote for its question, next to the full text", async () => {
+  const text = "The changelog has dates in two formats. ISO sorts, US matches the README. ISO dates or US dates?";
+  const { run } = await askingRun({ ...outputs.coderAsks, question: { text, summary: "ISO or US dates in the changelog?", options: ["ISO", "US"] } });
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  expect(question).toMatchObject({ question: text, context: { reason: "needs_input", summary: "ISO or US dates in the changelog?" } });
 });
 
 test("Coder resumed after a needs_input answer passes --resume with the recorded session id and the answer in the prompt", async () => {

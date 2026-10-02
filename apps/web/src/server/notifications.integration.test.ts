@@ -71,6 +71,20 @@ test("the feed lists runs that started, finished or failed and questions for a p
   expect((await listNotifications(db, { limit: 2 })).items.map((i) => i.kind)).toEqual(["input", "input"]);
 });
 
+test("a question's notification shows its summary, or the question cut short when it has none", async () => {
+  const { start, ask } = await setUp();
+  const run = await start("Pick a license");
+  const long = `${"The repository has no license file and the README names two. ".repeat(4)}Which license?`;
+  const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await ask({ runId: run.id, nodeExecutionId: gate.id, question: long, context: { reason: "needs_input", summary: "MIT or Apache-2.0?" } });
+  const gate2 = await seedExecution(db, run.id, { nodeKey: "gate2", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await ask({ runId: run.id, nodeExecutionId: gate2.id, question: long });
+  const bodies = Object.fromEntries((await listNotifications(db, { limit: 8 })).items.map((item) => [item.title, item.body]));
+  expect(bodies["sandbox: gate asks a question"]).toBe("MIT or Apache-2.0?");
+  expect(bodies["sandbox: gate2 asks a question"]).toMatch(/^The repository has no license file .*…$/);
+  expect(bodies["sandbox: gate2 asks a question"]!.length).toBeLessThanOrEqual(140);
+});
+
 test("opening the feed marks what it showed as read, and later items are unread again", async () => {
   const { start, notify, age } = await setUp();
   const first = await start("Add a CHANGELOG.md");

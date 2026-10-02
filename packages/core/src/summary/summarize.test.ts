@@ -44,3 +44,9 @@ test("long text is cut, and unknown output has no summary", () => {
 test("a planner that asks is summarized by its question", () => {
   expect(summarizeOutput({ status: "needs_input", plan: "", steps: [], ownedPaths: [], question: { text: "SQLite or JSON?" } })).toBe("Asked: SQLite or JSON?");
 });
+
+test("a question with a summary is summarized by it", () => {
+  const question = { text: "The store has two options. SQLite keeps history, JSON is simpler to read. Which one?", summary: "SQLite or JSON for the store?" };
+  expect(summarizeOutput({ status: "needs_input", plan: "", steps: [], ownedPaths: [], question })).toBe("Asked: SQLite or JSON for the store?");
+  expect(summarizeOutput({ status: "needs_input", summary: "", question })).toBe("Asked: SQLite or JSON for the store?");
+});

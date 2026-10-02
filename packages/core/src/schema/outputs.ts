@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+/** What a node asks a person: the full question, and one line that says what is asked, for notifications. */
+const QuestionSchema = z.object({
+  text: z.string().min(1),
+  summary: z.string().min(1).optional().describe("The decision asked for, in one line of at most 80 characters. Notifications show it."),
+  options: z.array(z.string()).optional(),
+});
+
 /**
  * A plan, or a question when the task leaves a decision to a person. Outputs from before planners
  * could ask have no status and are plans.
@@ -12,7 +19,7 @@ export const PlannerOutputSchema = z
     ownedPaths: z.array(z.string()),
     /** What a person can check in the running app to see the task is done, when the issue lists none. */
     acceptance: z.array(z.string().min(1)).optional(),
-    question: z.object({ text: z.string().min(1), options: z.array(z.string()).optional() }).optional(),
+    question: QuestionSchema.optional(),
   })
   .refine((o) => (o.status === "needs_input" ? o.question !== undefined : o.plan.trim().length > 0), {
     message: "a plan needs text, and needs_input needs a question",
@@ -23,7 +30,7 @@ export const CoderOutputSchema = z
   .object({
     status: z.enum(["done", "failed", "needs_input"]),
     summary: z.string(),
-    question: z.object({ text: z.string().min(1), options: z.array(z.string()).optional() }).optional(),
+    question: QuestionSchema.optional(),
     filesChanged: z.array(z.string()).optional(),
     commitSha: z.string().optional(),
     /** Files outside the plan's owned paths that the change needed, each with the reason. */
