@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeMemory, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, questions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
+import { nudgeScheduler } from "../backlog-scheduler/nudge.ts";
 import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
 
@@ -196,7 +197,7 @@ async function finishRouting(
       events.push({ type: "run.succeeded", payload: {} });
     }
   }
-  await tx
+  const [ended] = await tx
     .update(runs)
     .set({
       state: routed.state,
@@ -205,8 +206,11 @@ async function finishRouting(
       status,
       ...(status !== "running" ? { finishedAt: sql`now()` } : {}),
     })
-    .where(eq(runs.id, runId));
+    .where(eq(runs.id, runId))
+    .returning({ projectId: runs.projectId });
   await appendEvents(tx, runId, events);
+  // A run that ends frees a slot, or holds the project when it failed: the scheduler checks again soon.
+  if (status !== "running" && ended) await nudgeScheduler(tx, ended.projectId);
 }
 
 export async function completePassed(

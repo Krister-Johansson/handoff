@@ -4,8 +4,10 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { eq, liveWorkers, nodeExecutions, previews } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
-import { engineDeps, inspect, startRun } from "../testing/harness.ts";
-import { killOrphans, startWorker } from "./worker.ts";
+import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
+import { schedulerOn } from "../testing/scheduler.ts";
+import { done, outputs, scripted } from "../testing/scripted.ts";
+import { killOrphans, runOnce, startWorker } from "./worker.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -69,4 +71,28 @@ test("a worker that starts again stops the previews it left running", async () =
   await expect.poll(async () => (await db.select({ status: previews.status }).from(previews).where(eq(previews.id, row!.id)))[0]!.status).toBe("stopped");
   await handle.stop();
   expect(alive(app.pid!)).toBe(false);
+});
+
+test("a run that ends nudges its project's scheduler", async () => {
+  const executors = {
+    planner: scripted(done(outputs.planner, { plan: outputs.planner })),
+    coder: scripted(done(outputs.coderDone)),
+    pr: scripted(done(outputs.prGreen, { prNumber: 1 })),
+    merge: scripted(done({ merged: true })),
+  };
+  const succeeds = await startRun(db, linear);
+  const scheduler = await schedulerOn(db, succeeds.project.id);
+  const deps = engineDeps(db, executors);
+  // A step that passes on the way does not end the run, and nudges nothing.
+  await runOnce(deps);
+  expect(await scheduler.due()).toBe(30);
+  await drain(deps);
+  expect((await inspect(db, succeeds.run.id)).run.status).toBe("succeeded");
+  expect(await scheduler.due()).toBe(0);
+
+  const fails = await startRun(db, linear);
+  const failing = await schedulerOn(db, fails.project.id);
+  await drain(engineDeps(db, { ...executors, planner: scripted({ kind: "failed", error: { code: "boom", message: "boom" } }) }));
+  expect((await inspect(db, fails.run.id)).run.status).toBe("failed");
+  expect(await failing.due()).toBe(0);
 });
