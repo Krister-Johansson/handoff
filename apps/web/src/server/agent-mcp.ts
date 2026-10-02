@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
-import { and, desc, eq, events, listLibraryIndex, nodeExecutions, projects, type Db, type QuestionComment } from "@handoff/db";
+import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
@@ -10,6 +10,7 @@ import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
 import { currentSteps, getRunDetail, listRuns } from "./queries";
+import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
 import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ScheduleItem } from "./shaping";
@@ -40,7 +41,7 @@ A project can keep a plan on a GitHub Project: epics, stories and tasks, each in
 
 Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, pause_scheduler stops new starts and stop_scheduler turns it off.
 
-A run may stop to ask a question (a Human gate) or fail. Tell the user what it asks or why it failed. Answer a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
+A run may stop to ask permission for a tool call, ask a question (a Human gate) or fail; get_run has the whole command, the question's options and the failure. Tell the user what it asks or why it failed. Answer a permission or a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
 
 const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
 const fail = (message: string) => ({ content: [{ type: "text" as const, text: message }], isError: true });
@@ -68,12 +69,138 @@ async function findProject(db: Db, ref: string) {
 
 const errorMessage = (error: unknown) => (error && typeof error === "object" && "message" in error ? String((error as { message: unknown }).message) : undefined);
 
+/** The run's permission prompts that still wait for a person, oldest first. */
+async function pendingPermissions(db: Db, runId: string) {
+  return db
+    .select({ id: permissionRequests.id, toolName: permissionRequests.toolName, input: permissionRequests.input, createdAt: permissionRequests.createdAt, nodeKey: nodeExecutions.nodeKey, attempt: nodeExecutions.attempt })
+    .from(permissionRequests)
+    .innerJoin(nodeExecutions, eq(nodeExecutions.id, permissionRequests.nodeExecutionId))
+    .where(and(eq(permissionRequests.runId, runId), eq(permissionRequests.status, "pending")))
+    .orderBy(asc(permissionRequests.createdAt));
+}
+
+/** What the run's latest Demo step said it did, if one passed. */
+async function latestDemoSummary(db: Db, runId: string): Promise<string | null> {
+  const [demo] = await db
+    .select({ output: nodeExecutions.output })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.nodeType, "demo"), eq(nodeExecutions.status, "passed")))
+    .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
+    .limit(1);
+  const summary = (demo?.output as { summary?: unknown } | undefined)?.summary;
+  return typeof summary === "string" ? summary : null;
+}
+
+type TryContext = {
+  acceptance?: string[];
+  preview?: { url?: string; status?: string; error?: string };
+  shots?: { id: string; caption: string; works: boolean; criterion?: string }[];
+};
+
+/**
+ * A Try it gate as the agent answers it: the app's address while it runs, each acceptance criterion with
+ * what the demo's screenshots showed of it, and the page where a person can try it.
+ */
+function tryItOf(deps: HandoffMcpDeps, run: { id: string; projectId: string }, q: { id: string; context: unknown }, demoSummary: string | null) {
+  const { acceptance = [], preview, shots = [] } = q.context as TryContext;
+  const demo = (s: NonNullable<TryContext["shots"]>[number]) => ({ note: s.caption, works: s.works, screenshot_url: `${deps.baseUrl}/api/screenshots/${s.id}` });
+  const criteria = new Set(acceptance);
+  const loose = shots.filter((s) => !s.criterion || !criteria.has(s.criterion));
+  return {
+    app_url: preview?.status === "running" ? (preview.url ?? null) : null,
+    app: preview?.status ?? "not_started",
+    ...(preview?.error ? { app_error: preview.error } : {}),
+    demo_summary: demoSummary,
+    criteria: acceptance.map((criterion) => ({ criterion, demo: shots.filter((s) => s.criterion === criterion).map(demo) })),
+    ...(loose.length ? { other_screenshots: loose.map(demo) } : {}),
+    url: `${deps.baseUrl}${tryPath(run.projectId, run.id, q.id)}`,
+  };
+}
+
+/** The verdict and findings of a review that sent work back, as the run page shows them on a stuck loop. */
+function lastReviewOf(output: unknown) {
+  const o = (output ?? {}) as { verdict?: unknown; comments?: unknown };
+  return typeof o.verdict === "string" && Array.isArray(o.comments) ? { last_review: { verdict: o.verdict, comments: o.comments } } : {};
+}
+
+type CriterionVerdict = { criterion: string; works: boolean; note?: string | undefined };
+
+/**
+ * A Try it gate answered with a verdict per acceptance criterion, as its page answers it: what does not
+ * work goes back as a comment on that criterion, with changes; when everything works, approve.
+ */
+function tryItAnswer(context: unknown, criteria: CriterionVerdict[], note: string | undefined) {
+  const { reason, acceptance = [] } = (context ?? {}) as { reason?: string; acceptance?: string[] };
+  if (reason !== "try") throw new Error("criteria answer a Try it gate; this question takes an answer and an option.");
+  const listed = `The criteria: ${acceptance.map((c) => `"${c}"`).join(", ")}.`;
+  const known = new Set(acceptance);
+  const unknown = criteria.find((c) => !known.has(c.criterion));
+  if (unknown) throw new Error(`There is no criterion "${unknown.criterion}". ${listed}`);
+  const given = new Set(criteria.map((c) => c.criterion));
+  const missing = acceptance.filter((c) => !given.has(c));
+  if (missing.length) throw new Error(`Give a verdict for every criterion; missing: ${missing.map((c) => `"${c}"`).join(", ")}.`);
+  const failing = criteria.filter((c) => !c.works);
+  const summary = failing.length === 0 ? "Every criterion works." : `${failing.length} of ${criteria.length} criteria ${failing.length === 1 ? "does" : "do"} not work.`;
+  return {
+    answer: note?.trim() || summary,
+    option: failing.length ? "changes" : "approve",
+    comments: failing.map((c): QuestionComment => ({ quote: c.criterion, body: c.note?.trim() || "Does not work." })),
+  };
+}
+
+const roundUsd = (usd: number) => Math.round(usd * 1e6) / 1e6;
+
+/**
+ * A failed step as the agent reads it: the error's code and message, and for a Claude step how it
+ * ended, how many turns it took, what it cost and what it said last.
+ */
+function failureOf(failed: { nodeKey: string; attempt: number; error: unknown }) {
+  const error = (failed.error ?? {}) as { code?: string; detail?: { subtype?: unknown; turns?: unknown; costUsd?: unknown; lastMessage?: unknown } };
+  const detail = error.detail ?? {};
+  return {
+    node: failed.nodeKey,
+    attempt: failed.attempt,
+    code: error.code ?? null,
+    error: errorMessage(failed.error),
+    ...(typeof detail.subtype === "string" ? { subtype: detail.subtype } : {}),
+    ...(typeof detail.turns === "number" ? { turns: detail.turns } : {}),
+    ...(typeof detail.costUsd === "number" ? { cost_usd: roundUsd(detail.costUsd) } : {}),
+    ...(typeof detail.lastMessage === "string" ? { last_message: detail.lastMessage } : {}),
+  };
+}
+
+/** The run's answered questions, with the gate that asked each. */
+async function answeredGates(db: Db, runId: string) {
+  return db
+    .select({
+      id: questions.id,
+      nodeKey: nodeExecutions.nodeKey,
+      question: questions.question,
+      option: questions.option,
+      answer: questions.answer,
+      comments: questions.comments,
+      answeredBy: questions.answeredBy,
+      answeredAt: questions.answeredAt,
+    })
+    .from(questions)
+    .innerJoin(nodeExecutions, eq(nodeExecutions.id, questions.nodeExecutionId))
+    .where(and(eq(questions.runId, runId), isNotNull(questions.answer)))
+    .orderBy(asc(questions.answeredAt));
+}
+
 /** A run as the agent needs it: where it stands, its steps, PR, issues, open questions and failure. */
 async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const stuck = await stuckLoop(deps.db, run.id);
+  const [stuck, prompts, demoSummary, answered, states] = await Promise.all([
+    stuckLoop(deps.db, run.id),
+    pendingPermissions(deps.db, run.id),
+    latestDemoSummary(deps.db, run.id),
+    answeredGates(deps.db, run.id),
+    stepStates(deps.db, executions.map((e) => e.id)),
+  ]);
+  const costs = executions.map((e) => (e.costUsd === null ? null : Number(e.costUsd)));
   return {
     id: run.id,
     project: project.name,
@@ -85,14 +212,18 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     branch: run.branchName,
     pr: run.prNumber ? { number: run.prNumber, url: `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` } : null,
     issues: run.issues.map((i) => ({ number: i.number, title: i.title, url: i.url })),
-    steps: executions.map((e) => ({
+    // What Claude cost over every step of the run, in US dollars.
+    cost_usd: roundUsd(costs.reduce<number>((sum, c) => sum + (c ?? 0), 0)),
+    steps: executions.map((e, i) => ({
       node: e.nodeKey,
       attempt: e.attempt,
       status: e.status,
+      ...states.get(e.id),
       started_at: e.startedAt?.toISOString() ?? null,
       finished_at: e.finishedAt?.toISOString() ?? null,
       // A step still running counts up to now, which is what decides between waiting and repairing.
       duration_seconds: e.startedAt ? Math.round(((e.finishedAt ?? new Date()).getTime() - e.startedAt.getTime()) / 1000) : null,
+      cost_usd: costs[i] ?? null,
     })),
     questions: openQuestions.map((q) => {
       const review = (q.context as { review?: { markdown?: string } }).review;
@@ -103,11 +234,28 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
         options: q.options ?? [],
         // A review shows what to approve; the person can also comment on it in the dashboard.
         ...(review?.markdown ? { review: review.markdown, review_url: `${deps.baseUrl}${reviewPath(run.projectId, run.id, q.id)}` } : {}),
+        ...((q.context as { reason?: string }).reason === "try" ? { try: tryItOf(deps, run, q, demoSummary) } : {}),
       };
     }),
-    failed: failed ? { node: failed.nodeKey, attempt: failed.attempt, error: errorMessage(failed.error) } : null,
+    // Each with its whole command, which notifications cut short; answer_permission answers it.
+    permissions: prompts.map((p) => {
+      const { action, detail } = describePermission(p.toolName, p.input);
+      return { id: p.id, node: p.nodeKey, attempt: p.attempt, tool: p.toolName, asks: action, detail, input: p.input, asked_at: p.createdAt.toISOString() };
+    }),
+    failed: failed ? failureOf(failed) : null,
+    // What people decided at the run's gates, oldest first.
+    answered: answered.map((q) => ({
+      id: q.id,
+      node: q.nodeKey,
+      question: q.question,
+      option: q.option,
+      answer: q.answer,
+      comments: q.comments,
+      answered_by: q.answeredBy,
+      answered_at: q.answeredAt?.toISOString() ?? null,
+    })),
     // A loop that used all its attempts stops the run without a failed step; resolve_loop decides what next.
-    stuck: stuck ? { node: stuck.nodeKey, loop: stuck.edgeKey, attempts: stuck.attempts } : null,
+    stuck: stuck ? { node: stuck.nodeKey, loop: stuck.edgeKey, attempts: stuck.attempts, ...lastReviewOf(executions.find((e) => e.id === stuck.executionId)?.output) } : null,
   };
 }
 
@@ -149,12 +297,29 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     get_project: async ({ project }: { project: string }) => {
       const detail = await getProjectDetail(db, (await findProject(db, project)).id);
       if (!detail) throw new Error(`There is no project ${project}.`);
+      const recent = detail.runs.slice(0, 10);
+      // Each run keeps the graph version it started on, which may be older than the graph's latest.
+      const versions = recent.length
+        ? await db
+            .select({ id: graphVersions.id, version: graphVersions.version, name: graphs.name })
+            .from(graphVersions)
+            .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+            .where(inArray(graphVersions.id, [...new Set(recent.map((r) => r.graphVersionId))]))
+        : [];
+      const versionOf = new Map(versions.map((v) => [v.id, v]));
       return {
         name: detail.project.name,
         repo: `${detail.project.repoOwner}/${detail.project.repoName}`,
-        graphs: detail.graphs.map((g) => g.name),
+        graphs: detail.graphs.map((g) => ({ name: g.name, latest_version: g.latestVersion })),
         default_graph: detail.defaultGraph ?? null,
-        recent_runs: detail.runs.slice(0, 10).map((r) => ({ id: r.id, task: r.task, status: r.status, url: url(runPath(detail.project.id, r.id)) })),
+        recent_runs: recent.map((r) => ({
+          id: r.id,
+          task: r.task,
+          status: r.status,
+          graph: versionOf.get(r.graphVersionId)?.name ?? null,
+          graph_version: versionOf.get(r.graphVersionId)?.version ?? null,
+          url: url(runPath(detail.project.id, r.id)),
+        })),
       };
     },
 
@@ -206,6 +371,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {
       const listed = await listRuns(db, { ...(project ? { project } : {}), ...(status ? { status } : {}) }, 30);
       const steps = await currentSteps(db, listed.map((r) => r.id));
+      const states = await stepStates(db, [...steps.values()].map((s) => s.id));
       return listed.map((r) => {
         const step = steps.get(r.id);
         return {
@@ -219,6 +385,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
                 node: step.nodeKey,
                 attempt: step.attempt,
                 status: step.status,
+                ...states.get(step.id),
                 since: step.since?.toISOString() ?? null,
                 for_seconds: step.since ? Math.round((Date.now() - step.since.getTime()) / 1000) : null,
               }
@@ -290,7 +457,14 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { dismissed: true };
     },
 
-    answer_question: async ({ question_id, answer, option, comments }: { question_id: string; answer: string; option?: string; comments?: QuestionComment[] }) => {
+    answer_question: async ({ question_id, ...input }: { question_id: string; answer?: string; option?: string; comments?: QuestionComment[]; criteria?: CriterionVerdict[] }) => {
+      const [question] = await db.select({ options: questions.options, context: questions.context }).from(questions).where(eq(questions.id, question_id));
+      if (!question) throw new Error(`question ${question_id} not found`);
+      const { answer, option, comments } = input.criteria ? tryItAnswer(question.context, input.criteria, input.answer) : input;
+      if (!answer?.trim()) throw new Error("Give the answer.");
+      if (option !== undefined && !(question.options ?? []).includes(option)) {
+        throw new Error(question.options?.length ? `The question takes one of ${question.options.join(", ")}; "${option}" is not one of them.` : `The question has no options; answer it in words without "${option}".`);
+      }
       const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: actor });
       return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
     },

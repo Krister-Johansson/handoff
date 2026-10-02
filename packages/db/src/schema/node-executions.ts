@@ -28,6 +28,12 @@ export const nodeExecutions = pgTable(
     waitKey: text("wait_key"),
     waitToken: uuid("wait_token").unique(),
     waitDeadlineAt: tstz("wait_deadline_at"),
+    /**
+     * What a running step waits on while its process stays alive: `permission` while a permission prompt
+     * waits for a person. Such a step does not count against its executor kind's cap. A step that yields
+     * (status waiting) says what it waits on with wait_kind instead.
+     */
+    waitingOn: text("waiting_on").$type<"permission">(),
     wakeRequestedAt: tstz("wake_requested_at"),
     wakeReason: text("wake_reason"),
     wakePayload: jsonb("wake_payload").$type<unknown[]>(),

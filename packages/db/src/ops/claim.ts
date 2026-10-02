@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db, DbExecutor } from "../client.ts";
 import { nodeExecutions } from "../schema/index.ts";
 
@@ -20,7 +20,8 @@ export async function claimNext(
   return db.transaction(async (tx) => {
     await tx.execute(CLAIM_LOCK);
     const running = await tx.execute<{ executor_kind: ExecutorKind; n: number }>(
-      sql`select executor_kind, count(*)::int as n from node_executions where status = 'running' group by executor_kind`,
+      // A step whose process waits on a person's answer to a permission prompt holds no slot.
+      sql`select executor_kind, count(*)::int as n from node_executions where status = 'running' and waiting_on is null group by executor_kind`,
     );
     const inUse = new Map(running.rows.map((r) => [r.executor_kind, r.n]));
     const free = (Object.keys(opts.caps) as ExecutorKind[]).filter((k) => opts.caps[k] - (inUse.get(k) ?? 0) > 0);
@@ -57,6 +58,36 @@ export async function claimNext(
       .where(eq(nodeExecutions.id, id))
       .returning();
     return row;
+  });
+}
+
+/**
+ * A running step's process waits on a person's answer to a permission prompt: until it takes its slot
+ * back, it does not count against its executor kind's cap, so another step can run meanwhile.
+ */
+export async function waitOnPermission(db: DbExecutor, executionId: string): Promise<void> {
+  await db.update(nodeExecutions).set({ waitingOn: "permission" }).where(and(eq(nodeExecutions.id, executionId), eq(nodeExecutions.status, "running")));
+}
+
+/**
+ * Takes a slot back for a step whose permission prompt was answered, when its executor kind has one
+ * free; under the claim lock, so a claim and a resume never both take the last slot. Returns whether
+ * the step may go on; when false, it asks again later. A step not waiting on a permission goes on.
+ */
+export async function resumeAfterPermission(db: Db, executionId: string, caps: Partial<Caps>): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    await tx.execute(CLAIM_LOCK);
+    const [row] = await tx.select({ kind: nodeExecutions.executorKind, waitingOn: nodeExecutions.waitingOn }).from(nodeExecutions).where(eq(nodeExecutions.id, executionId));
+    if (!row || row.waitingOn === null) return true;
+    const cap = caps[row.kind];
+    if (cap !== undefined) {
+      const running = await tx.execute<{ n: number }>(
+        sql`select count(*)::int as n from node_executions where status = 'running' and waiting_on is null and executor_kind = ${row.kind}`,
+      );
+      if ((running.rows[0]?.n ?? 0) >= cap) return false;
+    }
+    await tx.update(nodeExecutions).set({ waitingOn: null }).where(eq(nodeExecutions.id, executionId));
+    return true;
   });
 }
 

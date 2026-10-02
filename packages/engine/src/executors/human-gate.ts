@@ -151,7 +151,8 @@ async function compose(ctx: ExecutorContext, branchDiff: BranchDiff | undefined)
   const review = found && backTo ? { ...found, backTo } : found;
   return {
     question: typeof config.question === "string" ? config.question : review ? `Review the ${review.kind} from ${review.from}` : "Approve continuing?",
-    options: Array.isArray(config.options) ? config.options.map(String) : ["approve", "changes"],
+    // "fix" (approve after fixes) routes like changes, so a gate offers it only where changes go somewhere.
+    options: Array.isArray(config.options) ? config.options.map(String) : backTo ? ["approve", "changes", "fix"] : ["approve", "changes"],
     context: { reason: "approval", from: trigger?.from, ...(review ? { review } : {}) },
   };
 }

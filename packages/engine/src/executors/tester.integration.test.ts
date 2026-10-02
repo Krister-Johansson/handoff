@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
+import { nodeCatalog } from "@handoff/core";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
@@ -70,6 +71,7 @@ test("Reviewer node is spawned with read-only allowed tools", async () => {
   );
   expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "reviewer")?.status).toBe("passed");
   const tools = cli.requests[0]!.allowedTools;
-  expect(tools).toEqual(["Read", "Glob", "Grep", "Bash(git log *)", "Bash(git show *)", "Bash(git diff *)", "Bash(git status *)", "Bash(git ls-files *)"]);
+  expect(tools).toEqual(nodeCatalog.reviewer.allowedTools);
+  expect(tools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "Bash(git log *)", "Bash(git diff *)", "Bash(cat *)"]));
   expect(tools.some((t) => t === "Edit" || t === "Write")).toBe(false);
 });

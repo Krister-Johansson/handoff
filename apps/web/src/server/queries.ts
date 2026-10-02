@@ -44,9 +44,10 @@ export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 5
 
 /** Each run's latest step still in progress (running, waiting or pending), for listing active runs. */
 export async function currentSteps(db: DbExecutor, runIds: string[]) {
-  if (runIds.length === 0) return new Map<string, { nodeKey: string; attempt: number; status: string; since: Date | null }>();
+  if (runIds.length === 0) return new Map<string, { id: string; nodeKey: string; attempt: number; status: string; since: Date | null }>();
   const rows = await db
     .select({
+      id: nodeExecutions.id,
       runId: nodeExecutions.runId,
       nodeKey: nodeExecutions.nodeKey,
       attempt: nodeExecutions.attempt,
@@ -57,8 +58,8 @@ export async function currentSteps(db: DbExecutor, runIds: string[]) {
     .from(nodeExecutions)
     .where(and(inArray(nodeExecutions.runId, runIds), inArray(nodeExecutions.status, ["running", "waiting", "pending"])))
     .orderBy(desc(nodeExecutions.createdAt));
-  const steps = new Map<string, { nodeKey: string; attempt: number; status: string; since: Date | null }>();
-  for (const r of rows) if (!steps.has(r.runId)) steps.set(r.runId, { nodeKey: r.nodeKey, attempt: r.attempt, status: r.status, since: r.startedAt ?? r.createdAt });
+  const steps = new Map<string, { id: string; nodeKey: string; attempt: number; status: string; since: Date | null }>();
+  for (const r of rows) if (!steps.has(r.runId)) steps.set(r.runId, { id: r.id, nodeKey: r.nodeKey, attempt: r.attempt, status: r.status, since: r.startedAt ?? r.createdAt });
   return steps;
 }
 

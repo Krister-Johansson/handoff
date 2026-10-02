@@ -44,7 +44,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
     ...(env.HANDOFF_MODEL ? { model: env.HANDOFF_MODEL } : {}),
     ...(env.HANDOFF_EFFORT ? { effort: env.HANDOFF_EFFORT } : {}),
     // A tool call outside a step's allow rules waits for a person on the run page instead of being denied.
-    permissions: { db },
+    permissions: { db, caps: env.caps },
   };
   const agent = cliNodeExecutor(cliOptions);
   const git = new GitWorktreeProvider({
