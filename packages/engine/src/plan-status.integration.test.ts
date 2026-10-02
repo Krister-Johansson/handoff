@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, projects } from "@handoff/db";
+import { eq, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { cancelRun } from "./operations.ts";
@@ -37,4 +37,17 @@ test("cancelling the latest run of a task sets it back to Ready", async () => {
   expect(await statusOf(migration.number)).toBe("Ready");
   const { events } = await inspect(db, cancelled.id);
   expect(events.filter((e) => e.type.startsWith("plan.")).map((e) => [e.type, e.payload])).toEqual([["plan.status", { issue: migration.number, status: "Ready" }]]);
+});
+
+test("cancelling an older run leaves a task whose newer run is active alone", async () => {
+  const { plan, task, run, statusOf } = await planned();
+  const migration = await task("Add the migration");
+  const docs = await task("Document the migration");
+  const older = await run([migration, docs]);
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, older.id));
+  await run([migration]);
+  await cancelRun(db, older.id, { projects: plan });
+  // The newer run owns the migration task; the docs task had only the cancelled run.
+  expect(await statusOf(migration.number)).toBe("Running");
+  expect(await statusOf(docs.number)).toBe("Ready");
 });

@@ -62,8 +62,20 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
   });
   await stopRunPreviews(db, runId);
   const [project] = await db.select().from(projectRows).where(eq(projectRows.id, cancelled.projectId));
-  const written = await writePlanStatus(opts.projects, project!, cancelled.issues.map((i) => i.number), "Ready");
+  if (!project || project.planProjectNumber === null || cancelled.issues.length === 0) return;
+  const written = await writePlanStatus(opts.projects, project, await latestRunOf(db, cancelled), "Ready");
   if (written.length) await appendEvents(db, runId, written);
+}
+
+/** The run's issues it is the latest run of: a newer run that links an issue owns its status. */
+async function latestRunOf(db: Db, run: typeof runs.$inferSelect): Promise<number[]> {
+  const newer = await db
+    .select({ issues: runs.issues })
+    .from(runs)
+    // Compared in SQL: a JavaScript Date drops the microseconds Postgres keeps.
+    .where(and(eq(runs.projectId, run.projectId), sql`${runs.createdAt} > (select r.created_at from runs r where r.id = ${run.id})`));
+  const taken = new Set(newer.flatMap((r) => r.issues.map((i) => i.number)));
+  return run.issues.map((i) => i.number).filter((n) => !taken.has(n));
 }
 
 /**
