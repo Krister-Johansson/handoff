@@ -248,6 +248,9 @@ export class OctokitProjects implements ProjectsPort {
     const project = await this.projectNode(login, number);
     if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
     const ids = estimateFieldIds(project);
+    // Check both fields first, so a Project with a wrong Estimate does not get a Size either.
+    if (project.size && !ids.size) throw new Error(`GitHub Project #${number} has a Size field that is not a single select. Rename it on GitHub, then try again.`);
+    if (project.estimate && !ids.estimate) throw new Error(`GitHub Project #${number} has an Estimate field that is not a number field. Rename it on GitHub, then try again.`);
     const existing = project.size?.__typename === "ProjectV2SingleSelectField" ? project.size : undefined;
     const size = existing ? await this.addSizeOptions(existing) : await this.createSizeField(project.id);
     const estimate = ids.estimate ?? (await this.createEstimateField(project.id));

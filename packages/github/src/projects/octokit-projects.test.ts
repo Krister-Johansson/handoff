@@ -1020,6 +1020,21 @@ test("ensureEstimateFields adds S, M and L to an existing Size field and keeps i
   expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
 });
 
+test("ensureEstimateFields refuses a Size that is not a single select", async () => {
+  let project: Record<string, unknown> = { ...planProject(3), url: "u", title: "t", size: projectField("F_size_text", "TEXT"), estimate: null };
+  const { fetch, operations } = fakeGraphql({ PlanProject: () => ({ user: { projectV2: project } }) });
+  const projects = port(fetch);
+
+  await expect(projects.ensureEstimateFields("octo", 3)).rejects.toThrow(/has a Size field that is not a single select/);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+
+  // An Estimate that is not a number is refused the same way, before the missing Size is created.
+  project = { ...project, size: null, estimate: projectField("F_estimate_text", "TEXT") };
+  operations.length = 0;
+  await expect(projects.ensureEstimateFields("octo", 3)).rejects.toThrow(/has an Estimate field that is not a number field/);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
 test("setStatus still fails for an issue GitHub cannot resolve", async () => {
   const { fetch } = fakeGraphql({
     IssuePlan: (v) =>
