@@ -247,12 +247,19 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "repair_run",
     title: "Repair a run",
-    description: "Re-runs the failed step of a failed run in place, keeping what earlier steps did. A note is passed to the step's agent.",
-    input: z.object({ run_id: runId, node: z.string().optional().describe("The failed step; defaults to the one that failed last"), note: z.string().optional() }),
+    description:
+      "Re-runs the failed step of a failed run in place, keeping what earlier steps did. A note is passed to the step's agent; allow_paths lets the step change those files outside the plan for the rest of the run.",
+    input: z.object({
+      run_id: runId,
+      node: z.string().optional().describe("The failed step; defaults to the one that failed last"),
+      note: z.string().optional(),
+      allow_paths: z.array(z.string()).optional().describe("Files outside the plan the step may change, with the user's agreement"),
+    }),
     kind: "data",
     confirm: true,
     readOnly: false,
-    summarize: (a) => `Repair run ${short(a.run_id)}${a.node ? ` at ${a.node}` : ""}${a.note ? `: ${a.note}` : ""}`,
+    summarize: (a) =>
+      `Repair run ${short(a.run_id)}${a.node ? ` at ${a.node}` : ""}${a.allow_paths?.length ? `, allowing ${a.allow_paths.join(", ")}` : ""}${a.note ? `: ${a.note}` : ""}`,
   }),
   spec({
     name: "list_merge_queue",

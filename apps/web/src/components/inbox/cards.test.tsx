@@ -83,6 +83,17 @@ test("a failed run shows the error's first line as its title and the rest as out
   expect(screen.getByRole("link", { name: "Open the run" })).toHaveAttribute("href", "/projects/p1/runs/r1");
 });
 
+test("a failed step shows why it failed, and its repair can allow files outside the plan", async () => {
+  const error = { code: "paths_outside_plan", message: "files outside the plan: notes.txt", detail: { files: ["notes.txt"] } };
+  render(<FailedRunCard compact item={{ ...run, executionId: "x2", nodeKey: "coder", attempt: 1, error }} />);
+  expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Files to allow outside the plan"), { target: { value: "notes.txt" } });
+  fireEvent.click(screen.getByRole("button", { name: "Repair coder" }));
+  await waitFor(() => expect(actions.repairAction).toHaveBeenCalled());
+  const form = actions.repairAction.mock.calls[0]![1] as FormData;
+  expect([form.get("executionId"), form.get("allowPaths")]).toEqual(["x2", "notes.txt"]);
+});
+
 test("a run stuck on a loop asks for a decision and sends it", async () => {
   render(<StuckRunCard item={{ ...run, nodeKey: "reviewer", loop: "reviewer->coder", attempts: 3, finishedAt: null }} />);
   expect(screen.getByText("ran out of rounds")).toBeInTheDocument();

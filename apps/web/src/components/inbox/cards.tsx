@@ -6,6 +6,7 @@ import { CircleXIcon, ClipboardCheckIcon, ExternalLinkIcon, GitMergeIcon, GitPul
 import { answerAction, cancelAction, repairAction, resolveLoopAction, type InboxActionState } from "@/app/inbox/actions";
 import { Button } from "@/components/ui/button";
 import { MergeButton } from "@/components/runs/merge-button";
+import { FailureDetail, type FailureError } from "@/components/runs/failure-detail";
 import { PathsQuestionCard } from "@/components/runs/paths-question-card";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -230,7 +231,7 @@ export type FailedRunItem = {
   executionId: string;
   nodeKey: string;
   attempt: number;
-  error: { code: string; message: string } | null;
+  error: FailureError | null;
   finishedAt?: Date | string | null;
 };
 
@@ -246,13 +247,19 @@ export function FailedRunCard({ item, compact = false }: { item: FailedRunItem; 
       <CardTitle mono>{item.error ? `${item.error.code}: ${first}` : "failed"}</CardTitle>
       <div className="mt-2.5 flex flex-col gap-3">
         {output && <pre className="max-h-32 overflow-auto rounded-md border bg-terminal px-3 py-2.5 font-mono text-xs leading-relaxed whitespace-pre-wrap text-terminal-foreground">{output}</pre>}
-        <form id={`repair-${item.executionId}`} action={repair}>
+        <FailureDetail error={item.error} />
+        <form id={`repair-${item.executionId}`} action={repair} className="flex flex-col gap-3">
           <input type="hidden" name="executionId" value={item.executionId} />
           <input type="hidden" name="runId" value={item.runId} />
           <Field>
             <FieldLabel htmlFor={`note-${item.executionId}`}>Note for the retry</FieldLabel>
             <Input id={`note-${item.executionId}`} name="note" placeholder="What changed, or what to try instead" />
             <FieldDescription>Repair re-runs {item.nodeKey} as attempt {item.attempt + 1}; everything before it is kept.</FieldDescription>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor={`allow-${item.executionId}`}>Files to allow outside the plan</FieldLabel>
+            <Input id={`allow-${item.executionId}`} name="allowPaths" placeholder="pnpm-lock.yaml, docs/setup.md" />
+            <FieldDescription>Separated by commas. The path check lets {item.nodeKey} change them for the rest of the run.</FieldDescription>
           </Field>
         </form>
         {error && <FieldError>{error}</FieldError>}
