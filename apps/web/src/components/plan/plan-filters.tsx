@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDownIcon, KanbanIcon, ListTreeIcon, XIcon } from "lucide-react";
+import { ChartGanttIcon, ChevronDownIcon, KanbanIcon, ListTreeIcon, XIcon } from "lucide-react";
 import type { PlanStatus } from "@handoff/github";
 import type { PlanColumn, PlanEpic } from "@/server/plan";
 import { Button } from "@/components/ui/button";
@@ -58,7 +58,7 @@ type Props = {
 };
 
 /**
- * The Plan page's toolbar: Tree or Board, then the Epic, Status and Run filters. Every choice lives in
+ * The Plan page's toolbar: Tree, Board or Timeline, then the Epic, Status and Run filters. Every choice lives in
  * the URL, so a link or a refresh keeps it; with a filter set, a chip row undoes one or all of them.
  */
 export function PlanFilters({ projectId, view, filters, epics, counts, unplanned, aside }: Props) {
@@ -87,6 +87,10 @@ export function PlanFilters({ projectId, view, filters, epics, counts, unplanned
           <ToggleGroupItem value="board">
             <KanbanIcon />
             Board
+          </ToggleGroupItem>
+          <ToggleGroupItem value="timeline">
+            <ChartGanttIcon />
+            Timeline
           </ToggleGroupItem>
         </ToggleGroup>
 

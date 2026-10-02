@@ -1,6 +1,7 @@
 import type { PlanStatus } from "@handoff/github";
 import { planPath } from "../paths";
 import type { RunFilter } from "../plan/filters";
+import type { Zoom } from "../plan/timeline-scale";
 import type { PlanViewName } from "../project-tab";
 import { toolSpec } from "./catalog";
 
@@ -88,7 +89,7 @@ export function planUiTool(name: string, args: unknown, origin: string): UiPlan 
       return navigate(`/projects/${id(a.project_id!, "project")}/${a.tab}${search ? `?${search}` : ""}`);
     }
     case "go_to_plan": {
-      const p = parsed.data as { project_id: string; view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter };
+      const p = parsed.data as { project_id: string; view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; zoom?: Zoom };
       return navigate(planPath(id(p.project_id, "project"), p));
     }
     case "go_to_run":

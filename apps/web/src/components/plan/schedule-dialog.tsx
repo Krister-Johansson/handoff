@@ -7,13 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import type { ScheduleNote } from "@/lib/plan/timeline-rows";
 import { shortDay } from "@/lib/plan/timeline-scale";
 
 /** The item a person schedules: its number, title and the dates GitHub holds now. */
 export type ScheduleTarget = { number: number; title: string; start?: string | undefined; target?: string | undefined };
 
-/** A line under the fields: the parent's window, or a blocker and when it is planned to end. */
-export type ScheduleNote = { kind: "window" | "blocker"; text: string };
 
 function DateField({ id, label, value, was, invalid, onChange }: { id: string; label: string; value: string; was: string | undefined; invalid?: boolean; onChange: (value: string) => void }) {
   return (

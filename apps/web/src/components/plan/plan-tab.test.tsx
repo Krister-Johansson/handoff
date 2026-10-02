@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { PlanTab } from "./plan-tab";
-import { epic, planView, story, task } from "./testing/plan-fixtures";
+import { epic, planView, story, task, timelineOf } from "./testing/plan-fixtures";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), setupPlanAction: vi.fn() }));
@@ -31,4 +31,19 @@ test("the activity line shows the latest issues, sub_issues or issue_dependencie
 
   render(<PlanTab {...props} activity={null} />);
   expect(screen.queryByText(/Last from GitHub/)).not.toBeInTheDocument();
+});
+
+test("the timeline view shows the chart narrowed by the filters, and says so when nothing matches", () => {
+  const plan = { ...view, timeline: timelineOf(view, [], new Date(READ_AT)) };
+  const { unmount } = render(<PlanTab {...props} plan={plan} view="timeline" zoom="months" filters={parsePlanFilters({ status: "Ready" })} activity={null} />);
+  expect(screen.getByRole("radio", { name: "Timeline" })).toHaveAttribute("aria-checked", "true");
+  const grid = screen.getByRole("grid", { name: "Timeline" });
+  expect(within(grid).getByRole("row", { name: "Task #57 Add the migration" })).toBeInTheDocument();
+  expect(within(grid).queryByRole("row", { name: "Task #58 Plan page" })).not.toBeInTheDocument();
+  expect(within(screen.getByRole("radiogroup", { name: "Zoom" })).getByRole("radio", { name: "Months" })).toHaveAttribute("aria-checked", "true");
+  unmount();
+
+  render(<PlanTab {...props} plan={plan} view="timeline" zoom={undefined} filters={parsePlanFilters({ status: "Done" })} activity={null} />);
+  expect(screen.getByText("No items match these filters")).toBeInTheDocument();
+  for (const clear of screen.getAllByRole("link", { name: "Clear filters" })) expect(clear).toHaveAttribute("href", "/projects/p1/plan?view=timeline");
 });

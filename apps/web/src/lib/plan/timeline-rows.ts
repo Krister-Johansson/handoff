@@ -1,5 +1,58 @@
-import type { PlanItem } from "@handoff/github";
-import type { PlanEpic, PlanTask } from "@/server/plan";
+import type { PlanItem, PlanProject } from "@handoff/github";
+import type { PlanEpic, PlanProgress, PlanTask } from "@/server/plan";
+import type { ActualStrip, DaySpan, Timeline, TimelineItem } from "./schedule";
+import { dayOfInstant, shortDay, visibleRange } from "./timeline-scale";
+
+export const KIND_NAME = { epic: "Epic", story: "Story", task: "Task", group: "Unparented" } as const;
+
+/** An epic's or a story's progress, when the item carries it. */
+export const progressOf = (item: unknown): PlanProgress | undefined => (item && typeof item === "object" && "progress" in item ? (item.progress as PlanProgress) : undefined);
+
+/** "Oct 1 to now" for an active run, "Sep 26 to Sep 30" for one that ended. */
+export const stripDates = (strip: ActualStrip) => `${shortDay(dayOfInstant(strip.start))} to ${strip.active ? "now" : shortDay(dayOfInstant(strip.end))}`;
+
+/** Whether the Project lacks Start or Target. */
+export const lacksDateFields = (project: PlanProject) => !project.dateFields?.start || !project.dateFields.target;
+
+/** "Oct 6 to Oct 17", or one day alone. */
+export const spanText = (span: DaySpan) => (span.start === span.end ? shortDay(span.start) : `${shortDay(span.start)} to ${shortDay(span.end)}`);
+
+/** The days the chart shows: every planned or derived span and every run strip, around today. */
+export function chartRange(timeline: Timeline): DaySpan {
+  const spans = timeline.items.flatMap((i) => [
+    ...[i.planned ?? i.derived].filter((s) => s !== undefined),
+    ...i.actual.map((a) => ({ start: dayOfInstant(a.start), end: dayOfInstant(a.end) })),
+  ]);
+  return visibleRange(spans, timeline.today);
+}
+
+/** Every epic, story and task of the plan as shown, by number. */
+export const itemsOf = (epics: PlanEpic[], unparented: PlanTask[]) =>
+  new Map<number, PlanItem>([...epics.flatMap((e) => [e, ...e.stories, ...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...unparented].map((i) => [i.number, i]));
+
+/** A line under the schedule dialog's fields: the parent's window, or a blocker and when it is planned to end. */
+export type ScheduleNote = { kind: "window" | "blocker"; text: string };
+
+/** What the schedule dialog tells about an item: the nearest parent's span, then each open blocker's planned end. */
+export function scheduleNotes(item: PlanItem, items: Map<number, PlanItem>, entries: Map<number, TimelineItem>): ScheduleNote[] {
+  const notes: ScheduleNote[] = [];
+  const seen = new Set<number>();
+  for (let p = item.parent; p !== undefined && !seen.has(p); p = items.get(p)?.parent) {
+    seen.add(p);
+    const parent = items.get(p);
+    const entry = entries.get(p);
+    const span = entry?.planned ?? entry?.derived;
+    if (!parent || !span) continue;
+    const name = `${parent.kind === "story" ? "Story" : "Epic"} #${parent.number} ${parent.title}`;
+    notes.push({ kind: "window", text: entry?.planned ? `${name} runs ${spanText(span)}.` : `${name} spans ${spanText(span)}, derived from its tasks.` });
+    break;
+  }
+  for (const blocker of entries.get(item.number)?.waitingOn ?? []) {
+    const end = entries.get(blocker)?.planned?.end;
+    notes.push({ kind: "blocker", text: end ? `Blocked by #${blocker}, planned to end ${shortDay(end)}.` : `Blocked by #${blocker}, not scheduled.` });
+  }
+  return notes;
+}
 
 export type TimelineRowKind = "epic" | "story" | "task" | "group";
 
