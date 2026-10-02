@@ -24,6 +24,9 @@ const CODE_SENDERS = new Set(["coder", "tester", "code_review", "pr"]);
 /** Reads what the run's branch changed against its base, as the files a person reviews. */
 export type BranchDiff = (run: ExecutorContext["run"]) => Promise<DiffFile[] | undefined>;
 
+/** A review finding's severity as the gate names it. */
+const SEVERITY_NAMES: Record<string, string> = { blocking: "Blocking", should_fix: "Should fix", follow_up: "Follow-up" };
+
 /** What reached the gate, as markdown a person can read and comment on, by the kind of node that sent it. */
 export function reviewOf(fromType: string | undefined, output: unknown): { kind: string; markdown: string } {
   const o = obj(output);
@@ -45,7 +48,14 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
     const comments = Array.isArray(o.comments) ? o.comments.map(obj) : [];
     return {
       kind: "review",
-      markdown: [`Verdict: **${o.verdict === "approve" ? "approve" : "request changes"}**`, "", ...comments.map((c) => `- ${c.path ? `\`${String(c.path)}${c.line ? `:${String(c.line)}` : ""}\` ` : ""}${String(c.body ?? "")}`)].join("\n"),
+      markdown: [
+        `Verdict: **${o.verdict === "approve" ? "approve" : "request changes"}**`,
+        "",
+        ...comments.map((c) => {
+          const severity = typeof c.severity === "string" && SEVERITY_NAMES[c.severity] ? `**${SEVERITY_NAMES[c.severity]}** ` : "";
+          return `- ${severity}${c.path ? `\`${String(c.path)}${c.line ? `:${String(c.line)}` : ""}\` ` : ""}${String(c.body ?? "")}`;
+        }),
+      ].join("\n"),
     };
   }
   if (fromType === "tester" && typeof o.passed === "boolean") {
