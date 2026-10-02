@@ -32,6 +32,7 @@ test("tools that change state are marked confirm and never read only", () => {
     "resolve_loop",
     "run_again",
     "schedule",
+    "set_size",
     "setup_plan",
     "start_run",
     "start_scheduler",
@@ -57,6 +58,7 @@ test("toolSpec also finds a page tool by name, so a stored page tool call keeps 
 
 test("results that carry text from runs or GitHub are marked untrusted", () => {
   expect(CATALOG.filter((t) => t.untrusted).map((t) => t.name).sort()).toEqual([
+    "arrange_plan",
     "get_run",
     "get_run_events",
     "get_scheduler",
@@ -110,6 +112,24 @@ test("schedule is confirm and its summary names every issue with its dates", () 
   // The input refuses a date that is not a calendar day written YYYY-MM-DD.
   expect(toolSpec("schedule").input.safeParse({ project: "handoff", items: [{ issue: 57, start: "2026-02-31" }] }).success).toBe(false);
   expect(toolSpec("schedule").input.safeParse({ project: "handoff", items: [] }).success).toBe(false);
+});
+
+test("set_size is confirm and its summary names each task with its old and new size and estimate", () => {
+  expect(toolSpec("set_size")).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true, idempotent: true });
+  const items = [
+    { issue: 57, size: "L", estimate: "3h", was: { size: "M", estimate_hours: null } },
+    { issue: 58, estimate: null, was: { size: "S", estimate_hours: 12 } },
+    { issue: 59, size: "S", estimate: 4 },
+    { issue: 60, size: null },
+  ];
+  expect(toolSpec("set_size").summarize({ project: "handoff", items })).toBe(
+    "Size in handoff: #57 size M to L, estimate none to 3h; #58 estimate 12h to none; #59 size S, estimate 4h; #60 clear size",
+  );
+  // An item changes its size, its estimate or both; an estimate is hours or days, like 3h or 2d, or a number of hours.
+  const parses = (item: Record<string, unknown>) => toolSpec("set_size").input.safeParse({ project: "handoff", items: [{ issue: 57, ...item }] }).success;
+  expect(parses({})).toBe(false);
+  expect(parses({ size: "XL" })).toBe(false);
+  expect(parses({ estimate: "2d" })).toBe(true);
 });
 
 test("start_scheduler is confirm and its summary names the project, the limit, the order and the graph", () => {
