@@ -6,7 +6,7 @@ import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
 import { addDateFieldsAction } from "@/app/projects/actions";
 import { Tag } from "@/components/tag";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -107,16 +107,17 @@ export function DateFieldsBanner({ projectId, project }: { projectId: string; pr
     });
   return (
     <div className="p-2.5">
-      <Alert className="border-attention-dot/35 bg-attention-bg">
+      <Alert className="border-attention-dot/35 bg-attention-bg sm:pr-40">
         <CalendarIcon className="text-attention" />
         <AlertTitle>This Project has no Start and Target fields</AlertTitle>
         <AlertDescription className="text-xs">GitHub&apos;s roadmap also needs them picked once under &quot;Date fields&quot;.</AlertDescription>
-        <AlertAction className="top-1/2 -translate-y-1/2">
+        {/* Under the text on a phone, at the right on wider screens. */}
+        <div className="col-start-2 mt-1.5 sm:absolute sm:top-1/2 sm:right-2.5 sm:mt-0 sm:-translate-y-1/2">
           <Button size="sm" onClick={() => setOpen(true)}>
             <PlusIcon data-icon="inline-start" />
             Add date fields
           </Button>
-        </AlertAction>
+        </div>
       </Alert>
       <AlertDialog
         open={open}

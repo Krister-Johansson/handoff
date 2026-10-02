@@ -567,7 +567,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
             aria-rowcount={rows.length + 1}
             data-scrolled={(pane?.left ?? 0) > 0}
             className="group/grid relative text-[13px]"
-            style={{ width: LABEL_WIDTH + scale.width }}
+            style={{ width: LABEL_WIDTH + scale.width, minWidth: "100%" }}
           >
             <div role="rowgroup">
               <div role="row" aria-label="Time axis" className="flex h-12">
@@ -578,7 +578,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
                 >
                   Item
                 </div>
-                <div role="columnheader" aria-label={`${shortDay(scale.range.start)} to ${shortDay(scale.range.end)}`} className="relative border-b" style={{ width: scale.width }}>
+                <div role="columnheader" aria-label={`${shortDay(scale.range.start)} to ${shortDay(scale.range.end)}`} className="relative flex-1 border-b" style={{ minWidth: scale.width }}>
                   {scale.top.map((c) => (
                     <span key={`t${c.x}`} className="absolute top-0 flex h-6 items-center truncate border-l pl-1.5 text-[11px] font-medium" style={{ left: c.x, width: c.width }}>
                       {c.label}
@@ -619,7 +619,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
                       onToggle={() => collapsed.toggle(row.key)}
                       onSchedule={setScheduling}
                     />
-                    <div role="gridcell" className={cn("relative border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ width: scale.width }}>
+                    <div role="gridcell" className={cn("relative flex-1 border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ minWidth: scale.width }}>
                       {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} ctx={ctx} />}
                       {entry && row.task && <Strips row={row} entry={entry} scale={scale} projectId={projectId} />}
                     </div>
