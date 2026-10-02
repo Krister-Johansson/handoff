@@ -1,22 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { CalendarIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
 import type { PlanTask } from "@/server/plan";
 import { Button } from "@/components/ui/button";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+
 import type { TimelineItem } from "@/lib/plan/schedule";
 import { COLUMN_TONE, taskColumn } from "@/lib/plan/task";
 import { chartRange, itemsOf, KIND_NAME, lacksDateFields, progressOf, scheduleNotes, spanText, stripDates } from "@/lib/plan/timeline-rows";
-import { addDays, defaultZoom, shortDay, timeScale, type TimeScale, type Zoom } from "@/lib/plan/timeline-scale";
-import { planPath } from "@/lib/paths";
+import { addDays, defaultZoom, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
+
 import { cn } from "@/lib/utils";
 import { KindBadge, StatusPill } from "./plan-status";
 import { IssueTitle } from "./plan-task-parts";
 import { ScheduleDialog } from "./schedule-dialog";
-import { DateFieldsBanner, TimeChips, type TimelineProps } from "./timeline-parts";
+import { DateFieldsBanner, TimeFlags, type TimelineProps } from "./timeline-parts";
 
 type ListRow = { item: PlanItem; kind: "epic" | "story" | "task"; task: PlanTask | undefined; level: 1 | 2 | 3 };
 
@@ -57,12 +56,12 @@ function MiniBar({ row, entry, scale, todayX }: { row: ListRow; entry: TimelineI
 }
 
 /**
- * The timeline under 640 px: one row per item in the tree's order with a mini bar, the dates as text,
- * the late, waiting or overdue chips and the latest run's dates. There are no arrows; the chips say
- * what each task waits on.
+ * The timeline under 640 px: one row per item in the tree's order with a mini bar, the dates as text
+ * and the latest run's dates. There are no arrows; the warning icon after a task's title says what it
+ * waits on, and whether it is late or overdue.
+
  */
-export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, filters, readAt }: TimelineProps) {
-  const router = useRouter();
+export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, readAt, needsYou }: TimelineProps) {
   const [scheduling, setScheduling] = useState<PlanItem>();
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
@@ -73,23 +72,6 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        <span className="text-xs text-muted-foreground">
-          {shortDay(scale.range.start)} to {shortDay(scale.range.end)}, today {shortDay(timeline.today)}
-        </span>
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
-          className="ml-auto"
-          value={scale.zoom}
-          onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: v as Zoom }), { scroll: false })}
-          aria-label="Zoom"
-        >
-          <ToggleGroupItem value="weeks">Weeks</ToggleGroupItem>
-          <ToggleGroupItem value="months">Months</ToggleGroupItem>
-        </ToggleGroup>
-      </div>
       {lacksDateFields(project) && <DateFieldsBanner projectId={projectId} project={project} />}
       <ul aria-label="Timeline">
         {listRows(epics, unparented).map((row) => {
@@ -107,6 +89,7 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
               <div className="flex min-w-0 items-center gap-2">
                 {row.task ? <StatusPill column={taskColumn(row.task)} /> : <KindBadge kind={row.kind === "story" ? "story" : "epic"} />}
                 <IssueTitle item={row.item} className="text-xs font-medium" />
+                {row.task && <TimeFlags task={row.task} entry={entry} window={row.item.parent !== undefined && stories.has(row.item.parent) ? "story" : "epic"} needsYou={needsYou} />}
               </div>
               <MiniBar row={row} entry={entry} scale={scale} todayX={todayX} />
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -116,7 +99,7 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
                     {progress.done} of {progress.total} done
                   </span>
                 )}
-                {row.task && <TimeChips task={row.task} entry={entry} window={row.item.parent !== undefined && stories.has(row.item.parent) ? "story" : "epic"} waiting />}
+
                 {row.task && <span>{latest ? `Run ${stripDates(latest)}` : "No runs"}</span>}
                 {entry.unscheduled && (
                   <Button size="xs" variant="outline" className="ml-auto" aria-label={`Schedule #${row.item.number} ${row.item.title}`} onClick={() => setScheduling(row.item)}>

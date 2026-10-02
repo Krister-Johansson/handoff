@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useSyncExternalStore, useTransition } from "react";
-import { CalendarClockIcon, CalendarIcon, ClockAlertIcon, LockIcon, MoveHorizontalIcon, PlusIcon } from "lucide-react";
+import { useState, useSyncExternalStore, useTransition, type RefObject } from "react";
+import { useRouter } from "next/navigation";
+import { CalendarClockIcon, CalendarIcon, CircleAlertIcon, ClockAlertIcon, InfoIcon,
+ LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
 import { addDateFieldsAction } from "@/app/projects/actions";
@@ -18,11 +20,20 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
+import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { Separator } from "@/components/ui/separator";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { planPath } from "@/lib/paths";
 import type { Timeline, TimelineItem } from "@/lib/plan/schedule";
 import type { PlanFilters } from "@/lib/plan/filters";
-import { taskColumn } from "@/lib/plan/task";
-import type { Zoom } from "@/lib/plan/timeline-scale";
+import { BAR_TONE, taskColumn } from "@/lib/plan/task";
+import { chartRange } from "@/lib/plan/timeline-rows";
+import { defaultZoom, shortDay, timeScale, type Zoom } from "@/lib/plan/timeline-scale";
+import { cn } from "@/lib/utils";
 import type { StartRunContext } from "./plan-actions";
+import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
+
 
 /** What the chart and the list form both take. */
 export type TimelineProps = StartRunContext & {
@@ -39,15 +50,121 @@ export type TimelineProps = StartRunContext & {
   needsYou: string[];
   /** When the page read GitHub, in epoch milliseconds: the Today line. */
   readAt: number;
+  /** Where the chart puts its scroll to today, for the toolbar's Today button. */
+  todayRef?: RefObject<(() => void) | null> | undefined;
+  /** During a search, the rows it opens; the collapse store's rows otherwise. */
+  searchOpen?: Set<string> | undefined;
 };
+
+const LEGEND: { label: string; swatch: string }[] = [
+  ...(["Shaping", "Ready", "Running", "In review", "Done"] as const).map((c) => ({ label: c, swatch: cn("h-2 rounded-[2px] border", BAR_TONE[c]) })),
+  { label: "Derived", swatch: "h-2 rounded-[2px] border border-dashed border-muted-foreground/60" },
+  { label: "Run", swatch: "h-1 rounded-[2px] bg-active-dot" },
+  { label: "Blocks", swatch: "h-0 border-t-[1.5px] border-muted-foreground" },
+  { label: "Late", swatch: "h-0 border-t-[1.5px] border-danger-dot" },
+];
+
+/** The timeline's legend in a popover, with the note that dates move on GitHub's roadmap. */
+function Legend() {
+  return (
+    <Popover>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="icon-sm" aria-label="Legend">
+              <InfoIcon />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Legend</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="end" className="w-64 gap-2.5 text-xs" aria-label="Legend">
+        <PopoverHeader>
+          <PopoverTitle className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Legend</PopoverTitle>
+        </PopoverHeader>
+        <ul className="grid grid-flow-col grid-cols-2 grid-rows-5 gap-x-3 gap-y-1.5">
+          {LEGEND.map((l) => (
+            <li key={l.label} className="inline-flex items-center gap-2">
+              <span aria-hidden className={cn("w-3.5 shrink-0", l.swatch)} />
+              {l.label}
+            </li>
+          ))}
+        </ul>
+        <Separator />
+        <p className="flex gap-2 leading-snug text-muted-foreground">
+          <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          Drag dates on GitHub&apos;s roadmap. This timeline shows the Project; it does not move dates.
+        </p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * The timeline's controls at the right end of the Plan toolbar: Today, Weeks or Months, and the Legend.
+ * Under 640 px, where the timeline is a list, the range it shows takes Today's place.
+ */
+export function TimelineControls({
+  projectId,
+  filters,
+  timeline,
+  zoom,
+  narrow,
+  onToday,
+}: {
+  projectId: string;
+  filters: PlanFilters;
+  timeline: Timeline;
+  zoom: Zoom | undefined;
+  narrow: boolean;
+  onToday: () => void;
+}) {
+  const router = useRouter();
+  const range = chartRange(timeline);
+  const scale = timeScale(range, zoom ?? defaultZoom(range));
+  return (
+    <div className={cn("ml-auto flex items-center gap-1.5", narrow && "basis-full")}>
+      {narrow ? (
+        <span className="mr-auto text-xs whitespace-nowrap text-muted-foreground">
+          {shortDay(scale.range.start)} to {shortDay(scale.range.end)}, today {shortDay(timeline.today)}
+        </span>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="outline" size="icon-sm" aria-label="Today" onClick={onToday}>
+              <LocateFixedIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Today</TooltipContent>
+        </Tooltip>
+      )}
+      <ToggleGroup
+        type="single"
+        spacing={0.5}
+        className={SEGMENTED}
+        value={scale.zoom}
+        onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: v as Zoom }), { scroll: false })}
+        aria-label="Zoom"
+      >
+        <ToggleGroupItem value="weeks" className={SEGMENTED_ITEM}>
+          Weeks
+        </ToggleGroupItem>
+        <ToggleGroupItem value="months" className={SEGMENTED_ITEM}>
+          Months
+        </ToggleGroupItem>
+      </ToggleGroup>
+      <Legend />
+    </div>
+  );
+}
 
 const numbers = (list: number[]) => list.map((n) => `#${n}`).join(", ");
 
 /**
- * What a task's row says about its time: late, blocked, overdue, or outside its parent's window. The
- * list form, which has no arrows, says "Waiting on #70" where the chart says "Blocked by #70".
+ * What a task says about its time as chips, in the hover card of its bar: late, blocked, overdue, or
+ * outside its parent's window.
  */
-export function TimeChips({ task, entry, window, waiting }: { task: PlanTask; entry: TimelineItem; window: "story" | "epic"; waiting?: boolean }) {
+export function TimeChips({ task, entry, window }: { task: PlanTask; entry: TimelineItem; window: "story" | "epic" }) {
   const done = taskColumn(task) === "Done";
   const chips = [
     entry.late && (
@@ -59,7 +176,8 @@ export function TimeChips({ task, entry, window, waiting }: { task: PlanTask; en
     !entry.late && !done && entry.waitingOn.length > 0 && (
       <Tag key="blocked" tone="fill">
         <LockIcon aria-hidden />
-        {waiting ? "Waiting on" : "Blocked by"} {numbers(entry.waitingOn)}
+        Blocked by {numbers(entry.waitingOn)}
+
       </Tag>
     ),
     entry.overdueDays !== undefined && (
@@ -77,6 +195,47 @@ export function TimeChips({ task, entry, window, waiting }: { task: PlanTask; en
   ].filter(Boolean);
   if (chips.length === 0) return null;
   return <>{chips}</>;
+}
+
+/** What a task's warning says, one line each, with the tone of the most urgent. */
+function timeFlags(task: PlanTask, entry: TimelineItem, window: "story" | "epic", waitingOnYou: boolean) {
+  const done = taskColumn(task) === "Done";
+  const flags = [
+    entry.late && `Late: waiting on ${numbers(entry.waitingOn)}`,
+    !entry.late && !done && entry.waitingOn.length > 0 && `Blocked by ${numbers(entry.waitingOn)}`,
+    entry.overdueDays !== undefined && `Overdue by ${entry.overdueDays === 1 ? "1 day" : `${entry.overdueDays} days`}`,
+    entry.outsideParent && `Outside ${window} window`,
+    waitingOnYou && "Waiting on you",
+  ].filter((f): f is string => Boolean(f));
+  const tone = entry.late ? "text-danger" : entry.overdueDays !== undefined || waitingOnYou ? "text-attention" : "text-muted-foreground";
+  return { flags, tone };
+}
+
+/**
+ * A small warning icon after a task's title on the timeline, in place of a row of chips: blocked by which
+ * issues, late, overdue, outside its story's or epic's window, or waiting on you. Its accessible name and
+ * its tooltip list them; a tap or a click opens the tooltip too, for touch screens.
+ */
+export function TimeFlags({ task, entry, window, needsYou }: { task: PlanTask; entry: TimelineItem; window: "story" | "epic"; needsYou: readonly string[] }) {
+  const [open, setOpen] = useState(false);
+  const { flags, tone } = timeFlags(task, entry, window, task.run !== null && needsYou.includes(task.run.id));
+  if (flags.length === 0) return null;
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon-xs" aria-label={flags.join(". ")} className={cn("-mx-0.5 size-5 shrink-0", tone)} onClick={() => setOpen((o) => !o)}>
+          <CircleAlertIcon />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start">
+        <ul className="flex flex-col gap-0.5">
+          {flags.map((f) => (
+            <li key={f}>{f}</li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 const NARROW = "(max-width: 639px)";

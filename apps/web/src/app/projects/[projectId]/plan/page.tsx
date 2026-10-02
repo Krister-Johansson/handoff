@@ -1,13 +1,12 @@
 import { notFound } from "next/navigation";
-import { ExternalLinkIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { PlanEmpty } from "@/components/plan/plan-empty";
+import { PlanHeader } from "@/components/plan/plan-header";
 import { PlanTab } from "@/components/plan/plan-tab";
-import { ShapeButton } from "@/components/plan/shape-button";
-import { Button } from "@/components/ui/button";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import { parsePlanFilters } from "@/lib/plan/filters";
+import { readyInBacklog } from "@/lib/plan/task";
 import { parsePlanView, parseZoom } from "@/lib/project-tab";
 import { projectCrumb } from "@/server/crumbs";
 import { getProjectDetail } from "@/server/graphs";
@@ -38,7 +37,6 @@ export default async function PlanPage({
   const { detail, plan, activity, signals, crumbs, readAt } = await loadPlanPage(projectId);
   if (!detail || ("reason" in plan && plan.reason === "not-found")) notFound();
   const { project, graphs, defaultGraph } = detail;
-  const shape = <ShapeButton projectName={project.name} />;
 
   if ("reason" in plan) {
     return (
@@ -54,31 +52,8 @@ export default async function PlanPage({
   }
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <PageHeader
-        crumbs={crumbs}
-        title="Plan"
-        description={
-          <>
-            Epics, stories and tasks for {project.name}, read from the GitHub Project{" "}
-            <a href={plan.project.url} className="underline underline-offset-3 hover:text-foreground">
-              {plan.project.title}
-            </a>
-            . Only Ready tasks reach the backlog.
-          </>
-        }
-        actions={
-          <>
-            {shape}
-            <Button variant="ghost" asChild>
-              <a href={plan.project.url}>
-                <ExternalLinkIcon data-icon="inline-start" />
-                Open on GitHub
-              </a>
-            </Button>
-          </>
-        }
-      />
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-6">
+      <PlanHeader crumbs={crumbs} projectId={project.id} project={plan.project} ready={readyInBacklog(plan.board.Ready)} />
       <PlanTab
         project={project}
         plan={plan}

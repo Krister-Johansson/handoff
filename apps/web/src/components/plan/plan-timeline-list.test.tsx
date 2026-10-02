@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { PlanTimeline } from "./plan-timeline";
 import { epic, planView, PROJECT, REPO_URL, story, task, timelineOf } from "./testing/plan-fixtures";
@@ -18,7 +19,8 @@ afterEach(() => {
 
 const NOW = new Date("2026-10-02T12:00:00Z");
 
-test("under 640 px the timeline lists items with their dates and waiting-on text instead of arrows", () => {
+test("under 640 px the timeline lists items with their dates, and a warning icon after a title names what it waits on instead of arrows", () => {
+
   const view = planView([
     epic(12, "Project management", [
       story(41, "Shaping with the assistant", 12, [
@@ -45,11 +47,11 @@ test("under 640 px the timeline lists items with their dates and waiting-on text
       graphName="loop"
       readAt={NOW.getTime()}
     />,
+    { wrapper: TooltipProvider },
   );
 
   expect(screen.queryByRole("grid")).not.toBeInTheDocument();
   expect(container.querySelector("[data-arrow]")).toBeNull();
-  expect(screen.getByText("Sep 7 to Nov 1, today Oct 2")).toBeInTheDocument();
 
   const list = screen.getByRole("list", { name: "Timeline" });
   const items = within(list).getAllByRole("listitem");
@@ -70,9 +72,10 @@ test("under 640 px the timeline lists items with their dates and waiting-on text
   expect(within(item(/Story #41/)).getByText("0 of 3 done")).toBeInTheDocument();
   expect(within(item(/Task #55/)).getByText("Run Oct 1 to now")).toBeInTheDocument();
   expect(within(item(/Task #57/)).getByText("Oct 1 to Oct 9")).toBeInTheDocument();
-  expect(within(item(/Task #57/)).getByText("Late: waiting on #55")).toBeInTheDocument();
+  expect(within(item(/Task #57/)).getByRole("button", { name: "Late: waiting on #55" })).toBeInTheDocument();
+  expect(within(item(/Task #57/)).queryByText("Late: waiting on #55")).not.toBeInTheDocument();
   expect(within(item(/Task #57/)).getByText("No runs")).toBeInTheDocument();
-  expect(within(item(/Task #72/)).getByText("Waiting on #70")).toBeInTheDocument();
+  expect(within(item(/Task #72/)).getByRole("button", { name: "Blocked by #70" })).toBeInTheDocument();
   expect(within(item(/Task #58/)).getByText("No dates")).toBeInTheDocument();
   expect(within(item(/Task #58/)).getByRole("button", { name: "Schedule #58 Plan page tree and board" })).toBeInTheDocument();
 });
