@@ -586,6 +586,52 @@ test("list_plan returns the tree with statuses, dates and runs, wrapped as data"
   expect((await call("list_plan", { project: "sandbox", epic: 999 })).epics).toEqual([]);
 });
 
+test("list_plan returns sizes, estimates, durations, forecasts and the capacity", async () => {
+  const { number, story } = await epicAndStory();
+  await plan.ensureEstimateFields("octo", number);
+  const create = async (title: string) => (await call("create_task", { project: "sandbox", story, title, brief: `${title}.` })).number as number;
+  const sized = await create("Sized");
+  const proposed = await create("Proposed");
+  const bare = await create("Bare");
+  Object.assign(plan.itemsOf(repo).get(sized)!, { size: "M", estimate: 4 });
+
+  // The planner of a finished run on the unsized task proposed S.
+  await call("move_to_ready", { project: "sandbox", issues: [proposed] });
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [proposed] });
+  const [run] = await db.select().from(runs).where(eq(runs.id, run_id));
+  await db
+    .update(runs)
+    .set({ status: "succeeded", state: { ...run!.state, plan: { plan: "p", steps: ["a"], ownedPaths: ["b"], size: "S" } } })
+    .where(eq(runs.id, run_id));
+  // Five succeeded M runs of 90 minutes on other tasks give M a forecast of its own.
+  for (const issue of [50, 51, 52, 53, 54]) {
+    await db.insert(runs).values({
+      ...run!,
+      id: crypto.randomUUID(),
+      status: "succeeded",
+      issues: [{ number: issue, title: `#${issue}`, url: `https://github.com/octo/sample/issues/${issue}` }],
+      size: "M",
+      branchName: `handoff/m-${issue}`,
+      startedAt: new Date("2026-10-01T09:00:00Z"),
+      finishedAt: new Date("2026-10-01T10:30:00Z"),
+    });
+  }
+
+  const listed = await call("list_plan", { project: "sandbox" });
+  expect(listed.capacity_hours).toBe(6);
+  expect(listed.forecasts).toEqual({
+    S: { source: "default", minutes: 30, parts: null, cost_usd: null, runs: 0, measured_minutes: null },
+    M: { source: "runs", minutes: 90, parts: { agent: 90, queue: 0, waiting: 0 }, cost_usd: 0, runs: 5, measured_minutes: 90 },
+    L: { source: "default", minutes: 120, parts: null, cost_usd: null, runs: 0, measured_minutes: null },
+  });
+  const tasks = listed.epics[0].stories[0].tasks as Record<string, unknown>[];
+  expect(tasks.map((t) => [t.number, t.size, t.estimate_hours, t.proposal, t.duration])).toEqual([
+    [sized, "M", 4, null, { hours: 4, source: "estimate" }],
+    [proposed, null, null, { size: "S", run_id }, { hours: 0.5, source: "proposal" }],
+    [bare, null, null, null, null],
+  ]);
+});
+
 /** The Start and Target an issue has on the sandbox plan. */
 const datesOf = (issue: number) => {
   const item = plan.itemsOf(repo).get(issue);

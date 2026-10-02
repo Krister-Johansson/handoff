@@ -15,6 +15,7 @@ import { runPathOf } from "./run-path";
 import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ScheduleItem } from "./shaping";
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
+import type { Forecast } from "../lib/plan/forecast";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
@@ -356,10 +357,17 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         blocked_by: t.blockedBy,
         run: t.run ? { id: t.run.id, status: t.run.status, url: url(runPath(projectId, t.run.id)) } : null,
         pr: t.run?.prNumber ?? t.prNumbers[0] ?? null,
+        size: t.size ?? null,
+        estimate_hours: t.estimate ?? null,
+        proposal: t.proposal ? { size: t.proposal.size, run_id: t.proposal.runId } : null,
+        duration: t.duration ?? null,
       });
       const progress = (p: PlanProgress) => `${p.done} of ${p.total} done`;
+      const forecast = (f: Forecast) => ({ source: f.source, minutes: f.minutes, parts: f.parts, cost_usd: f.costUsd, runs: f.runs, measured_minutes: f.measuredMinutes });
       return {
         project: { number: view.project.number, title: view.project.title, url: view.project.url },
+        capacity_hours: view.capacity ?? null,
+        forecasts: view.forecasts ? { S: forecast(view.forecasts.S), M: forecast(view.forecasts.M), L: forecast(view.forecasts.L) } : null,
         epics: view.epics
           .filter((e) => epic === undefined || e.number === epic)
           .map((e) => ({
