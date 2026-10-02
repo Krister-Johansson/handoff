@@ -1,3 +1,16 @@
+import type { PlanStatus } from "@handoff/github";
+import type { PlanViewName } from "./project-tab";
+
+/** A project's Plan page, with the view (the tree unless given), an epic and statuses to narrow it to. */
+export function planPath(projectId: string, opts: { view?: PlanViewName; epic?: number; status?: PlanStatus[] } = {}) {
+  const query = [
+    opts.view && opts.view !== "tree" ? `view=${opts.view}` : undefined,
+    opts.epic !== undefined ? `epic=${opts.epic}` : undefined,
+    opts.status?.length ? `status=${opts.status.map(encodeURIComponent).join(",")}` : undefined,
+  ].filter(Boolean);
+  return `/projects/${projectId}/plan${query.length ? `?${query.join("&")}` : ""}`;
+}
+
 /** A run's page, under the project it belongs to. */
 export const runPath = (projectId: string, runId: string) => `/projects/${projectId}/runs/${runId}`;
 
