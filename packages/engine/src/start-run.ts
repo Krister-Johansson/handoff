@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { LinkedIssue } from "@handoff/core";
 import { graphs, graphVersions, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
-import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
+import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
 import { recordPlanStatus } from "./plan-status.ts";
 import { createRun } from "./runs.ts";
 import type { RunRow } from "./types.ts";
@@ -17,6 +17,8 @@ export type StartRunInput = {
   again?: boolean | undefined;
   /** Who starts the run: dashboard, claude-code, assistant, webmcp, cli or scheduler. */
   startedBy?: string | undefined;
+  /** The size to record when the gate reads no items: a run started again keeps the size of the run it repeats. */
+  size?: PlanSize | null | undefined;
   /** The plan's items as the caller already read them: the Ready gate uses them instead of reading the Project again. */
   items?: PlanItem[] | undefined;
   /** The most active runs the project may have, counted under the start lock: the scheduler's limit. */
@@ -78,7 +80,8 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
-    const size = issues.length === 1 ? items?.find((item) => item.number === issues[0]!.number)?.size : undefined;
+    // A run records the size its single task has now, so a later change of the task's size does not move it.
+    const size = input.again ? (input.size ?? undefined) : issues.length === 1 ? items?.find((item) => item.number === issues[0]!.number)?.size : undefined;
     return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
