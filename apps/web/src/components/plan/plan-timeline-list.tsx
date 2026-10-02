@@ -13,7 +13,7 @@ import { formatDuration } from "@/lib/plan/duration";
 import { durationIn, planMove, type MoveContext } from "@/lib/plan/move";
 
 import type { TimelineItem } from "@/lib/plan/schedule";
-import { COLUMN_TONE, taskColumn } from "@/lib/plan/task";
+import { canMove, COLUMN_TONE, taskColumn } from "@/lib/plan/task";
 import { chartRange, estimateFieldsGap, itemsOf, KIND_NAME, lacksDateFields, progressOf, scheduleNotes, spanText, stripDates, type ScheduleNote } from "@/lib/plan/timeline-rows";
 import { addDays, defaultZoom, shortDay, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
 
@@ -207,7 +207,7 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
 
                 {row.task && <span>{latest ? `Run ${stripDates(latest)}` : "No runs"}</span>}
                 {row.task && sizing && <SizeChip task={row.task} />}
-                {row.task && durationIn(move, row.task) ? (
+                {row.task && canMove(row.task) && durationIn(move, row.task) ? (
                   <StartField projectId={projectId} task={row.task} ctx={move} notes={scheduleNotes(row.task, items, entries)} />
                 ) : entry.unscheduled && (
                   <Button size="xs" variant="outline" className="ml-auto" aria-label={`Schedule #${row.item.number} ${row.item.title}`} onClick={() => setScheduling(row.item)}>

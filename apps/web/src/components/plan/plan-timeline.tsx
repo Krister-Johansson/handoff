@@ -22,7 +22,7 @@ import { hoursByDay } from "@/lib/plan/load";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
 import { durationInWords, hoursInWords, usually } from "@/lib/plan/size-text";
-import { BAR_TONE, hasActiveRun, prNumberOf, taskColumn } from "@/lib/plan/task";
+import { BAR_TONE, canMove, prNumberOf, taskColumn } from "@/lib/plan/task";
 import {
   arrowPath,
   chartRange,
@@ -106,7 +106,8 @@ const minutesText = (minutes: number) => formatDuration(minutes / 60, Infinity);
 
 /** What a size usually takes in this project, with its parts and cost, or its default with the runs so far. */
 function ForecastRow({ forecast, capacity }: { forecast: Forecast; capacity: number }) {
-  const where = forecast.source === "runs" ? `the median of ${forecast.runs} finished ${forecast.size} runs` : `the default for ${forecast.size}; ${forecast.runs} finished ${forecast.size} runs so far`;
+  const sofar = forecast.runs === 0 ? `no finished ${forecast.size} runs yet` : `${forecast.runs} finished ${forecast.size} ${forecast.runs === 1 ? "run" : "runs"} so far`;
+  const where = forecast.source === "runs" ? `the median of ${forecast.runs} finished ${forecast.size} runs` : `the default for ${forecast.size}; ${sofar}`;
   const cost = forecast.costUsd !== null ? `, about $${forecast.costUsd.toFixed(2)}` : "";
   return (
     <>
@@ -193,13 +194,34 @@ function TargetText({ item, entry }: { item: PlanItem; entry: TimelineItem }) {
   );
 }
 
+/** A task's latest run, when its runs ran, and its pull request, in the bar's hover card. */
+function TaskRunRows({ task, entry, projectId }: { task: PlanTask; entry: TimelineItem; projectId: string }) {
+  const pr = prNumberOf(task);
+  return (
+    <>
+      <dt className="text-muted-foreground">Latest run</dt>
+      <dd>
+        {task.run ? (
+          <Link href={runPath(projectId, task.run.id)} className="rounded-full">
+            <StatusBadge status={task.run.status} size="sm" />
+          </Link>
+        ) : (
+          "None yet"
+        )}
+      </dd>
+      <RunTimes entry={entry} />
+      <dt className="text-muted-foreground">Pull request</dt>
+      <dd>{pr !== undefined ? `#${pr}` : "None"}</dd>
+    </>
+  );
+}
+
 /** The hover card of a bar or a row title: kind, status, dates and where they come from, blockers, latest run and pull request. */
 function ItemCard({ row, entry, ctx, quiet = false, children }: { row: TimelineRow; entry: TimelineItem; ctx: CardContext; quiet?: boolean; children: ReactNode }) {
   const item = row.item!;
   const task = row.task;
   const span = entry.planned ? "Own dates" : entry.derived ? "Derived from its tasks" : "Not scheduled";
   const progress = progressOf(item);
-  const pr = task && prNumberOf(task);
   // A bar on the move keeps its card shut; the drag's tooltip speaks for it.
   const [open, setOpen] = useState(false);
   return (
@@ -253,23 +275,7 @@ function ItemCard({ row, entry, ctx, quiet = false, children }: { row: TimelineR
               </dd>
             </>
           )}
-          {task && (
-            <>
-              <dt className="text-muted-foreground">Latest run</dt>
-              <dd>
-                {task.run ? (
-                  <Link href={runPath(ctx.projectId, task.run.id)} className="rounded-full">
-                    <StatusBadge status={task.run.status} size="sm" />
-                  </Link>
-                ) : (
-                  "None yet"
-                )}
-              </dd>
-              <RunTimes entry={entry} />
-              <dt className="text-muted-foreground">Pull request</dt>
-              <dd>{pr !== undefined ? `#${pr}` : "None"}</dd>
-            </>
-          )}
+          {task && <TaskRunRows task={task} entry={entry} projectId={ctx.projectId} />}
         </dl>
         <div className="flex items-center justify-between gap-2 border-t pt-2">
           <span className="flex flex-wrap gap-1">{task && <TimeChips task={task} entry={entry} window="story" />}</span>
@@ -620,8 +626,7 @@ type Placing = { grip: (task: PlanTask) => ReturnType<ReturnType<typeof useBarDr
  * says why. Done and Running tasks have none, and nothing has one without the Plan page's sizes.
  */
 function Grip({ task, placing }: { task: PlanTask; placing: Placing }) {
-  const column = taskColumn(task);
-  if (!placing.enabled || column === "Done" || column === "Running" || hasActiveRun(task)) return null;
+  if (!placing.enabled || !canMove(task)) return null;
   const props = placing.grip(task);
   const GRIP = "-ml-6 grid h-[22px] w-[18px] shrink-0 place-items-center rounded-sm text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5";
   if (!props) {
@@ -994,7 +999,7 @@ function useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, 
   /** How a task's bar moves: not at all when Done or Running, or when it has no dates and no duration. */
   const moveOf = (task: PlanTask, entry: TimelineItem): BarMove | undefined => {
     const span = entry.planned;
-    if (!span || taskColumn(task) === "Done" || taskColumn(task) === "Running" || hasActiveRun(task)) return undefined;
+    if (!span || !canMove(task)) return undefined;
     const hours = sizing && span.hours !== undefined ? span.hours : undefined;
     const dayWidth = dayWidthAt(scale, span.start);
     const bar: DragBar = { issue: task.number, dayWidth, hourWidth: sizing ? dayWidth / sizing.capacity : dayWidth, hours };

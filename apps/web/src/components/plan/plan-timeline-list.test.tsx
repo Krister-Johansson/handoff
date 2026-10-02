@@ -135,6 +135,7 @@ test("under 640 px a task shows its size and a Start field whose Target follows 
   const view = planView([
     epic(120, "Refined product redesign", [
       story(127, "Restyle project views", 120, [
+        task(141, "R1 Redesign tokens", "Running", { start: "2026-10-02", target: "2026-10-02", size: "S" }),
         task(143, "R3 Restyle the sidebar", "Ready", { start: "2026-10-02", target: "2026-10-03", size: "L", estimate: 9 }),
         task(146, "R6 Restyle the list view", "Shaping", { start: "2026-10-03", target: "2026-10-03", size: "M", blockedBy: [143] }),
         task(152, "Document the workflow", "Shaping"),
@@ -181,5 +182,8 @@ test("under 640 px a task shows its size and a Start field whose Target follows 
   expect(within(item(/Task #143/)).getByText("Target follows from the manual estimate, 1.5d: Oct 3.")).toBeInTheDocument();
   expect(within(item(/Task #152/)).getByRole("button", { name: "Schedule #152 Document the workflow" })).toBeInTheDocument();
   expect(within(item(/Task #152/)).queryByRole("button", { name: /^Start of/ })).not.toBeInTheDocument();
+  // A Running task keeps its dates: its run owns it.
+  expect(within(item(/Task #141/)).getByRole("button", { name: "Size S, forecast 25m. Change the size or estimate of #141" })).toBeInTheDocument();
+  expect(within(item(/Task #141/)).queryByRole("button", { name: /^Start of/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /^Task #/ })).not.toBeInTheDocument();
 });
