@@ -394,6 +394,8 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
           ctx.emit("notify", told);
         }
         await closeLinkedIssues(deps.github, ctx, repo, number);
+        // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless.
+        await movePlan(deps.projects, ctx, "Done");
         // Closed issues may unblock other runs of the project waiting at their Start.
         if (db) await wakeDependents(db, ctx.project.id);
         return done({ kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } });

@@ -209,6 +209,20 @@ describe("status on the plan", () => {
     expect(await statusOf(tasks[0]!)).toBe("Ready");
     expect(await planEvents()).toEqual(tasks.map((issue) => ["plan.status", { issue, status: "In review" }]));
   });
+
+  test("the merge sets Done after closing the issues", async () => {
+    const { github, tasks, run, deps, statusOf } = await plannedRun();
+    await drain(deps);
+    github.setChecks(1, "SUCCESS");
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    expect(github.merged).toEqual([1]);
+    expect(await Promise.all(tasks.map(statusOf))).toEqual(["Done", "Done"]);
+    const { types, events } = await inspect(db, run.id);
+    const done = events.filter((e) => e.type === "plan.status" && (e.payload as { status: string }).status === "Done");
+    expect(done.map((e) => (e.payload as { issue: number }).issue)).toEqual(tasks);
+    expect(types.indexOf("github.issues_closed")).toBeLessThan(types.indexOf("plan.status", types.indexOf("github.merged")));
+  });
 });
 
 /** The linear graph with the edges that keep a run up with main: fix (which takes conflicts) back to the coder, a refused merge back to the PR node. */
