@@ -138,3 +138,18 @@ mutation CreatePlanEstimateField($projectId: ID!, $name: String!) {
     }
   }
 }
+
+mutation SetPlanSizeOptions($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+  updateProjectV2Field(input: { fieldId: $fieldId, singleSelectOptions: $options }) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2SingleSelectField {
+        id
+        options {
+          id
+          name
+        }
+      }
+    }
+  }
+}

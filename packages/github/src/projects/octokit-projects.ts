@@ -19,6 +19,7 @@ import {
   PlanProjectDocument,
   PlanProjectsDocument,
   PlanProjectSetupDocument,
+  SetPlanSizeOptionsDocument,
   SetPlanStatusDocument,
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
@@ -39,6 +40,7 @@ import {
   type PlanProjectSetupQuery,
   type PlanProjectsQuery,
   type ProjectV2SingleSelectFieldOptionInput,
+  type SetPlanSizeOptionsMutation,
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
@@ -246,9 +248,27 @@ export class OctokitProjects implements ProjectsPort {
     const project = await this.projectNode(login, number);
     if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
     const ids = estimateFieldIds(project);
-    const size = ids.size ?? (await this.createSizeField(project.id));
+    const existing = project.size?.__typename === "ProjectV2SingleSelectField" ? project.size : undefined;
+    const size = existing ? await this.addSizeOptions(existing) : await this.createSizeField(project.id);
     const estimate = ids.estimate ?? (await this.createEstimateField(project.id));
     return { size, estimate };
+  }
+
+  /**
+   * Adds the S, M and L options a Size field lacks after its own options, sending every existing option
+   * back with its id so no item loses its value; returns the field's ids. Changes nothing when it has all three.
+   */
+  private async addSizeOptions(field: { id: string; options: ChoiceOption[] }): Promise<NonNullable<PlanEstimateFieldIds["size"]>> {
+    const missing = PLAN_SIZES.filter((name) => !field.options.some((o) => o.name === name));
+    if (missing.length === 0) return sizeFieldIds(field);
+    const options: ProjectV2SingleSelectFieldOptionInput[] = [
+      ...field.options.map((o) => ({ id: o.id, name: o.name, color: o.color, description: o.description })),
+      ...missing.map((name) => ({ name, ...SIZE_STYLE[name] })),
+    ];
+    const updated = await this.octokit.graphql<SetPlanSizeOptionsMutation>(SetPlanSizeOptionsDocument.toString(), { fieldId: field.id, options });
+    const result = updated.updateProjectV2Field?.projectV2Field;
+    if (result?.__typename !== "ProjectV2SingleSelectField") throw new Error("updating the Size field returned no single select field");
+    return sizeFieldIds(result);
   }
 
   /** Creates the Size single select field with the options S, M and L and returns its ids. */

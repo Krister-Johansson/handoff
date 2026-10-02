@@ -989,6 +989,37 @@ test("ensureEstimateFields creates Size with S, M and L and Estimate as a Number
   expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
 });
 
+test("ensureEstimateFields adds S, M and L to an existing Size field and keeps its options with their ids", async () => {
+  // Project #1 live has these five options; here a person has also added M by hand.
+  const current = sizeField("🐋 X-Large", "🦑 Large", "M", "🐂 Medium", "🐇 Small", "🦔 Tiny");
+  let project: Record<string, unknown> = { ...planProject(1), url: "u", title: "t", size: current, estimate: projectField("F_estimate", "NUMBER") };
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: () => ({ user: { projectV2: project } }),
+    SetPlanSizeOptions: (v) => {
+      const field = sizeFieldFrom(v.options as { id?: string; name: string }[]);
+      project = { ...project, size: field };
+      return { updateProjectV2Field: { projectV2Field: field } };
+    },
+  });
+  const projects = port(fetch);
+
+  expect(await projects.ensureEstimateFields("octo", 1)).toEqual({ size: { id: "F_size", options: { S: "o_S", M: "o_M", L: "o_L" } }, estimate: "F_estimate" });
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "SetPlanSizeOptions"]);
+  const sent = operations[1]!.variables as { fieldId: string; options: { id?: string; name: string; color: string; description: string }[] };
+  expect(sent.fieldId).toBe("F_size");
+  // Every existing option goes back with its id, colour and description, so no item loses its value; S and L are added.
+  expect(sent.options.slice(0, 6)).toEqual(current.options);
+  expect(sent.options.slice(6).map((o) => [o.id, o.name])).toEqual([
+    [undefined, "S"],
+    [undefined, "L"],
+  ]);
+  expect(sent.options.slice(6).every((o) => o.color && o.description)).toBe(true);
+
+  operations.length = 0;
+  await projects.ensureEstimateFields("octo", 1);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
 test("setStatus still fails for an issue GitHub cannot resolve", async () => {
   const { fetch } = fakeGraphql({
     IssuePlan: (v) =>
