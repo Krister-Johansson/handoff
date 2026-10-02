@@ -75,18 +75,26 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
   if (!task) throw new Error("Describe the task, or link at least one issue.");
+  const size = input.again ? (input.size ?? undefined) : sizeOfSingleTask(items, issues);
   // Starts on one project take turns, so two starts (a person's and the scheduler's) cannot both take an issue.
   const run = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
-    // A run records the size its single task has now, so a later change of the task's size does not move it.
-    const size = input.again ? (input.size ?? undefined) : issues.length === 1 ? items?.find((item) => item.number === issues[0]!.number)?.size : undefined;
     return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");
   return run;
+}
+
+/**
+ * The Size of a run's one linked task as the Ready gate read it. The run keeps it, so a later change of
+ * the task's size does not move the run; a run on several tasks, or on none, has no size.
+ */
+function sizeOfSingleTask(items: PlanItem[] | undefined, issues: LinkedIssue[]): PlanSize | undefined {
+  if (issues.length !== 1) return undefined;
+  return items?.find((item) => item.number === issues[0]!.number)?.size;
 }
 
 /** A project with `max` active runs, whoever started them, has no room for another. */
