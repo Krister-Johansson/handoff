@@ -350,7 +350,15 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
             if (!works) return `Marked criterion ${at + 1} as not working${note?.trim() ? ", with the note" : ""}.`;
             return `Marked criterion ${at + 1} as working.${moved === undefined ? " Every criterion is checked." : ` Now on criterion ${moved + 1}.`}`;
           },
-      page_go_to_criterion: undefined,
+      page_go_to_criterion: ({ index, direction }) => {
+        if (!acceptance.length) throw new Error("This run has no acceptance criteria.");
+        const to = index === undefined ? current + (direction === "previous" ? -1 : 1) : findCriterion(acceptance, { index });
+        const at = Math.max(0, Math.min(acceptance.length - 1, to));
+        const named = `${at + 1} of ${acceptance.length}: "${acceptance[at]}".`;
+        if (at === current && to !== current) return `Already on the ${to < 0 ? "first" : "last"} criterion, ${named}`;
+        go(at);
+        return `Now on criterion ${named}`;
+      },
       page_set_note: undefined,
       page_submit: undefined,
       page_restart_app: undefined,

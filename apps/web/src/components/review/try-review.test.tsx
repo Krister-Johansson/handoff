@@ -178,3 +178,25 @@ test("page_mark_criterion ticks a criterion by index or text, collapses it and m
   });
   expect(await call("page_mark_criterion", { works: true })).toEqual({ text: "Name the criterion by its index or its text.", isError: true });
 });
+
+test("page_go_to_criterion moves next, previous and to an index", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(cursor()).toHaveTextContent("1 of 3");
+
+  expect(await call("page_go_to_criterion", { direction: "next" })).toEqual({ text: 'Now on criterion 2 of 3: "The project shows in the sidebar".', isError: false });
+  expect(cursor()).toHaveTextContent("2 of 3");
+  expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+
+  expect(await call("page_go_to_criterion", { index: 3 })).toEqual({ text: 'Now on criterion 3 of 3: "pnpm lint passes".', isError: false });
+  expect(cursor()).toHaveTextContent("3 of 3");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ current: 3 });
+
+  // With nothing given it moves on; past the last one it stays.
+  expect(await call("page_go_to_criterion")).toEqual({ text: 'Already on the last criterion, 3 of 3: "pnpm lint passes".', isError: false });
+
+  expect(await call("page_go_to_criterion", { direction: "previous" })).toEqual({ text: 'Now on criterion 2 of 3: "The project shows in the sidebar".', isError: false });
+  expect(cursor()).toHaveTextContent("2 of 3");
+
+  expect(await call("page_go_to_criterion", { index: 5 })).toEqual({ text: "There is no criterion 5. The criteria run from 1 to 3.", isError: true });
+  expect(cursor()).toHaveTextContent("2 of 3");
+});
