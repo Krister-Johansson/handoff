@@ -47,6 +47,44 @@ describe("claimNext", () => {
     expect(await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 })).toBeUndefined();
   });
 
+  test("claiming adds the time since runnable_at to queued_ms, across a wait and a wake", async () => {
+    const { run } = await seedRun(db);
+    const row = await seedExecution(db, run.id);
+    // On the database's clock, which may differ from this process's by a few milliseconds.
+    await db.$client.query("update node_executions set runnable_at = now() - interval '5 seconds' where id = $1", [row.id]);
+    const first = await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 });
+    expect(first?.queuedMs).toBeGreaterThanOrEqual(5_000);
+    expect(first?.queuedMs).toBeLessThan(6_000);
+
+    // The step yields to wait for a pull request; an hour of waiting is not queue time.
+    await db.$client.query(
+      "update node_executions set status = 'waiting', wait_key = 'gh:pr:1:7', lease_owner = null, runnable_at = now() - interval '1 hour' where id = $1",
+      [row.id],
+    );
+    await wakeByKey(db, "gh:pr:1:7", { reason: "webhook" });
+    // Three seconds pass before a worker has room for it again.
+    await db.$client.query("update node_executions set runnable_at = runnable_at - interval '3 seconds' where id = $1", [row.id]);
+    const second = await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 });
+    expect(second?.id).toBe(row.id);
+    expect(second?.queuedMs).toBeGreaterThanOrEqual(8_000);
+    expect(second?.queuedMs).toBeLessThan(9_000);
+  });
+
+  test("a retry's delay is not queue time", async () => {
+    const { run } = await seedRun(db);
+    // A retry after a rate limit: created a while ago, runnable once its delay ends.
+    const row = await seedExecution(db, run.id, { status: "pending", attempt: 2, retryCount: 1 });
+    await db.$client.query(
+      "update node_executions set runnable_at = now() + interval '400 milliseconds', created_at = now() - interval '1 minute', updated_at = now() - interval '1 minute' where id = $1",
+      [row.id],
+    );
+    expect(await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 })).toBeUndefined();
+    await sleep(500);
+    const claimed = await claimNext(db, { workerId: "w1", caps, leaseMs: 60_000 });
+    expect(claimed?.id).toBe(row.id);
+    expect(claimed?.queuedMs).toBeLessThan(400);
+  });
+
   test("claimNext skips executions of cancelled or finished runs", async () => {
     const { run } = await seedRun(db);
     await seedExecution(db, run.id);

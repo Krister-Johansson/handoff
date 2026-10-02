@@ -1,4 +1,5 @@
-import { bigint, index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { bigint, check, index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
 import { createdAt, id, tstz, updatedAt } from "./columns.ts";
 import { runStatus } from "./enums.ts";
 import { graphVersions } from "./graphs.ts";
@@ -35,10 +36,16 @@ export const runs = pgTable(
     archivedAt: tstz("archived_at"),
     /** Who started the run: dashboard, claude-code, assistant, webmcp, cli or scheduler; null for runs from before it was recorded. */
     startedBy: text("started_by"),
+    /** The Size, S, M or L, its single linked task had on the plan when the run started; null without one or with several tasks. */
+    size: text("size").$type<"S" | "M" | "L">(),
     startedAt: tstz("started_at"),
     finishedAt: tstz("finished_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("runs_project_created_idx").on(t.projectId, t.createdAt.desc()), index("runs_status_idx").on(t.status)],
+  (t) => [
+    index("runs_project_created_idx").on(t.projectId, t.createdAt.desc()),
+    index("runs_status_idx").on(t.status),
+    check("runs_size_check", sql`${t.size} in ('S', 'M', 'L')`),
+  ],
 );

@@ -130,3 +130,34 @@ test("a second start on a planned task its run moved to Running names the run, n
   const first = await start();
   await expect(start()).rejects.toThrow(`#${ready} is taken by run ${first.id}, which is queued.`);
 });
+
+test("startRun records the size of its single linked task from the items it read", async () => {
+  const { github, plan, number, project, task } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  const sized = await task("Sized M");
+  plan.itemsOf(repo).get(sized)!.size = "M";
+  const run = await startRun(db, { projectId: project.id, graphName: "g", task: "", issues: [sized], startedBy: "dashboard" }, { github, projects: plan });
+  expect(run.size).toBe("M");
+  // A later change of the task's size does not move the run.
+  plan.itemsOf(repo).get(sized)!.size = "L";
+  const [stored] = await db.select().from(runs).where(eq(runs.id, run.id));
+  expect(stored?.size).toBe("M");
+});
+
+test("a run without a sized task, or with two tasks, records no size", async () => {
+  const { github, plan, number, project, task } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  const unsized = await task("No size");
+  const other = await task("Another Size option");
+  plan.itemsOf(repo).get(other)!.size = "🐋 X-Large";
+  const first = await task("Sized S");
+  const second = await task("Sized L");
+  plan.itemsOf(repo).get(first)!.size = "S";
+  plan.itemsOf(repo).get(second)!.size = "L";
+  const start = (issues: number[]) => startRun(db, { projectId: project.id, graphName: "g", task: "", issues, startedBy: "dashboard" }, { github, projects: plan });
+
+  expect((await start([unsized])).size).toBeNull();
+  expect((await start([other])).size).toBeNull();
+  expect((await start([first, second])).size).toBeNull();
+  expect((await startRun(db, { projectId: project.id, graphName: "g", task: "No issue at all" }, { github, projects: plan })).size).toBeNull();
+});

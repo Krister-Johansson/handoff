@@ -301,4 +301,17 @@ describe("the Ready gate", () => {
     expect(run.issues.map((i) => i.number)).toEqual([90, ready]);
     await expect(start([91])).rejects.toThrow("#91 is blocked by #90");
   });
+
+  test("run again keeps the size of the run it repeats", async () => {
+    const { plan, issue, start } = await planned();
+    await plan.ensureEstimateFields("octo", 1);
+    const ready = await issue("Ready to build", ["task"], "Ready");
+    plan.itemsOf(repo).get(ready)!.size = "M";
+    const first = await start([ready]);
+    expect(first.size).toBe("M");
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.id));
+    plan.itemsOf(repo).get(ready)!.size = "L";
+    const again = await runAgain(db, first.id, { projects: plan });
+    expect(again.size).toBe("M");
+  });
 });
