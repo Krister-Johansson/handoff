@@ -161,9 +161,9 @@ export function SkippedList({ projectId, skipped, start }: { projectId: string; 
 }
 
 /** The last three events, with All events. */
-function Recent({ project, card }: Props) {
+function Recent({ project, card, now }: Props) {
   return (
-    <Column label="Recent" action={<SchedulerEvents project={project} events={card.events} />}>
+    <Column label="Recent" action={<SchedulerEvents project={project} events={card.events} now={now} />}>
       {card.events.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">Nothing yet.</p>
       ) : (
@@ -294,7 +294,7 @@ const HOLD_ICON: Record<string, { icon: LucideIcon; tone: string }> = {
 
 /** Held: each hold on its line with the page that clears it, and what starts once they clear. */
 function Held(props: Props) {
-  const { project, card } = props;
+  const { project, card, now } = props;
   const { holds } = card.status;
   return (
     <>
@@ -335,7 +335,7 @@ function Held(props: Props) {
           <InfoIcon aria-hidden className="size-3.5" />
           Holds count every run of {project.name}, also runs a person started. Active runs go on.
         </p>
-        <SchedulerEvents project={project} events={card.events} />
+        <SchedulerEvents project={project} events={card.events} now={now} />
       </div>
     </>
   );
