@@ -197,6 +197,26 @@ test("the seed command runs after services start and before the app", async () =
   expect(seen.page).toBe("services\nseed\napp\n");
 });
 
+test("a console error in the demo's output fails the step with the message", async () => {
+  const cli = new FakeCliExecutor([
+    async (request) => {
+      const output = {
+        summary: "The list did not render.",
+        shots: [],
+        console: [
+          { level: "warning", text: "React does not recognize the `isActive` prop" },
+          { level: "error", text: "Uncaught (in promise) TypeError: tasks.map is not a function" },
+        ],
+      };
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: output, validated: request.contract.parse(output) };
+    },
+  ]);
+  const { run } = await demoRun(cli);
+  const demo = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "demo")!;
+  expect(demo).toMatchObject({ status: "failed", error: { code: "demo_console_errors", message: expect.stringContaining("Uncaught (in promise) TypeError: tasks.map is not a function") } });
+  expect((demo.error as { message: string }).message).not.toContain("isActive");
+});
+
 test("a passEnv variable reaches the app", async () => {
   process.env.HANDOFF_DEMO_TEST_KEY = "key-from-the-worker";
   try {

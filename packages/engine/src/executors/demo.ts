@@ -104,7 +104,13 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
         if (outcome.kind !== "completed") return outcome;
 
         // Only handoff skips a demo: whatever the agent says, it walked through the app.
-        const { skipped: _skipped, reason: _reason, ...output } = DemoOutputSchema.parse(outcome.output);
+        const { skipped: _skipped, reason: _reason, warnings: _warnings, ...output } = DemoOutputSchema.parse(outcome.output);
+        const errors = output.console.filter((entry) => entry.level === "error");
+        if (errors.length) {
+          const count = errors.length === 1 ? "an error" : `${errors.length} errors`;
+          const message = `The browser console had ${count} while the demo walked through the app:\n${errors.map((e) => `- ${e.text}`).join("\n")}`;
+          return { kind: "failed", error: { code: "demo_console_errors", message, detail: { console: output.console } }, ...(outcome.cost ? { cost: outcome.cost } : {}) };
+        }
         const dir = join(options.artifactsRoot, ctx.run.id, ctx.execution.id);
         mkdirSync(dir, { recursive: true });
         const kept: typeof output.shots = [];

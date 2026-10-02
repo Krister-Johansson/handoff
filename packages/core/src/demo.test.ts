@@ -40,3 +40,17 @@ test("a step given the running app is told where it runs and how to take screens
   expect(md).toContain("browser_take_screenshot");
   expect(md).toContain("copy the criterion word for word");
 });
+
+test("a step given the running app is told to report the browser console", () => {
+  const md = renderContextPacket({
+    task: "t",
+    nodeKey: "demo",
+    stateSlice: {},
+    repoPaths: [],
+    constraints: { ownedPaths: [], allowedTools: [], maxTurns: 10 },
+    outputContract: "demo_output",
+    app: { url: "http://localhost:41000" },
+  });
+  expect(md).toContain("browser_console_messages");
+  expect(md).toMatch(/unhandled rejection/i);
+});

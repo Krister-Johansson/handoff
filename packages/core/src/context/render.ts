@@ -207,6 +207,7 @@ export function renderContextPacket(packet: ContextPacket): string {
       "",
       "Walk through each acceptance criterion in the app as a person would. For each one, take a screenshot that shows it with browser_take_screenshot, without a filename, and note the file name the tool reports. Take at most 12 screenshots.",
       "In shots, give each screenshot's file name, a one-line caption a person reads under the image, the criterion it shows, and whether that criterion works. For the criterion, copy the criterion word for word from the list, so the screenshot shows under it; leave it out for a screenshot that shows none. Do not edit files.",
+      "After the walk-through, read the browser console with browser_console_messages, with level warning and all set to true. In console, list each error and warning with its level and text as the tool printed it. An error, such as an uncaught exception or an unhandled rejection, fails the demo; list it all the same.",
       "",
     );
   }
