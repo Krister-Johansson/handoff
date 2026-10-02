@@ -9,17 +9,21 @@ const headingText = (h: HTMLElement | null) => (h?.querySelector("[data-page-tit
 const here = () => `${window.location.pathname}${window.location.search}`;
 
 /**
- * Waits until the address is `href` and the page shows it: the heading changed, or the path stayed the
- * same (a tab or filter change keeps the page and its heading). Gives up after `timeoutMs`.
+ * Waits until the page shows: the address is `href`, or it left the old page for another (the server
+ * redirects /runs/<id> to the run under its project), and the heading changed. A tab or filter change
+ * keeps the page and its heading, so there the address alone counts. Gives up after `timeoutMs`.
  */
 async function pageShown(href: string, before: { path: string; heading: HTMLElement | null; text: string }, timeoutMs: number) {
   const target = new URL(href, window.location.origin);
+  const exact = `${target.pathname}${target.search}`;
   const samePage = target.pathname === new URL(before.path, window.location.origin).pathname;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (here() === `${target.pathname}${target.search}`) {
+    const now = here();
+    if (samePage && now === exact) return heading();
+    if (!samePage && now !== before.path) {
       const h = heading();
-      if (samePage || (h && (h !== before.heading || headingText(h) !== before.text))) return h;
+      if (h && (h !== before.heading || headingText(h) !== before.text)) return h;
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -47,5 +51,5 @@ export async function runUiTool(call: { name: string; args: unknown }, push: (hr
   if (shown.tabIndex < 0 && !shown.hasAttribute("tabindex")) shown.setAttribute("tabindex", "-1");
   shown.focus();
   const name = headingText(shown) || plan.href;
-  return { text: `Opened ${name} (${plan.href}).`, isError: false, note: `Opened ${name}` };
+  return { text: `Opened ${name} (${here()}).`, isError: false, note: `Opened ${name}` };
 }
