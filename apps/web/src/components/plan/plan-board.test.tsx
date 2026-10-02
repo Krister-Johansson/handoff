@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { PlanBoard } from "./plan-board";
-import { epic, planView, PROJECT, REPO_URL, run, story, task } from "./testing/plan-fixtures";
+import { Sizing } from "./plan-context";
+import { epic, planView, PROJECT, REPO_URL, run, sizingOf, story, task } from "./testing/plan-fixtures";
 
-vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn() }));
+vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), setSizeAction: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 const NOW = Date.parse("2026-10-02T12:00:00Z");
 const base = { projectId: "p1", repoUrl: REPO_URL, project: PROJECT, needsYou: [] as string[], graphs: ["loop"], graphName: "loop", now: NOW };
@@ -62,6 +64,31 @@ test("the Done column shows the last 30 days and Show all reveals the rest", () 
 
   expect(within(column("Ready")).getByText("Move tasks here when they are shaped. Only Ready tasks reach the backlog.")).toBeInTheDocument();
   expect(within(column("Running")).getByText("Start a run from a Ready task.")).toBeInTheDocument();
+});
+
+test("a column header sums its tasks with ~ and +n", () => {
+  const view = planView([
+    epic(120, "Refined product redesign", [
+      story(128, "Restyle the task page", 120, [
+        task(148, "R8 Restyle the task page", "Shaping", { size: "L" }),
+        task(149, "R9 Restyle dialogs", "Shaping", { size: "L" }),
+        task(152, "Document the workflow", "Shaping"),
+        task(143, "R3 Restyle the sidebar", "Ready", { size: "L", estimate: 9 }),
+        task(142, "R2 Geist type", "Running"),
+      ]),
+    ]),
+  ]);
+  render(
+    <Sizing value={sizingOf()}>
+      <PlanBoard {...base} board={view.board} epics={view.epics} />
+    </Sizing>,
+  );
+
+  expect(within(column("Shaping")).getByTitle("4 hours over 2 tasks, forecasts; #152 has no size")).toHaveTextContent(/^~4h\+1$/);
+  expect(within(column("Ready")).getByTitle("9 hours over 1 task, estimates")).toHaveTextContent(/^1\.5d$/);
+  expect(within(column("Running")).queryByTitle(/over/)).not.toBeInTheDocument();
+  expect(within(card(column("Shaping"), /#152/)).getByRole("button", { name: "Set a size for #152" })).toBeInTheDocument();
+  expect(within(card(column("Shaping"), /#148/)).getByRole("button", { name: /^Size L, default forecast 2h/ })).toBeInTheDocument();
 });
 
 test("a card whose Status disagrees with its active run says what the run is doing", () => {

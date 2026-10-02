@@ -6,7 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
 
 import { PlanTimeline } from "./plan-timeline";
-import { epic, planView, PROJECT, REPO_URL, run, story, task, timelineOf } from "./testing/plan-fixtures";
+import { Sizing } from "./plan-context";
+import { epic, planView, PROJECT, REPO_URL, run, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -17,6 +18,8 @@ const actions = vi.hoisted(() => ({
   listIssuesAction: vi.fn(async () => ({ issues: [] })),
   scheduleAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   addDateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+  addEstimateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+  setSizeAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
@@ -385,4 +388,71 @@ test("a Project without date fields shows the banner and Add date fields", async
   fireEvent.click(again);
   await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   expect(actions.addDateFieldsAction).toHaveBeenCalledTimes(2);
+});
+
+const SIZE_FIELDS = { size: { id: "f-size", options: { S: "s", M: "m", L: "l" } }, estimate: "f-estimate" };
+
+test("a Project without Size and Estimate shows the banner and Add the fields", async () => {
+  const { unmount } = renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: SIZE_FIELDS } });
+  expect(screen.queryByText(/no Size/)).not.toBeInTheDocument();
+  unmount();
+
+  // A Size field without S, M and L counts as missing too; the banner says what it lacks.
+  const partial = renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: { size: { id: "f-size", options: { S: undefined, M: undefined, L: undefined } }, estimate: "f-estimate" } } });
+  expect(screen.getByText("The Size field has no S, M or L option")).toBeInTheDocument();
+  partial.unmount();
+
+  actions.addEstimateFieldsAction.mockResolvedValueOnce({ ok: false, error: "GitHub refused the field." });
+  renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: { size: undefined, estimate: undefined } } });
+  const banner = screen.getByText("This Project has no Size and no Estimate field").closest<HTMLElement>("[role=alert]")!;
+  expect(within(banner).getByText("Size is a single select with S, M and L. Estimate is a Number field in hours. Both are added to the GitHub Project.")).toBeInTheDocument();
+
+  fireEvent.click(within(banner).getByRole("button", { name: "Add the fields" }));
+  const confirm = await screen.findByRole("alertdialog", { name: "Add Size and Estimate to handoff plan?" });
+  expect(actions.addEstimateFieldsAction).not.toHaveBeenCalled();
+  const add = within(confirm).getByRole("button", { name: "Add the fields" });
+  fireEvent.click(add);
+  await waitFor(() => expect(actions.addEstimateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
+  expect(await within(confirm).findByText("GitHub refused the field.")).toBeInTheDocument();
+
+  // The button comes back once the refused write has settled; the second try closes the dialog.
+  await waitFor(() => expect(add).toBeEnabled());
+  fireEvent.click(add);
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+  expect(actions.addEstimateFieldsAction).toHaveBeenCalledTimes(2);
+});
+
+test("timeline task rows and Unscheduled carry the size chip, and stories and epics the sum of their tasks", () => {
+  const sized = planView([
+    epic(12, "Project management", [
+      story(41, "Shaping with the assistant", 12, [
+        task(55, "Shaping tools", "Running", { start: "2026-09-30", target: "2026-10-07", size: "M" }),
+        task(58, "Plan page tree and board", "Ready", { size: "S" }),
+      ]),
+    ]),
+  ]);
+  render(
+    <Sizing value={sizingOf()}>
+      <PlanTimeline
+        projectId="p1"
+        repoUrl={REPO_URL}
+        project={{ ...PROJECT_WITH_DATES, estimateFields: SIZE_FIELDS }}
+        epics={sized.epics}
+        unparented={[]}
+        timeline={timelineOf(sized, [], NOW)}
+        zoom={undefined}
+        filters={parsePlanFilters({})}
+        needsYou={[]}
+        graphs={["loop"]}
+        graphName="loop"
+        readAt={NOW.getTime()}
+      />
+    </Sizing>,
+    { wrapper: TooltipProvider },
+  );
+  expect(within(row(/Task #55/)).getByRole("button", { name: "Size M, forecast 50m. Change the size or estimate of #55" })).toBeInTheDocument();
+  expect(within(row(/Story #41/)).getByTitle("1 hour 15 minutes over 2 tasks, forecasts")).toHaveTextContent(/^~1h 15m$/);
+  expect(within(row(/Epic #12/)).getByTitle("1 hour 15 minutes over 2 tasks, forecasts")).toBeInTheDocument();
+  const unscheduled = screen.getByRole("region", { name: "Unscheduled" });
+  expect(within(unscheduled).getByRole("button", { name: "Size S, forecast 25m. Change the size or estimate of #58" })).toBeInTheDocument();
 });

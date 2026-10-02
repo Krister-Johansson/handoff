@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useSyncExternalStore, useTransition, type RefObject } from "react";
+import { useState, useSyncExternalStore, useTransition, type ReactNode, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClockIcon, CalendarIcon, ClockAlertIcon, InfoIcon,
- LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon } from "lucide-react";
+ LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
-import { addDateFieldsAction } from "@/app/projects/actions";
+import { addDateFieldsAction, addEstimateFieldsAction } from "@/app/projects/actions";
 import { Tag } from "@/components/tag";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -212,28 +212,39 @@ export const useNarrow = () =>
     () => false,
   );
 
-/** A Project without Start or Target: says so and offers to add them, behind a confirmation. */
-export function DateFieldsBanner({ projectId, project }: { projectId: string; project: PlanProject }) {
+type FieldsBannerProps = {
+  icon: ReactNode;
+  title: string;
+  description: ReactNode;
+  /** The button on the banner and in the confirmation. */
+  label: string;
+  confirmTitle: string;
+  confirmDescription: ReactNode;
+  add: () => Promise<{ ok?: boolean; error?: string }>;
+};
+
+/** A banner that says which fields the Project lacks and offers to add them, behind a confirmation. */
+function FieldsBanner({ icon, title, description, label, confirmTitle, confirmDescription, add }: FieldsBannerProps) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
-  const add = () =>
+  const confirm = () =>
     startTransition(async () => {
-      const result = await addDateFieldsAction({ projectId });
+      const result = await add();
       if (result.ok) setOpen(false);
       else setError(result.error ?? "GitHub did not add the fields.");
     });
   return (
     <div className="p-2.5">
       <Alert className="border-attention-dot/35 bg-attention-bg sm:pr-40">
-        <CalendarIcon className="text-attention" />
-        <AlertTitle>This Project has no Start and Target fields</AlertTitle>
-        <AlertDescription className="text-xs">GitHub&apos;s roadmap also needs them picked once under &quot;Date fields&quot;.</AlertDescription>
+        {icon}
+        <AlertTitle>{title}</AlertTitle>
+        <AlertDescription className="text-xs">{description}</AlertDescription>
         {/* Under the text on a phone, at the right on wider screens. */}
         <div className="col-start-2 mt-1.5 sm:absolute sm:top-1/2 sm:right-2.5 sm:mt-0 sm:-translate-y-1/2">
           <Button size="sm" onClick={() => setOpen(true)}>
             <PlusIcon data-icon="inline-start" />
-            Add date fields
+            {label}
           </Button>
         </div>
       </Alert>
@@ -246,20 +257,56 @@ export function DateFieldsBanner({ projectId, project }: { projectId: string; pr
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Add Start and Target to {project.title}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              handoff creates two Date fields, Start and Target, on the GitHub Project. Nothing else changes. To see them on GitHub&apos;s roadmap, pick them once under &quot;Date fields&quot;.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{confirmTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           {error && <FieldError>{error}</FieldError>}
           <AlertDialogFooter>
             <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
-            <Button type="button" disabled={pending} onClick={add}>
-              Add date fields
+            <Button type="button" disabled={pending} onClick={confirm}>
+              {label}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+/**
+ * A Project without Size or Estimate, or with a Size field that lacks S, M or L: says what it lacks and
+ * offers to add the fields, behind a confirmation. Existing Size options stay.
+ */
+export function EstimateFieldsBanner({ projectId, project, title }: { projectId: string; project: PlanProject; title: string }) {
+  const both = !project.estimateFields?.size && !project.estimateFields?.estimate;
+  return (
+    <FieldsBanner
+      icon={<RulerIcon className="text-attention" />}
+      title={title}
+      description={`Size is a single select with S, M and L. Estimate is a Number field in hours. ${both ? "Both are added to the GitHub Project." : "The missing ones are added to the GitHub Project, and its own Size options stay."}`}
+      label="Add the fields"
+      confirmTitle={`Add Size and Estimate to ${project.title}?`}
+      confirmDescription="handoff creates a single select field Size with S, M and L and a Number field Estimate on the GitHub Project, or adds what is missing of them. Existing options and values stay; nothing else changes."
+      add={() => addEstimateFieldsAction({ projectId })}
+    />
+  );
+}
+
+/** A Project without Start or Target: says so and offers to add them, behind a confirmation. */
+export function DateFieldsBanner({ projectId, project }: { projectId: string; project: PlanProject }) {
+  return (
+    <FieldsBanner
+      icon={<CalendarIcon className="text-attention" />}
+      title="This Project has no Start and Target fields"
+      description={<>GitHub&apos;s roadmap also needs them picked once under &quot;Date fields&quot;.</>}
+      label="Add date fields"
+      confirmTitle={`Add Start and Target to ${project.title}?`}
+      confirmDescription={
+        <>
+          handoff creates two Date fields, Start and Target, on the GitHub Project. Nothing else changes. To see them on GitHub&apos;s roadmap, pick them once under &quot;Date fields&quot;.
+        </>
+      }
+      add={() => addDateFieldsAction({ projectId })}
+    />
   );
 }

@@ -71,13 +71,17 @@ function plannedOf(item: PlanItem): PlannedSpan | undefined {
 /** A task with a Start and a duration in hours, as its bar is laid out; `target` is its Target on GitHub. */
 export type BarTask = { number: number; start: string; target?: string | undefined; blockers: readonly number[]; hours: number };
 
+/** The day a task's last hour falls on, from `offsetHours` into its Start day at the capacity per day. */
+export const endDayOf = (start: string, offsetHours: number, hours: number, capacity: number) =>
+  addDays(start, Math.max(0, Math.ceil((offsetHours + hours) / capacity - EPSILON) - 1));
+
 /**
  * A task's bar from its Start for its hours at the capacity per day, starting `offsetHours` into its first day.
  * Its end is the day its last hour falls on; every day counts.
  */
 function barOf(task: BarTask, offsetHours: number, capacity: number): PlannedSpan {
   const { start, target, hours } = task;
-  const end = addDays(start, Math.max(0, Math.ceil((offsetHours + hours) / capacity - EPSILON) - 1));
+  const end = endDayOf(start, offsetHours, hours, capacity);
   return { start, end, openStart: false, openEnd: false, hours, offsetHours, ...(target && target !== end ? { targetOnGitHub: target } : {}) };
 }
 

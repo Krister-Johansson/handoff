@@ -16,6 +16,7 @@ import { PlanItDialog, TaskActions, type StartRunContext, type StoryChoice } fro
 import { KindBadge, ProgressBar, StatusPill } from "./plan-status";
 import { taskColumn } from "@/lib/plan/task";
 import { AssigneeButton } from "./assignee-button";
+import { SizeChip, SizeSum } from "./size-chip";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
 
 import { matchesQuery } from "@/lib/plan/search";
@@ -135,6 +136,7 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
         {column !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={ctx.repoUrl} />}
       </span>
       <span className={RIGHT}>
+        <SizeChip task={task} />
         <RunCell task={task} projectId={ctx.projectId} needsYou={ctx.needsYou} />
         <PrLink task={task} repoUrl={ctx.repoUrl} />
         <span className="flex min-w-6 justify-center empty:hidden">
@@ -172,6 +174,7 @@ function StoryRow({ story, expanded, onToggle, ...ctx }: { story: PlanStory; exp
         )}
       </span>
       <span className={RIGHT}>
+        <SizeSum tasks={story.tasks} />
         <ProgressBar progress={story.progress} />
         <span className="w-6" />
       </span>
@@ -322,6 +325,7 @@ export function PlanTree({ epics, unparented, unplanned, hidden, hiddenBy = "fil
                   <IssueTitle item={epic} className="text-sm font-semibold" />
                 </span>
                 <span className={RIGHT}>
+                  <SizeSum tasks={[...epic.stories.flatMap((s) => s.tasks), ...epic.tasks]} />
                   <ProgressBar progress={epic.progress} />
                   <EpicMenu epic={epic} onCollapseStories={() => collapsed.collapseAll(epic.stories.map((s) => `s${s.number}`))} />
                 </span>
