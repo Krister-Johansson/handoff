@@ -52,7 +52,7 @@ export type Overview = {
 const A_DAY = 24 * 3_600_000;
 
 /** The runs of a project's inbox items that wait on a person: questions, reviews, permission requests and runs that stopped. */
-const waitingRuns = (view: InboxView) => new Set([...(view.permissions ?? []), ...view.reviews, ...view.questions, ...view.failedRuns, ...view.stuckRuns].map((i) => i.runId));
+export const waitingRuns = (view: InboxView) => new Set([...(view.permissions ?? []), ...view.reviews, ...view.questions, ...view.failedRuns, ...view.stuckRuns].map((i) => i.runId));
 
 /** Every task of an epic: those under its stories and those hung on the epic itself. */
 const tasksOf = (epic: PlanEpic) => [...epic.stories.flatMap((s) => s.tasks), ...epic.tasks];
