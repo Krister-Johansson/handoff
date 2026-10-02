@@ -274,6 +274,7 @@ export function RunLive({
   );
 
   const live = status === "queued" || status === "running" || status === "waiting";
+  const stepName = (step: ExecutionView) => `${labels[step.nodeKey] ?? step.nodeKey} (${step.nodeKey})`;
 
   usePageTools(
     "run",
@@ -285,10 +286,18 @@ export function RunLive({
       page_open_step: ({ step, attempt }) => {
         const execution = findStep(executions, step, attempt);
         setSelectedId(execution.id);
-        return `Opened ${labels[execution.nodeKey] ?? execution.nodeKey} (${execution.nodeKey}), attempt ${execution.attempt}.`;
+        return `Opened ${stepName(execution)}, attempt ${execution.attempt}.`;
       },
-      page_close_step: undefined,
-      page_pop_out: undefined,
+      page_close_step: () => {
+        setSelectedId(null);
+        setPoppedOut(false);
+        return selected ? `Closed ${stepName(selected)}.` : "No step was open.";
+      },
+      page_pop_out: ({ open }) => {
+        if (!selected) throw new Error("No step is open. Open one with page_open_step first.");
+        setPoppedOut(open);
+        return open ? `Popped out ${stepName(selected)}.` : `Put ${stepName(selected)} back in the drawer.`;
+      },
       page_filter_events: undefined,
     },
     () => ({
@@ -298,6 +307,7 @@ export function RunLive({
       view,
       steps: executions.map((e) => ({ id: e.id, nodeKey: e.nodeKey, label: labels[e.nodeKey] ?? e.nodeKey, attempt: e.attempt, status: e.status })),
       openStep: selected ? { id: selected.id, nodeKey: selected.nodeKey, attempt: selected.attempt } : null,
+      poppedOut: selected !== undefined && poppedOut,
     }),
   );
 

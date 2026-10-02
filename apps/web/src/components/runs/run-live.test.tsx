@@ -393,3 +393,25 @@ test("page_open_step opens the latest execution of a node key, and an attempt op
   expect(await call("page_open_step", { step: "planner", attempt: 3 })).toEqual({ text: "planner has no attempt 3. Its attempts are 1, 2.", isError: true });
   expect(drawerHeading()).toHaveTextContent("Review");
 });
+
+test("page_close_step closes the drawer and page_pop_out needs an open step", async () => {
+  const { call, whereAmI } = await withAssistant({ initialStatus: "running", initialExecutions: executions });
+  expect(await call("page_pop_out", { open: true })).toEqual({ text: "No step is open. Open one with page_open_step first.", isError: true });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+  await call("page_open_step", { step: "planner" });
+  expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Pop out" })).toBeInTheDocument();
+  expect(await call("page_pop_out", { open: true })).toEqual({ text: "Popped out Plan (planner).", isError: false });
+  // The large window has no Pop out button of its own.
+  await waitFor(() => expect(within(screen.getByRole("dialog")).queryByRole("button", { name: "Pop out" })).not.toBeInTheDocument());
+  expect((await whereAmI()).page?.state.data).toMatchObject({ openStep: { nodeKey: "planner" }, poppedOut: true });
+
+  expect(await call("page_pop_out", { open: false })).toEqual({ text: "Put Plan (planner) back in the drawer.", isError: false });
+  await waitFor(() => expect(within(screen.getByRole("dialog")).getByRole("button", { name: "Pop out" })).toBeInTheDocument());
+
+  await call("page_pop_out", { open: true });
+  expect(await call("page_close_step")).toEqual({ text: "Closed Plan (planner).", isError: false });
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect((await whereAmI()).page?.state.data).toMatchObject({ openStep: null, poppedOut: false });
+  expect(await call("page_close_step")).toEqual({ text: "No step was open.", isError: false });
+});
