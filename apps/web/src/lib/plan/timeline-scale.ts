@@ -1,10 +1,12 @@
 import type { DaySpan } from "./schedule";
 
-/** How much time a column holds: a day of 14 px at Weeks, a month of 120 px at Months. */
-export type Zoom = "weeks" | "months";
+/** How much time a column holds: a day of 96 px at Days, a day of 14 px at Weeks, a month of 120 px at Months. */
+export type Zoom = "days" | "weeks" | "months";
+/** The zooms the URL and the toolbar offer; Days joins them with the drag on the timeline. */
 export const ZOOMS: readonly Zoom[] = ["weeks", "months"];
 
 export const DAY_WIDTH = 14;
+export const DAYS_DAY_WIDTH = 96;
 export const MONTH_WIDTH = 120;
 
 /** A header cell or a shaded column of the time axis, in pixels from the left of the time pane. */
@@ -19,11 +21,11 @@ export type TimeScale = {
   x: (day: string) => number;
   /** Where an instant (ISO time) falls, by its calendar day and time of day in local time. */
   xAt: (iso: string) => number;
-  /** Months at Weeks, quarters at Months. */
+  /** Months at Days and Weeks, quarters at Months. */
   top: AxisCell[];
-  /** ISO weeks at Weeks, months at Months. */
+  /** Days ("Wed 30") at Days, ISO weeks at Weeks, months at Months. */
   bottom: AxisCell[];
-  /** Saturday and Sunday pairs at Weeks; none at Months. */
+  /** Saturday and Sunday pairs at Days and Weeks; none at Months. */
   weekends: AxisCell[];
 };
 
@@ -65,10 +67,14 @@ function localDay(iso: string): { day: string; fraction: number } {
   return { day, fraction };
 }
 
-function weeksScale(span: DaySpan): TimeScale {
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/** A column a day over whole ISO weeks: day cells at Days, week cells at Weeks, under month cells. */
+function dayColumnsScale(span: DaySpan, zoom: "days" | "weeks"): TimeScale {
+  const width = zoom === "days" ? DAYS_DAY_WIDTH : DAY_WIDTH;
   const range = { start: addDays(span.start, -weekday(span.start)), end: addDays(span.end, 6 - weekday(span.end)) };
   const days = daysBetween(range.start, range.end) + 1;
-  const x = (day: string) => daysBetween(range.start, day) * DAY_WIDTH;
+  const x = (day: string) => daysBetween(range.start, day) * width;
   const top: AxisCell[] = [];
   const bottom: AxisCell[] = [];
   const weekends: AxisCell[] = [];
@@ -77,19 +83,20 @@ function weeksScale(span: DaySpan): TimeScale {
     const { year, month, date } = parts(day);
     if (i === 0 || date === 1) {
       const end = Math.min(days, i + daysInMonth(year, month) - date + 1);
-      top.push({ label: `${MONTHS[month]} ${year}`, x: i * DAY_WIDTH, width: (end - i) * DAY_WIDTH });
+      top.push({ label: `${MONTHS[month]} ${year}`, x: i * width, width: (end - i) * width });
     }
-    if (weekday(day) === 0) bottom.push({ label: `W${isoWeek(day)}`, x: i * DAY_WIDTH, width: 7 * DAY_WIDTH });
-    if (weekday(day) === 5) weekends.push({ label: "Sat", x: i * DAY_WIDTH, width: 2 * DAY_WIDTH });
+    if (zoom === "days") bottom.push({ label: `${WEEKDAYS[weekday(day)]} ${date}`, x: i * width, width });
+    else if (weekday(day) === 0) bottom.push({ label: `W${isoWeek(day)}`, x: i * width, width: 7 * width });
+    if (weekday(day) === 5) weekends.push({ label: "Sat", x: i * width, width: 2 * width });
   }
   return {
-    zoom: "weeks",
+    zoom,
     range,
-    width: days * DAY_WIDTH,
+    width: days * width,
     x,
     xAt: (iso) => {
       const { day, fraction } = localDay(iso);
-      return x(day) + fraction * DAY_WIDTH;
+      return x(day) + fraction * width;
     },
     top,
     bottom,
@@ -159,5 +166,5 @@ export const defaultZoom = (range: DaySpan): Zoom => (daysBetween(range.start, r
 
 /** The time axis over a span of days at a zoom, widened to whole weeks or whole months. */
 export function timeScale(span: DaySpan, zoom: Zoom): TimeScale {
-  return zoom === "weeks" ? weeksScale(span) : monthsScale(span);
+  return zoom === "months" ? monthsScale(span) : dayColumnsScale(span, zoom);
 }
