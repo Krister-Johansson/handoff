@@ -1,5 +1,5 @@
 import type { PlanItem } from "@handoff/github";
-import { sizedBars } from "./schedule";
+import { sizedBars, type PlannedSpan } from "./schedule";
 import { addDays } from "./timeline-scale";
 
 /** Hours a float may miss by and still count as whole. */
@@ -19,6 +19,16 @@ export function spreadHours(start: string, offsetHours: number, hours: number, c
   return spread;
 }
 
+/** Hours per day of bars with a duration, each spread over the days it covers; bars without hours add none. */
+export function hoursByDay(bars: Iterable<PlannedSpan | undefined>, capacity: number): Record<string, number> {
+  const hours: Record<string, number> = {};
+  for (const bar of bars) {
+    if (bar?.hours === undefined) continue;
+    for (const [day, used] of spreadHours(bar.start, bar.offsetHours ?? 0, bar.hours, capacity)) hours[day] = (hours[day] ?? 0) + used;
+  }
+  return hours;
+}
+
 /** The plan's load: planned hours per day, and the tasks with dates that add none for want of a duration. */
 export type Load = { hours: Record<string, number>; datedWithoutDuration: number };
 
@@ -29,10 +39,7 @@ const isTask = (item: PlanItem) => item.kind !== "story" && item.kind !== "epic"
  * A task with dates and no duration adds no hours; it is counted so the load row can say so.
  */
 export function loadByDay(items: readonly PlanItem[], durations: ReadonlyMap<number, { hours: number }>, capacity: number): Load {
-  const hours: Record<string, number> = {};
-  for (const bar of sizedBars(items, { durations, capacity }).values()) {
-    for (const [day, used] of spreadHours(bar.start, bar.offsetHours ?? 0, bar.hours ?? 0, capacity)) hours[day] = (hours[day] ?? 0) + used;
-  }
+  const hours = hoursByDay(sizedBars(items, { durations, capacity }).values(), capacity);
   const datedWithoutDuration = items.filter((i) => isTask(i) && !durations.has(i.number) && (i.start || i.target)).length;
   return { hours, datedWithoutDuration };
 }

@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TimelineRun } from "@/lib/plan/schedule";
+import type { PlanTask } from "@/server/plan";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
@@ -748,4 +749,23 @@ test("an unscheduled task with a size drags onto the chart and one without has i
   expect(await screen.findByText("Moved #153 to Oct 4")).toBeInTheDocument();
   expect(within(block).queryByText(/#153/)).not.toBeInTheDocument();
   expect(barOf(153)).toBeInTheDocument();
+});
+
+/** The sized plan with some tasks changed. */
+const sizedWith = (changes: Record<number, Partial<PlanTask>>) =>
+  planView(sized.epics.map((e) => ({ ...e, stories: e.stories.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t, ...changes[t.number] })) })) })));
+
+test("the load row shows hours per day and marks a day over capacity", () => {
+  // #145 with a manual 4 hours: Oct 3 holds the last 3 of #143's 9 hours, #145's 4 and #146's 50 minutes.
+  renderSized({ plan: sizedWith({ 145: { estimate: 4 }, 152: { start: "2026-10-05", target: "2026-10-06" } }) });
+  const axis = screen.getByRole("row", { name: "Time axis" });
+  expect(within(axis).getByText("Load at 6h a day")).toHaveAttribute("title", "1 task with dates has no size, so its hours are not counted");
+
+  expect(within(axis).getByTitle("Oct 1: 1h 15m of 6h")).not.toHaveAttribute("data-over");
+  expect(within(axis).getByTitle("Oct 2: 6h of 6h")).not.toHaveAttribute("data-over");
+  const over = within(axis).getByTitle("Oct 3: 7h 50m of 6h");
+  expect(over).toHaveAttribute("data-over", "true");
+  expect(over).toHaveTextContent("7h 50m");
+  expect(within(axis).getByTitle("Oct 4: 2h of 6h")).toBeInTheDocument();
+  expect(within(axis).queryByTitle(/^Oct 5:/)).not.toBeInTheDocument();
 });

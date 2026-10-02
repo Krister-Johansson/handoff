@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDuration } from "@/lib/plan/duration";
+import { hoursByDay } from "@/lib/plan/load";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
 import { durationInWords, hoursInWords } from "@/lib/plan/size-text";
@@ -50,7 +51,8 @@ import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
 import { FlagCard, type FlagContext } from "./timeline-flag-card";
 import { DateFieldsBanner, EstimateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
-import { useBarDrag, type BarDrag, type DragBar } from "./use-bar-drag";
+import { LoadRow } from "./load-row";
+import { useBarDrag, type DragBar } from "./use-bar-drag";
 import { useRowsOpen } from "./use-collapsed";
 
 const LABEL_WIDTH = 280;
@@ -645,6 +647,17 @@ function movedEntries(timeline: Timeline, moves: ReadonlyMap<number, MovePlan>):
   return new Map(timeline.items.map((i) => [i.number, moves.has(i.number) ? movedEntry(i, moves.get(i.number)!) : i]));
 }
 
+/**
+ * The load row's hours per day from every bar with a duration, the ones the filters hide too, and a note on
+ * the tasks shown with dates that add nothing for want of a size.
+ */
+function loadOf(entries: ReadonlyMap<number, TimelineItem>, items: ReadonlyMap<number, PlanItem>, capacity: number) {
+  const hours = hoursByDay([...entries.values()].map((e) => e.planned), capacity);
+  const unsized = [...items.values()].filter((i) => i.kind === "task" && entries.get(i.number)?.planned && entries.get(i.number)?.planned?.hours === undefined).length;
+  const note = unsized === 0 ? undefined : `${unsized === 1 ? "1 task with dates has" : `${unsized} tasks with dates have`} no size, so ${unsized === 1 ? "its" : "their"} hours are not counted`;
+  return { hours, capacity, note };
+}
+
 const numbers = (list: readonly { number: number }[]) => list.map((b) => `#${b.number}`).join(" and ");
 
 /** The toast after a saved move: what moved, with the estimate it set and the blockers it starts before. */
@@ -789,6 +802,8 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
     grip: (task) => (durationIn(move, task) ? gripProps(task.number, dayUnder) : undefined),
   };
 
+  const load = sizing && loadOf(entries, items, sizing.capacity);
+
   const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
 
   const measure = () => {
@@ -864,13 +879,17 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
             style={{ width: LABEL_WIDTH + scale.width, minWidth: "100%" }}
           >
             <div role="rowgroup">
-              <div role="row" aria-label="Time axis" className="flex h-12">
-                <div
-                  role="columnheader"
-                  className="sticky left-0 z-10 flex items-end border-r border-b bg-card px-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase"
-                  style={{ width: LABEL_WIDTH }}
-                >
-                  Item
+              <div role="row" aria-label="Time axis" className={cn("flex", load ? "h-[66px]" : "h-12")}>
+                <div role="columnheader" className="sticky left-0 z-10 border-r border-b bg-card" style={{ width: LABEL_WIDTH }}>
+                  <span className="absolute top-[26px] left-2.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Item</span>
+                  {load && (
+                    <span
+                      title={load.note}
+                      className="absolute inset-x-0 bottom-0 flex h-[18px] items-center justify-end border-t px-2.5 text-[10.5px] font-medium text-muted-foreground"
+                    >
+                      Load at {formatDuration(load.capacity, Infinity)} a day
+                    </span>
+                  )}
                 </div>
                 <div role="columnheader" aria-label={`${shortDay(scale.range.start)} to ${shortDay(scale.range.end)}`} className="relative flex-1 border-b" style={{ minWidth: scale.width }}>
                   {scale.top.map((c) => (
@@ -886,6 +905,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                   <span className="absolute top-7 z-[4] ml-1 rounded-[4px] bg-foreground px-1.5 py-px text-[9.5px] font-semibold text-background" style={{ left: todayX }}>
                     Today
                   </span>
+                  {load && <LoadRow scale={scale} hours={load.hours} capacity={load.capacity} />}
                 </div>
               </div>
             </div>
