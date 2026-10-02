@@ -177,7 +177,7 @@ export async function startRunFromGraph(
   const run = await createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   const written = await writePlanStatus(plan, project, issues.map((i) => i.number), "Running");
-  if (written.length) await appendEvents(db, run.id, written);
+  if (written.length) await db.transaction((tx) => appendEvents(tx, run.id, written));
   return run;
 }
 

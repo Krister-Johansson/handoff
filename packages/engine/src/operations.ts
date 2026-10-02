@@ -64,7 +64,7 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
   const [project] = await db.select().from(projectRows).where(eq(projectRows.id, cancelled.projectId));
   if (!project || project.planProjectNumber === null || cancelled.issues.length === 0) return;
   const written = await writePlanStatus(opts.projects, project, await latestRunOf(db, cancelled), "Ready");
-  if (written.length) await appendEvents(db, runId, written);
+  if (written.length) await db.transaction((tx) => appendEvents(tx, runId, written));
 }
 
 /** The run's issues it is the latest run of: a newer run that links an issue owns its status. */

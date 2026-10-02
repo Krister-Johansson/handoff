@@ -165,7 +165,7 @@ const title = (task: string) => (task.length > 72 ? `${task.slice(0, 69)}...` : 
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
  */
-export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number; db?: Db; projects?: ProjectsPort }): NodeExecutor {
+export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number; db?: Db; projects?: ProjectsPort | undefined }): NodeExecutor {
   return {
     needsWorkdir: true,
     async execute(ctx): Promise<ExecutorOutcome> {
@@ -329,7 +329,7 @@ const QUEUE_RECHECK_MS = 60_000;
  * auto, asked to merge by a person. At its turn a pull request that conflicts with the base branch or
  * is behind it goes back on the update edge to catch up, keeping its place. Merging wakes the queue.
  */
-export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?: ProjectsPort }): NodeExecutor {
+export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?: ProjectsPort | undefined }): NodeExecutor {
   return {
     needsWorkdir: false,
     async execute(ctx): Promise<ExecutorOutcome> {
