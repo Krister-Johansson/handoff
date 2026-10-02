@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { eq, runs, wakeByKey } from "@handoff/db";
+import { asc, eq, notifications, runs, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
 import { wakeDependents } from "../dependencies.ts";
@@ -102,26 +102,29 @@ describe("merge queue", () => {
   });
 
   test("the merge node tells a person once that a pull request is ready, and that it merged only when turned on", async () => {
-    const notifications = async (runId: string) =>
-      (await inspect(db, runId)).events.filter((e) => e.type === "notify" && (e.payload as { kind: string }).kind !== "finished").map((e) => e.payload);
+    // What the merge node told a person; the Finish node's own notification is left out.
+    const told = async (runId: string) =>
+      (await db.select().from(notifications).where(eq(notifications.runId, runId)).orderBy(asc(notifications.createdAt)))
+        .filter((n) => !n.title.endsWith("run finished"))
+        .map(({ tone, title, body, href }) => ({ tone, title, body, href }));
     const quiet = await twoRuns("manual");
     await quiet.ready(quiet.first.id);
     await wakeByKey(db, `mq:${quiet.project.id}`, { reason: "merge_queue" });
     await drain(quiet.deps);
     const number = await quiet.prOf(quiet.first.id);
-    const ready = { kind: "ready", nodeKey: "merge", number, title: `${quiet.project.name}: PR #${number} is ready to merge`, body: "First" };
-    expect(await notifications(quiet.first.id)).toEqual([ready]);
+    const ready = { tone: "attention", title: `${quiet.project.name}: PR #${number} is ready to merge`, body: "First", href: `/projects/${quiet.project.id}/runs/${quiet.first.id}` };
+    expect(await told(quiet.first.id)).toEqual([ready]);
     await requestMerge(db, quiet.first.id);
     await drain(quiet.deps);
-    expect(await notifications(quiet.first.id)).toEqual([ready]);
+    expect(await told(quiet.first.id)).toEqual([ready]);
 
     await truncateAll(db);
-    const told = await twoRuns("manual", undefined, { ready: false, merged: true });
-    await told.ready(told.first.id);
-    await requestMerge(db, told.first.id);
-    await drain(told.deps);
-    const merged = await told.prOf(told.first.id);
-    expect(await notifications(told.first.id)).toEqual([{ kind: "merged", nodeKey: "merge", number: merged, title: `${told.project.name}: PR #${merged} merged`, body: "First" }]);
+    const loud = await twoRuns("manual", undefined, { ready: false, merged: true });
+    await loud.ready(loud.first.id);
+    await requestMerge(db, loud.first.id);
+    await drain(loud.deps);
+    const merged = await loud.prOf(loud.first.id);
+    expect(await told(loud.first.id)).toEqual([{ tone: "success", title: `${loud.project.name}: PR #${merged} merged`, body: "First", href: `/projects/${loud.project.id}/runs/${loud.first.id}` }]);
   });
 
   test("a pull request whose issue became blocked on GitHub stays out of the queue until the blocker closes", async () => {

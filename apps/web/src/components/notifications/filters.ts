@@ -4,9 +4,10 @@ import type { NotificationFilter } from "@/lib/notifications";
 export const NOTIFICATION_FILTERS: { filter: NotificationFilter | undefined; label: string }[] = [
   { filter: undefined, label: "All" },
   { filter: "unread", label: "Unread" },
-  { filter: "input", label: "Needs you" },
-  { filter: "finished", label: "Finished" },
-  { filter: "failed", label: "Failed" },
+  // Everything that asked for a person, answered or not. What still waits is in the inbox.
+  { filter: "attention", label: "Asked you" },
+  { filter: "success", label: "Finished" },
+  { filter: "danger", label: "Failed" },
 ];
 
 /** The feed filter named in the address, if it is one the feed knows. */

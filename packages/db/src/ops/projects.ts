@@ -1,12 +1,14 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../client.ts";
-import { edgeTraversals, events, graphs, graphVersions, nodeExecutions, projects, questions, runs, type ProjectLibrary } from "../schema/index.ts";
+import { edgeTraversals, events, graphs, graphVersions, nodeExecutions, notifications, projects, questions, runs, type ProjectLibrary } from "../schema/index.ts";
 
 /** Deletes a project and everything that belongs to it. Used by pnpm demo --reset. */
 export async function deleteProject(db: Db, projectId: string) {
   await db.transaction(async (tx) => {
     const runIds = (await tx.select({ id: runs.id }).from(runs).where(eq(runs.projectId, projectId))).map((r) => r.id);
+    await tx.delete(notifications).where(eq(notifications.projectId, projectId));
     if (runIds.length) {
+      await tx.delete(notifications).where(inArray(notifications.runId, runIds));
       await tx.delete(events).where(inArray(events.runId, runIds));
       await tx.delete(questions).where(inArray(questions.runId, runIds));
       await tx.delete(edgeTraversals).where(inArray(edgeTraversals.runId, runIds));

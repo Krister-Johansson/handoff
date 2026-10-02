@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import { appendEvents, eq, events, graphs, nodeExecutions, projects, questions, runs } from "@handoff/db";
+import { appendEvents, createNotification, eq, events, graphs, nodeExecutions, notifications, projects, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 import { deleteProject, projectAttention, updateProject } from "./project-admin.ts";
@@ -39,9 +39,11 @@ describe("deleteProject", () => {
     await expect(deleteProject(db, project.id)).rejects.toThrow(/active/);
   });
 
-  test("removes the project with its graphs, runs, executions, questions and events", async () => {
+  test("removes the project with its graphs, runs, executions, questions, events and notifications", async () => {
     const { project, run } = await projectWithRun();
     const { project: kept } = await projectWithRun("kept", "octo/kept");
+    await createNotification(db, { tone: "danger", title: "sandbox: run failed", body: "Add a CHANGELOG.md", projectId: project.id, runId: run.id });
+    const other = await createNotification(db, { tone: "neutral", title: "kept: run started", body: "Add a CHANGELOG.md", projectId: kept.id });
     const execution = await seedExecution(db, run.id, { status: "failed" });
     await db.insert(questions).values({ runId: run.id, nodeExecutionId: execution.id, question: "Which?" });
     await db.transaction((tx) => appendEvents(tx, run.id, [{ type: "node.failed", payload: {}, nodeExecutionId: execution.id }]));
@@ -54,6 +56,7 @@ describe("deleteProject", () => {
     expect(await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, run.id))).toEqual([]);
     expect(await db.select().from(events).where(eq(events.runId, run.id))).toEqual([]);
     expect(await db.select().from(questions)).toEqual([]);
+    expect((await db.select().from(notifications)).map((n) => n.id)).toEqual([other.id]);
   });
 });
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { NotificationKind } from "@/lib/notifications";
+import type { NotificationTone } from "@/lib/notifications";
 import { DEFAULT_VOICE_PREFS, writeVoicePrefs, type VoicePrefs } from "@/lib/voice/prefs";
 import { createSpeaker } from "@/lib/voice/speaker";
 import { FakePlayer } from "@/lib/voice/testing/fake-player";
@@ -19,7 +19,7 @@ beforeEach(() => {
 afterEach(() => unregister());
 
 const voice = (patch: Partial<VoicePrefs>) => writeVoicePrefs({ ...DEFAULT_VOICE_PREFS, ...patch });
-const item = (kind: NotificationKind, title: string, body = "Add a CHANGELOG.md") => ({ id: `${kind}-${title}`, kind, title, body, href: `/projects/p1/runs/${kind}` });
+const item = (tone: NotificationTone, title: string, body = "Add a CHANGELOG.md") => ({ id: `${tone}-${title}`, tone, title, body, href: `/projects/p1/runs/${tone}` });
 
 /** Everything the speaker says, sentence by sentence, letting each sentence end. */
 function spoken() {
@@ -27,13 +27,13 @@ function spoken() {
   return player.spoken;
 }
 
-test("notify speaks input, permission, ready and failed items when speakNotifications is on", () => {
+test("notify speaks what waits for the person and what went wrong when speakNotifications is on", () => {
   voice({ speakNotifications: true });
   notify([
-    item("input", "sandbox: gate asks a question"),
-    item("permission", "sandbox: coder asks to run pnpm"),
-    item("ready", "sandbox: PR #54 is ready to merge", ""),
-    item("failed", "sandbox: run failed at coder", "The tests did not pass."),
+    item("attention", "sandbox: gate asks a question"),
+    item("attention", "sandbox: coder asks to run pnpm"),
+    item("attention", "sandbox: PR #54 is ready to merge", ""),
+    item("danger", "sandbox: run failed at coder", "The tests did not pass."),
   ]);
   expect(spoken()).toEqual([
     "sandbox: gate asks a question.",
@@ -46,30 +46,30 @@ test("notify speaks input, permission, ready and failed items when speakNotifica
   ]);
 });
 
-test("finished and merged are spoken only with speakFinished", () => {
+test("what went well is spoken only with speakFinished", () => {
   voice({ speakNotifications: true });
-  notify([item("finished", "sandbox: run finished", ""), item("merged", "sandbox: PR #54 merged", "")]);
+  notify([item("success", "sandbox: run finished", ""), item("success", "sandbox: PR #54 merged", "")]);
   expect(spoken()).toEqual([]);
   voice({ speakNotifications: true, speakFinished: true });
-  notify([item("finished", "todo: run finished", ""), item("merged", "todo: PR #9 merged", "")]);
+  notify([item("success", "todo: run finished", ""), item("success", "todo: PR #9 merged", "")]);
   expect(spoken()).toEqual(["todo: run finished.", "todo: PR #9 merged."]);
 });
 
-test("started is never spoken", () => {
+test("plain news is never spoken", () => {
   voice({ speakNotifications: true, speakFinished: true });
-  notify([item("started", "sandbox: run started", "")]);
+  notify([item("neutral", "sandbox: run started", "")]);
   expect(spoken()).toEqual([]);
 });
 
 test("nothing is spoken when the preference is off", () => {
   voice({ speakNotifications: false, speakFinished: true });
-  notify([item("failed", "sandbox: run failed at coder"), item("input", "sandbox: gate asks a question")]);
+  notify([item("danger", "sandbox: run failed at coder"), item("attention", "sandbox: gate asks a question")]);
   expect(spoken()).toEqual([]);
 });
 
 test("a notification another tab of the dashboard already spoke is not spoken again", () => {
   voice({ speakNotifications: true });
-  const failed = item("failed", "sandbox: run failed at coder", "");
+  const failed = item("danger", "sandbox: run failed at coder", "");
   notify([failed]);
   expect(spoken()).toEqual(["sandbox: run failed at coder."]);
   // Another tab polls the same feed and gets the same item.

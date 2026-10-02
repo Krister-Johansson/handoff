@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, notifies, renderContextPacket, type NodeType, type Notification } from "@handoff/core";
+import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, type NodeType } from "@handoff/core";
 import type { Db } from "@handoff/db";
 import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliSession } from "@handoff/cli-adapter";
@@ -171,13 +171,10 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           runId: ctx.run.id,
           executionId: ctx.execution.id,
           dir,
-          onRequest: (request) => {
+          onRequest: async (request) => {
             ctx.emit("permission.requested", request);
-            if (notifies(ctx.node, "permission")) {
-              const { action, detail } = describePermission(request.toolName, request.input);
-              const told: Notification = { kind: "permission", nodeKey: ctx.node.key, requestId: request.id, title: `${ctx.project.name}: ${ctx.node.key} ${action}`, body: brief(detail || ctx.run.task) };
-              ctx.emit("notify", told);
-            }
+            const { action, detail } = describePermission(request.toolName, request.input);
+            await ctx.notify("permission", { title: `${ctx.project.name}: ${ctx.node.key} ${action}`, body: brief(detail || ctx.run.task), href: runPath(ctx.project.id, ctx.run.id) });
           },
         });
       }

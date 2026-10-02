@@ -1,20 +1,21 @@
-/** What a notification is about: a run that started, finished or failed, a gate that needs a person, or a pull request ready to merge or merged. */
-export type NotificationKind = "started" | "finished" | "failed" | "input" | "permission" | "ready" | "merged";
+import type { NotificationTone } from "@handoff/core";
 
-/** What the feed page can narrow to: the unread items, or one kind. */
-export type NotificationFilter = "unread" | NotificationKind;
+export type { NotificationTone };
 
-/** One entry of the notification feed. */
+/** What the feed page can narrow to: the unread items, or one tone. */
+export type NotificationFilter = "unread" | NotificationTone;
+
+/** One entry of the notification feed: what a sender told a person, as the sender wrote it. */
 export type NotificationItem = {
   id: string;
-  kind: NotificationKind;
+  /** How it looks and sounds: plain news, something that went well, something that waits for a person, or something that went wrong. */
+  tone: NotificationTone;
   title: string;
   body: string;
-  href: string;
+  /** The dashboard page it leads to, when it leads anywhere. */
+  href: string | null;
   createdAt: Date;
-  /** Whether the person has done what it asked: answered, asked for the merge, repaired the run. */
-  done: boolean;
-  /** Whether it came after the person last opened the feed and is not done. */
+  /** Whether it came after the person last opened the feed. */
   unread: boolean;
 };
 

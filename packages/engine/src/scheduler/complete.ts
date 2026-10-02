@@ -1,6 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type Notification, type RunState } from "@handoff/core";
+import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
+import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
 
 export class LeaseLostError extends Error {
@@ -147,11 +148,16 @@ function rememberAttempt(state: RunState, row: NodeExecutionRow, output: unknown
   return extraPaths.length || notes.length ? remember(state, row.nodeKey, { extraPaths, notes }) : state;
 }
 
-/** The run's project and task, which a notification about how the run ended names. */
-async function runText(tx: DbTx, runId: string) {
-  const [row] = await tx.select({ project: projects.name, task: runs.task }).from(runs).innerJoin(projects, eq(projects.id, runs.projectId)).where(eq(runs.id, runId));
-  if (!row) throw new Error(`run ${runId} not found`);
-  return row;
+/**
+ * Tells a person how the run ended, when the node that ended it has that kind on. The notification
+ * commits with the run's end.
+ */
+async function tellEnd(tx: DbTx, graph: CompiledGraph, runId: string, row: NodeExecutionRow, kind: "failed" | "finished", title: (project: string) => string) {
+  const node = graph.node(row.nodeKey);
+  if (!notifies(node, kind)) return;
+  const [run] = await tx.select({ projectId: runs.projectId, project: projects.name, task: runs.task }).from(runs).innerJoin(projects, eq(projects.id, runs.projectId)).where(eq(runs.id, runId));
+  if (!run) throw new Error(`run ${runId} not found`);
+  await notifyFrom(tx, node, kind, { id: runId, projectId: run.projectId }, { title: title(run.project), body: brief(run.task), href: runPath(run.projectId, runId) });
 }
 
 async function finishRouting(
@@ -171,24 +177,14 @@ async function finishRouting(
     if (failure || routed.exhausted || deadEnd) {
       status = "failed";
       const reason = failure ? "node_failed" : routed.exhausted ? "loop_exhausted" : "no_route";
-      // The node's notification comes first, so the run's end stays its last event.
-      if (notifies(graph.node(row.nodeKey), "failed")) {
-        const { project, task } = await runText(tx, runId);
-        const title = reason === "loop_exhausted" ? `${project}: ${row.nodeKey} ran out of rounds` : `${project}: run failed at ${row.nodeKey}`;
-        const told: Notification = { kind: "failed", nodeKey: row.nodeKey, reason, title, body: brief(task) };
-        events.push({ type: "notify", payload: told, nodeExecutionId: row.id });
-      }
+      await tellEnd(tx, graph, runId, row, "failed", (project) => (reason === "loop_exhausted" ? `${project}: ${row.nodeKey} ran out of rounds` : `${project}: run failed at ${row.nodeKey}`));
       events.push({
         type: "run.failed",
         payload: { nodeKey: row.nodeKey, reason, ...(failure ? { error: failure } : {}), awaiting: "repair" },
       });
     } else {
       status = "succeeded";
-      if (notifies(graph.node(row.nodeKey), "finished")) {
-        const { project, task } = await runText(tx, runId);
-        const told: Notification = { kind: "finished", nodeKey: row.nodeKey, title: `${project}: run finished`, body: brief(task) };
-        events.push({ type: "notify", payload: told, nodeExecutionId: row.id });
-      }
+      await tellEnd(tx, graph, runId, row, "finished", (project) => `${project}: run finished`);
       events.push({ type: "run.succeeded", payload: {} });
     }
   }

@@ -32,7 +32,7 @@ type Request = { id: string; toolName: string; input: Record<string, unknown> };
  */
 export function watchPermissions(
   db: Db,
-  step: { runId: string; executionId: string; dir: string; onRequest: (request: Request) => void; intervalMs?: number },
+  step: { runId: string; executionId: string; dir: string; onRequest: (request: Request) => void | Promise<void>; intervalMs?: number },
 ): PermissionWatch {
   mkdirSync(step.dir, { recursive: true });
   const open = new Set<string>();
@@ -53,7 +53,7 @@ export function watchPermissions(
         .values({ id, runId: step.runId, nodeExecutionId: step.executionId, toolName: request.toolName, input: request.input })
         .onConflictDoNothing();
       open.add(id);
-      step.onRequest({ id, toolName: request.toolName, input: request.input });
+      await step.onRequest({ id, toolName: request.toolName, input: request.input });
     }
     if (open.size === 0) return;
     const answered = await db

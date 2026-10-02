@@ -2,7 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { and, appendEvents, eq, events, nodeExecutions, permissionRequests, projects, questions, runs } from "@handoff/db";
+import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG } from "../lib/assistant/catalog";
@@ -121,6 +121,20 @@ test("what needs attention comes with links to the dashboard", async () => {
   await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run_id));
   await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
   expect(await call("list_attention")).toEqual([expect.objectContaining({ kind: "failed", title: "sandbox: run failed at planner", url: expect.stringMatching(new RegExp(`^${BASE}/projects/[0-9a-f-]+/runs/${run_id}$`)) })]);
+});
+
+test("list_notifications gives the feed as its senders wrote it, with each item's tone and a link to the dashboard", async () => {
+  await createNotification(db, { tone: "neutral", title: "The worker restarted", body: "" });
+  await db.execute(sql`update notifications set created_at = now() - interval '5 minutes'`);
+  await createNotification(db, { tone: "attention", title: "sandbox: gate asks a question", body: "Which license?", href: "/projects/p1/runs/r1" });
+  expect(await call("list_notifications")).toEqual({
+    unread: 2,
+    items: [
+      { tone: "attention", title: "sandbox: gate asks a question", body: "Which license?", at: expect.any(String), unread: true, url: `${BASE}/projects/p1/runs/r1` },
+      { tone: "neutral", title: "The worker restarted", body: "", at: expect.any(String), unread: true, url: null },
+    ],
+  });
+  expect((await call("list_notifications", { filter: "attention" })).items.map((n: { title: string }) => n.title)).toEqual(["sandbox: gate asks a question"]);
 });
 
 test("add_project adds a repository the credential can reach, on its default branch, and refuses one twice", async () => {

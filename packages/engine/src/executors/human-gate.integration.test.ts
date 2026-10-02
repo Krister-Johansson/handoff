@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { eq, questions } from "@handoff/db";
+import { eq, notifications, questions, wakeByToken } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { answerQuestion } from "../operations.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
@@ -53,17 +53,29 @@ test("Human gate keeps the summary the Coder wrote for its question, next to the
   expect(question).toMatchObject({ question: text, context: { reason: "needs_input", summary: "ISO or US dates in the changelog?" } });
 });
 
-const notified = async (runId: string) => (await inspect(db, runId)).events.find((e) => e.type === "notify")?.payload;
+const told = async (runId: string) => (await db.select().from(notifications).where(eq(notifications.runId, runId))).map(({ tone, title, body, href }) => ({ tone, title, body, href }));
 
-test("a gate that asks a Coder's question notifies with the question's summary, or the question cut short", async () => {
+test("a gate that asks a Coder's question notifies with the question's summary, or the question cut short, and links to the run", async () => {
   const text = `${"The changelog has dates in two formats, and the README uses a third. ".repeat(3)}ISO dates or US dates?`;
   const summarized = await askingRun({ ...outputs.coderAsks, question: { text, summary: "ISO or US dates in the changelog?" } });
-  expect(await notified(summarized.run.id)).toMatchObject({ kind: "input", nodeKey: "gate", title: expect.stringMatching(/^p-\w+: gate asks a question$/), body: "ISO or US dates in the changelog?" });
+  expect(await told(summarized.run.id)).toEqual([
+    { tone: "attention", title: expect.stringMatching(/^p-\w+: gate asks a question$/), body: "ISO or US dates in the changelog?", href: `/projects/${summarized.run.projectId}/runs/${summarized.run.id}` },
+  ]);
 
   const plain = await askingRun({ ...outputs.coderAsks, question: { text } });
-  const { body } = (await notified(plain.run.id)) as { body: string };
+  const body = (await told(plain.run.id))[0]!.body;
   expect(body).toMatch(/^The changelog has dates in two formats.*…$/);
   expect(body.length).toBeLessThanOrEqual(140);
+});
+
+test("a gate that runs again for the same step keeps its one question and its one notification", async () => {
+  const { run, deps } = await askingRun();
+  const gate = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "gate")!;
+  // The worker woke the gate without an answer, as after a restart.
+  await wakeByToken(db, gate.waitToken!, { reason: "restart" });
+  await drain(deps);
+  expect(await db.select().from(questions).where(eq(questions.runId, run.id))).toHaveLength(1);
+  expect(await told(run.id)).toHaveLength(1);
 });
 
 test("Coder resumed after a needs_input answer passes --resume with the recorded session id and the answer in the prompt", async () => {
