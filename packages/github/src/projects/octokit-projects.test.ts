@@ -751,3 +751,49 @@ test("setDates writes a date, clears one with null, and reports no-field on a Pr
   expect(await projects.setDates(repo, 3, 14, { start: "2026-10-06" })).toBe("no-field");
   expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan"]);
 });
+
+/** The path GitHub gives a field lookup on the Project of the issue's `index`th item in IssuePlan; GitHub sends the index as a number. */
+const itemProjectPath = (index: number) => ["repository", "issue", "projectItems", "nodes", String(index), "project"];
+
+test("setStatus works on a Project without Start and Target fields", async () => {
+  // Checked live: an issue in a Project without Start or Target answers IssuePlan with the data plus a NOT_FOUND per missing field.
+  // The issue is also in another Project that lacks the fields; that one answers the same way.
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: () =>
+      new GraphqlErrors(
+        issuePlan(12, [
+          { id: "PVTI_2", project: planProject(2, "U_octo", false) },
+          { id: "PVTI_5", project: planProject(5, "U_octo", false), status: "Shaping" },
+        ]),
+        [...missingDateFields(itemProjectPath(0)), ...missingDateFields(itemProjectPath(1))],
+      ),
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_5" } } }),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getStatus(repo, 5, 12)).toBe("Shaping");
+  expect(await projects.setStatus(repo, 5, 12, "Ready")).toBe("set");
+  expect(operations.at(-1)).toEqual({ operation: "SetPlanStatus", variables: { projectId: "PVT_5", itemId: "PVTI_5", fieldId: "F_status", optionId: "o_ready" } });
+});
+
+test("setDates reports no-field on a Project without Start and Target fields instead of throwing", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: () => new GraphqlErrors(issuePlan(12, [{ id: "PVTI_5", project: planProject(5, "U_octo", false) }]), missingDateFields(itemProjectPath(0))),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.setDates(repo, 5, 12, { start: "2026-10-06" })).toBe("no-field");
+  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan"]);
+});
+
+test("setStatus still fails for an issue GitHub cannot resolve", async () => {
+  const { fetch } = fakeGraphql({
+    IssuePlan: (v) =>
+      new GraphqlErrors({ repository: { owner: { id: "U_octo" }, issue: null } }, [
+        { type: "NOT_FOUND", path: ["repository", "issue"], message: `Could not resolve to an Issue with the number of ${v.number}.` },
+      ]),
+  });
+  const projects = port(fetch);
+
+  await expect(projects.setStatus(repo, 5, 999, "Ready")).rejects.toThrow(/Could not resolve to an Issue/);
+});
