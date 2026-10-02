@@ -118,10 +118,10 @@ export function VoiceSettings({ support: given, elevenLabs }: { support?: VoiceS
           ? "The dashboard speaks with ElevenLabs: the text read aloud goes to ElevenLabs."
           : "Add ELEVENLABS_API_KEY to the dashboard's environment and restart it. The dashboard speaks with ElevenLabs, so the text read aloud goes to ElevenLabs."}
       </p>
-      <Row id="voice-replies" title="Speak replies" description="Read the assistant's replies aloud, with a Stop button while it speaks. It never listens while speaking." disabled={!canSpeak}>
+      <Row id="voice-replies" title="Speak replies" description="Read the assistant's replies in the panel aloud when they are done, up to three sentences, with a Stop button while it speaks. Replies to questions asked with V are always spoken." disabled={!canSpeak}>
         <Switch id="voice-replies" checked={prefs.speakReplies} disabled={!canSpeak} onCheckedChange={(on) => update({ speakReplies: on })} />
       </Row>
-      <Row id="voice-notifications" title="Speak notifications" description="Read new questions, failed runs and reviews aloud as they arrive." disabled={!canSpeak}>
+      <Row id="voice-notifications" title="Speak notifications" description="Read new questions, permission requests, failed runs and pull requests ready to merge aloud as they arrive. While you speak, they wait until you stop." disabled={!canSpeak}>
         <Switch id="voice-notifications" checked={prefs.speakNotifications} disabled={!canSpeak} onCheckedChange={(on) => update({ speakNotifications: on })} />
       </Row>
       <div className="-mt-1 flex items-center gap-2 pb-3 pl-5 text-[13px]">
