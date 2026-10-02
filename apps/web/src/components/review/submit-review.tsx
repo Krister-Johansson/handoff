@@ -1,22 +1,11 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { answerReviewAction } from "@/app/inbox/actions";
 import { Button } from "@/components/ui/button";
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldTitle } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-
-export type ReviewOption = "changes" | "approve" | "fix";
-
-type SentComment = {
-  quote: string;
-  body: string;
-  path?: string;
-  line?: number;
-  endLine?: number;
-  side?: "old" | "new";
-};
+import { sendReview, type ReviewOption, type SentComment } from "./send-review";
 
 const CHOICES: {
   value: ReviewOption;
@@ -63,25 +52,10 @@ export function SubmitReview({ questionId, runId, target, comments, note, setNot
 
   const send = () => {
     if (!option) return;
-    if (option !== "approve" && !note.trim() && comments.length === 0) {
-      setError("Add a comment or an overall comment first, so there is something to fix.");
-      return;
-    }
     setError(undefined);
-    // A sent review redirects to the run, so the draft goes first and comes back if the send fails.
-    onSending?.();
     startSubmit(async () => {
-      const result = await answerReviewAction({
-        questionId,
-        runId,
-        option,
-        note: note.trim(),
-        comments,
-      });
-      if (result && "error" in result && result.error) {
-        setError(result.error);
-        onFailed?.();
-      }
+      const failed = await sendReview({ questionId, runId, option, note, comments, onSending, onFailed });
+      if (failed) startSubmit(() => setError(failed));
     });
   };
 

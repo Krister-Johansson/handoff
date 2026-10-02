@@ -133,6 +133,86 @@ GitHub sends no webhook when a card moves on a Project owned by a user account. 
 
 `pnpm dev:webhooks` also relays the repository's `issues`, `sub_issues` and `issue_dependencies` events. handoff stores them with every other delivery. They wake nothing; the Plan page uses the latest one for its "last GitHub activity" line.
 
+## The scheduler
+
+A project with a plan has a scheduler. It is off until you turn it on. Once on, the worker starts runs by itself on the plan's Ready tasks, so a planned project moves forward without a `start_run` for each task. Deciding what is Ready stays with you: the scheduler never moves a task to Ready, never requests a merge, and never answers, repairs or cancels a run.
+
+### What it starts, and in what order
+
+The worker checks each project whose scheduler is on every 60 seconds. These bring the check forward: a run ends, a run the scheduler started gets its plan, a merge closes issues, someone answers a question or decides a permission request, a run is repaired or cancelled, a stuck loop is resolved, `move_to_ready` moves tasks, someone lets the scheduler take a cancelled task, and someone turns the scheduler on, resumes it or changes its settings. A check never comes sooner than 10 seconds after the last one. GitHub sends no webhook when you move a card on the board, so the scheduler sees a task you move to Ready there on the next 60 second check.
+
+A task is a candidate when it is an open task in Ready, has no open blocker, has no active run, does not carry the skip label, and is not a task whose run you cancelled (see A cancelled task). Epics, stories, tasks in other columns and issues outside the Project never start by themselves.
+
+Candidates start in Project order: the order of the items in the GitHub Project. With the order set to priority, the single select field named Priority comes first. Its first option ranks highest, items without a value come after every item with one, and Project order breaks ties. The scheduler refuses priority order for a Project without a Priority field.
+
+Each check starts at most one run, on the first candidate, with the scheduler's graph (the project's default graph unless you pick another) and the task linked as the run's issue. The start goes through the same checks as `start_run`, so a task that is blocked or taken by then is skipped for that check and the next candidate is tried. The next start waits until the run it started has a plan from its planner, so the runs it starts are planned one at a time. With a graph that has no Planner node, the next start waits until that run ends.
+
+### Max runs and the Claude cap
+
+`max_runs` is the most runs of the project that may be active at once, 1 to 10, and 1 when you first turn the scheduler on. It counts every queued, running or waiting run of the project: runs you started, runs waiting at a review and runs waiting in the merge queue. With `max_runs` runs active, a check starts nothing and reads nothing from GitHub.
+
+The Claude cap is separate. `HANDOFF_CAP_CLI` limits Claude processes across all projects, and the scheduler never changes it. With `max_runs` above the cap, runs take turns at their Claude steps while their other steps (CI, reviews, the merge queue) go on. The dashboard and `get_scheduler` show both numbers, for example "2 of 3 runs active, 1 Claude slot".
+
+### What holds new starts
+
+Two things hold the project, and while either does, the scheduler starts nothing and reads nothing from GitHub:
+
+- a failed run, including a loop that ran out of rounds
+- a pending permission request
+
+Holds count every run of the project, whoever started it and however old it is. Once you repair or cancel the failed run, resolve the loop or decide the permission request, the scheduler checks again within about 10 seconds and goes on by itself.
+
+A run waiting on you for anything else does not hold the project: an open question, a plan or code review, Try it, a pull request waiting for a review, or a pull request waiting in a manual merge queue for you to merge it. That run stays active and counts toward `max_runs`. With `max_runs` at 1 nothing new starts while it waits; with a higher limit the other slots keep working.
+
+### Overlap waits
+
+Before the coder's first attempt in a run the scheduler started, the worker compares the paths the run's plan owns with the paths every other active run of the project owns. A directory owns the files under it, a file owns itself, and `package.json` counts as one unit with its lockfiles. If they overlap, the coder waits and the run records `run.overlap_held`, naming the other run and the shared paths. The waiting run holds no Claude slot but counts toward `max_runs`. It checks again when a run of the project ends or is cancelled, when a merge lands, and after 10 minutes at the latest. A run waits only for runs started before it and for runs a person started. Runs you start yourself never wait on overlap.
+
+### Pausing and turning off
+
+Pause (`pause_scheduler`, or Pause on the dashboard with an optional reason) stops new starts until you resume it with `start_scheduler` or Resume. Active runs go on. Saving the settings in Project settings keeps a pause.
+
+The scheduler pauses itself when three checks in a row fail for a reason that is not one task's refusal, such as a graph that no longer exists or GitHub refusing the read. It records the last error and sends a notification. Fix the cause, then resume it.
+
+Turning it off (`stop_scheduler`, or Turn off in Project settings) stops new starts, forgets a pause and the last check, and keeps the settings. Active runs go on. Turning it on again starts it as the first time did.
+
+### A cancelled task
+
+Cancelling a run moves its task back to Ready, but the scheduler does not start it again. It skips the task with "cancelled run; start it by hand". Start it yourself (Start run beside the skipped task, or `start_run`), or press **Let the scheduler take it** beside it. That releases the task for the cancelled run; if you cancel its next run too, it needs a new release.
+
+### The skip label
+
+The scheduler skips tasks with the skip label and leaves them to a person. The label is `human` when you first turn the scheduler on. Change it with `skip_label` or **Skips tasks labelled** in Project settings; an empty label skips nothing.
+
+### Where to see it
+
+On the dashboard:
+
+- The Plan page has the scheduler card. It shows the state (Off, Running, Held, Idle or Paused) with Turn on, Pause or Resume, the active runs, the next three tasks, the skipped Ready tasks with their reasons, what holds the project with a link to each run, and the recent events. The tree marks the next three tasks Next 1 to Next 3.
+- Home shows one line with the state and the same action while the scheduler is on.
+- Project settings has a Scheduler section: turn it on or off, pause or resume, set the runs at a time, the order, the graph and the skip label, and read the worker's Claude cap.
+- Settings, Projects shows the state and the active runs on the project's row, for example "Scheduler held, 1 of 2".
+- The Runs table and the run page tag the runs it started with Scheduler. The run's events list `run.scheduled` right after `run.created`, with the task's place in the order and the scheduler's settings at that moment.
+
+Over MCP, for the assistant, Claude Code with the handoff plugin and WebMCP:
+
+- `get_scheduler` shows the state, what holds it with links, the active runs against `max_runs`, the Claude slots, runs waiting on overlap, the next tasks, the skipped ones with their reasons, and the recent events.
+- `start_scheduler` turns it on, resumes it, or changes `max_runs`, `order`, `graph` and `skip_label`. It asks for approval first, with a sentence such as "Let handoff start up to 2 runs at a time on Ready tasks in todooverkill, in Project order, with graph master".
+- `pause_scheduler` and `stop_scheduler` pause it and turn it off.
+- `list_runs` and `get_run` report who started each run in `started_by`.
+
+`start_scheduler` refuses a demo project, a project without a plan (run `setup_plan` first), a graph the project does not have, priority order without a Priority field, and a dashboard without access to GitHub Projects. The worker needs that access too: the Plan's token (see The token). A worker without it logs that the scheduler is off and checks nothing.
+
+### Setting up a project for the scheduler
+
+The scheduler's runs start without you watching, and several can be active on the same machine at once. Before you turn it on, edit the project in **Settings, Projects** and fill in three fields.
+
+- **Setup command.** It runs once in each run's worktree, before the first step that uses it, and again only if you change it. Install the dependencies there, for example `pnpm install --frozen-lockfile` or `npm ci`. It sees `HANDOFF_RUN_ID`, `HANDOFF_RUN_SHORT` (the first eight characters of the run id) and `HANDOFF_WORKTREE`. If the tests need a database, give each run its own, named after `HANDOFF_RUN_SHORT`, for example by copying `.env.example` to `.env` with the test database's name changed to `app_test_$HANDOFF_RUN_SHORT`. A setup command that fails fails the step that needed it, with the command's output.
+- **Teardown command.** It runs in the worktree just before handoff removes it, with the same three variables, and drops what the setup command made, for example `dropdb --if-exists app_test_$HANDOFF_RUN_SHORT`. handoff removes a worktree when its run succeeds or is cancelled. A failed run keeps its worktree until you repair or cancel it, or `pnpm handoff gc` removes it.
+- **Agent notes.** Every agent step reads them as facts about the project's environment, for example "The database container is shared and already running." handoff stores them as plain text, so keep secrets out.
+
+The Tester and every Claude step also see the three variables, and the agents are told to name anything they create outside the worktree after `HANDOFF_RUN_SHORT`. `setup_project` warns when the repository has a lockfile and no setup command.
+
 ## The assistant
 
 The **Assistant** button in the header (or Cmd or Ctrl+J) opens a panel beside every page. Ask what needs you or how a run is going, or tell it to start, answer, merge, repair or cancel something. It can also open pages for you: the inbox for a project, a run, a review or Try it. The panel stays open while the page behind it changes, and earlier conversations are listed in its picker.
@@ -153,9 +233,12 @@ These pages have tools:
 
 - The run page shows its Steps, Graph or Events view, opens a step (its latest attempt or a given one), closes it, pops it out into a large window, and narrows the events to one node or adds the Claude CLI's own events.
 - Try it marks a criterion as working, not working or unchecked, with a note, moves between criteria, expands or collapses them, writes the overall note, submits (approve, or send the app back to the coder) and restarts the app. Once Try it is answered, only moving between criteria and expanding them remain.
+- The code review moves between files by path, number or next and previous, shows the changes or the whole file in one column or side by side, expands or collapses files, marks a file viewed, drafts a comment on a line or a range of lines the diff shows (with the code quoted), removes a drafted comment, writes the overall comment and submits the review. `where_am_i` also lists the code reviewer's findings by severity; you open a follow-up issue from them with the Create follow-up issue button, which has no page tool. Once the review is answered, only moving between files and changing the view remain.
+- The plan review drafts a comment on a passage of the plan, quoted as the page shows it, removes one, writes the overall comment and submits the review.
+- The graph editor selects a node or an edge, reads a node's or an edge's settings, changes them with the inspector's fields, renames a node, adds a node, connects two nodes, removes nodes and edges, tidies the layout, lists the graph's issues and saves the graph as its next version. While the editor is locked, adding, connecting and removing are refused, as on the canvas.
 - The Inbox shows a card: it scrolls the card into view and focuses it. The assistant answers questions, decides permission requests, repairs, cancels and merges with its own tools, using the ids `where_am_i` lists for the cards.
 
-A change to what a page shows, or to a draft it holds such as a criterion's mark, runs without asking: you see it on the page, and nothing is sent. Submitting Try it and restarting the app show an approval card first, as the assistant's other changes do. If you leave a page while the assistant works on it, a call to the old page's tools answers that the page changed, and the new page's tools come with your next message.
+A change to what a page shows, or to a draft it holds such as a criterion's mark, runs without asking: you see it on the page, and nothing is sent. Marking a file viewed also runs without asking, and saves the mark as ticking its Viewed box does. Submitting Try it, restarting the app, submitting a review and saving the graph show an approval card first, as the assistant's other changes do. If you leave a page while the assistant works on it, a call to the old page's tools answers that the page changed, and the new page's tools come with your next message.
 
 ## Voice in Chrome
 
