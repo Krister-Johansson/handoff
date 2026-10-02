@@ -1,9 +1,9 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "323f99d9-8011-4002-82c8-575776bcbc08",
+  "id": "1d37cffc-a3be-457a-a196-0e80690355e4",
   "prevIds": [
-    "a6ac1f14-70c7-4025-9d02-3bf2e64bad5e"
+    "d187bb0d-237b-4040-9d43-e04f30b16ea3"
   ],
   "ddl": [
     {
@@ -508,6 +508,32 @@
       "generated": null,
       "identity": null,
       "name": "teardown_command",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "demo_seed_command",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 1,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "ui_paths",
       "entityType": "columns",
       "schema": "public",
       "table": "projects"
