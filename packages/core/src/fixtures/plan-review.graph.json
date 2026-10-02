@@ -227,6 +227,16 @@
       }
     },
     {
+      "key": "merge->pr",
+      "source": "merge",
+      "target": "pr",
+      "attributes": {
+        "port": "update",
+        "loop": true,
+        "maxAttempts": 3
+      }
+    },
+    {
       "key": "merge->finish",
       "source": "merge",
       "target": "finish",

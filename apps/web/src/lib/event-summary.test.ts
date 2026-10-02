@@ -50,6 +50,12 @@ test("summarizes an overlap hold with the shared paths and the other run", () =>
   ).toBe("Waiting: shares apps/board, pnpm-lock.yaml with run 1a2b3c4d");
 });
 
+test("summarizes a run the scheduler started with its place in the order and the settings", () => {
+  expect(
+    summarizeEvent({ type: "run.scheduled", payload: { place: 1, settings: { maxRuns: 2, order: "project", graphName: "master", skipLabel: "human" } } }),
+  ).toBe("Started by the scheduler, 1st in order: up to 2 runs, Project order, graph master");
+});
+
 test("summarizes the assignment of a run's issue to the token's user and one that was skipped, with the reason", () => {
   expect(summarizeEvent({ type: "issue.assigned", payload: { issue: 16, login: "Krister-Johansson" } })).toBe("#16 assigned to Krister-Johansson");
   expect(summarizeEvent({ type: "issue.assign.skipped", payload: { issue: 16, reason: "no-user" } })).toBe(
@@ -59,6 +65,11 @@ test("summarizes the assignment of a run's issue to the token's user and one tha
     "#16 not assigned: GitHub cannot assign the token's user in this repository",
   );
   expect(summarizeEvent({ type: "issue.assign.skipped", payload: { issue: 16, reason: "Validation Failed" } })).toBe("#16 not assigned: Validation Failed");
+});
+
+test("an approval that held says why the step did not ask again", () => {
+  const message = "Unchanged since your approval at 2026-10-02 14:03 UTC; only main was merged in";
+  expect(summarizeEvent({ type: "approval.held", payload: { message, approvedAt: "2026-10-02T14:03:00.000Z", base: "main" } })).toBe(message);
 });
 
 test("returns an empty string for unknown events", () => {

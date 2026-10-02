@@ -120,10 +120,13 @@ describe("withPorts", () => {
   });
 });
 
-test("the plan, review, approve, build graph compiles, and every way back is a feedback loop", () => {
+test("the plan, review, approve, build graph compiles, and every way back to an agent is a feedback loop", () => {
   const result = compileGraph(planReview);
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
-  const back = result.graph.graph.edges().map((e) => result.graph.graph.getEdgeAttributes(e)).filter((e) => e.loop);
+  const loops = result.graph.graph.edges().map((e) => result.graph.graph.getEdgeAttributes(e)).filter((e) => e.loop);
+  // A merge that finds the branch behind sends it back to the PR node to catch up, which takes no feedback.
+  expect(loops.find((e) => e.key === "merge->pr")).toMatchObject({ port: "update", input: "in", maxAttempts: 3 });
+  const back = loops.filter((e) => e.key !== "merge->pr");
   expect(back.map((e) => e.key).sort()).toEqual(["approval->planner", "ask->coder", "plan-review->planner", "pr->coder", "tester->coder"]);
   expect(back.every((e) => e.input === "feedback")).toBe(true);
   // A person decides every answer at the question gate, so its loop has no round limit.

@@ -46,9 +46,13 @@ function datesText(dates: { start?: string | null | undefined; target?: string |
  * todooverkill, in Project order, with graph master". A setting left out keeps its stored value, or
  * its default the first time, and the sentence says so.
  */
-function schedulerText(a: { project: string; max_runs?: number | undefined; order?: "project" | "priority" | undefined; graph?: string | undefined }) {
+function schedulerText(a: { project: string; max_runs?: number | undefined; order?: "project" | "priority" | undefined; graph?: string | undefined; skip_label?: string | null | undefined }) {
   const limit = a.max_runs ? `up to ${a.max_runs} ${a.max_runs === 1 ? "run" : "runs"} at a time` : "runs";
-  const given = [...(a.order ? [a.order === "priority" ? "by the Priority field" : "in Project order"] : []), ...(a.graph ? [`with graph ${a.graph}`] : [])];
+  const given = [
+    ...(a.order ? [a.order === "priority" ? "by the Priority field" : "in Project order"] : []),
+    ...(a.graph ? [`with graph ${a.graph}`] : []),
+    ...(a.skip_label === undefined ? [] : [a.skip_label ? `skipping tasks labelled ${a.skip_label}` : "skipping no label"]),
+  ];
   const defaults = [...(a.max_runs ? [] : ["1 run at a time"]), ...(a.order ? [] : ["Project order"]), ...(a.graph ? [] : ["the default graph"])];
   const rest = defaults.length === 0 ? "" : `, with its ${defaults.length === 3 ? "settings" : "other settings"} as they are (at first: ${defaults.join(", ")})`;
   return `Let handoff start ${limit} on Ready tasks in ${a.project}${given.map((g) => `, ${g}`).join("")}${rest}`;
@@ -544,6 +548,7 @@ export const CATALOG: ToolSpec[] = [
       max_runs: z.number().int().min(1).max(10).optional().describe("The most runs of the project active at once, 1 to 10; 1 when first turned on"),
       order: z.enum(["project", "priority"]).optional().describe("project for Project order, priority for the Priority field first; project when first turned on"),
       graph: z.string().optional().describe("The graph its runs use; the project's default graph when first turned on"),
+      skip_label: z.string().nullable().optional().describe("Tasks with this label are left to a person; null skips none; human when first turned on"),
     }),
     kind: "data",
     confirm: true,
@@ -561,6 +566,18 @@ export const CATALOG: ToolSpec[] = [
     readOnly: false,
     idempotent: true,
     summarize: (a) => `Pause the scheduler of ${a.project}${a.reason ? `: ${a.reason}` : ""}`,
+  }),
+  spec({
+    name: "stop_scheduler",
+    title: "Turn off the scheduler",
+    description:
+      "Turns off a project's scheduler: it starts no new runs and forgets a pause, and keeps its settings. Active runs go on. Turning it on again with start_scheduler starts it as the first time.",
+    input: z.object({ project }),
+    kind: "data",
+    confirm: false,
+    readOnly: false,
+    idempotent: true,
+    summarize: (a) => `Turn off the scheduler of ${a.project}`,
   }),
   spec({
     name: "go_to",

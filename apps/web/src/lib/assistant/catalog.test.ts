@@ -130,3 +130,14 @@ test("start_scheduler is confirm and its summary names the project, the limit, t
   expect(toolSpec("start_scheduler").input.safeParse({ project: "todooverkill", max_runs: 11 }).success).toBe(false);
   expect(toolSpec("pause_scheduler")).toMatchObject({ kind: "data", confirm: false, readOnly: false, idempotent: true });
 });
+
+test("start_scheduler's summary names the skip label when it changes, and stop_scheduler turns the scheduler off", () => {
+  expect(toolSpec("start_scheduler").summarize({ project: "todooverkill", max_runs: 1, order: "project", graph: "master", skip_label: "manual" })).toBe(
+    "Let handoff start up to 1 run at a time on Ready tasks in todooverkill, in Project order, with graph master, skipping tasks labelled manual",
+  );
+  expect(toolSpec("start_scheduler").summarize({ project: "todooverkill", max_runs: 1, order: "project", graph: "master", skip_label: null })).toBe(
+    "Let handoff start up to 1 run at a time on Ready tasks in todooverkill, in Project order, with graph master, skipping no label",
+  );
+  expect(toolSpec("stop_scheduler")).toMatchObject({ kind: "data", confirm: false, readOnly: false, idempotent: true });
+  expect(toolSpec("stop_scheduler").summarize({ project: "todooverkill" })).toBe("Turn off the scheduler of todooverkill");
+});

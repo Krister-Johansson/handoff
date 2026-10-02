@@ -1,12 +1,18 @@
-import { afterAll, beforeEach, expect, test } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
 import { eq, notifications, questions, wakeByToken } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { answerQuestion } from "../operations.ts";
-import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
+import { createRun } from "../runs.ts";
+import { createOriginRepo, git, landOnMain } from "../testing/git.ts";
+import { drain, engineDeps, inspect, seedGraph, startRun } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
-import type { ExecutorRegistry } from "../types.ts";
+import type { ExecutorRegistry, NodeExecutor } from "../types.ts";
+import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { cliNodeExecutor } from "./cli-node.ts";
 import { humanGateExecutor } from "./human-gate.ts";
 
@@ -102,6 +108,74 @@ test("answering a question twice is refused", async () => {
   const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
   await answerQuestion(db, question!.id, { answer: "ISO", answeredBy: "a" });
   await expect(answerQuestion(db, question!.id, { answer: "US", answeredBy: "b" })).rejects.toThrow(/already answered/);
+});
+
+describe("approvals hold until the change changes", () => {
+  /** coder -> gate -> pr; the gate's changes and the PR's fix go back to the coder. */
+  const reviewGraph = {
+    attributes: { startNode: "coder" },
+    nodes: [
+      { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "gate", attributes: { type: "human_gate", x: 300, y: 0 } },
+      { key: "pr", attributes: { type: "pr", x: 600, y: 0 } },
+    ],
+    edges: [
+      { key: "coder->gate", source: "coder", target: "gate", attributes: { port: "done" } },
+      { key: "gate->coder", source: "gate", target: "coder", attributes: { port: "changes" } },
+      { key: "gate->pr", source: "gate", target: "pr", attributes: { port: "approve" } },
+      { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix" } },
+    ],
+  };
+
+  /** The first attempt changes the notes; a later one only merges main, as a coder resolving a conflict would. */
+  const coder: NodeExecutor = {
+    needsWorkdir: true,
+    execute: async (ctx) => {
+      const path = ctx.workdir!.path;
+      if (ctx.execution.attempt === 1) {
+        writeFileSync(join(path, "notes.txt"), "one\ntwo, from the run\nthree\n");
+        git(path, "commit", "-qam", "Change the notes");
+      } else {
+        git(path, "fetch", "-q", "origin");
+        git(path, "merge", "-q", "--no-edit", "origin/main");
+      }
+      return { kind: "completed", output: { status: "done", summary: "Changed the notes." } };
+    },
+  };
+
+  test("an approval gate passes without a question when the fingerprint matches its last approval", async () => {
+    const origin = createOriginRepo({ "notes.txt": "one\ntwo\nthree\n" });
+    // The first PR attempt finds main moved on and sends the work back, as a conflict elsewhere would.
+    const pr = scripted(
+      () => {
+        landOnMain(origin, "LICENSE", "MIT\n");
+        return done({ sync: "conflict", conflict: { base: "main", baseSha: "0".repeat(40), files: ["LICENSE"] } });
+      },
+      { kind: "waiting", wait: { kind: "github_pr", key: "stop-here" } },
+    );
+    const { project, graphVersion } = await seedGraph(db, reviewGraph, { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Change the notes" });
+    const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
+    const deps = engineDeps(db, { coder, pr, human_gate: humanGateExecutor({ db }) }, { workdirs });
+    await drain(deps);
+    const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+    await answerQuestion(db, question!.id, { answer: "Approved.", option: "approve", answeredBy: "krister" });
+    await drain(deps);
+
+    const { executions, events } = await inspect(db, run.id);
+    expect(await db.select().from(questions).where(eq(questions.runId, run.id))).toHaveLength(1);
+    expect(executions.map((e) => [e.nodeKey, e.attempt, e.status])).toEqual([
+      ["coder", 1, "passed"],
+      ["gate", 1, "passed"],
+      ["pr", 1, "passed"],
+      ["coder", 2, "passed"],
+      ["gate", 2, "passed"],
+      ["pr", 2, "waiting"],
+    ]);
+    expect(executions.find((e) => e.nodeKey === "gate" && e.attempt === 2)!.output).toMatchObject({ option: "approve", approved: true, answeredBy: "krister" });
+    const held = events.find((e) => e.type === "approval.held");
+    expect((held?.payload as { message?: string } | undefined)?.message).toMatch(/^Unchanged since your approval at .+; only main was merged in$/);
+  });
 });
 
 test("a gate reached by loop exhaustion asks whether to retry and offers abort", async () => {

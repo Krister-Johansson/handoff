@@ -375,7 +375,7 @@ export type PlanItemsQuery = { user: { projectV2: { items: { pageInfo: { hasNext
             | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
                   | { login: string }
                   | { login: string }
-                 }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
+                 }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
             | { __typename: 'PullRequest' }
            | null } | null> | null } } | null } | null };
 
@@ -1167,6 +1167,7 @@ export const PlanItemsDocument = new TypedDocumentString(`
               assignees(first: 10) {
                 nodes {
                   login
+                  avatarUrl
                 }
               }
               issueType {

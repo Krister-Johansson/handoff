@@ -6,6 +6,7 @@ import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isCo
 import type { Db } from "@handoff/db";
 import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
+import { heldApproval, recordApproval } from "../approvals.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { runIdentity } from "../workdir/setup.ts";
 
@@ -148,6 +149,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "cli nodes need a workdir" } };
       const contractName = ctx.node.contract.output;
       if (!isContractName(contractName)) return { kind: "failed", error: { code: "unknown_contract", message: contractName } };
+      // A code review that approved this same change, with at most the base merged in since, keeps its verdict.
+      if (ctx.node.type === "code_review" && (await heldApproval(ctx))) return { kind: "completed", output: ctx.state.nodes[ctx.node.key]!.output };
 
       const answer = answerToResume(ctx);
       const session: CliSession = ctx.execution.executorSessionId
@@ -274,16 +277,17 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
         return { kind: "failed", error: { code: "mcp_unavailable", message: `MCP servers did not start: ${mcpProblems.join(", ")}` } };
       }
       switch (result.outcome) {
-        case "success":
-          return {
-            kind: "completed",
-            output: result.validated,
-            cost,
+        case "success": {
+          const statePatch: Record<string, unknown> = {
             // A planner's question is not a plan: the run keeps no plan until the answer comes back.
-            ...(ctx.node.type === "planner" && (result.validated as { status?: string }).status !== "needs_input" ? { statePatch: { plan: result.validated } } : {}),
+            ...(ctx.node.type === "planner" && (result.validated as { status?: string }).status !== "needs_input" ? { plan: result.validated } : {}),
             // A review remembers the commit it looked at, so its next round can look only at what changed since.
-            ...(reviewedAt ? { statePatch: { reviewedAt: { ...(ctx.state.reviewedAt as Record<string, string> | undefined), [ctx.node.key]: reviewedAt } } } : {}),
+            ...(reviewedAt ? { reviewedAt: { ...(ctx.state.reviewedAt as Record<string, string> | undefined), [ctx.node.key]: reviewedAt } } : {}),
+            // A code review's approval holds until the run's own change changes.
+            ...(ctx.node.type === "code_review" && (result.validated as { verdict?: string }).verdict === "approve" ? await recordApproval(ctx, { at: new Date().toISOString() }) : {}),
           };
+          return { kind: "completed", output: result.validated, cost, ...(Object.keys(statePatch).length ? { statePatch } : {}) };
+        }
         case "interrupted":
           return { kind: "interrupted" };
         default:

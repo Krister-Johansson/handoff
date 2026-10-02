@@ -15,6 +15,8 @@ import { lastGitHubActivity } from "@/server/plan-activity";
 import { planSignals } from "@/server/plan-signals";
 import { tokenUser } from "@/server/assignees";
 import { planAssignAction, planPeopleAction } from "@/app/projects/issue-actions";
+import { SchedulerCard } from "@/components/scheduler/scheduler-card";
+import { loadSchedulerCard, nextPlaces } from "@/server/scheduler-card";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +29,14 @@ async function loadPlanPage(projectId: string) {
     lastGitHubActivity(db, projectId),
     tokenUser(getGitHub()),
   ]);
-  const signals = detail && !("reason" in plan) ? await planSignals(db, projectId, Object.values(plan.board).flat()) : { needsYou: [], skipped: {} };
+  const tasks = "reason" in plan ? [] : Object.values(plan.board).flat();
+  // The scheduler's Next up comes from this read of the plan while its last check has none.
+  const [signals, scheduler] =
+    detail && !("reason" in plan)
+      ? await Promise.all([planSignals(db, projectId, tasks), loadSchedulerCard(db, projectId, { items: tasks, priorityOptions: plan.project.priorityOptions })])
+      : [{ needsYou: [], skipped: {} }, undefined];
   const crumbs = detail ? [projectCrumb(detail.project), { label: "Plan" }] : [];
-  return { detail, plan, activity, signals, crumbs, me, readAt: Date.now() };
+  return { detail, plan, activity, signals, scheduler, crumbs, me, readAt: Date.now() };
 }
 
 /** A project's plan from its GitHub Project: epics, stories and tasks as a tree, a board or a timeline. */
@@ -41,7 +48,7 @@ export default async function PlanPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [{ projectId }, query] = await Promise.all([params, searchParams]);
-  const { detail, plan, activity, signals, crumbs, me, readAt } = await loadPlanPage(projectId);
+  const { detail, plan, activity, signals, scheduler, crumbs, me, readAt } = await loadPlanPage(projectId);
   if (!detail || ("reason" in plan && plan.reason === "not-found")) notFound();
   const { project, graphs, defaultGraph } = detail;
 
@@ -61,7 +68,17 @@ export default async function PlanPage({
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-6">
       <PlanHeader crumbs={crumbs} projectId={project.id} project={plan.project} ready={readyInBacklog(plan.board.Ready)} />
+      {scheduler && !project.isDemo && (
+        <SchedulerCard
+          project={{ id: project.id, name: project.name }}
+          card={scheduler}
+          form={{ graphs: graphs.map((g) => g.name), defaultGraph, planNumber: plan.project.number, priority: plan.project.priorityOptions !== undefined }}
+          start={{ graphs: graphs.map((g) => g.name), graphName: defaultGraph }}
+          now={new Date(readAt)}
+        />
+      )}
       <PlanTab
+        next={scheduler && nextPlaces(scheduler)}
         project={project}
         plan={plan}
         view={parsePlanView(query)}

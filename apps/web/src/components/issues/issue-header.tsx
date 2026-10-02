@@ -151,7 +151,7 @@ function State({ state }: { state: "open" | "closed" }) {
 export function IssueHeader({ page, project, start, runs }: { page: FoundIssue; project: ProjectRef; start: StartRunContext; runs: IssueRun[] }) {
   const { issue, kind } = page;
   const label = KIND_LABEL[kind];
-  const assignees = new Set(issue.assignees);
+  const assignees = new Set(issue.assignees.map((a) => a.login));
   const assignedAtStart = runs.some((r) => r.assigned !== null && assignees.has(r.assigned));
   const dates = datesOf(page);
   const crumb = kind === "story" || kind === "epic" ? `${label} #${issue.number}` : `#${issue.number} ${issue.title}`;
@@ -176,7 +176,7 @@ export function IssueHeader({ page, project, start, runs }: { page: FoundIssue; 
         <State state={issue.state} />
         <Labels labels={issue.labels} />
         <span className="inline-flex flex-wrap items-center gap-2">
-          <Assignees key={issue.assignees.join(",")} projectId={project.id} issue={issue.number} assignees={issue.assignees} viewer={page.viewer} assignMe={kind === "task" || kind === "issue"} />
+          <Assignees key={[...assignees].join(",")} projectId={project.id} issue={issue.number} assignees={issue.assignees} viewer={page.viewer} assignMe={kind === "task" || kind === "issue"} />
           {assignedAtStart && <span className="text-xs text-muted-foreground">assigned at Start run</span>}
         </span>
         {dates && <Fact icon={CalendarIcon}>{dates}</Fact>}

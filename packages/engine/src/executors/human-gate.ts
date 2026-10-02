@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, questionBrief, reviewPath, runPath, tryPath, type DiffFile, type NodeMemory } from "@handoff/core";
 import { previews, questions, type Db } from "@handoff/db";
+import { heldApproval, recordApproval } from "../approvals.ts";
 import { notifyFrom, type Told } from "../notify.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
@@ -76,11 +77,17 @@ export function reviewOf(fromType: string | undefined, output: unknown): { kind:
  */
 type Review = { from: string; kind: string; markdown: string; files?: DiffFile[]; backTo?: string };
 
+/** The step a reviewer looked at, when it has output in the run. */
+function reviewedBy(ctx: ExecutorContext, reviewer: string): string | undefined {
+  const reviewed = ctx.graph.inEdges(reviewer).find((e) => !e.loop)?.source;
+  return reviewed && ctx.state.nodes[reviewed]?.output !== undefined ? reviewed : undefined;
+}
+
 function reviewFor(ctx: ExecutorContext, from: string): Review {
   const sender = ctx.graph.node(from);
   const output = ctx.state.nodes[from]?.output;
   if (sender?.type === "reviewer") {
-    const reviewed = ctx.graph.inEdges(from).find((e) => !e.loop)?.source;
+    const reviewed = reviewedBy(ctx, from);
     const work = reviewed ? ctx.state.nodes[reviewed]?.output : undefined;
     if (reviewed && work !== undefined) {
       const main = reviewOf(ctx.graph.node(reviewed)?.type, work);
@@ -89,6 +96,21 @@ function reviewFor(ctx: ExecutorContext, from: string): Review {
     }
   }
   return { from, ...reviewOf(sender?.type, output) };
+}
+
+/**
+ * Whether the gate approves the branch's code, so an approval holds while the run's own change stays
+ * the same: a Try it gate, or an approval gate after a step that works on the branch. A plan, a
+ * question or an exhausted loop is not code.
+ */
+function approvesCode(ctx: ExecutorContext): boolean {
+  const mode = gateMode(ctx.node.config);
+  if (mode === "try") return true;
+  const trigger = ctx.execution.trigger;
+  if (mode !== "approval" || trigger?.kind !== "edge" || !trigger.from) return false;
+  if ((ctx.state.nodes[trigger.from]?.output as { question?: { text?: unknown } } | undefined)?.question?.text) return false;
+  const from = ctx.graph.node(trigger.from)?.type === "reviewer" ? (reviewedBy(ctx, trigger.from) ?? trigger.from) : trigger.from;
+  return CODE_SENDERS.has(ctx.graph.node(from)?.type ?? "");
 }
 
 /** After a node that works on the branch, the review is the code: the sender's summary and the diff. */
@@ -202,7 +224,14 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
         const { [ctx.node.key]: _used, ...rest } = approvedAfterFixes;
         ctx.emit("human.auto_approved", { approvedBy: by });
         const answer = { answer: "Approved after fixes.", option: "approve", approved: true, answeredBy: by, answeredAt: new Date().toISOString() };
-        return { kind: "completed", output: answer, statePatch: { human: { ...ctx.state.human, [ctx.node.key]: answer }, approvedAfterFixes: rest } };
+        const approval = approvesCode(ctx) ? await recordApproval(ctx, { at: answer.answeredAt, by }) : undefined;
+        return { kind: "completed", output: answer, statePatch: { human: { ...ctx.state.human, [ctx.node.key]: answer }, approvedAfterFixes: rest, ...approval } };
+      }
+      // The code is what the person approved last time, with at most the base merged in: that approval holds.
+      const held = !question && approvesCode(ctx) ? await heldApproval(ctx) : undefined;
+      if (held) {
+        const answer = { answer: held.message, option: "approve", approved: true, answeredBy: held.approval.by ?? "unknown", answeredAt: new Date().toISOString() };
+        return { kind: "completed", output: answer, statePatch: { human: { ...ctx.state.human, [ctx.node.key]: answer } } };
       }
       if (!question) {
         const ask = tryIt ? await composeTry(ctx, deps) : await compose(ctx, deps.branchDiff);
@@ -243,6 +272,8 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
       };
       const statePatch: Record<string, unknown> = { human: { ...ctx.state.human, [ctx.node.key]: answer } };
       if (afterFixes) statePatch.approvedAfterFixes = { ...approvedAfterFixes, [ctx.node.key]: { answeredBy: answer.answeredBy } };
+      // An approval of the code holds until the run's own change changes.
+      if (option === "approve" && approvesCode(ctx)) Object.assign(statePatch, await recordApproval(ctx, { at: answer.answeredAt, by: answer.answeredBy }));
       // A review that asks for changes, comments, or has a note of its own is a decision every later step must keep to.
       const note = DEFAULT_NOTES.has(question.answer.trim()) ? undefined : question.answer;
       const decided = option === "changes" || option === "reject" || question.comments.length > 0 || note !== undefined;

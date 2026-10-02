@@ -10,6 +10,7 @@ import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
+import { withNetworkRetry } from "../workdir/network.ts";
 import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
 
 const execFileAsync = promisify(execFile);
@@ -130,9 +131,9 @@ type Sync = { status: "up_to_date" | "merged"; baseSha: string } | { status: "co
  * coder left it, and the conflicting files are reported. The merge commit uses the machine's git
  * identity, or handoff's when none is set.
  */
-async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv): Promise<Sync> {
+async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv, retryMs?: number): Promise<Sync> {
   const run = async (args: string[]) => (await execFileAsync("git", args, { cwd, env })).stdout.trim();
-  await run(["fetch", "-q", "origin", base]);
+  await withNetworkRetry(() => run(["fetch", "-q", "origin", base]), retryMs);
   const baseSha = await run(["rev-parse", "FETCH_HEAD"]);
   const behind = await run(["merge-base", "--is-ancestor", baseSha, "HEAD"]).then(
     () => false,
@@ -166,7 +167,14 @@ const title = (task: string) => (task.length > 72 ? `${task.slice(0, 69)}...` : 
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
  */
-export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number; db?: Db; projects?: ProjectsPort | undefined }): NodeExecutor {
+export function prNodeExecutor(deps: {
+  github: GitHubPort;
+  reconcileMs?: number;
+  db?: Db;
+  projects?: ProjectsPort | undefined;
+  /** The first wait before a failed fetch or push is tried again; tests shorten it. */
+  gitRetryMs?: number;
+}): NodeExecutor {
   return {
     needsWorkdir: true,
     async execute(ctx): Promise<ExecutorOutcome> {
@@ -180,7 +188,7 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number;
         if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "PR node needs the run worktree to push" } };
         const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(await deps.github.gitAuthEnv(repo)) };
         // Main may have moved since the run branched off it: catch up first, so the pull request is not born behind or in conflict.
-        const sync = await syncWithBase(ctx.workdir.path, ctx.run.baseBranch, env);
+        const sync = await syncWithBase(ctx.workdir.path, ctx.run.baseBranch, env, deps.gitRetryMs);
         if (sync.status === "conflict") {
           ctx.emit("github.conflict", { base: ctx.run.baseBranch, baseSha: sync.baseSha, files: sync.files });
           if (!routes(ctx, "fix")) {
@@ -191,7 +199,8 @@ export function prNodeExecutor(deps: { github: GitHubPort; reconcileMs?: number;
           return { kind: "completed", output: { sync: "conflict", conflict: { base: ctx.run.baseBranch, baseSha: sync.baseSha, files: sync.files } } };
         }
         ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged" });
-        await execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd: ctx.workdir.path, env });
+        const cwd = ctx.workdir.path;
+        await withNetworkRetry(() => execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd, env }), deps.gitRetryMs);
         // A Demo step's screenshots go to the assets branch so the description can show them; failing that, the PR opens without them.
         const taken = deps.db ? await latestScreenshots(deps.db, ctx.run.id) : [];
         if (taken.length) {

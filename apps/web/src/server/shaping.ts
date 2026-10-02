@@ -193,18 +193,26 @@ export async function planIssue(deps: ShapingDeps, projectId: string, input: { i
   if (input.story !== undefined) await parentOf(planned, input.story, "story");
   await planned.plan.addIssue(planned.repo, { project: planned.number, issue: input.issue, labels: ["task"], ...(input.story !== undefined ? { parent: input.story } : {}) });
   const run = runs.get(input.issue);
-  const status = run ? await statusFromRun(deps.db, planned, run, input.issue) : undefined;
+  // The issue joined the plan in Shaping, the Status a cancel of its run puts back.
+  const status = run ? await statusFromRun(deps.db, planned, run, input.issue, "Shaping") : undefined;
   return { number: input.issue, kind: "task" as const, status: status ?? ("Shaping" as const), parent: input.story ?? null };
 }
 
 /**
  * Sets an item of the plan that `run` works on to the Status the run owns, recorded on the run as the
- * run's own writes are. Returns the Status written; undefined for a run that ended or a skipped write.
+ * run's own writes are, with the Status the item had (`from`) for a cancel of the run to put back.
+ * Returns the Status written; undefined for a run that ended or a skipped write.
  */
-async function statusFromRun(db: Db, { plan, project, number }: Pick<Planned, "plan" | "project" | "number">, run: BacklogRun, issue: number) {
+async function statusFromRun(
+  db: Db,
+  { plan, project, number }: Pick<Planned, "plan" | "project" | "number">,
+  run: BacklogRun,
+  issue: number,
+  from: PlanStatus | undefined,
+) {
   const owned = ownedStatus(run);
   if (!owned) return undefined;
-  const [event] = await recordPlanStatus(db, run.id, plan, { ...project, planProjectNumber: number }, [issue], owned);
+  const [event] = await recordPlanStatus(db, run.id, plan, { ...project, planProjectNumber: number }, [issue], owned, new Map([[issue, from]]));
   return event?.type === "plan.status" ? owned : undefined;
 }
 
@@ -219,7 +227,7 @@ async function statusesFromRuns(db: Db, planned: Pick<Planned, "plan" | "project
     items.map(async (item) => {
       const run = runs.get(item.number);
       if (!run || item.state === "closed" || item.status === ownedStatus(run)) return [];
-      const status = await statusFromRun(db, planned, run, item.number);
+      const status = await statusFromRun(db, planned, run, item.number, item.status);
       return status ? [{ issue: item.number, status, run: run.id }] : [];
     }),
   );

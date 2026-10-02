@@ -7,10 +7,11 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRun } from "../runs.ts";
-import { createOriginRepo, git } from "../testing/git.ts";
+import { createOriginRepo, git, landOnMain } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph, startRun } from "../testing/harness.ts";
+import { done, scripted } from "../testing/scripted.ts";
 import { runOnce } from "../scheduler/worker.ts";
-import type { ExecutorRegistry } from "../types.ts";
+import type { ExecutorRegistry, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { cliNodeExecutor } from "./cli-node.ts";
 
@@ -286,4 +287,65 @@ test("a max-turns failure stores the subtype, turn count, cost and last message"
     costUsd: "0.750000",
     error: { code: "cli_error_max_turns", detail: { subtype: "error_max_turns", turns: 40, costUsd: 0.75, lastMessage: "Committed the parser; the formatter is not done." } },
   });
+});
+
+test("code review is skipped with the earlier verdict when the fingerprint matches", async () => {
+  const origin = createOriginRepo({ "notes.txt": "one\ntwo\nthree\n" });
+  // The first attempt changes the notes; the second only merges main, as a coder resolving a conflict would.
+  const coder: NodeExecutor = {
+    needsWorkdir: true,
+    execute: async (ctx) => {
+      const path = ctx.workdir!.path;
+      if (ctx.execution.attempt === 1) {
+        writeFileSync(join(path, "notes.txt"), "one\ntwo, from the run\nthree\n");
+        git(path, "commit", "-qam", "Change the notes");
+      } else {
+        git(path, "fetch", "-q", "origin");
+        git(path, "merge", "-q", "--no-edit", "origin/main");
+      }
+      return { kind: "completed", output: { status: "done", summary: "Changed the notes." } };
+    },
+  };
+  // The first PR attempt finds main moved on and sends the work back.
+  const pr = scripted(
+    () => {
+      landOnMain(origin, "LICENSE", "MIT\n");
+      return done({ sync: "conflict", conflict: { base: "main", baseSha: "0".repeat(40), files: ["LICENSE"] } });
+    },
+    { kind: "waiting", wait: { kind: "github_pr", key: "stop-here" } },
+  );
+  const graph = {
+    attributes: { startNode: "coder" },
+    nodes: [
+      { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "review", attributes: { type: "code_review", x: 300, y: 0 } },
+      { key: "pr", attributes: { type: "pr", x: 600, y: 0 } },
+    ],
+    edges: [
+      { key: "coder->review", source: "coder", target: "review", attributes: { port: "done" } },
+      { key: "review->coder", source: "review", target: "coder", attributes: { port: "changes" } },
+      { key: "review->pr", source: "review", target: "pr", attributes: { port: "approve" } },
+      { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix" } },
+    ],
+  };
+  const verdict = { verdict: "approve", comments: [{ path: "notes.txt", line: 2, body: "Consider a full stop." }] };
+  const cli = new FakeCliExecutor([{ output: verdict }]);
+  const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Change the notes" });
+  const executors = { coder, code_review: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr } as unknown as ExecutorRegistry;
+  await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+
+  const { executions, events } = await inspect(db, run.id);
+  expect(cli.requests).toHaveLength(1);
+  expect(executions.map((e) => [e.nodeKey, e.attempt, e.status])).toEqual([
+    ["coder", 1, "passed"],
+    ["review", 1, "passed"],
+    ["pr", 1, "passed"],
+    ["coder", 2, "passed"],
+    ["review", 2, "passed"],
+    ["pr", 2, "waiting"],
+  ]);
+  expect(executions.find((e) => e.nodeKey === "review" && e.attempt === 2)!.output).toEqual(verdict);
+  const held = events.find((e) => e.type === "approval.held");
+  expect((held?.payload as { message?: string } | undefined)?.message).toMatch(/^Unchanged since your approval at .+; only main was merged in$/);
 });

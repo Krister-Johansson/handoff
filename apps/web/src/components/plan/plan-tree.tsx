@@ -22,6 +22,7 @@ import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-
 import { matchesQuery } from "@/lib/plan/search";
 import { useSearchQuery } from "./plan-context";
 import { useRowsOpen } from "./use-collapsed";
+import { NextTag } from "@/components/scheduler/next-tag";
 
 type Props = StartRunContext & {
   projectId: string;
@@ -33,6 +34,8 @@ type Props = StartRunContext & {
   needsYou: string[];
   /** Why the latest status write for an issue was skipped, by issue number, as summarizeEvent words it. */
   skipped?: Record<number, string>;
+  /** The scheduler's next tasks, by issue number, with their place in its order. */
+  next?: Record<number, number> | undefined;
   /** Per epic, how many of its tasks the filters or the search hide. */
   hidden?: Record<number, number>;
   /** What hides them, for the line under the epic. */
@@ -41,7 +44,7 @@ type Props = StartRunContext & {
   searchOpen?: Set<string> | undefined;
 };
 
-type RowContext = StartRunContext & Pick<Props, "projectId" | "repoUrl" | "needsYou" | "skipped">;
+type RowContext = StartRunContext & Pick<Props, "projectId" | "repoUrl" | "needsYou" | "skipped" | "next">;
 
 /** The row that holds the tree's one tab stop. */
 const ActiveRow = createContext<string | undefined>(undefined);
@@ -128,6 +131,7 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
         </span>
 
         <TaskTags task={task} skipped={ctx.skipped?.[task.number]} />
+        <NextTag place={ctx.next?.[task.number]} />
         {outside && task.parent !== undefined && <Tag>parent #{task.parent} is not in the plan</Tag>}
         {column !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={ctx.repoUrl} />}
       </span>
