@@ -159,3 +159,37 @@ test("/ focuses the search; Escape clears it, then moves to the tree; Enter goes
   expect(treeRow(/Task #58/)).toHaveFocus();
   expect(collapsedRows()).toEqual([]);
 });
+
+test("Expand all and Collapse all act on every epic, story and block, are off when they would change nothing or during a search, and work in Timeline", () => {
+  const { unmount } = renderTab();
+  const expand = () => screen.getByRole("button", { name: "Expand all" });
+  const collapse = () => screen.getByRole("button", { name: "Collapse all" });
+  expect(expand()).toBeDisabled();
+  expect(collapse()).toBeEnabled();
+
+  fireEvent.click(collapse());
+  expect(collapsedRows().toSorted()).toEqual(["e10", "e12", "s18", "s40", "s41", "unplanned"]);
+  expect(treeRow(/Epic #12/)).toHaveAttribute("aria-expanded", "false");
+  expect(collapse()).toBeDisabled();
+  expect(expand()).toBeEnabled();
+
+  fireEvent.click(expand());
+  expect(collapsedRows()).toEqual([]);
+  expect(treeRow(/Story #41/)).toHaveAttribute("aria-expanded", "true");
+
+  fireEvent.change(searchBox(), { target: { value: "voice" } });
+  expect(expand()).toBeDisabled();
+  expect(collapse()).toBeDisabled();
+  unmount();
+
+  const board = renderTab({ view: "board" });
+  expect(screen.queryByRole("button", { name: "Collapse all" })).not.toBeInTheDocument();
+  board.unmount();
+
+  renderTab({ view: "timeline", zoom: "weeks" });
+  fireEvent.click(collapse());
+  expect(screen.getByRole("row", { name: "Epic #12 Project management" })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("row", { name: /Task #58/ })).not.toBeInTheDocument();
+  // The timeline has no Unplanned block, so it collapses only epics and stories.
+  expect(collapsedRows().toSorted()).toEqual(["e10", "e12", "s18", "s40", "s41"]);
+});

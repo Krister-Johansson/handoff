@@ -23,7 +23,7 @@ import { FilterChips, PlanFilters } from "./plan-filters";
 import { PlanRefresher } from "./plan-refresher";
 import { PlanSearchField, SearchQuery } from "./plan-search";
 import { PlanTimeline } from "./plan-timeline";
-import { PlanToolbar } from "./plan-toolbar";
+import { ExpandCollapse, PlanToolbar } from "./plan-toolbar";
 import { PlanTree } from "./plan-tree";
 import { useCollapsed } from "./use-collapsed";
 
@@ -138,6 +138,15 @@ function peopleOf(plan: PlanView, me: string | undefined): string[] {
   return [...logins].filter((l) => l.toLowerCase() !== me?.toLowerCase()).toSorted((a, b) => a.localeCompare(b));
 }
 
+/** The collapse keys of the rows that open and close in a view: epics, stories, and the tree's Unparented and Unplanned blocks. */
+function rowsOf(plan: NarrowedPlan, view: PlanViewName): string[] {
+  return [
+    ...plan.epics.flatMap((e) => [`e${e.number}`, ...e.stories.map((s) => `s${s.number}`)]),
+    ...(plan.unparented.length ? ["unparented"] : []),
+    ...(view === "tree" && plan.unplanned.length ? ["unplanned"] : []),
+  ];
+}
+
 /** The search text, with ?q= written to the URL a moment after the last key so a link or a refresh keeps it. */
 function useSearchText(initial: string, url: (q: string) => string) {
   const [text, setText] = useState(initial);
@@ -196,6 +205,7 @@ export function PlanTab({ activity, me, ...props }: PlanTabProps) {
           projectId={project.id}
           view={view}
           filters={current}
+          expand={view !== "board" && <ExpandCollapse projectId={project.id} rows={rowsOf(narrowed, view)} searching={found.active} />}
           search={
             <PlanSearchField
               value={query}
