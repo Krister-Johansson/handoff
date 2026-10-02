@@ -1,5 +1,5 @@
 import { and, appendEvents, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
-import { brief, questionBrief } from "../lib/brief";
+import { brief, questionBrief } from "@handoff/core";
 import { reviewPath, runPath } from "../lib/paths";
 import type { AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";

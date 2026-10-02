@@ -109,17 +109,19 @@ describe("merge queue", () => {
     await wakeByKey(db, `mq:${quiet.project.id}`, { reason: "merge_queue" });
     await drain(quiet.deps);
     const number = await quiet.prOf(quiet.first.id);
-    expect(await notifications(quiet.first.id)).toEqual([{ kind: "ready", nodeKey: "merge", number }]);
+    const ready = { kind: "ready", nodeKey: "merge", number, title: `${quiet.project.name}: PR #${number} is ready to merge`, body: "First" };
+    expect(await notifications(quiet.first.id)).toEqual([ready]);
     await requestMerge(db, quiet.first.id);
     await drain(quiet.deps);
-    expect(await notifications(quiet.first.id)).toEqual([{ kind: "ready", nodeKey: "merge", number }]);
+    expect(await notifications(quiet.first.id)).toEqual([ready]);
 
     await truncateAll(db);
     const told = await twoRuns("manual", undefined, { ready: false, merged: true });
     await told.ready(told.first.id);
     await requestMerge(db, told.first.id);
     await drain(told.deps);
-    expect(await notifications(told.first.id)).toEqual([{ kind: "merged", nodeKey: "merge", number: await told.prOf(told.first.id) }]);
+    const merged = await told.prOf(told.first.id);
+    expect(await notifications(told.first.id)).toEqual([{ kind: "merged", nodeKey: "merge", number: merged, title: `${told.project.name}: PR #${merged} merged`, body: "First" }]);
   });
 
   test("a pull request whose issue became blocked on GitHub stays out of the queue until the blocker closes", async () => {

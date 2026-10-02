@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { redactSecrets } from "@handoff/core";
+import { describePermission, redactSecrets } from "@handoff/core";
 import { and, desc, eq, events, listLibraryIndex, nodeExecutions, projects, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort } from "@handoff/github";
@@ -14,7 +14,6 @@ import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog"
 import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
 import { reviewPath, runPath, tryPath } from "../lib/paths";
-import { describePermission } from "../lib/permission";
 import { inboxGroups } from "./inbox-groups";
 import { listNotifications } from "./notifications";
 

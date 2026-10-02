@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { matchingEdges, mergeState, notifies, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
-import { appendEvents, edgeTraversals, nodeExecutions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
+import { brief, matchingEdges, mergeState, notifies, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type Notification, type RunState } from "@handoff/core";
+import { appendEvents, edgeTraversals, nodeExecutions, projects, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import type { ExecutionError } from "../types.ts";
 
 export class LeaseLostError extends Error {
@@ -138,6 +138,13 @@ async function route(
   return { events, created, arrived, exhausted, state: next };
 }
 
+/** The run's project and task, which a notification about how the run ended names. */
+async function runText(tx: DbTx, runId: string) {
+  const [row] = await tx.select({ project: projects.name, task: runs.task }).from(runs).innerJoin(projects, eq(projects.id, runs.projectId)).where(eq(runs.id, runId));
+  if (!row) throw new Error(`run ${runId} not found`);
+  return row;
+}
+
 async function finishRouting(
   tx: DbTx,
   graph: CompiledGraph,
@@ -156,14 +163,23 @@ async function finishRouting(
       status = "failed";
       const reason = failure ? "node_failed" : routed.exhausted ? "loop_exhausted" : "no_route";
       // The node's notification comes first, so the run's end stays its last event.
-      if (notifies(graph.node(row.nodeKey), "failed")) events.push({ type: "notify", payload: { kind: "failed", nodeKey: row.nodeKey, reason }, nodeExecutionId: row.id });
+      if (notifies(graph.node(row.nodeKey), "failed")) {
+        const { project, task } = await runText(tx, runId);
+        const title = reason === "loop_exhausted" ? `${project}: ${row.nodeKey} ran out of rounds` : `${project}: run failed at ${row.nodeKey}`;
+        const told: Notification = { kind: "failed", nodeKey: row.nodeKey, reason, title, body: brief(task) };
+        events.push({ type: "notify", payload: told, nodeExecutionId: row.id });
+      }
       events.push({
         type: "run.failed",
         payload: { nodeKey: row.nodeKey, reason, ...(failure ? { error: failure } : {}), awaiting: "repair" },
       });
     } else {
       status = "succeeded";
-      if (notifies(graph.node(row.nodeKey), "finished")) events.push({ type: "notify", payload: { kind: "finished", nodeKey: row.nodeKey }, nodeExecutionId: row.id });
+      if (notifies(graph.node(row.nodeKey), "finished")) {
+        const { project, task } = await runText(tx, runId);
+        const told: Notification = { kind: "finished", nodeKey: row.nodeKey, title: `${project}: run finished`, body: brief(task) };
+        events.push({ type: "notify", payload: told, nodeExecutionId: row.id });
+      }
       events.push({ type: "run.succeeded", payload: {} });
     }
   }

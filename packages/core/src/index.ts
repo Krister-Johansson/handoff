@@ -17,6 +17,8 @@ export * from "./secrets/redact.ts";
 export * from "./secrets/pass-env.ts";
 export * from "./project-name.ts";
 export * from "./summary/summarize.ts";
+export * from "./summary/brief.ts";
+export * from "./permission.ts";
 export * from "./library/skill-markdown.ts";
 export * from "./review/diff.ts";
 export * from "./acceptance.ts";

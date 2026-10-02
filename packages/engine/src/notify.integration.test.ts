@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
+import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { eq, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { finishExecutor, startExecutor } from "./executors/flow.ts";
@@ -40,34 +41,49 @@ const notifications = async (runId: string) =>
   (await inspect(db, runId)).events.filter((e) => e.type === "notify").map((e) => e.payload as { kind: string; nodeKey: string });
 
 test("by default a gate tells a person it waits for them and Finish that the run finished; Start stays quiet", async () => {
-  const { run } = await startRun(db, graph());
+  const { run, project } = await startRun(db, graph());
   await drain(engineDeps(db, registry()));
   const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
-  expect(await notifications(run.id)).toEqual([{ kind: "input", nodeKey: "gate", questionId: question!.id }]);
+  const asked = { kind: "input", nodeKey: "gate", questionId: question!.id, title: `${project.name}: the plan from planner needs your review`, body: "Add a CHANGELOG.md" };
+  expect(await notifications(run.id)).toEqual([asked]);
 
   await answerQuestion(db, question!.id, { answer: "approve", option: "approve", answeredBy: "krister" });
   await drain(engineDeps(db, registry()));
-  expect((await notifications(run.id)).map((n) => [n.kind, n.nodeKey])).toEqual([
-    ["input", "gate"],
-    ["finished", "finish"],
-  ]);
+  expect(await notifications(run.id)).toEqual([asked, { kind: "finished", nodeKey: "finish", title: `${project.name}: run finished`, body: "Add a CHANGELOG.md" }]);
 });
 
 test("nodes notify only about what their settings turn on", async () => {
-  const { run } = await startRun(db, graph({ start: { started: true }, gate: { input: false } }));
+  const { run, project } = await startRun(db, graph({ start: { started: true }, gate: { input: false } }));
   await drain(engineDeps(db, registry()));
-  expect((await notifications(run.id)).map((n) => [n.kind, n.nodeKey])).toEqual([["started", "start"]]);
+  expect(await notifications(run.id)).toEqual([{ kind: "started", nodeKey: "start", title: `${project.name}: run started`, body: "Add a CHANGELOG.md" }]);
 });
 
 test("a node that fails the run says so, unless its setting is off", async () => {
   const failing = () => scripted({ kind: "failed", error: { code: "boom", message: "planner broke" } });
-  const { run } = await startRun(db, graph());
+  const { run, project } = await startRun(db, graph());
   await drain(engineDeps(db, registry(failing())));
-  expect(await notifications(run.id)).toEqual([{ kind: "failed", nodeKey: "planner", reason: "node_failed" }]);
+  expect(await notifications(run.id)).toEqual([{ kind: "failed", nodeKey: "planner", reason: "node_failed", title: `${project.name}: run failed at planner`, body: "Add a CHANGELOG.md" }]);
 
   const quiet = await startRun(db, graph({ planner: { failed: false } }));
   await drain(engineDeps(db, registry(failing())));
   expect(await notifications(quiet.run.id)).toEqual([]);
+});
+
+test("a run that fails because a loop used its attempts says which step ran out of rounds", async () => {
+  const { exhaustedGate: _gate, ...attributes } = loop.attributes;
+  const { run, project } = await startRun(db, { ...loop, attributes });
+  await drain(engineDeps(db, { planner: scripted(done(outputs.planner, { plan: outputs.planner })), coder: scripted(done(outputs.coderDone)), tester: scripted(done(outputs.testsFail)) }));
+  expect((await inspect(db, run.id)).run.status).toBe("failed");
+  expect(await notifications(run.id)).toEqual([{ kind: "failed", nodeKey: "tester", reason: "loop_exhausted", title: `${project.name}: tester ran out of rounds`, body: "Add a CHANGELOG.md" }]);
+});
+
+test("a notification's body is the run's task on one line, cut to 140 characters", async () => {
+  const task = `Add a CHANGELOG.md\n\n${"It lists every release with its date and what changed. ".repeat(4)}`;
+  const { run } = await startRun(db, graph({ start: { started: true }, gate: { input: false } }), task);
+  await drain(engineDeps(db, registry()));
+  const [started] = (await notifications(run.id)) as unknown as { body: string }[];
+  expect(started!.body).toMatch(/^Add a CHANGELOG\.md It lists every release .*…$/);
+  expect(started!.body.length).toBeLessThanOrEqual(140);
 });
 
 test("Finish's earlier notify switch still decides whether the run's end is news", async () => {
