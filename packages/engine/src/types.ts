@@ -55,7 +55,7 @@ export type ExecutorOutcome =
       cost?: { usd?: number | undefined; usage?: unknown };
     }
   | { kind: "waiting"; wait: { kind: "github_pr" | "human" | "timer" | "merge_queue"; key?: string; token?: string; deadlineAt?: Date } }
-  | { kind: "failed"; error: ExecutionError; retryable?: boolean; retryAfterMs?: number }
+  | { kind: "failed"; error: ExecutionError; retryable?: boolean; retryAfterMs?: number; cost?: { usd?: number | undefined; usage?: unknown } }
   | { kind: "interrupted" };
 
 export interface NodeExecutor {

@@ -454,7 +454,7 @@ async function applyOutcome(
         await db.transaction((tx) => scheduleRetry(tx, { row, workerId, error: outcome.error, delayMs }));
         return;
       }
-      await db.transaction((tx) => completeFailed(tx, { row, workerId, graph, error: outcome.error }));
+      await db.transaction((tx) => completeFailed(tx, { row, workerId, graph, error: outcome.error, cost: outcome.cost }));
       return;
     }
     case "interrupted":

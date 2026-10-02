@@ -279,6 +279,7 @@ export async function completeFailed(
     error: ExecutionError;
     output?: unknown;
     checks?: CheckResult[] | undefined;
+    cost?: { usd?: number | undefined; usage?: unknown } | undefined;
   },
 ) {
   const { row } = input;
@@ -291,6 +292,8 @@ export async function completeFailed(
         status: "failed",
         error: input.error,
         checks: input.checks ?? [],
+        ...(input.cost?.usd !== undefined ? { costUsd: input.cost.usd.toFixed(6) } : {}),
+        ...(input.cost?.usage !== undefined ? { usage: input.cost.usage } : {}),
         ...(input.output !== undefined ? { output: input.output } : {}),
         finishedAt: sql`now()`,
       })

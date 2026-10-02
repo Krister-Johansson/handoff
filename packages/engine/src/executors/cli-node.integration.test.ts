@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
+import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { runOnce } from "../scheduler/worker.ts";
@@ -165,4 +165,25 @@ test("the planner is told ownedPaths is the whole list of files the change may t
   await startRun(db, linear);
   await drain(engineDeps(db, registry(cli)));
   expect(cli.requests[0]!.prompt).toContain("ownedPaths is the whole list of files and directories the change may touch");
+});
+
+/** A fake claude run that says something, then stops at its turn limit. */
+const outOfTurns =
+  (text: string, turns: number, costUsd: number): FakeReply =>
+  async (request, options) => {
+    await options.onSessionId?.(request.session.id);
+    await options.onEvent({ type: "cli.assistant", payload: { type: "assistant", message: { content: [{ type: "text", text }] } } });
+    return { outcome: "error_max_turns", exitCode: 1, stderrTail: "", sessionId: request.session.id, numTurns: turns, costUsd };
+  };
+
+test("a max-turns failure stores the subtype, turn count, cost and last message", async () => {
+  const cli = new FakeCliExecutor([outOfTurns("Reading the date helpers.", 30, 0.5), outOfTurns("Committed the parser; the formatter is not done.", 10, 0.25)]);
+  const { run } = await startRun(db, linear);
+  await runOnce(engineDeps(db, registry(cli)));
+  const planner = (await inspect(db, run.id)).executions[0]!;
+  expect(planner).toMatchObject({
+    status: "failed",
+    costUsd: "0.750000",
+    error: { code: "cli_error_max_turns", detail: { subtype: "error_max_turns", turns: 40, costUsd: 0.75, lastMessage: "Committed the parser; the formatter is not done." } },
+  });
 });
