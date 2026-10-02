@@ -65,14 +65,19 @@ export type Forecast = {
   source: "runs" | "default";
   /** The median wall time of the runs, or the size's default under five runs. */
   minutes: number;
-  /** Agent, queue and waiting-on-you minutes, scaled to add up to `minutes`. */
-  parts: { agent: number; queue: number; waiting: number };
-  /** The median reported cost of a run, in US dollars. */
-  costUsd: number;
+  /** Agent, queue and waiting-on-you minutes, scaled to add up to `minutes`; null for a default. */
+  parts: { agent: number; queue: number; waiting: number } | null;
+  /** The median reported cost of a run, in US dollars; null for a default. */
+  costUsd: number | null;
   runs: number;
-  /** The median wall time measured over the runs. */
-  measuredMinutes: number;
+  /** The median wall time measured over the runs, shown next to a default too; null without runs. */
+  measuredMinutes: number | null;
 };
+
+/** A forecast needs this many runs; under it a size uses its default. */
+export const FORECAST_MIN_RUNS = 5;
+/** Minutes a size takes until it has enough runs of its own. */
+export const DEFAULT_MINUTES: Record<PlanSize, number> = { S: 30, M: 60, L: 120 };
 
 /** The median, the mean of the middle two for an even count. */
 function median(values: number[]): number {
@@ -86,7 +91,11 @@ function median(values: number[]): number {
  * run, so agent, queue and waiting add up to the median shown.
  */
 export function forecastOf(samples: ForecastSample[], size: PlanSize): Forecast {
-  const minutes = median(samples.map((s) => s.wallMs)) / 60_000;
+  const measured = samples.length > 0 ? median(samples.map((s) => s.wallMs)) / 60_000 : null;
+  if (measured === null || samples.length < FORECAST_MIN_RUNS) {
+    return { size, source: "default", minutes: DEFAULT_MINUTES[size], parts: null, costUsd: null, runs: samples.length, measuredMinutes: measured };
+  }
+  const minutes = measured;
   const sum = (part: (s: ForecastSample) => number) => samples.reduce((total, s) => total + part(s), 0);
   const agent = sum((s) => s.agentMs);
   const queue = sum((s) => s.queueMs);

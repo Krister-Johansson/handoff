@@ -74,3 +74,10 @@ test("usually is the median wall time and the parts add up to it", () => {
   // An even count takes the mean of the middle two, as percentile_cont(0.5) does.
   expect(forecastOf([...samples, sample(80, 0, 0, 5)], "M")).toMatchObject({ minutes: 65, costUsd: 3.5, runs: 6 });
 });
+
+test("under five runs a size uses its default and keeps the measured median and count", () => {
+  const four = [sample(80, 10, 20, 4), sample(100, 0, 10, 5), sample(90, 10, 10, 6), sample(60, 0, 0, 7)];
+  expect(forecastOf(four, "L")).toEqual({ size: "L", source: "default", minutes: 120, parts: null, costUsd: null, runs: 4, measuredMinutes: 110 });
+  expect(forecastOf([], "S")).toEqual({ size: "S", source: "default", minutes: 30, parts: null, costUsd: null, runs: 0, measuredMinutes: null });
+  expect(forecastOf([sample(50, 0, 0, 1)], "M")).toMatchObject({ source: "default", minutes: 60, runs: 1, measuredMinutes: 50 });
+});
