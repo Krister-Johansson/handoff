@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { LinkedIssue } from "@handoff/core";
-import { graphs, graphVersions, projects, runs, type Db, type DbExecutor } from "@handoff/db";
+import { graphs, graphVersions, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { recordPlanStatus } from "./plan-status.ts";
 import { createRun } from "./runs.ts";
@@ -19,6 +19,8 @@ export type StartRunInput = {
   startedBy?: string | undefined;
   /** The plan's items as the caller already read them: the Ready gate uses them instead of reading the Project again. */
   items?: PlanItem[] | undefined;
+  /** Events the starter records on the run right after run.created, such as the scheduler's run.scheduled. */
+  events?: NewEvent[] | undefined;
 };
 
 export type StartRunPorts = { github?: GitHubPort | undefined; projects?: ProjectsPort | undefined };
@@ -56,7 +58,7 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   const run = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
-    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy });
+    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, events: input.events });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");
