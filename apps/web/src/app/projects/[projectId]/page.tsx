@@ -2,11 +2,13 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { ProjectOverview } from "@/components/overview/project-overview";
 import { StartRunDialog } from "@/components/projects/forms";
+import { SchedulerLine } from "@/components/scheduler/scheduler-card";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import { oldTabPath } from "@/lib/project-tab";
 import { loadOverview } from "@/server/overview";
 import { projectPage, repoUrl, sectionCrumbs } from "@/server/project-page";
+import { loadSchedulerCard } from "@/server/scheduler-card";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +25,11 @@ export default async function ProjectPage({
 }) {
   const [{ projectId }, query] = await Promise.all([params, searchParams]);
   if (query.tab !== undefined) redirect(oldTabPath(projectId, query));
-  const [{ project, graphs, defaultGraph }, overview] = await Promise.all([projectPage(projectId), loadOverview(getDb(), getGitHub(), getProjects(), projectId)]);
+  const [{ project, graphs, defaultGraph }, overview, scheduler] = await Promise.all([
+    projectPage(projectId),
+    loadOverview(getDb(), getGitHub(), getProjects(), projectId),
+    loadSchedulerCard(getDb(), projectId),
+  ]);
   const plan = overview.work.kind === "plan" ? overview.work.project : undefined;
   const repo = `${project.repoOwner}/${project.repoName}`;
   const start = { graphs: graphs.map((g) => g.name), graphName: project.isDemo ? undefined : defaultGraph };
@@ -51,6 +57,13 @@ export default async function ProjectPage({
         }
         actions={start.graphName && <StartRunDialog projectId={project.id} graphs={start.graphs} graphName={start.graphName} label="New run" size="default" />}
       />
+      {project.planProjectNumber !== null && !project.isDemo && (
+        <SchedulerLine
+          project={{ id: project.id, name: project.name }}
+          card={scheduler}
+          form={{ graphs: start.graphs, defaultGraph: start.graphName, planNumber: project.planProjectNumber, priority: plan?.priorityOptions !== undefined }}
+        />
+      )}
       <ProjectOverview project={{ id: project.id, name: project.name, repo }} overview={overview} start={start} />
     </main>
   );
