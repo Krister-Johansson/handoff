@@ -1,9 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, type ComponentProps } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { AssistantProvider, useAssistant } from "@/components/assistant/assistant-provider";
+import type { AssistantPort } from "@/lib/assistant/port";
+import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { RunLive } from "./run-live";
 
 const refresh = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh, push: vi.fn() }), usePathname: () => "/projects/p1/runs/r1" }));
 vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), cancelAction: vi.fn(), repairAction: vi.fn() }));
 const projectActions = vi.hoisted(() => ({ requestMergeAction: vi.fn(async () => ({ ok: true })) }));
 vi.mock("@/app/projects/actions", () => projectActions);
@@ -304,4 +308,61 @@ test("what the run is doing now sits in the page header, beside the run's action
   expect(within(header).getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
   expect(header).toHaveTextContent("master v12");
   expect(screen.getAllByRole("status")).toHaveLength(1);
+});
+
+function Grab({ onPort }: { onPort: (port: AssistantPort) => void }) {
+  const port = useAssistant();
+  useEffect(() => {
+    onPort(port);
+  }, [onPort, port]);
+  return null;
+}
+
+/**
+ * The run page inside the assistant, with a turn running so the test can call the page's tools as the
+ * model would: `call` emits a ui_call and resolves with the page's answer.
+ */
+async function withAssistant(props: Omit<ComponentProps<typeof RunLive>, "projectId" | "runId" | "initialEvents" | "labels" | "prNumber" | "questions"> & Partial<ComponentProps<typeof RunLive>>) {
+  const transport = new FakeAssistantTransport();
+  let port: AssistantPort | undefined;
+  const onPort = (p: AssistantPort) => (port = p);
+  render(
+    <AssistantProvider transport={transport} available>
+      <Grab onPort={onPort} />
+      <RunLive {...common} {...props} />
+    </AssistantProvider>,
+  );
+  act(() => void port!.send("what is on this page"));
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  let next = 1;
+  const call = async (name: string, args: unknown = {}) => {
+    const requestId = `u${next++}`;
+    act(() => transport.emit({ type: "ui_call", requestId, name, args }));
+    await waitFor(() => expect(transport.uiReplies.find((r) => r.requestId === requestId)).toBeDefined());
+    const { text, isError } = transport.uiReplies.find((r) => r.requestId === requestId)!;
+    return { text, isError };
+  };
+  const whereAmI = async () => JSON.parse((await call("where_am_i")).text) as { page?: { kind: string; tools: { name: string }[]; state: { data: Record<string, unknown> } } };
+  return { call, whereAmI, transport };
+}
+
+const selectedTab = () => screen.getAllByRole("tab").find((tab) => tab.getAttribute("aria-selected") === "true")?.textContent;
+
+test("page_show_view switches to the graph and events views and where_am_i says which is shown", async () => {
+  const { call, whereAmI } = await withAssistant({ initialStatus: "running", initialExecutions: executions });
+  expect(selectedTab()).toBe("Steps");
+  expect((await whereAmI()).page).toMatchObject({ kind: "run", state: { data: { view: "steps" } } });
+
+  expect(await call("page_show_view", { view: "graph" })).toEqual({ text: "Showing the graph view.", isError: false });
+  expect(selectedTab()).toBe("Graph");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ view: "graph" });
+
+  expect(await call("page_show_view", { view: "events" })).toEqual({ text: "Showing the events view.", isError: false });
+  expect(selectedTab()).toMatch(/^Events/);
+
+  // A tab the person clicks is what where_am_i reports next.
+  fireEvent.mouseDown(screen.getByRole("tab", { name: "Steps" }));
+  await waitFor(() => expect(selectedTab()).toBe("Steps"));
+  expect((await whereAmI()).page?.state.data).toMatchObject({ view: "steps" });
 });

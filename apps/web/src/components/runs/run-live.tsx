@@ -22,6 +22,7 @@ import { runStatusFromEvent, statusFromEvent, type StatusTone } from "@/lib/stat
 import { loopEdgeKeys } from "@/lib/sent-back";
 import { triggeringEdges } from "@/lib/triggering-edges";
 import { cn } from "@/lib/utils";
+import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { QuestionCard, type QuestionItem } from "@/components/inbox/cards";
 import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
@@ -136,6 +137,11 @@ function RunNowAction({
   );
 }
 
+/** The run page's views, as its tabs name them. */
+const VIEWS = ["steps", "graph", "events"] as const;
+type RunView = (typeof VIEWS)[number];
+const isView = (value: string): value is RunView => (VIEWS as readonly string[]).includes(value);
+
 type EventPayload = {
   nodeKey?: string;
   attempt?: number;
@@ -217,6 +223,7 @@ export function RunLive({
     [router, loopEdges],
   );
 
+  const [view, setView] = useState<RunView>("steps");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // A popped-out node shows in a large modal instead of the drawer; closing it goes back to the drawer.
   const [poppedOut, setPoppedOut] = useState(false);
@@ -248,6 +255,27 @@ export function RunLive({
 
   const live = status === "queued" || status === "running" || status === "waiting";
 
+  usePageTools(
+    "run",
+    {
+      page_show_view: ({ view }) => {
+        setView(view);
+        return `Showing the ${view} view.`;
+      },
+      page_open_step: undefined,
+      page_close_step: undefined,
+      page_pop_out: undefined,
+      page_filter_events: undefined,
+    },
+    () => ({
+      runId,
+      projectId,
+      status,
+      view,
+      steps: executions.map((e) => ({ id: e.id, nodeKey: e.nodeKey, label: labels[e.nodeKey] ?? e.nodeKey, attempt: e.attempt, status: e.status })),
+    }),
+  );
+
   return (
     <div className="flex flex-col gap-6">
       {header ? (
@@ -270,7 +298,7 @@ export function RunLive({
         </div>
       )}
       {children}
-      <Tabs defaultValue="steps" className="gap-6">
+      <Tabs value={view} onValueChange={(value) => isView(value) && setView(value)} className="gap-6">
         <TabsList variant="line">
           <TabsTrigger value="steps">Steps</TabsTrigger>
           <TabsTrigger value="graph">Graph</TabsTrigger>
