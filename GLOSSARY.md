@@ -14,6 +14,8 @@ Terms used in handoff. Test names, types and issue titles use these words.
 - **Deterministic check**: a true or false test run by the engine, never by a model: tests pass, diff within owned paths, PR exists.
 - **Waiting**: a node execution that has yielded and will be resumed by an external event, such as a GitHub webhook or a human answer.
 - **Human gate**: a node that waits for a person to answer a question or approve a step in the dashboard.
+- **Question**: what a human gate asks a person, stored with its options and what the gate shows for review. It is open until someone answers it, and the inbox lists the open ones.
+- **Notification**: something a person is told: a tone, a title, a body and an optional link, written by whoever sends it and shown as it is. Read or unread, never done. A question has a notification, and the two are separate rows.
 - **Coder node**: a node whose executor spawns the Claude Code CLI in a worktree.
 - **PR node**: a node that opens or updates a pull request, then waits for checks and reviews and routes the feedback.
 - **Worktree**: a git worktree created per run where a Coder node works.
