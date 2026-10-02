@@ -85,6 +85,18 @@ test("Ctrl+M works while typing", async () => {
   expect(latest().stopped).toBe(true);
 });
 
+test("Cmd+M is left to the system", async () => {
+  render(<VoiceTestApp />);
+  // Cmd+M minimizes the window on a Mac; the page neither takes it nor listens. Nor with Ctrl held too,
+  // nor Ctrl with Shift or Alt, which belong to the browser and the system.
+  expect(fireEvent.keyDown(document.body, { key: "m", code: "KeyM", metaKey: true })).toBe(true);
+  expect(ctrlM(document.body, { metaKey: true })).toBe(true);
+  expect(ctrlM(document.body, { shiftKey: true, key: "M" })).toBe(true);
+  expect(ctrlM(document.body, { altKey: true, key: "µ" })).toBe(true);
+  await act(async () => {});
+  expect(FakeSpeechRecognition.instances).toEqual([]);
+});
+
 test("Escape stops listening and leaves an idle page alone", async () => {
   render(<VoiceTestApp />);
   const idle = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
