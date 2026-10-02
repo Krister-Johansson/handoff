@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
-import { eq, questions } from "@handoff/db";
+import { eq, notifications, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "./executors/cli-node.ts";
 import { humanGateExecutor } from "./executors/human-gate.ts";
@@ -83,6 +83,8 @@ test("a lone path failure waits with a paths question naming the files", async (
   expect(row.status).toBe("waiting");
   expect(types).toContain("human.asked");
   expect(types).not.toContain("node.failed");
+  const told = await db.select().from(notifications).where(eq(notifications.runId, run.id));
+  expect(told).toEqual([expect.objectContaining({ tone: "attention", title: expect.stringContaining("coder changed a file outside the plan"), body: "notes.txt" })]);
 });
 
 /** Answers the run's open question, as a person on the run page would. */
