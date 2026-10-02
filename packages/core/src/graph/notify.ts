@@ -9,12 +9,6 @@ import type { NodeType } from "../schema/graph.ts";
 export const NotifyKindSchema = z.enum(["started", "finished", "failed", "input", "permission", "ready", "merged"]);
 export type NotifyKind = z.infer<typeof NotifyKindSchema>;
 
-/**
- * What a node tells a person. The node writes the title and the body, and the feed shows them as they
- * are. The rest says what the notification is about, so the feed can link to it and tell when it is done.
- */
-export type Notification = { kind: NotifyKind; title: string; body: string; nodeKey: string; reason?: string; number?: number; questionId?: string; requestId?: string };
-
 /** A node's notification settings, by kind. A kind left out uses its default. */
 export const NotifySettingsSchema = z.partialRecord(NotifyKindSchema, z.boolean());
 export type NotifySettings = z.infer<typeof NotifySettingsSchema>;
@@ -43,3 +37,12 @@ export function notifies(node: { notify?: NotifySettings | undefined; config?: R
   const earlier = kind === "finished" && typeof node.config?.notify === "boolean" ? node.config.notify : undefined;
   return node.notify?.[kind] ?? earlier ?? DEFAULT_ON[kind];
 }
+
+/** How a notification looks and sounds: plain news, something that went well, something that waits for a person, or something that went wrong. */
+export const NotificationToneSchema = z.enum(["neutral", "success", "attention", "danger"]);
+export type NotificationTone = z.infer<typeof NotificationToneSchema>;
+
+const TONES: Record<NotifyKind, NotificationTone> = { started: "neutral", finished: "success", failed: "danger", input: "attention", permission: "attention", ready: "attention", merged: "success" };
+
+/** The tone of the notification a node sends about `kind`. */
+export const toneOf = (kind: NotifyKind): NotificationTone => TONES[kind];

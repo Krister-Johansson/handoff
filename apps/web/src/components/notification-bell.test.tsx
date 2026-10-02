@@ -9,20 +9,19 @@ vi.mock("next/navigation", () => ({ usePathname: () => "/projects" }));
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
-const item = (id: string, kind: NotificationJson["kind"], title: string, createdAt: string, unread = true): NotificationJson => ({
+const item = (id: string, tone: NotificationJson["tone"], title: string, createdAt: string, unread = true): NotificationJson => ({
   id,
-  kind,
+  tone,
   title,
   body: "Add a CHANGELOG.md",
   href: `/projects/p1/runs/${id}`,
   createdAt,
   unread,
-  done: false,
 });
-const started = item("e1", "started", "sandbox: run started", "2026-10-01T10:00:00.000Z");
-const failed = item("e2", "failed", "sandbox: run failed at coder", "2026-10-01T10:05:00.000Z");
-const asked = item("q1", "input", "sandbox: gate asks a question", "2026-10-01T10:06:00.000Z");
-const done = item("e3", "finished", "sandbox: run finished", "2026-10-01T10:07:00.000Z");
+const started = item("e1", "neutral", "sandbox: run started", "2026-10-01T10:00:00.000Z");
+const failed = item("e2", "danger", "sandbox: run failed at coder", "2026-10-01T10:05:00.000Z");
+const asked = item("q1", "attention", "sandbox: gate asks a question", "2026-10-01T10:06:00.000Z");
+const done = item("e3", "success", "sandbox: run finished", "2026-10-01T10:07:00.000Z");
 
 class FakeNotification {
   static permission: NotificationPermission = "granted";
@@ -67,7 +66,7 @@ test("opening the bell marks what it shows as read", async () => {
   await waitFor(() => expect(document.title).toBe("handoff"));
 });
 
-test("notifications there when the page opens make no toast; new ones each make one, by kind", async () => {
+test("notifications there when the page opens make no toast; new ones each make one, by tone", async () => {
   localStorage.setItem("handoff.notify", JSON.stringify({ desktop: true, sound: true }));
   const load = vi
     .fn()
@@ -80,7 +79,7 @@ test("notifications there when the page opens make no toast; new ones each make 
   expect(toast.success).toHaveBeenCalledWith(done.title, expect.objectContaining({ description: done.body }));
   expect(toast.warning).toHaveBeenCalledWith(asked.title, expect.objectContaining({ description: asked.body }));
   expect(toast.error).toHaveBeenCalledWith(failed.title, expect.objectContaining({ description: failed.body }));
-  // A person is told on the desktop, with one ping, about what needs them or ended; not about a start.
+  // A person is told on the desktop, with one ping, about what needs them or ended; not about plain news.
   expect(FakeNotification.shown).toEqual([done.title, asked.title, failed.title]);
   expect(ping.playPing).toHaveBeenCalledTimes(1);
   await act(() => new Promise((r) => setTimeout(r, 60)));
@@ -95,7 +94,7 @@ test("a toast keeps its text to two lines, like the bell's list", async () => {
 });
 
 test("many new notifications at once make one toast", async () => {
-  const many = Array.from({ length: 5 }, (_, i) => item(`n${i}`, "started", `sandbox: run started ${i}`, `2026-10-01T10:1${i}:00.000Z`));
+  const many = Array.from({ length: 5 }, (_, i) => item(`n${i}`, "neutral", `sandbox: run started ${i}`, `2026-10-01T10:1${i}:00.000Z`));
   const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: many, unread: 5 });
   render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
   await waitFor(() => expect(toast.info).toHaveBeenCalledWith("5 new notifications", expect.anything()));
@@ -103,16 +102,24 @@ test("many new notifications at once make one toast", async () => {
 });
 
 test("a pull request ready to merge makes a toast that waits a while", async () => {
-  const ready = item("e9", "ready", "sandbox: PR #54 is ready to merge", "2026-10-01T10:20:00.000Z");
+  const ready = item("e9", "attention", "sandbox: PR #54 is ready to merge", "2026-10-01T10:20:00.000Z");
   const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [ready], unread: 1 });
   render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
   await waitFor(() => expect(toast.warning).toHaveBeenCalledWith(ready.title, expect.objectContaining({ duration: 10_000 })));
 });
 
-test("a new notification whose action is already done makes no toast", async () => {
-  const answered = { ...asked, done: true, unread: false };
-  const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [answered], unread: 0 });
+test("a new notification that is already read makes no toast", async () => {
+  const read = { ...asked, unread: false };
+  const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [read], unread: 0 });
   render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
   await waitFor(() => expect(load.mock.calls.length).toBeGreaterThan(2));
   expect(toast.warning).not.toHaveBeenCalled();
+});
+
+test("a notification without a link makes a toast with nothing to open, and no desktop notification leads anywhere", async () => {
+  const plain = { ...failed, id: "n1", href: null };
+  const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [plain], unread: 1 });
+  render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
+  await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+  expect(toast.error.mock.calls[0]![1]).not.toHaveProperty("action");
 });

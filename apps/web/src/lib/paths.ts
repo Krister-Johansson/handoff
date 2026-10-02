@@ -11,11 +11,5 @@ export function planPath(projectId: string, opts: { view?: PlanViewName; epic?: 
   return `/projects/${projectId}/plan${query.length ? `?${query.join("&")}` : ""}`;
 }
 
-/** A run's page, under the project it belongs to. */
-export const runPath = (projectId: string, runId: string) => `/projects/${projectId}/runs/${runId}`;
-
-/** A review question's page, under its run. */
-export const reviewPath = (projectId: string, runId: string, questionId: string) => `${runPath(projectId, runId)}/review/${questionId}`;
-
-/** A Try it gate's page, where a person checks the run's app against its acceptance criteria. */
-export const tryPath = (projectId: string, runId: string, questionId: string) => `${runPath(projectId, runId)}/try/${questionId}`;
+// A run's, a review's and a Try it page's paths live in core, where the engine writes notification links with them.
+export { reviewPath, runPath, tryPath } from "@handoff/core/paths";

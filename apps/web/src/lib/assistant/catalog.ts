@@ -166,9 +166,9 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "list_notifications",
     title: "List notifications",
-    description: "The notification feed, newest first, as the bell and the notifications page show it, with whether each is unread or done.",
+    description: "The notification feed, newest first, as the bell and the notifications page show it: each item's tone (neutral, success, attention or danger), title, body and link, and whether it is unread. What still waits for a person is in the inbox, not here.",
     input: z.object({
-      filter: z.enum(["unread", "input", "finished", "failed"]).optional().describe("unread, input (needs you), finished or failed"),
+      filter: z.enum(["unread", "attention", "success", "danger"]).optional().describe("unread, attention (asked you), success (finished) or danger (failed)"),
       limit: z.number().int().positive().max(50).optional(),
     }),
     kind: "data",
@@ -334,7 +334,7 @@ export const CATALOG: ToolSpec[] = [
     name: "go_to_notifications",
     title: "Open notifications",
     description: "Opens the notifications page, optionally filtered.",
-    input: z.object({ filter: z.enum(["unread", "input", "finished", "failed"]).optional().describe("unread, input (needs you), finished or failed") }),
+    input: z.object({ filter: z.enum(["unread", "attention", "success", "danger"]).optional().describe("unread, attention (asked you), success (finished) or danger (failed)") }),
     kind: "ui",
     confirm: false,
     readOnly: true,

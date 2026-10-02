@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BellIcon, BellRingIcon } from "lucide-react";
 import { toast } from "sonner";
-import { KindTile, NotificationList } from "@/components/notifications/notification-list";
+import { NotificationList, ToneTile } from "@/components/notifications/notification-list";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { titleWithCount } from "@/lib/attention";
@@ -29,15 +29,16 @@ const label = (n: number) => (n === 0 ? "No unread notifications" : `${n} unread
 /** More new notifications than this at once make one toast instead of one each. */
 const TOAST_LIMIT = 3;
 
-/** A toast's icon is its kind's tile, which needs more room than sonner's 16px icon slot. */
+/** A toast's icon is its tone's tile, which needs more room than sonner's 16px icon slot. */
 const TOAST_CLASSES = { icon: "size-7! mr-1! ml-0! self-start", description: "text-muted-foreground! line-clamp-2", actionButton: "self-start" };
 
-/** Shows one new notification as a toast: a start quietly, a question or a failure for longer. */
+/** Shows one new notification as a toast: plain news quietly, what waits for the person or went wrong for longer. */
 function toastFor(item: NotificationJson, open: (href: string) => void) {
-  const options = { description: item.body, icon: <KindTile kind={item.kind} />, classNames: TOAST_CLASSES, action: { label: "Open", onClick: () => open(item.href) } };
-  if (item.kind === "finished" || item.kind === "merged") toast.success(item.title, options);
-  else if (item.kind === "failed") toast.error(item.title, { ...options, duration: 10_000 });
-  else if (item.kind === "input" || item.kind === "permission" || item.kind === "ready") toast.warning(item.title, { ...options, duration: 10_000 });
+  const { href } = item;
+  const options = { description: item.body, icon: <ToneTile tone={item.tone} />, classNames: TOAST_CLASSES, ...(href ? { action: { label: "Open", onClick: () => open(href) } } : {}) };
+  if (item.tone === "success") toast.success(item.title, options);
+  else if (item.tone === "danger") toast.error(item.title, { ...options, duration: 10_000 });
+  else if (item.tone === "attention") toast.warning(item.title, { ...options, duration: 10_000 });
   else toast.info(item.title, options);
 }
 
@@ -76,7 +77,7 @@ export function NotificationBell({
       seen = new Set([...(seen ?? []), ...next.items.map((item) => item.id)]);
       if (fresh.length > TOAST_LIMIT) toast.info(`${fresh.length} new notifications`, { action: { label: "Open", onClick: () => go("/notifications") } });
       else for (const item of fresh) toastFor(item, go);
-      const urgent = fresh.filter((item) => item.kind !== "started");
+      const urgent = fresh.filter((item) => item.tone !== "neutral");
       if (urgent.length) notify(urgent);
       setFeed(next);
     };

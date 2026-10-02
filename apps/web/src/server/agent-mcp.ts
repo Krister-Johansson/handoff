@@ -246,7 +246,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     list_notifications: async ({ filter, limit }: { filter?: NotificationFilter; limit?: number }) => {
       const { items, unread } = await listNotifications(db, { limit: limit ?? 20, ...(filter ? { filter } : {}) });
-      return { unread, items: items.map((n) => ({ kind: n.kind, title: n.title, body: n.body, at: n.createdAt.toISOString(), unread: n.unread, done: n.done, url: url(n.href) })) };
+      return { unread, items: items.map((n) => ({ tone: n.tone, title: n.title, body: n.body, at: n.createdAt.toISOString(), unread: n.unread, url: n.href ? url(n.href) : null })) };
     },
 
     resolve_loop: async ({ run_id, action }: { run_id: string; action: "retry" | "continue" | "stop" }) => {

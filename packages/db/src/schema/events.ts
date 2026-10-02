@@ -17,6 +17,6 @@ export const events = pgTable(
     payload: jsonb("payload").$type<unknown>().notNull(),
     createdAt: createdAt(),
   },
-  // The notification feed reads a few event types across all runs, newest first.
+  // What needs attention reads a few event types across all runs, newest first.
   (t) => [unique("events_run_seq_unique").on(t.runId, t.seq), index("events_type_created_idx").on(t.type, t.createdAt)],
 );

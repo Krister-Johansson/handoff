@@ -4,7 +4,8 @@ import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
-import { brief, notifies, redactSecrets, RunStateSchema, type Notification } from "@handoff/core";
+import { brief, redactSecrets, runPath, RunStateSchema } from "@handoff/core";
+import { notifyFrom } from "../notify.ts";
 import { stopWorkerPreviews } from "../preview/preview.ts";
 import {
   appendEvents,
@@ -221,10 +222,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     const events: NewEvent[] = [];
     if (run.status === "queued") {
       events.push({ type: "run.started", payload: {} });
-      if (notifies(node, "started")) {
-        const told: Notification = { kind: "started", nodeKey: row.nodeKey, title: `${project.name}: run started`, body: brief(run.task) };
-        events.push({ type: "notify", payload: told, nodeExecutionId: row.id });
-      }
+      await notifyFrom(tx, node, "started", run, { title: `${project.name}: run started`, body: brief(run.task), href: runPath(project.id, run.id) });
     }
     events.push({
       type: "node.claimed",
@@ -311,6 +309,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         ...(library ? { library } : {}),
         signal: controller.signal,
         emit: (type, payload) => void buffer.push({ type, payload, nodeExecutionId: row.id }),
+        notify: (kind, told) => notifyFrom(db, node, kind, run, told),
         recordRepoId: async (repoId) => {
           await db.update(projects).set({ repoId }).where(eq(projects.id, project.id));
         },

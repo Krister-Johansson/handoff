@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./paths": "./src/paths.ts",
     "./fixtures/*": "./src/fixtures/*"
   },
   "dependencies": {

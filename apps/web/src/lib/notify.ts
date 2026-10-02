@@ -1,12 +1,12 @@
 import { readPrefs } from "@/lib/attention";
-import type { NotificationKind } from "@/lib/notifications";
+import type { NotificationTone } from "@/lib/notifications";
 import { playPing } from "@/lib/ping";
 import { readVoicePrefs } from "@/lib/voice/prefs";
 
 export const hasNotifications = () => typeof Notification !== "undefined";
 
-/** Something new to tell the person about. Only an item with a kind can be spoken. */
-export type NotifyItem = { id: string; kind?: NotificationKind; title: string; body: string; href: string };
+/** Something new to tell the person about. Only an item with a tone can be spoken, and only one with a link opens a page. */
+export type NotifyItem = { id: string; tone?: NotificationTone; title: string; body: string; href: string | null };
 
 type SpeakNotification = (text: string) => void;
 let speakNotification: SpeakNotification | undefined;
@@ -22,9 +22,8 @@ export function setNotificationVoice(speak: SpeakNotification): () => void {
   };
 }
 
-/** What needs the person is spoken; a finished or merged run only when asked for; a start never. */
-const NEEDS_PERSON = new Set<NotificationKind>(["input", "permission", "ready", "failed"]);
-const ENDED = new Set<NotificationKind>(["finished", "merged"]);
+/** What waits for the person or went wrong is spoken; what went well only when asked for; plain news never. */
+const NEEDS_PERSON = new Set<NotificationTone>(["attention", "danger"]);
 
 const SPOKEN_KEY = "handoff.voice.spoken";
 const SPOKEN_KEEP = 100;
@@ -54,7 +53,7 @@ function speak(items: NotifyItem[]) {
   const prefs = readVoicePrefs();
   if (!prefs.speakNotifications) return;
   for (const item of items) {
-    if (!item.kind || !(NEEDS_PERSON.has(item.kind) || (prefs.speakFinished && ENDED.has(item.kind)))) continue;
+    if (!item.tone || !(NEEDS_PERSON.has(item.tone) || (prefs.speakFinished && item.tone === "success"))) continue;
     if (claim(item.id)) speakNotification(spokenText(item));
   }
 }
@@ -70,9 +69,10 @@ export function notify(items: NotifyItem[]) {
   if (!prefs.desktop || !hasNotifications() || Notification.permission !== "granted") return;
   for (const item of items) {
     const notification = new Notification(item.title, { body: item.body, tag: item.id });
+    const { href } = item;
     notification.onclick = () => {
       window.focus();
-      window.location.assign(item.href);
+      if (href) window.location.assign(href);
     };
   }
 }

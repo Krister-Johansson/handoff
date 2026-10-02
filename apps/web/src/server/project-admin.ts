@@ -1,4 +1,4 @@
-import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, notifications, projects, questions, runs, sql, type Db } from "@handoff/db";
 
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const ACTIVE = ["queued", "running", "waiting"] as const;
@@ -17,7 +17,7 @@ export async function updateProject(db: Db, projectId: string, input: { name: st
 
 /**
  * Deletes a project and everything recorded for it: graphs, versions, runs, node executions,
- * questions, edge traversals and events. Refused while any of its runs is active. The worker's
+ * questions, edge traversals, events and notifications. Refused while any of its runs is active. The worker's
  * clone and worktrees on disk are left to `handoff gc`.
  */
 export async function deleteProject(db: Db, projectId: string) {
@@ -26,7 +26,9 @@ export async function deleteProject(db: Db, projectId: string) {
     const active = projectRuns.filter((r) => (ACTIVE as readonly string[]).includes(r.status)).length;
     if (active > 0) throw new Error(`The project has ${active} active run${active === 1 ? "" : "s"}. Cancel ${active === 1 ? "it" : "them"} first.`);
     const runIds = projectRuns.map((r) => r.id);
+    await tx.delete(notifications).where(eq(notifications.projectId, projectId));
     if (runIds.length > 0) {
+      await tx.delete(notifications).where(inArray(notifications.runId, runIds));
       await tx.delete(events).where(inArray(events.runId, runIds));
       await tx.delete(questions).where(inArray(questions.runId, runIds));
       await tx.delete(edgeTraversals).where(inArray(edgeTraversals.runId, runIds));
