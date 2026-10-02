@@ -203,23 +203,27 @@ function demoPassEnv(ctx: ExecutorContext): string[] {
   return [...new Set(demos.flatMap((key) => passEnvOf(ctx.graph.node(key).config)))];
 }
 
-/** The screenshots of the run's latest Demo step, for a person to see before trying the app. */
-function demoShotsOf(ctx: ExecutorContext) {
+/**
+ * What the run's latest Demo step left for a person to see before trying the app: its screenshots, and
+ * the warnings and errors of the browser console and the server log.
+ */
+function demoOf(ctx: ExecutorContext) {
   const demos = Object.entries(ctx.state.nodes).filter(([key]) => ctx.graph.graph.hasNode(key) && ctx.graph.node(key).type === "demo");
   const latest = demos.sort(([, a], [, b]) => b.attempt - a.attempt).at(0)?.[1].output;
   const parsed = DemoOutputSchema.safeParse(latest);
-  if (!parsed.success) return [];
-  return parsed.data.shots.flatMap((s) => (s.artifactId ? [{ id: s.artifactId, caption: s.caption, works: s.works, ...(s.criterion ? { criterion: s.criterion } : {}) }] : []));
+  if (!parsed.success) return { shots: [], warnings: [] };
+  const shots = parsed.data.shots.flatMap((s) => (s.artifactId ? [{ id: s.artifactId, caption: s.caption, works: s.works, ...(s.criterion ? { criterion: s.criterion } : {}) }] : []));
+  return { shots, warnings: parsed.data.warnings ?? [] };
 }
 
-/** A Try it gate's question: try the running app against the run's acceptance criteria, with the demo's screenshots. */
+/** A Try it gate's question: try the running app against the run's acceptance criteria, with the demo's screenshots and warnings. */
 async function composeTry(ctx: ExecutorContext, deps: GateDeps): Promise<Ask> {
   const acceptance = acceptanceOf(ctx.state)?.items ?? [];
-  const shots = demoShotsOf(ctx);
+  const { shots, warnings } = demoOf(ctx);
   return {
     question: acceptance.length ? "Try the app and check each acceptance criterion." : "Try the app, then approve it or send it back with what is wrong.",
     options: ["approve", "changes"],
-    context: { reason: "try", acceptance, preview: await ensurePreview(ctx, deps), ...(shots.length ? { shots } : {}) },
+    context: { reason: "try", acceptance, preview: await ensurePreview(ctx, deps), ...(shots.length ? { shots } : {}), ...(warnings.length ? { warnings } : {}) },
   };
 }
 

@@ -97,7 +97,7 @@ test("restarting a Try it gate starts its app again when it stopped", async () =
   expect(updated!.answer).toBeNull();
 });
 
-test("a Try it gate after a Demo shows its screenshots next to the criteria", async () => {
+test("a Try it gate after a Demo shows its screenshots next to the criteria, and its warnings", async () => {
   const withDemo = {
     ...graph,
     nodes: [...graph.nodes, { key: "demo", attributes: { type: "demo" } }],
@@ -111,6 +111,7 @@ test("a Try it gate after a Demo shows its screenshots next to the criteria", as
   const origin = createOriginRepo({ ".claude/launch.json": launch, "app.js": app });
   const { project, graphVersion } = await seedGraph(db, withDemo, { localClonePath: origin });
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Tasks", issues: [issue] });
+  const warnings = [{ source: "server", level: "error", text: "Error: could not load tasks", new: true }];
   const shot = { file: "page-1.png", caption: "The new task in the list", criterion: "A user can create a new task", works: true, artifactId: "9f1c2d3e-0000-4000-8000-000000000001" };
   await drain(
     engineDeps(
@@ -119,12 +120,12 @@ test("a Try it gate after a Demo shows its screenshots next to the criteria", as
         start: startExecutor(),
         finish: finishExecutor(),
         coder: scripted(done({ status: "done", summary: "Built it" })),
-        demo: scripted(done({ summary: "Walked through it.", shots: [shot] })),
+        demo: scripted(done({ summary: "Walked through it.", shots: [shot], warnings })),
         human_gate: humanGateExecutor({ db, workerId: "test-worker" }),
       },
       { workerId: "test-worker", workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) },
     ),
   );
   const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
-  expect(question!.context).toMatchObject({ shots: [{ id: shot.artifactId, caption: shot.caption, criterion: shot.criterion, works: true }] });
+  expect(question!.context).toMatchObject({ shots: [{ id: shot.artifactId, caption: shot.caption, criterion: shot.criterion, works: true }], warnings });
 });

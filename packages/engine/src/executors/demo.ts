@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { DemoOutputSchema, uiPathsOf } from "@handoff/core";
-import { screenshots, type Db } from "@handoff/db";
+import { DemoOutputSchema, markNew, serverLogWarnings, uiPathsOf, type DemoWarning } from "@handoff/core";
+import { and, desc, eq, ne, nodeExecutions, runs, screenshots, sql, type Db } from "@handoff/db";
 import { changedFiles, isOwned } from "../contract/checks.ts";
 import type { MaterializedLibrary } from "../library/materialize.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
@@ -30,6 +30,28 @@ function originsOf(url: string): string {
 }
 
 const LISTED_FILES = 10;
+
+/**
+ * The warnings of the project's latest demo in another run, which this demo's warnings are compared
+ * with: a warning that was there before is not new. Undefined when the project has no such demo.
+ */
+async function previousDemoWarnings(db: Db, ctx: ExecutorContext): Promise<DemoWarning[] | undefined> {
+  const [row] = await db
+    .select({ output: nodeExecutions.output })
+    .from(nodeExecutions)
+    .innerJoin(runs, eq(runs.id, nodeExecutions.runId))
+    .where(
+      and(
+        eq(runs.projectId, ctx.project.id),
+        ne(runs.id, ctx.run.id),
+        eq(nodeExecutions.status, "passed"),
+        sql`jsonb_typeof(${nodeExecutions.output} -> 'warnings') = 'array'`,
+      ),
+    )
+    .orderBy(desc(nodeExecutions.finishedAt))
+    .limit(1);
+  return (row?.output as { warnings?: DemoWarning[] } | undefined)?.warnings;
+}
 
 /** The variable names a Demo node passes from the worker's environment to the seed command and the app. */
 export const passEnvOf = (config: Record<string, unknown>): string[] => (Array.isArray(config.passEnv) ? config.passEnv.filter((n): n is string => typeof n === "string") : []);
@@ -129,7 +151,9 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
             .returning({ id: screenshots.id });
           kept.push({ ...shot, artifactId: row!.id });
         }
-        return { ...outcome, output: { ...output, shots: kept } };
+        const current = [...serverLogWarnings(existsSync(preview.logPath) ? readFileSync(preview.logPath, "utf8") : ""), ...output.console.map((e) => ({ source: "console" as const, ...e }))];
+        const warnings = markNew(current, await previousDemoWarnings(options.db, ctx));
+        return { ...outcome, output: { ...output, shots: kept, warnings } };
       } finally {
         await stopStepPreviews(options.db, ctx.execution.id);
       }

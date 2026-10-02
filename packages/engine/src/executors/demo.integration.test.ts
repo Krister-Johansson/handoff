@@ -217,6 +217,63 @@ test("a console error in the demo's output fails the step with the message", asy
   expect((demo.error as { message: string }).message).not.toContain("isActive");
 });
 
+test("the server log's and the console's warnings are in the output, marked new when the project's previous demo did not have them", async () => {
+  // The app always warns about the old API; on the second run's change it also logs an error.
+  const logging = `const fs = require("node:fs");
+console.warn("Warning: the old API is deprecated (took 12ms)");
+if (fs.existsSync("new.flag")) console.error("Error: could not load tasks");
+console.log("listening");
+require("node:http").createServer((_, res) => res.end("ok")).listen(Number(process.env.PORT));`;
+  const walk = (consoleEntries: { level: string; text: string }[]) => async (request: { session: { id: string }; contract: { parse(v: unknown): unknown } }) => {
+    const output = { summary: "Walked through.", shots: [], console: consoleEntries };
+    return { outcome: "success" as const, exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: output, validated: request.contract.parse(output) };
+  };
+  const cli = new FakeCliExecutor([
+    walk([{ level: "warning", text: "Each child in a list should have a unique key prop" }]),
+    walk([
+      { level: "warning", text: "Each child in a list should have a unique key prop" },
+      { level: "warning", text: "Image is missing an alt attribute" },
+    ]),
+  ]);
+  const origin = createOriginRepo({ ".claude/launch.json": launch, "app.js": logging });
+  const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+  let calls = 0;
+  const coder: NodeExecutor = {
+    needsWorkdir: true,
+    async execute(ctx) {
+      if (++calls === 2) writeFileSync(join(ctx.workdir!.path, "new.flag"), "");
+      return done({ status: "done", summary: "Built it" });
+    },
+  };
+  const deps = engineDeps(
+    db,
+    {
+      start: startExecutor(),
+      finish: finishExecutor(),
+      coder,
+      demo: demoExecutor({ cli, maxTurns: 30, timeoutMs: 60_000, db, workerId: "test-worker", artifactsRoot: mkdtempSync(join(tmpdir(), "handoff-artifacts-")) }),
+    },
+    { workerId: "test-worker", workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) },
+  );
+  const first = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Tasks", issues: [issue] });
+  await drain(deps);
+  const second = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Tasks", issues: [issue] });
+  await drain(deps);
+
+  const warningsOf = async (runId: string) => ((await inspect(db, runId)).executions.find((e) => e.nodeKey === "demo")!.output as { warnings: unknown[] }).warnings;
+  // The project's first demo has nothing to compare with: everything is new.
+  expect(await warningsOf(first.id)).toEqual([
+    { source: "server", level: "warning", text: "Warning: the old API is deprecated (took 12ms)", new: true },
+    { source: "console", level: "warning", text: "Each child in a list should have a unique key prop", new: true },
+  ]);
+  expect(await warningsOf(second.id)).toEqual([
+    { source: "server", level: "warning", text: "Warning: the old API is deprecated (took 12ms)", new: false },
+    { source: "server", level: "error", text: "Error: could not load tasks", new: true },
+    { source: "console", level: "warning", text: "Each child in a list should have a unique key prop", new: false },
+    { source: "console", level: "warning", text: "Image is missing an alt attribute", new: true },
+  ]);
+});
+
 test("a passEnv variable reaches the app", async () => {
   process.env.HANDOFF_DEMO_TEST_KEY = "key-from-the-worker";
   try {
