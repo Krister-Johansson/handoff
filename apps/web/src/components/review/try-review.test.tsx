@@ -222,3 +222,40 @@ test("page_submit approve is refused while a criterion is unticked, and after ap
   expect(await call("page_submit", { option: "approve" })).toEqual({ text: "Approved: every criterion works. The run page opens.", isError: false });
   expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "approve", note: "", comments: [] });
 });
+
+test("page_submit changes sends the failing criteria as comments with the note", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(await call("page_submit", { option: "changes" })).toEqual({
+    text: "Say what to change: mark a criterion that does not work, or add a note.",
+    isError: true,
+  });
+
+  await call("page_mark_criterion", { index: 2, works: false, note: "It shows only after a reload." });
+  await call("page_mark_criterion", { index: 3, works: false });
+  // The overall note is the popover's: page_set_note writes it, and a note given to page_submit replaces it.
+  expect(await call("page_set_note", { note: "Check dark mode too." })).toEqual({ text: 'Set the overall note to "Check dark mode too."', isError: false });
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  expect(screen.getByLabelText("Note (optional)")).toHaveValue("Check dark mode too.");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ note: "Check dark mode too." });
+
+  actions.answerReviewAction.mockRejectedValueOnce(redirectTo(`/projects/p1/runs/${RUN}`));
+  expect(await call("page_submit", { option: "changes", note: "Both are in the sidebar." })).toEqual({
+    text: "Sent back to coder-1: 2 criteria do not work, with the note. The run page opens.",
+    isError: false,
+  });
+  expect(actions.answerReviewAction).toHaveBeenCalledWith({
+    questionId: QUESTION,
+    runId: RUN,
+    option: "changes",
+    note: "Both are in the sidebar.",
+    comments: [
+      { quote: "The project shows in the sidebar", body: "It shows only after a reload." },
+      { quote: "pnpm lint passes", body: "Does not work." },
+    ],
+  });
+  expect(screen.getByLabelText("Note (optional)")).toHaveValue("Both are in the sidebar.");
+
+  // What the action refuses comes back as the tool's error.
+  actions.answerReviewAction.mockResolvedValueOnce({ ok: false, error: "This question was already answered." });
+  expect(await call("page_submit", { option: "changes" })).toEqual({ text: "This question was already answered.", isError: true });
+});

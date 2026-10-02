@@ -410,21 +410,32 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
         go(at);
         return `Now on criterion ${named}`;
       },
-      page_set_note: undefined,
+      page_set_note: readOnly
+        ? undefined
+        : ({ note: next }) => {
+            setNote(next);
+            return next.trim() ? `Set the overall note to "${next}"` : "Cleared the overall note.";
+          },
       page_submit: readOnly
         ? undefined
-        : async ({ option }) => {
+        : async ({ option, note: given }) => {
+            // The same rules as the popover's buttons, said in words.
+            const overall = given ?? note;
             if (option === "approve" && !allWork) {
               const unchecked = checks.flatMap((c, i) => (c.works === true ? [] : [i + 1]));
               throw new Error(`Check every criterion to approve. Not marked as working: ${unchecked.join(", ")}.`);
             }
+            if (option === "changes" && failed.length === 0 && !overall.trim()) throw new Error("Say what to change: mark a criterion that does not work, or add a note.");
+            if (given !== undefined) setNote(given);
             try {
-              const error = await send(option, note);
+              const error = await send(option, overall);
               if (error) throw new Error(error);
             } catch (error) {
               if (!isNextNavigation(error)) throw error;
             }
-            return "Approved: every criterion works. The run page opens.";
+            if (option === "approve") return "Approved: every criterion works. The run page opens.";
+            const what = failed.length ? `${failed.length} ${failed.length === 1 ? "criterion does" : "criteria do"} not work` : "every criterion works";
+            return `Sent back to ${from}: ${what}${overall.trim() ? ", with the note" : ""}. The run page opens.`;
           },
       page_restart_app: undefined,
       page_expand_criteria: undefined,
@@ -435,6 +446,8 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
       from,
       current: acceptance.length ? current + 1 : null,
       criteria: acceptance.map((text, i) => ({ index: i + 1, text, works: checks[i]?.works ?? null, note: checks[i]?.note ?? "" })),
+      note,
+      app: readOnly ? { status: "stopped" } : { status: preview.status, url: preview.url ?? null, error: preview.error ?? null },
       readOnly,
     }),
   );
