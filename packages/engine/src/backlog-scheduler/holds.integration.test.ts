@@ -22,8 +22,8 @@ async function project() {
       .returning();
     return row!;
   };
-  const fail = async (reason: "node_failed" | "loop_exhausted", nodeKey = "coder-1") => {
-    const failed = await run();
+  const fail = async (reason: "node_failed" | "loop_exhausted", nodeKey = "coder-1", startedBy?: string) => {
+    const failed = await run(startedBy);
     await db.update(runs).set({ status: "failed" }).where(eq(runs.id, failed.id));
     await db.transaction((tx) => appendEvents(tx, failed.id, [{ type: "run.failed", payload: { nodeKey, reason, awaiting: "repair" } }]));
     return failed;
@@ -42,8 +42,8 @@ async function project() {
     await db.transaction((tx) => appendEvents(tx, waiting.id, [{ type: "github.pr", payload: { number: 7, url: "https://github.com/octo/sample/pull/7", ci }, nodeExecutionId: pr.id }]));
     return waiting;
   };
-  const permission = async () => {
-    const running = await run();
+  const permission = async (startedBy?: string) => {
+    const running = await run(startedBy);
     await db.update(runs).set({ status: "running" }).where(eq(runs.id, running.id));
     const coder = await step(running.id, "coder-1", { executorKind: "cli", status: "running" });
     const id = crypto.randomUUID();
@@ -59,7 +59,7 @@ async function project() {
   return { project, run, fail, ask, pullRequest, permission, mergeQueue };
 }
 
-test("a failed run, a loop out of rounds, an open question, a review gate, a pull request waiting for review and a pending permission each hold the project", async () => {
+test("a failed run, a loop out of rounds and a pending permission each hold the project", async () => {
   const quiet = await project();
   await quiet.run();
   await quiet.pullRequest("pending");
@@ -73,21 +73,19 @@ test("a failed run, a loop out of rounds, an open question, a review gate, a pul
   const loopRun = await loop.fail("loop_exhausted", "review-1");
   expect(await projectHolds(db, loop.project.id)).toEqual([{ kind: "loop", runId: loopRun.id, nodeKey: "review-1" }]);
 
-  const asked = await project();
-  const question = await asked.ask({ reason: "question" });
-  expect(await projectHolds(db, asked.project.id)).toEqual([{ kind: "question", runId: question.run.id, nodeKey: "human_gate-1", questionId: question.question.id }]);
-
-  const reviewing = await project();
-  const review = await reviewing.ask({ review: { from: "planner-1", kind: "plan" } });
-  expect(await projectHolds(db, reviewing.project.id)).toEqual([{ kind: "review", runId: review.run.id, nodeKey: "human_gate-1", questionId: review.question.id }]);
-
-  const prs = await project();
-  const prRun = await prs.pullRequest("success");
-  expect(await projectHolds(db, prs.project.id)).toEqual([{ kind: "pull_request", runId: prRun.id, prNumber: 7 }]);
-
   const asking = await project();
   const request = await asking.permission();
   expect(await projectHolds(db, asking.project.id)).toEqual([{ kind: "permission", runId: request.run.id, nodeKey: "coder-1", permissionId: request.id, toolName: "Bash" }]);
+});
+
+test("an open question, a plan or code review, Try it and a pull request waiting for review do not hold", async () => {
+  const waiting = await project();
+  await waiting.ask({ reason: "question" });
+  await waiting.ask({ review: { from: "planner-1", kind: "plan" } });
+  await waiting.ask({ review: { from: "review-1", kind: "code" } });
+  await waiting.ask({ reason: "try" });
+  await waiting.pullRequest("success");
+  expect(await projectHolds(db, waiting.project.id)).toEqual([]);
 });
 
 test("a pull request waiting in a manual merge queue does not hold", async () => {
@@ -98,14 +96,14 @@ test("a pull request waiting in a manual merge queue does not hold", async () =>
 
 test("holds count runs a person started", async () => {
   const mine = await project();
-  const byHand = await mine.ask({ review: { from: "planner-1", kind: "plan" } }, "dashboard");
-  const fromScheduler = await mine.ask({ reason: "question" }, "scheduler");
+  const byHand = await mine.fail("node_failed", "coder-1", "dashboard");
+  const fromScheduler = await mine.permission("scheduler");
   // A run of another project never holds this one.
   const other = await project();
   await other.fail("node_failed");
 
   expect((await projectHolds(db, mine.project.id)).map((h) => [h.kind, h.runId])).toEqual([
-    ["review", byHand.run.id],
-    ["question", fromScheduler.run.id],
+    ["failed", byHand.id],
+    ["permission", fromScheduler.run.id],
   ]);
 });
