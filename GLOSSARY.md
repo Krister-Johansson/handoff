@@ -18,7 +18,8 @@ Terms used in handoff. Test names, types and issue titles use these words.
 - **Notification**: something a person is told: a tone, a title, a body and an optional link, written by whoever sends it and shown as it is. Read or unread, never done. A question has a notification, and the two are separate rows.
 - **Coder node**: a node whose executor spawns the Claude Code CLI in a worktree.
 - **PR node**: a node that opens or updates a pull request, then waits for checks and reviews and routes the feedback.
-- **Worktree**: a git worktree created per run where a Coder node works.
+- **Paths question**: what a node execution asks when the diff-within-owned-paths check is its only failing check. It waits, names the files outside the plan, and a person answers Allow for this run, Send back or Fail the step.
+- **Worktree**: a git worktree created per run where a Coder node works. A failed run keeps it until the run is repaired or cancelled, or `handoff gc` removes it.
 - **Library**: the catalog of skills and MCP servers that can be enabled per node or per edge.
 - **Engine**: the worker process that schedules node executions, evaluates contracts and edges, and writes events.
 - **Event**: one row in the events table, streamed to the dashboard. CLI stream-json lines become events.
