@@ -221,6 +221,28 @@ test("a task with a Size ignores a planner's proposal", async () => {
   expect(task.proposal).toMatchObject({ size: "L", runId: run.id });
 });
 
+test("loadPlan lays out the bars of tasks with a duration at the project's capacity", async () => {
+  const { github, plan, project, number, issue } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  await db.update(projects).set({ planHoursPerDay: 8 }).where(eq(projects.id, project.id));
+  const story = await issue("Bars", ["story"], await issue("Estimates", ["epic"]));
+  const sized = await issue("Sized", ["task"], story);
+  const estimated = await issue("Estimated", ["task"], story);
+  const dated = await issue("Dated", ["task"], story);
+  const item = (n: number) => plan.itemsOf(repo).get(n)!;
+  Object.assign(item(sized), { size: "L", start: "2026-10-12" });
+  // It starts after the L default's 2 hours on the same day; GitHub's Target disagrees and the bar follows the hours.
+  Object.assign(item(estimated), { estimate: 10, start: "2026-10-12", target: "2026-10-12" });
+  Object.assign(item(dated), { start: "2026-10-12", target: "2026-10-16" });
+
+  const view = await loadPlan(db, github, plan, project.id, { now: new Date(2026, 9, 10, 12) });
+  if ("error" in view) throw new Error(view.error);
+  const bar = (n: number) => view.timeline!.items.find((i) => i.number === n)!.planned;
+  expect(bar(sized)).toEqual({ start: "2026-10-12", end: "2026-10-12", openStart: false, openEnd: false, hours: 2, offsetHours: 0 });
+  expect(bar(estimated)).toEqual({ start: "2026-10-12", end: "2026-10-13", openStart: false, openEnd: false, hours: 10, offsetHours: 2, targetOnGitHub: "2026-10-12" });
+  expect(bar(dated)).toEqual({ start: "2026-10-12", end: "2026-10-16", openStart: false, openEnd: false });
+});
+
 test("without a plan number loadPlan says there is no plan, and without the project scope it says what is missing", async () => {
   const { github, plan, project } = await planned();
   const bare = await createProject(db, { name: "bare", repo: "octo/bare", defaultBranch: "main" });

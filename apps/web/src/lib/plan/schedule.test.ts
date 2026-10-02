@@ -109,3 +109,116 @@ test("arrows run from each blocker to the blocked task and are red when the task
     { from: 1, to: 4, late: false },
   ]);
 });
+
+/** Durations by issue number, in hours. */
+const hours = (entries: Record<number, number>) => new Map(Object.entries(entries).map(([n, h]) => [Number(n), { hours: h }]));
+
+test("a sized task's bar runs from Start for its duration over the capacity", () => {
+  const items = [
+    // GitHub's Target disagrees with Start plus 9 hours: the bar follows the duration and keeps GitHub's Target for the hover.
+    item(1, { start: "2026-10-12", target: "2026-10-20" }),
+    item(2, { start: "2026-10-14" }),
+    item(3, { start: "2026-10-15", target: "2026-10-17" }),
+    // No duration: Start to Target as before.
+    item(4, { start: "2026-10-12", target: "2026-10-14" }),
+  ];
+  const durations = hours({ 1: 9, 2: 50 / 60, 3: 13 });
+  const at = (capacity: number) => deriveSpans(items, [], NOW, { durations, capacity }).items;
+  expect(at(6).map((i) => i.planned)).toEqual([
+    { start: "2026-10-12", end: "2026-10-13", openStart: false, openEnd: false, hours: 9, offsetHours: 0, targetOnGitHub: "2026-10-20" },
+    { start: "2026-10-14", end: "2026-10-14", openStart: false, openEnd: false, hours: 50 / 60, offsetHours: 0 },
+    { start: "2026-10-15", end: "2026-10-17", openStart: false, openEnd: false, hours: 13, offsetHours: 0 },
+    { start: "2026-10-12", end: "2026-10-14", openStart: false, openEnd: false },
+  ]);
+  // At 8 hours a day the 13-hour task takes two days, and GitHub's Target of the 17th no longer agrees.
+  expect(at(8)[2]!.planned).toEqual({ start: "2026-10-15", end: "2026-10-16", openStart: false, openEnd: false, hours: 13, offsetHours: 0, targetOnGitHub: "2026-10-17" });
+  // Overdue still reads GitHub's Target.
+  expect(deriveSpans([item(5, { start: "2026-10-01", target: "2026-10-07" })], [], NOW, { durations: hours({ 5: 1 }), capacity: 6 }).items[0]).toMatchObject({
+    planned: { start: "2026-10-01", end: "2026-10-01", targetOnGitHub: "2026-10-07" },
+    overdueDays: 3,
+  });
+});
+
+test("tasks on one day sit in blocker order, then by number, and a later task's Target counts the hours before it", () => {
+  const items = [
+    item(3, { start: "2026-10-12", blockedBy: [7] }),
+    item(5, { start: "2026-10-12" }),
+    item(7, { start: "2026-10-12" }),
+    item(9, { start: "2026-10-12" }),
+    // The order is per Start day: #7's last hour on the 13th does not push #11, so the load row shows that day over capacity.
+    item(11, { start: "2026-10-13" }),
+  ];
+  const timeline = deriveSpans(items, [], NOW, { durations: hours({ 3: 2, 5: 4, 7: 3, 9: 1, 11: 2 }), capacity: 6 });
+  const bar = (n: number) => timeline.items.find((i) => i.number === n)!.planned;
+  // #3 waits for its blocker #7, then comes before #9 by number.
+  expect([5, 7, 3, 9, 11].map((n) => [n, bar(n)!.offsetHours, bar(n)!.end])).toEqual([
+    [5, 0, "2026-10-12"],
+    [7, 4, "2026-10-13"],
+    [3, 7, "2026-10-13"],
+    [9, 9, "2026-10-13"],
+    [11, 0, "2026-10-13"],
+  ]);
+});
+
+test("a task with a duration and no Start is unscheduled", () => {
+  const items = [
+    item(1, { kind: "story" }),
+    item(2, { parent: 1 }),
+    // A Target alone does not place a task with a duration: the bar needs a Start to run from.
+    item(3, { parent: 1, target: "2026-10-16" }),
+    // Without a duration a Target alone still gives a one-day span.
+    item(4, { target: "2026-10-16" }),
+  ];
+  const timeline = deriveSpans(items, [], NOW, { durations: hours({ 2: 3, 3: 3 }), capacity: 6 });
+  const of = (n: number) => timeline.items.find((i) => i.number === n)!;
+  expect(of(2)).toMatchObject({ planned: undefined, unscheduled: true });
+  expect(of(3)).toMatchObject({ planned: undefined, unscheduled: true });
+  expect(of(1)).toMatchObject({ derived: undefined, unscheduled: true });
+  expect(of(4)).toMatchObject({ planned: { start: "2026-10-16", end: "2026-10-16", openStart: true }, unscheduled: false });
+});
+
+test("an active run past its duration is over forecast and not overdue", () => {
+  const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3600_000).toISOString();
+  // Every task's Target on GitHub was two days ago.
+  const items = [1, 2, 3, 4].map((n) => item(n, { start: "2026-10-08", target: "2026-10-08" }));
+  const runs: TimelineRun[] = [
+    { id: "past", status: "running", issues: [1], startedAt: hoursAgo(3), finishedAt: null },
+    { id: "within", status: "waiting", issues: [2], startedAt: hoursAgo(3), finishedAt: null },
+    { id: "ended", status: "failed", issues: [3], startedAt: hoursAgo(30), finishedAt: hoursAgo(20) },
+    { id: "unsized", status: "running", issues: [4], startedAt: hoursAgo(3), finishedAt: null },
+  ];
+  const timeline = deriveSpans(items, runs, NOW, { durations: hours({ 1: 1, 2: 4, 3: 1 }), capacity: 6 });
+  const of = (n: number) => timeline.items.find((i) => i.number === n)!;
+  // Three hours into a one-hour task: two hours over, and Overdue gives way.
+  expect(of(1)).toMatchObject({ overForecastMinutes: 120, overdueDays: undefined });
+  // Still inside its four hours, or no longer running, or without a duration: Overdue as before.
+  expect(of(2)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
+  expect(of(3)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
+  expect(of(4)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
+});
+
+test("a Start before a blocker's end is flagged with that blocker", () => {
+  const items = [
+    // Nine hours from the 12th: it ends three hours into the 13th.
+    item(1, { start: "2026-10-12" }),
+    item(2, { start: "2026-10-13", blockedBy: [1] }),
+    item(3, { start: "2026-10-14", blockedBy: [1] }),
+    // Same day as its blocker, so it sits after it and starts as #1 ends.
+    item(8, { start: "2026-10-12", blockedBy: [1] }),
+    // A blocker without a duration ends with its Target day.
+    item(4, { start: "2026-10-12", target: "2026-10-15" }),
+    item(5, { start: "2026-10-15", blockedBy: [4], blockers: [4, 1] }),
+    // A done blocker has ended, whatever its dates say.
+    item(7, { state: "closed", start: "2026-10-12", target: "2026-10-20" }),
+    item(6, { start: "2026-10-14", blockers: [7] }),
+  ];
+  const timeline = deriveSpans(items, [], NOW, { durations: hours({ 1: 9, 2: 2, 3: 2, 8: 2 }), capacity: 6 });
+  const flagged = (n: number) => timeline.items.find((i) => i.number === n)!.startsBeforeBlocker;
+  expect([2, 3, 8, 5, 6].map((n) => [n, flagged(n)])).toEqual([
+    [2, [1]],
+    [3, []],
+    [8, []],
+    [5, [4]],
+    [6, []],
+  ]);
+});

@@ -105,16 +105,20 @@ export async function loadPlan(
   const byNumber = new Map(items.map((i) => [i.number, i]));
   const { forecasts, capacity } = await loadForecasts(db, projectId, (issue) => byNumber.get(issue)?.size);
   const sorted = [...items].sort((a, b) => a.number - b.number);
-  const task = (item: PlanItem): PlanTask => {
-    const proposal = proposals.get(item.number) ?? null;
-    return {
-      ...item,
-      status: item.state === "closed" ? "Done" : item.status,
-      run: latest.get(item.number) ?? null,
-      proposal,
-      duration: durationOf(item, forecasts, proposal?.size) ?? null,
-    };
-  };
+  // Only tasks take a duration; stories and epics keep the span their tasks give them.
+  const durations = new Map(
+    items.flatMap((item) => {
+      const duration = isTask(item.kind) ? durationOf(item, forecasts, proposals.get(item.number)?.size) : undefined;
+      return duration ? [[item.number, duration] as const] : [];
+    }),
+  );
+  const task = (item: PlanItem): PlanTask => ({
+    ...item,
+    status: item.state === "closed" ? "Done" : item.status,
+    run: latest.get(item.number) ?? null,
+    proposal: proposals.get(item.number) ?? null,
+    duration: durations.get(item.number) ?? null,
+  });
 
   // Each story hangs under its nearest epic, each task under its nearest story or epic; the walk stays inside the plan.
   const holderOf = (item: PlanItem): PlanItem | undefined => {
@@ -154,7 +158,7 @@ export async function loadPlan(
   const unplanned = open
     .filter((i) => !byNumber.has(i.number))
     .map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
-  return { project: planProject, epics, unparented, board, unplanned, timeline: deriveSpans(items, projectRuns, opts.now ?? new Date()), forecasts, capacity };
+  return { project: planProject, epics, unparented, board, unplanned, timeline: deriveSpans(items, projectRuns, opts.now ?? new Date(), { durations, capacity }), forecasts, capacity };
 }
 
 /** Every run of a project with the issues it linked and when it ran, for the timeline's actual strips. */

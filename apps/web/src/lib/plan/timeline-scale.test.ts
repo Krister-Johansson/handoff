@@ -27,6 +27,27 @@ test("the weeks scale lays out day columns with week and month headers and the m
   expect(months.weekends).toEqual([]);
 });
 
+test("the days scale lays out 96 px days with day and month headers", () => {
+  // Wed Sep 30 to Fri Oct 2 widens to the whole ISO week, Mon Sep 28 to Sun Oct 4: 7 days of 96 px.
+  const days = timeScale({ start: "2026-09-30", end: "2026-10-02" }, "days");
+  expect(days.zoom).toBe("days");
+  expect(days.range).toEqual({ start: "2026-09-28", end: "2026-10-04" });
+  expect(days.width).toBe(672);
+  expect(days.x("2026-10-01")).toBe(288);
+  expect(days.xAt(new Date(2026, 9, 1, 6, 0, 0).toISOString())).toBe(312);
+  expect(days.top).toEqual([cell("Sep 2026", 0, 288), cell("Oct 2026", 288, 384)]);
+  expect(days.bottom).toEqual([
+    cell("Mon 28", 0, 96),
+    cell("Tue 29", 96, 96),
+    cell("Wed 30", 192, 96),
+    cell("Thu 1", 288, 96),
+    cell("Fri 2", 384, 96),
+    cell("Sat 3", 480, 96),
+    cell("Sun 4", 576, 96),
+  ]);
+  expect(days.weekends).toEqual([cell("Sat", 480, 192)]);
+});
+
 test("the visible range starts a week before the earliest Start and ends two weeks after the latest Target, and spans at least eight weeks around today", () => {
   const spans = [
     { start: "2026-09-14", end: "2026-10-09" },
