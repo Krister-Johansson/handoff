@@ -6,6 +6,7 @@ import { CircleXIcon, ClipboardCheckIcon, ExternalLinkIcon, GitMergeIcon, GitPul
 import { answerAction, cancelAction, repairAction, resolveLoopAction, type InboxActionState } from "@/app/inbox/actions";
 import { Button } from "@/components/ui/button";
 import { MergeButton } from "@/components/runs/merge-button";
+import { PathsQuestionCard } from "@/components/runs/paths-question-card";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -160,6 +161,7 @@ function TryItLink({ item, compact }: { item: QuestionItem; compact: boolean }) 
 export function QuestionCard({ item, compact = false }: { item: QuestionItem; compact?: boolean }) {
   if (item.context?.review) return <ReviewLink item={item} compact={compact} />;
   if (item.reason === "try") return <TryItLink item={item} compact={compact} />;
+  if (item.reason === "paths") return <PathsQuestionCard item={item} compact={compact} />;
   return <AnswerCard item={item} compact={compact} />;
 }
 

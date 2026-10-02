@@ -56,6 +56,14 @@ test("a Try it question opens its own page, where the app and the criteria are",
   expect(screen.queryByRole("button", { name: "approve" })).not.toBeInTheDocument();
 });
 
+test("a question about files outside the plan offers to allow them, send the work back or fail the step", () => {
+  const context = { reason: "paths", from: "coder", files: ["notes.txt"] };
+  render(<QuestionCard item={{ ...run, id: "q4", question: "coder changed files outside the plan: `notes.txt`", options: ["allow", "send_back", "fail"], nodeKey: "coder", reason: "paths", context }} />);
+  expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Allow for this run" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "send_back" })).not.toBeInTheDocument();
+});
+
 test("a failed run shows the error's first line as its title and the rest as output, and repairs with a note", async () => {
   render(
     <FailedRunCard
