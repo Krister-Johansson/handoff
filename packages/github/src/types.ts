@@ -123,6 +123,8 @@ export interface GitHubPort {
   /** Replaces a pull request's title and description. */
   updatePr(repo: RepoRef, number: number, input: { title: string; body: string }): Promise<void>;
   getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot>;
+  /** The paths of the files a pull request changes, as GitHub lists them (at most 3,000). */
+  listPrFiles(repo: RepoRef, number: number): Promise<string[]>;
   /** Whether checks will ever run on a pull request into `branch`: an active Actions workflow, or a branch rule that requires status checks. */
   expectsChecks(repo: RepoRef, branch: string): Promise<boolean>;
   getJobLogTail(repo: RepoRef, jobId: number, lines?: number): Promise<string | undefined>;

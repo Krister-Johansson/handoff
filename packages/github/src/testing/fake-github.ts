@@ -4,7 +4,7 @@ import type { PlanAncestor } from "../projects/types.ts";
 import { GitHubReadError } from "../errors.ts";
 import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
-type FakePr = PrSnapshot & { base: string; body: string };
+type FakePr = PrSnapshot & { base: string; body: string; files?: string[] };
 
 /**
  * An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set.
@@ -249,6 +249,12 @@ export class FakeGitHub implements GitHubPort {
       }
     }
     return structuredClone(pr);
+  }
+
+  async listPrFiles(_repo: RepoRef, number: number): Promise<string[]> {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    return [...(pr.files ?? [])];
   }
 
   async getJobLogTail(_repo: RepoRef, jobId: number) {

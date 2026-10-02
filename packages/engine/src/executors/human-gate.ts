@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, questionBrief, reviewPath, runPath, tryPath, type DiffFile, type NodeMemory } from "@handoff/core";
-import { previews, questions, type Db } from "@handoff/db";
+import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, PlannerOutputSchema, questionBrief, reviewPath, runPath, tryPath, type ContextPacket, type DiffFile, type NodeMemory, type PlanOverlap } from "@handoff/core";
+import { nodeExecutions, previews, questions, type Db } from "@handoff/db";
+import { planOverlaps } from "../planning.ts";
 import { heldApproval, recordApproval } from "../approvals.ts";
 import { notifyFrom, type Told } from "../notify.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
@@ -31,6 +32,20 @@ const SEVERITY_NAMES: Record<string, string> = { blocking: "Blocking", should_fi
 /** What reached the gate, as markdown a person can read and comment on, by the kind of node that sent it. */
 export function reviewOf(fromType: string | undefined, output: unknown): { kind: string; markdown: string } {
   const o = obj(output);
+  const split = fromType === "planner" && o.status === "split" ? PlannerOutputSchema.safeParse(output).data?.parts : undefined;
+  if (split) {
+    return {
+      kind: "split",
+      markdown: [
+        String(o.plan ?? "").trim() || "The task is over the project's plan budget.",
+        "",
+        "## Proposed split",
+        "",
+        "Each part is its own run. This run builds part 1; handoff opens an issue for each later part.",
+        ...split.flatMap((part, i) => ["", `### ${i + 1}. ${part.title}`, "", part.body.trim(), "", `Files: ${part.ownedPaths.map((p) => `\`${p}\``).join(", ")}`]),
+      ].join("\n"),
+    };
+  }
   if (fromType === "planner" && typeof o.plan === "string") {
     const steps = strings(o.steps);
     const paths = strings(o.ownedPaths);
@@ -131,7 +146,7 @@ async function withCode(ctx: ExecutorContext, review: Review, branchDiff: Branch
   return files.length ? { ...review, kind: "code", files } : review;
 }
 
-async function compose(ctx: ExecutorContext, branchDiff: BranchDiff | undefined): Promise<Ask> {
+async function compose(ctx: ExecutorContext, db: Db, branchDiff: BranchDiff | undefined): Promise<Ask> {
   const trigger = ctx.execution.trigger;
   if (trigger?.kind === "exhausted") {
     const attempts = ctx.state.loops[trigger.edgeKey ?? ""]?.attempts ?? 0;
@@ -150,12 +165,34 @@ async function compose(ctx: ExecutorContext, branchDiff: BranchDiff | undefined)
   // Where the person's comments go when they ask for changes, which is not always the node that sent the work.
   const backTo = ctx.graph.outEdges(ctx.node.key).find((e) => e.port === "changes")?.target;
   const review = found && backTo ? { ...found, backTo } : found;
+  const planned = review && (review.kind === "plan" || review.kind === "split") ? PlannerOutputSchema.safeParse(ctx.state.nodes[review.from]?.output).data : undefined;
+  // A split is accepted as proposed or sent back, which needs somewhere for changes to go; it is never approved as a plan.
+  const parts = planned?.status === "split" && backTo ? planned.parts : undefined;
+  const overlapping = planned && review ? await overlapsOf(ctx, db, review.from, [...planned.ownedPaths, ...(planned.parts ?? []).flatMap((p) => p.ownedPaths)]) : [];
   return {
     question: typeof config.question === "string" ? config.question : review ? `Review the ${review.kind} from ${review.from}` : "Approve continuing?",
     // "fix" (approve after fixes) routes like changes, so a gate offers it only where changes go somewhere.
-    options: Array.isArray(config.options) ? config.options.map(String) : backTo ? ["approve", "changes", "fix"] : ["approve", "changes"],
-    context: { reason: "approval", from: trigger?.from, ...(review ? { review } : {}) },
+    options: parts ? ["split", "changes"] : Array.isArray(config.options) ? config.options.map(String) : backTo ? ["approve", "changes", "fix"] : ["approve", "changes"],
+    context: {
+      reason: "approval",
+      from: trigger?.from,
+      ...(review ? { review } : {}),
+      ...(parts ? { split: { parts } } : {}),
+      ...(overlapping.length ? { overlaps: overlapping } : {}),
+    },
   };
+}
+
+/**
+ * Where a plan's paths meet the other work its planner was told of, from the planner's own context
+ * packet: other active runs' owned paths and open pull requests' files.
+ */
+async function overlapsOf(ctx: ExecutorContext, db: Db, planner: string, paths: string[]): Promise<PlanOverlap[]> {
+  const executionId = ctx.state.nodes[planner]?.executionId;
+  if (!executionId || paths.length === 0) return [];
+  const [row] = await db.select({ packet: nodeExecutions.contextPacket }).from(nodeExecutions).where(eq(nodeExecutions.id, executionId));
+  const work = (row?.packet as ContextPacket | null | undefined)?.otherWork;
+  return work ? planOverlaps([...new Set(paths)], work) : [];
 }
 
 /**
@@ -265,7 +302,7 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
         return { kind: "completed", output: answer, statePatch: { human: { ...ctx.state.human, [ctx.node.key]: answer } } };
       }
       if (!question) {
-        const ask = tryIt ? await composeTry(ctx, deps) : await compose(ctx, deps.branchDiff);
+        const ask = tryIt ? await composeTry(ctx, deps) : await compose(ctx, deps.db, deps.branchDiff);
         // A question and its notification are two rows that commit together. Only a new question tells the person.
         question = await deps.db.transaction(async (tx) => {
           const [created] = await tx
@@ -291,12 +328,15 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
 
       // "Approve after fixes" routes like changes; the gate remembers to let the fixed work through.
       const afterFixes = question.option === "fix";
-      const option = afterFixes ? "changes" : question.option;
+      // "Split as proposed" sends the narrowed run back to the planner to plan its first part, so it routes like changes.
+      const split = question.option === "split";
+      const option = afterFixes || split ? "changes" : question.option;
       const answer = {
         answer: question.answer,
         ...(option ? { option } : {}),
         ...(option === "approve" || option === "reject" || option === "changes" ? { approved: option === "approve" } : {}),
         ...(afterFixes ? { afterFixes: true } : {}),
+        ...(split ? { split: true } : {}),
         ...(question.comments.length ? { comments: question.comments } : {}),
         answeredBy: question.answeredBy ?? "unknown",
         answeredAt: (question.answeredAt ?? new Date()).toISOString(),

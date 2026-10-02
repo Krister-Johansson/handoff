@@ -27,7 +27,15 @@ const CHOICES: {
     title: "Approve after fixes",
     describe: (target) => `Send your comments back to ${target}. When the fixed work returns, the run goes on without asking you.`,
   },
+  {
+    value: "split",
+    title: "Split as proposed",
+    describe: (target) => `handoff opens an issue for each later part, and this run builds the first part. ${target} plans it on its own.`,
+  },
 ];
+
+/** The choices a review offers when its question names none: everything but a split. */
+const DEFAULT_OPTIONS: ReviewOption[] = ["changes", "approve", "fix"];
 
 /**
  * How a person finishes a review: an overall comment and one of three choices. Request changes and
@@ -43,9 +51,13 @@ type SubmitProps = {
   /** Called as the review is sent, to drop the kept draft, and again if sending failed, to keep it. */
   onSending?: () => void;
   onFailed?: () => void;
+  /** The answers the gate's question offers; a split offers split and changes. */
+  options?: readonly string[] | undefined;
 };
 
-export function SubmitReview({ questionId, runId, target, comments, note, setNote, onSending, onFailed }: SubmitProps) {
+export function SubmitReview({ questionId, runId, target, comments, note, setNote, onSending, onFailed, options }: SubmitProps) {
+  const offered = options?.length ? options : DEFAULT_OPTIONS;
+  const choices = CHOICES.filter((choice) => offered.includes(choice.value));
   const [option, setOption] = useState<ReviewOption>();
   const [error, setError] = useState<string>();
   const [pending, startSubmit] = useTransition();
@@ -69,7 +81,7 @@ export function SubmitReview({ questionId, runId, target, comments, note, setNot
         {comments.length > 0 && <FieldDescription className="text-xs">{`${comments.length} ${comments.length === 1 ? "comment" : "comments"} will be sent with it.`}</FieldDescription>}
       </Field>
       <RadioGroup value={option ?? ""} onValueChange={(value) => setOption(value as ReviewOption)} aria-label="Review result" className="gap-1.5">
-        {CHOICES.map((choice) => (
+        {choices.map((choice) => (
           <FieldLabel
             key={choice.value}
             htmlFor={`review-${choice.value}`}

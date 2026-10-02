@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyIcon, MessageSquareIcon, MessageSquarePlusIcon, XIcon } from "lucide-react";
@@ -159,11 +160,55 @@ function SelectionBar({ selected, onComment }: { selected: Selected; onComment: 
   );
 }
 
+/** Another run whose plan or open pull request shares paths with the plan under review, and the shared paths. */
+export type PlanOverlap = { runId: string; href: string; task: string; branch: string; issues: { number: number; title: string }[]; paths: string[]; pr?: number | undefined };
+
+/** The other runs the plan's paths meet, each named by its issues (or its task) and linked to its run page. */
+function Overlaps({ overlaps }: { overlaps: PlanOverlap[] }) {
+  if (overlaps.length === 0) return null;
+  return (
+    <div className={`${CARD} flex flex-col gap-2 px-5 py-4 text-[13px]`}>
+      <span className="text-xs font-medium text-muted-foreground">Overlaps with other runs</span>
+      <p className="text-xs text-muted-foreground">These runs own or change files this plan owns. The run that merges second may conflict.</p>
+      <ul aria-label="Overlaps with other runs" className="flex flex-col gap-2">
+        {overlaps.map((o) => (
+          <li key={o.runId} className="flex flex-col gap-1">
+            <span className="flex flex-wrap items-baseline gap-x-1.5">
+              <Link href={o.href} className="font-medium underline-offset-2 hover:underline">
+                {o.issues.length ? o.issues.map((i) => `#${i.number} ${i.title}`).join(", ") : o.task.split("\n")[0]}
+              </Link>
+              {o.pr !== undefined && <span className="text-xs text-muted-foreground">{`pull request #${o.pr}`}</span>}
+            </span>
+            <span className="flex flex-col gap-0.5">
+              {o.paths.map((path) => (
+                <code key={path} className="text-xs break-all">
+                  {path}
+                </code>
+              ))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+type PlanReviewProps = {
+  questionId: string;
+  runId: string;
+  from: string;
+  markdown: string;
+  /** The answers the gate's question offers; a split offers split and changes instead of approve. */
+  options?: readonly string[] | undefined;
+  overlaps?: PlanOverlap[] | undefined;
+};
+
 /**
  * A human gate's review: what reached the gate as markdown, comments on selected passages, and an
- * overall comment with request changes, approve, or approve after fixes. Comments go back with every quote.
+ * overall comment with request changes, approve, or approve after fixes, or for a proposed split, split
+ * as proposed. Comments go back with every quote. Other runs whose paths the plan meets are listed.
  */
-export function PlanReview({ questionId, runId, from, markdown }: { questionId: string; runId: string; from: string; markdown: string }) {
+export function PlanReview({ questionId, runId, from, markdown, options, overlaps = [] }: PlanReviewProps) {
   const article = useRef<HTMLElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const [selected, setSelected] = useSelectedText(article);
@@ -221,6 +266,7 @@ export function PlanReview({ questionId, runId, from, markdown }: { questionId: 
         )}
       </div>
       <aside className="flex flex-col gap-4 lg:sticky lg:top-[76px]">
+        <Overlaps overlaps={overlaps} />
         <div className={`${CARD} px-5 py-4`}>
           <Composer
             key={selected?.text}
@@ -235,7 +281,7 @@ export function PlanReview({ questionId, runId, from, markdown }: { questionId: 
         </div>
         <CommentList comments={comments} onRemove={(index) => setComments((list) => list.filter((_, i) => i !== index))} />
         <div className={`${CARD} px-5 py-4`}>
-          <SubmitReview questionId={questionId} runId={runId} target={from} comments={comments} note={note} setNote={setNote} onSending={onSending} onFailed={onFailed} />
+          <SubmitReview questionId={questionId} runId={runId} target={from} comments={comments} note={note} setNote={setNote} onSending={onSending} onFailed={onFailed} options={options} />
         </div>
       </aside>
     </div>

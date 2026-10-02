@@ -2,6 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import { ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { DEFAULT_PLAN_BUDGET } from "@handoff/core";
 import { unlinkPlanAction } from "@/app/projects/actions";
 import { SetUpPlanDialog } from "@/components/plan/set-up-plan-dialog";
 import { AddProjectDialog } from "@/components/projects/add-project-dialog";
@@ -38,6 +39,7 @@ export type ProjectRow = {
   agentNotes?: string | null;
   demoSeedCommand?: string | null;
   uiPaths?: string[] | null;
+  planBudget?: { files: number; steps: number } | null;
   isDemo: boolean;
   runCount: number;
   plan: PlanLink | null;
@@ -163,6 +165,13 @@ function ProjectDetails({ project }: { project: ProjectRow }) {
           <span className={`${MONO} break-all`}>{project.uiPaths.join(" ")}</span>
         ) : (
           <span className="text-[13px] text-muted-foreground">the defaults: routes, pages, components and styles</span>
+        )}
+      </Detail>
+      <Detail term="Plan budget">
+        {project.planBudget ? (
+          <span className="text-[13px]">{`${project.planBudget.files} files, ${project.planBudget.steps} steps`}</span>
+        ) : (
+          <span className="text-[13px] text-muted-foreground">{`the defaults: ${DEFAULT_PLAN_BUDGET.files} files, ${DEFAULT_PLAN_BUDGET.steps} steps`}</span>
         )}
       </Detail>
       <Detail term="Plan on GitHub">

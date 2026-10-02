@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
-import { remember, RunStateSchema, type RunState } from "@handoff/core";
+import { PlanPartSchema, remember, RunStateSchema, type PlanPart, type RunState } from "@handoff/core";
 import type { PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
@@ -149,11 +149,17 @@ export async function restartTryIt(db: Db, questionId: string) {
 }
 
 /** Records a person's answer and wakes the Human gate waiting on it. */
-export async function answerQuestion(
-  db: Db,
-  questionId: string,
-  input: { answer: string; option?: string; answeredBy: string; comments?: QuestionComment[] },
-) {
+type Answer = { answer: string; option?: string; answeredBy: string; comments?: QuestionComment[] };
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+export async function answerQuestion(db: Db, questionId: string, input: Answer) {
+  // Accepting a split opens the later parts' issues first, which needs GitHub: splitRun answers it.
+  if (input.option === "split") throw new Error("Split as proposed opens an issue for each later part first; accept a split through the split, not as a plain answer.");
+  return db.transaction((tx) => answerIn(tx, questionId, input));
+}
+
+/** Records a person's answer to an open question and wakes the step that waits on it. */
+async function answerIn(tx: Tx, questionId: string, input: Answer, extra: { type: string; payload: unknown }[] = []) {
   const comments = (input.comments ?? [])
     .map(
       (c): QuestionComment => ({
@@ -167,28 +173,64 @@ export async function answerQuestion(
       }),
     )
     .filter((c) => c.body);
+  const [question] = await tx
+    .update(questions)
+    .set({ answer: input.answer, option: input.option ?? null, comments, answeredBy: input.answeredBy, answeredAt: sql`now()` })
+    .where(and(eq(questions.id, questionId), sql`${questions.answer} is null`))
+    .returning();
+  if (!question) {
+    const [existing] = await tx.select({ id: questions.id }).from(questions).where(eq(questions.id, questionId));
+    throw new Error(existing ? "question already answered" : `question ${questionId} not found`);
+  }
+  await wakeByToken(tx, question.id, { reason: "answer", payload: { option: input.option ?? null, answeredBy: input.answeredBy } });
+  // An open question or review held the project's scheduler.
+  const [run] = await tx.select({ projectId: runs.projectId }).from(runs).where(eq(runs.id, question.runId));
+  if (run) await nudgeScheduler(tx, run.projectId);
+  await appendEvents(tx, question.runId, [
+    {
+      type: "human.answered",
+      payload: { questionId: question.id, answer: input.answer, option: input.option ?? null, comments: comments.length, answeredBy: input.answeredBy },
+      nodeExecutionId: question.nodeExecutionId,
+    },
+    ...extra.map((e) => ({ ...e, nodeExecutionId: question.nodeExecutionId })),
+  ]);
+  return question;
+}
+
+/** An issue opened for a later part of a split. */
+export type SplitIssue = { number: number; title: string; url: string };
+
+/** The parts a plan gate's question offers to split into, when it offers a split. */
+export function splitPartsOf(context: Record<string, unknown>): PlanPart[] | undefined {
+  const parsed = PlanPartSchema.array().min(2).safeParse((context.split as { parts?: unknown } | undefined)?.parts);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Accepts the split a plan gate shows, once the later parts' issues are open: the run narrows to the
+ * first part (its task becomes that part, and its plan is dropped for the planner to plan the part
+ * again) and the gate is answered "split", which sends the work back to the planner. Records `run.split`.
+ */
+export async function splitRun(db: Db, questionId: string, input: { note?: string | undefined; answeredBy: string; issues: SplitIssue[] }) {
   return db.transaction(async (tx) => {
-    const [question] = await tx
-      .update(questions)
-      .set({ answer: input.answer, option: input.option ?? null, comments, answeredBy: input.answeredBy, answeredAt: sql`now()` })
-      .where(and(eq(questions.id, questionId), sql`${questions.answer} is null`))
-      .returning();
-    if (!question) {
-      const [existing] = await tx.select({ id: questions.id }).from(questions).where(eq(questions.id, questionId));
-      throw new Error(existing ? "question already answered" : `question ${questionId} not found`);
-    }
-    await wakeByToken(tx, question.id, { reason: "answer", payload: { option: input.option ?? null, answeredBy: input.answeredBy } });
-    // An open question or review held the project's scheduler.
-    const [run] = await tx.select({ projectId: runs.projectId }).from(runs).where(eq(runs.id, question.runId));
-    if (run) await nudgeScheduler(tx, run.projectId);
-    await appendEvents(tx, question.runId, [
-      {
-        type: "human.answered",
-        payload: { questionId: question.id, answer: input.answer, option: input.option ?? null, comments: comments.length, answeredBy: input.answeredBy },
-        nodeExecutionId: question.nodeExecutionId,
-      },
-    ]);
-    return question;
+    const [question] = await tx.select().from(questions).where(eq(questions.id, questionId)).for("update");
+    if (!question) throw new Error(`question ${questionId} not found`);
+    if (question.answer !== null) throw new Error("question already answered");
+    const parts = splitPartsOf(question.context);
+    if (!parts) throw new Error("This question does not offer a split.");
+    if (input.issues.length !== parts.length - 1) throw new Error(`A split into ${parts.length} parts needs ${parts.length - 1} issues for the later parts.`);
+    const [run] = await tx.select().from(runs).where(eq(runs.id, question.runId)).for("update");
+    if (!run) throw new Error(`run ${question.runId} not found`);
+    const first = parts[0]!;
+    const task = `${first.title}\n\n${first.body.trim()}`;
+    const { plan: _split, ...rest } = RunStateSchema.parse(run.state);
+    await tx.update(runs).set({ task, state: { ...rest, task }, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, run.id));
+    const later = input.issues.map((i) => `#${i.number} "${i.title}"`).join(", ");
+    const answer = [
+      `Split as proposed. This run builds part 1, "${first.title}", and nothing of the later parts: ${later} hold them, each for a run of its own. Plan part 1 on its own.`,
+      ...(input.note?.trim() ? [input.note.trim()] : []),
+    ].join("\n\n");
+    return answerIn(tx, questionId, { answer, option: "split", answeredBy: input.answeredBy }, [{ type: "run.split", payload: { questionId, task, issues: input.issues } }]);
   });
 }
 

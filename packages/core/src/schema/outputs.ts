@@ -10,13 +10,21 @@ const QuestionSchema = z.object({
 /** A task's size, the same S, M and L as the plan's Size field. */
 export const PlanSizeSchema = z.enum(["S", "M", "L"]);
 
+/** One part of a task a planner proposes to split: what it builds, and the files it owns. */
+export const PlanPartSchema = z.object({
+  title: z.string().min(1).max(256),
+  body: z.string().min(1).describe("What this part builds and how a person checks it is done, as an issue body."),
+  ownedPaths: z.array(z.string()).min(1),
+});
+export type PlanPart = z.infer<typeof PlanPartSchema>;
+
 /**
- * A plan, or a question when the task leaves a decision to a person. Outputs from before planners
- * could ask have no status and are plans.
+ * A plan, a question when the task leaves a decision to a person, or a split into parts when the task
+ * is over the plan budget. Outputs from before planners could ask have no status and are plans.
  */
 export const PlannerOutputSchema = z
   .object({
-    status: z.enum(["done", "needs_input"]).optional(),
+    status: z.enum(["done", "needs_input", "split"]).optional(),
     plan: z.string(),
     steps: z.array(z.string()),
     ownedPaths: z.array(z.string()),
@@ -25,9 +33,11 @@ export const PlannerOutputSchema = z
     /** The planner's proposal for the task's Size; the plan's timeline shows it until a person picks a size. */
     size: PlanSizeSchema.optional().describe("S for a change in one place, M for a feature across a few files, L for a change across several areas."),
     question: QuestionSchema.optional(),
+    /** With status split: the parts in the order to build them. The first stays in this run; each later one becomes an issue. */
+    parts: z.array(PlanPartSchema).optional(),
   })
-  .refine((o) => (o.status === "needs_input" ? o.question !== undefined : o.plan.trim().length > 0), {
-    message: "a plan needs text, and needs_input needs a question",
+  .refine((o) => (o.status === "needs_input" ? o.question !== undefined : o.status === "split" ? (o.parts?.length ?? 0) >= 2 : o.plan.trim().length > 0), {
+    message: "a plan needs text, needs_input needs a question, and split needs at least two parts",
     path: ["plan"],
   });
 
@@ -193,6 +203,8 @@ export const HumanAnswerSchema = z.object({
   approved: z.boolean().optional(),
   /** The person approved on condition their comments are fixed: the gate lets the fixed work through. */
   afterFixes: z.boolean().optional(),
+  /** The person accepted the planner's split: the run now builds the first part, and it routes like changes, back to plan it. */
+  split: z.boolean().optional(),
   /** Comments on quoted parts or lines of what the gate showed, when the person reviewed something. */
   comments: z.array(PersonCommentSchema).optional(),
   answeredBy: z.string(),

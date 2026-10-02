@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
-import { brief, redactSecrets, runPath, RunStateSchema } from "@handoff/core";
+import { brief, redactSecrets, runPath, RunStateSchema, type RunState } from "@handoff/core";
 import { overlapKey } from "../backlog-scheduler/nudge.ts";
 import { overlapWith } from "../backlog-scheduler/overlap.ts";
 import { notifyFrom } from "../notify.ts";
@@ -33,6 +33,8 @@ import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary }
 import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
 import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
+import { budgetFor, freshIssues, otherWorkOf } from "../planning.ts";
+import type { GitHubPort } from "@handoff/github";
 import { runAllowRules } from "../permissions/broker.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import { workdirSpecOf } from "../runs.ts";
@@ -60,6 +62,8 @@ export type EngineDeps = {
   secrets?: Record<string, string | undefined>;
   /** Where OAuth tokens for MCP servers are read from. Defaults to the store at defaultOAuthDir(). */
   oauth?: McpOAuthStore;
+  /** GitHub, for what a planner reads before it plans: its issues and their comments, and the files of open pull requests. */
+  github?: GitHubPort | undefined;
 };
 
 const EVENT_FLUSH_MS = 100;
@@ -290,6 +294,8 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
   mkdirSync(stagingDir, { recursive: true });
   let outcome: ExecutorOutcome;
   let workdir: Workdir | undefined;
+  // The linked issues as a planner read them again from GitHub, kept in run state when it completes.
+  let fresh: RunState["issues"];
   try {
     const executor = deps.executors[node.type];
     if (!executor) {
@@ -316,7 +322,14 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       }
       // Where this node sends work back, so a reviewer's next round can read what that step changed.
       const sentBackTo = graph.outEdges(node.key).filter((e) => e.loop).map((e) => e.target);
-      const packet = selectContext(node, state, row, sentBackTo);
+      // Every planner attempt reads its issues again, with their comments, and is told its budget and the project's other work.
+      if (node.type === "planner" && deps.github && state.issues?.length) fresh = await freshIssues(deps.github, project, state.issues);
+      const seen = fresh ? { ...state, issues: fresh } : state;
+      const packet = selectContext(node, seen, row, sentBackTo);
+      if (node.type === "planner") {
+        packet.budget = budgetFor(project, graph, node.key);
+        packet.otherWork = await otherWorkOf(db, deps.github, run, project);
+      }
       if (workdir) packet.environment = { branch: run.branchName, setupCommand: project.setupCommand, ...(project.agentNotes ? { agentNotes: project.agentNotes } : {}) };
       // A person's Always allow in this run covers the node's later attempts too, though the run keeps its graph version.
       const allowedInRun = graph.executorKind(node.key) === "cli" ? await runAllowRules(db, run.id, node.key) : [];
@@ -329,7 +342,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         execution: row,
         node,
         graph,
-        state,
+        state: seen,
         packet,
         ...(workdir ? { workdir } : {}),
         stagingDir,
@@ -370,6 +383,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     rmSync(stagingDir, { recursive: true, force: true });
   }
   await flush();
+  if (fresh && outcome.kind === "completed") outcome = { ...outcome, statePatch: { ...outcome.statePatch, issues: fresh } };
 
   const final = await heartbeat(db, row.id, workerId, deps.leaseMs);
   if (!final.alive || leaseLost) {

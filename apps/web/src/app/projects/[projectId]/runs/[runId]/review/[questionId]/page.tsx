@@ -27,6 +27,7 @@ type Answered = NonNullable<Review["answered"]>;
 const VERDICT: Record<string, { status: "succeeded" | "waiting"; label: string }> = {
   approve: { status: "succeeded", label: "Approved" },
   fix: { status: "succeeded", label: "Approved after fixes" },
+  split: { status: "succeeded", label: "Split as proposed" },
   changes: { status: "waiting", label: "Changes requested" },
 };
 
@@ -90,7 +91,11 @@ function ReviewBody({ review, runId, tokens }: { review: Review; runId: string; 
       </div>
     );
   }
-  return answered ? <AnsweredReview markdown={shown.markdown} answered={answered} /> : <PlanReview questionId={review.id} runId={runId} from={shown.backTo ?? shown.from} markdown={shown.markdown} />;
+  return answered ? (
+    <AnsweredReview markdown={shown.markdown} answered={answered} />
+  ) : (
+    <PlanReview questionId={review.id} runId={runId} from={shown.backTo ?? shown.from} markdown={shown.markdown} options={review.options} overlaps={review.overlaps} />
+  );
 }
 
 /** A review that was already answered: what was reviewed, the verdict, the note and the comments. */

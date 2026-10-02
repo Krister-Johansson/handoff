@@ -318,6 +318,14 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       switch (result.outcome) {
         case "success": {
           const output = isReview(ctx) ? followFindings(ctx, result.validated as ReviewerOutput) : result.validated;
+          // A split needs a person to accept it at a plan gate; without one, it would reach the next step as a plan.
+          if (ctx.node.type === "planner" && (output as { status?: string }).status === "split" && !ctx.packet.budget?.canSplit) {
+            return {
+              kind: "failed",
+              error: { code: "plan_split_without_gate", message: "The planner proposed a split into parts, but no plan gate follows it in this graph for a person to accept one." },
+              cost,
+            };
+          }
           const statePatch: Record<string, unknown> = {
             // A planner's question is not a plan: the run keeps no plan until the answer comes back.
             ...(ctx.node.type === "planner" && (output as { status?: string }).status !== "needs_input" ? { plan: output } : {}),

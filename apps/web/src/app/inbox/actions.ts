@@ -6,7 +6,8 @@ import { z } from "zod";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, resolveExhaustedLoop, restartTryIt } from "@handoff/engine/operations";
 import { allowPathsOf } from "@/lib/allow-paths";
 import { getDb } from "@/lib/db";
-import { getProjects } from "@/lib/github";
+import { getGitHub, getProjects } from "@/lib/github";
+import { splitPlan } from "@/server/graphs";
 import { runPathOf } from "@/server/run-path";
 import { markViewed } from "@/server/review";
 import { allowToolForNode } from "@/server/allow-tool";
@@ -63,7 +64,7 @@ export async function cancelAction(_: InboxActionState, form: FormData): Promise
 const ReviewAnswerSchema = z.object({
   questionId: z.string().uuid(),
   runId: z.string().uuid(),
-  option: z.enum(["approve", "changes", "fix"]),
+  option: z.enum(["approve", "changes", "fix", "split"]),
   note: z.string().max(10_000),
   comments: z
     .array(
@@ -79,14 +80,18 @@ const ReviewAnswerSchema = z.object({
     .max(200),
 });
 
-/** Answers a human gate's review: approve, or changes with comments on quoted passages or lines of files. Returns to the run. */
+/**
+ * Answers a human gate's review: approve, changes with comments on quoted passages or lines of files,
+ * or a planner's split as proposed, which opens the later parts' issues first. Returns to the run.
+ */
 export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchema>): Promise<InboxActionState> {
   const parsed = ReviewAnswerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That review cannot be sent." };
   const { questionId, runId, option, note, comments } = parsed.data;
-  if (option !== "approve" && !note && comments.length === 0) return { ok: false, error: "Say what to change: add a comment or a note." };
+  if (option !== "approve" && option !== "split" && !note && comments.length === 0) return { ok: false, error: "Say what to change: add a comment or a note." };
   try {
-    await answerQuestion(getDb(), questionId, { answer: note || (option === "approve" ? "Approved." : "Changes requested."), option, comments, answeredBy: "dashboard" });
+    if (option === "split") await splitPlan({ db: getDb(), github: getGitHub(), projects: getProjects() }, { runId, questionId, answeredBy: "dashboard", note });
+    else await answerQuestion(getDb(), questionId, { answer: note || (option === "approve" ? "Approved." : "Changes requested."), option, comments, answeredBy: "dashboard" });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

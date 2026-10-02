@@ -28,6 +28,8 @@ export const projects = pgTable(
     demoSeedCommand: text("demo_seed_command"),
     /** Globs of the files a person sees in the app. A Demo step set to UI changes skips a change that touches none. Null: the defaults. */
     uiPaths: text("ui_paths").array(),
+    /** The most files and steps a planner's plan may have before it proposes a split. Null: the defaults, 15 files and 12 steps. */
+    planBudget: jsonb("plan_budget").$type<{ files: number; steps: number }>(),
     /** Free text every agent step reads under "About this project's environment". Never secrets. */
     agentNotes: text("agent_notes"),
     /** The number of the repository owner's GitHub Project (v2) that holds this project's plan; null without a plan. */

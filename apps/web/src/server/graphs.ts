@@ -2,8 +2,8 @@ import linear from "@handoff/core/templates/linear.graph.json" with { type: "jso
 import loop from "@handoff/core/templates/loop.graph.json" with { type: "json" };
 import planReview from "@handoff/core/templates/plan-review.graph.json" with { type: "json" };
 import { compileGraph, RunStateSchema, suggestProjectName, type CompileError } from "@handoff/core";
-import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
-import { cancelRun, statusesBeforeRun } from "@handoff/engine/operations";
+import { and, desc, eq, graphs, graphVersions, inArray, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { cancelRun, splitPartsOf, splitRun, statusesBeforeRun, type SplitIssue } from "@handoff/engine/operations";
 import { branchHasWork, previousRunOf } from "@handoff/engine/runs";
 import { startRun, type StartRunInput } from "@handoff/engine/start-run";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
@@ -213,6 +213,51 @@ export async function runAgain(db: Db, runId: string, opts: RunAgainOptions = {}
   await db.update(runs).set({ supersededBy: again.id }).where(eq(runs.id, runId));
   if (earlier.status === "failed") await cancelRun(db, runId, { reason: `run again as ${again.id}`, projects: opts.projects });
   return again;
+}
+
+/** What accepting a split needs: the database, GitHub for plain issues, and the plan for sub-issues. */
+export type SplitDeps = { db: Db; github: GitHubPort | undefined; projects: ProjectsPort | undefined };
+
+/**
+ * "Split as proposed" at a plan gate: opens one issue for each part after the first, then narrows the
+ * run to the first part and answers the gate, which sends the planner back to plan that part. With a
+ * plan on GitHub Projects each issue is a sub-issue of the run's issue; without one, each issue depends
+ * on the one before it (the first on the run's issue) through a "Depends on" line and GitHub's
+ * blocked-by link, so the parts run in order. Returns the opened issues.
+ */
+export async function splitPlan(deps: SplitDeps, input: { runId: string; questionId: string; answeredBy: string; note?: string | undefined }): Promise<SplitIssue[]> {
+  const [row] = await deps.db
+    .select({ question: questions, issues: runs.issues, task: runs.task, owner: projects.repoOwner, name: projects.repoName, planNumber: projects.planProjectNumber })
+    .from(questions)
+    .innerJoin(runs, eq(runs.id, questions.runId))
+    .innerJoin(projects, eq(projects.id, runs.projectId))
+    .where(and(eq(questions.id, input.questionId), eq(questions.runId, input.runId)));
+  if (!row) throw new Error("Question not found.");
+  if (row.question.answer !== null) throw new Error("question already answered");
+  const parts = splitPartsOf(row.question.context);
+  if (!parts) throw new Error("This question does not offer a split.");
+  const repo = { owner: row.owner, name: row.name };
+  const parent = row.issues[0];
+  const origin = parent ? `#${parent.number}` : `"${row.task.split("\n")[0]!.trim()}"`;
+  const withPlan = row.planNumber !== null && deps.projects !== undefined;
+  if (!withPlan && !deps.github) throw new Error("handoff has no GitHub credentials to open the parts' issues with.");
+
+  const opened: SplitIssue[] = [];
+  for (const [index, part] of parts.entries()) {
+    if (index === 0) continue;
+    const about = `Part ${index + 1} of ${parts.length} of ${origin}, split by handoff's planner. The plan expects it to change ${part.ownedPaths.map((p) => `\`${p}\``).join(", ")}.`;
+    const before = opened.at(-1)?.number ?? parent?.number;
+    let created: { number: number; url: string };
+    if (withPlan) {
+      created = await deps.projects!.createIssue(repo, { project: row.planNumber!, title: part.title, body: `${part.body.trim()}\n\n${about}`, labels: [], ...(parent ? { parent: parent.number } : {}) });
+    } else {
+      created = await deps.github!.createIssue(repo, { title: part.title, body: [part.body.trim(), about, ...(before ? [`Depends on: #${before}`] : [])].join("\n\n") });
+      if (before) await deps.github!.addBlockedBy(repo, created.number, before);
+    }
+    opened.push({ number: created.number, title: part.title, url: created.url });
+  }
+  await splitRun(deps.db, input.questionId, { answeredBy: input.answeredBy, issues: opened, note: input.note });
+  return opened;
 }
 
 const GRAPH_NAME = /^[a-z0-9][a-z0-9-]*$/;

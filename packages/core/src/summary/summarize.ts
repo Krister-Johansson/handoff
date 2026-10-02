@@ -28,8 +28,9 @@ const join = (lead: string, tail?: string) => {
 export function summarizeOutput(output: unknown): string | undefined {
   const planner = PlannerOutputSchema.safeParse(output);
   if (planner.success) {
-    const { status, question, plan, steps } = planner.data;
+    const { status, question, plan, steps, parts } = planner.data;
     if (status === "needs_input" && question) return join(`Asked: ${question.summary ?? question.text}`);
+    if (status === "split" && parts) return `Proposed a split into ${plural(parts.length, "part")}`;
     return join(plan, plural(steps.length, "step"));
   }
   const coder = CoderOutputSchema.safeParse(output);

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FeedbackSchema, HumanAnswerSchema, PlanSizeSchema } from "./outputs.ts";
+import { FeedbackSchema, HumanAnswerSchema, PlanPartSchema, PlanSizeSchema } from "./outputs.ts";
 
 export const NodeResultSchema = z.object({
   output: z.unknown().optional(),
@@ -13,9 +13,13 @@ export const NodeResultSchema = z.object({
 export const IssueAncestorSchema = z.object({ kind: z.enum(["epic", "story", "task"]).optional(), number: z.number().int(), title: z.string(), body: z.string() });
 export type IssueAncestor = z.infer<typeof IssueAncestorSchema>;
 
+/** A comment on a linked issue, as a planner read it from GitHub. */
+export const IssueCommentSchema = z.object({ author: z.string(), createdAt: z.string(), body: z.string() });
+
 /**
- * A GitHub issue a run works on, with its body as it was when the run started. `lineage` holds its
- * parent and grandparent, nearest first; it is absent when the issue has none or they could not be read.
+ * A GitHub issue a run works on, with its body as it was when the run started, or when a planner last
+ * read it again. `lineage` holds its parent and grandparent, nearest first; it is absent when the issue
+ * has none or they could not be read. `comments` are newest first, read by a planner attempt.
  */
 export const LinkedIssueSchema = z.object({
   number: z.number().int(),
@@ -23,6 +27,7 @@ export const LinkedIssueSchema = z.object({
   url: z.string(),
   body: z.string(),
   lineage: z.array(IssueAncestorSchema).optional(),
+  comments: z.array(IssueCommentSchema).optional(),
 });
 export type LinkedIssue = z.infer<typeof LinkedIssueSchema>;
 
@@ -66,7 +71,9 @@ export const RunStateSchema = z
   .object({
     task: z.string(),
     issues: z.array(LinkedIssueSchema).optional(),
-    plan: z.object({ plan: z.string(), steps: z.array(z.string()), ownedPaths: z.array(z.string()), acceptance: z.array(z.string()).optional(), size: PlanSizeSchema.optional() }).optional(),
+    plan: z
+      .object({ plan: z.string(), steps: z.array(z.string()), ownedPaths: z.array(z.string()), acceptance: z.array(z.string()).optional(), size: PlanSizeSchema.optional(), parts: z.array(PlanPartSchema).optional() })
+      .optional(),
     prNumber: z.number().int().optional(),
     feedback: FeedbackSchema.optional(),
     loops: z.record(z.string(), z.object({ attempts: z.number().int() })).default({}),

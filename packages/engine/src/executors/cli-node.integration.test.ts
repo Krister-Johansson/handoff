@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
-import { eq, projects } from "@handoff/db";
+import { eq, projects, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +14,7 @@ import { runOnce } from "../scheduler/worker.ts";
 import type { ExecutorRegistry, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { cliNodeExecutor } from "./cli-node.ts";
+import { humanGateExecutor } from "./human-gate.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -222,6 +223,65 @@ test("the planner is told ownedPaths is the whole list of files the change may t
   await startRun(db, linear);
   await drain(engineDeps(db, registry(cli)));
   expect(cli.requests[0]!.prompt).toContain("ownedPaths is the whole list of files and directories the change may touch");
+});
+
+const splitOut = {
+  status: "split",
+  plan: "A board and drag and drop are two changes.",
+  steps: [],
+  ownedPaths: ["src/board.tsx", "src/drag.ts"],
+  parts: [
+    { title: "Show todos as a board", body: "A board with a column per status.", ownedPaths: ["src/board.tsx"] },
+    { title: "Drag todos between columns", body: "Drag a card to change its status.", ownedPaths: ["src/drag.ts"] },
+  ],
+};
+
+/** planner -> plan gate -> coder, with the gate's changes back to the planner. */
+const gatedGraph = {
+  attributes: { startNode: "planner" },
+  nodes: [
+    { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+    { key: "gate", attributes: { type: "human_gate", x: 300, y: 0 } },
+    { key: "coder", attributes: { type: "coder", x: 600, y: 0 } },
+  ],
+  edges: [
+    { key: "planner->gate", source: "planner", target: "gate", attributes: { port: "done" } },
+    { key: "gate->planner", source: "gate", target: "planner", attributes: { port: "changes", input: "feedback" } },
+    { key: "gate->coder", source: "gate", target: "coder", attributes: { port: "approve" } },
+  ],
+};
+
+test("a planner over budget returns split and the plan gate offers Split as proposed", async () => {
+  const cli = new FakeCliExecutor([{ output: splitOut }]);
+  const { project, graphVersion } = await seedGraph(db, gatedGraph);
+  await db.update(projects).set({ planBudget: { files: 8, steps: 6 } }).where(eq(projects.id, project.id));
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a board with drag and drop" });
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), human_gate: humanGateExecutor({ db }) }));
+
+  const budget = cli.requests[0]!.systemPrompt.split("# Size budget")[1]!;
+  expect(budget).toContain("at most 8 files in ownedPaths and 6 steps");
+  expect(budget).toContain("return status `split` with parts");
+
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  expect(question).toMatchObject({ question: "Review the split from planner", options: ["split", "changes"] });
+  const context = question!.context as { review: { kind: string; markdown: string }; split: { parts: { title: string }[] } };
+  expect(context.split.parts.map((p) => p.title)).toEqual(["Show todos as a board", "Drag todos between columns"]);
+  expect(context.review.kind).toBe("split");
+  expect(context.review.markdown).toContain("### 1. Show todos as a board");
+  expect(context.review.markdown).toContain("### 2. Drag todos between columns");
+  expect(context.review.markdown).toContain("`src/drag.ts`");
+  expect((await inspect(db, run.id)).run.state).toMatchObject({ plan: { parts: splitOut.parts } });
+});
+
+test("a planner with no plan gate after it gets the budget without a split, and a split it returns anyway fails the step", async () => {
+  const cli = new FakeCliExecutor([{ output: splitOut }]);
+  const { run } = await startRun(db, linear);
+  await drain(engineDeps(db, registry(cli)));
+  const budget = cli.requests[0]!.systemPrompt.split("# Size budget")[1]!;
+  expect(budget).toContain("at most 15 files in ownedPaths and 12 steps");
+  expect(budget).not.toContain("`split`");
+  const planner = (await inspect(db, run.id)).executions[0]!;
+  expect(planner).toMatchObject({ status: "failed", error: { code: "plan_split_without_gate" } });
 });
 
 /** A fake claude run that says something, then stops at its turn limit. */

@@ -38,11 +38,12 @@ const submitReview = spec({
   name: "page_submit_review",
   title: "Submit the review",
   description:
-    "Submits the review with the drafted comments and the overall comment: changes requests changes, approve lets the work through, fix approves after the comments are fixed. changes and fix need a comment or an overall comment.",
-  input: z.object({ option: z.enum(["changes", "approve", "fix"]) }),
+    "Submits the review with the drafted comments and the overall comment: changes requests changes, approve lets the work through, fix approves after the comments are fixed, split accepts the split a planner proposed where the review offers it. changes and fix need a comment or an overall comment.",
+  input: z.object({ option: z.enum(["changes", "approve", "fix", "split"]) }),
   confirm: true,
   readOnly: false,
-  summarize: (a) => (a.option === "approve" ? "Approve the review" : a.option === "fix" ? "Approve after fixes, sending the comments back" : "Request changes, sending the comments back"),
+  summarize: (a) =>
+    a.option === "approve" ? "Approve the review" : a.option === "split" ? "Split the task as proposed, opening an issue for each later part" : a.option === "fix" ? "Approve after fixes, sending the comments back" : "Request changes, sending the comments back",
 });
 
 const TOOLS = {

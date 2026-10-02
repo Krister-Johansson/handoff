@@ -48,6 +48,20 @@ describe("updateProject", () => {
     expect(await read()).toMatchObject({ demoSeedCommand: null, uiPaths: null });
   });
 
+  test("saves the plan budget, keeps the default for a number left empty, clears it when both are empty, and refuses one out of range", async () => {
+    const { project } = await projectWithRun();
+    const read = async () => (await db.select().from(projects).where(eq(projects.id, project.id)))[0];
+    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: " 8 ", planBudgetSteps: "6" });
+    expect(await read()).toMatchObject({ planBudget: { files: 8, steps: 6 } });
+    expect((await projectsForSettings(db, undefined))[0]).toMatchObject({ planBudget: { files: 8, steps: 6 } });
+    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: "20", planBudgetSteps: "" });
+    expect(await read()).toMatchObject({ planBudget: { files: 20, steps: 12 } });
+    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: "", planBudgetSteps: "" });
+    expect(await read()).toMatchObject({ planBudget: null });
+    await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: "0" })).rejects.toThrow(/whole number from 1 to 500/);
+    await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetSteps: "two" })).rejects.toThrow(/whole number from 1 to 500/);
+  });
+
   test("refuses an invalid or taken name", async () => {
     const { project } = await projectWithRun();
     await createProject(db, { name: "other", repo: "octo/other", defaultBranch: "main" });
