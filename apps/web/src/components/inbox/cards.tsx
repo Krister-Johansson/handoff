@@ -170,7 +170,12 @@ function AnswerCard({ item, compact }: { item: QuestionItem; compact: boolean })
     <InboxCard icon={loop ? RepeatIcon : MessageCircleQuestionIcon} tone={loop ? "attention" : "active"}>
       <CardContext tag={REASONS[item.reason] ?? item.reason} item={item} compact={compact} node={item.nodeKey} when={<When prefix="asked" at={item.createdAt} />} />
       <CardTitle>{item.question}</CardTitle>
-      <form action={action} className="mt-2.5 flex flex-col gap-3">
+      <form
+        action={action}
+        className="mt-2.5 flex flex-col gap-3"
+        toolname={`answer_question_${item.id}`}
+        tooldescription={`Answers the question "${item.question}" that ${item.nodeKey} asked in a run of ${item.projectName}. The person reviews the answer and sends it.`}
+      >
         <input type="hidden" name="questionId" value={item.id} />
         <input type="hidden" name="runId" value={item.runId} />
         {item.options.length > 0 && (
@@ -184,7 +189,13 @@ function AnswerCard({ item, compact }: { item: QuestionItem; compact: boolean })
         )}
         <Field data-invalid={state.error ? true : undefined}>
           <FieldLabel htmlFor={`answer-${item.id}`}>{item.options.length ? "Details (optional)" : "Answer"}</FieldLabel>
-          <Textarea id={`answer-${item.id}`} name="answer" rows={2} placeholder="Your answer goes to the node that asked." />
+          <Textarea
+            id={`answer-${item.id}`}
+            name="answer"
+            rows={2}
+            placeholder="Your answer goes to the node that asked."
+            toolparamdescription={item.options.length ? `Details for the answer; the options are ${item.options.join(", ")}` : "The answer to the question"}
+          />
           {state.error && <FieldError>{state.error}</FieldError>}
         </Field>
         {item.options.length === 0 && (

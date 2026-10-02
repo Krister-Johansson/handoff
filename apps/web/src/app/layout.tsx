@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { AssistantProvider } from "@/components/assistant/assistant-provider";
 import { AssistantSheet } from "@/components/assistant/assistant-sheet";
 import { SiteHeader } from "@/components/site-header";
-import { assistantConfig } from "@/server/assistant/env";
+import { assistantState } from "@/server/assistant/settings";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -21,6 +21,7 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
+  const assistant = assistantState();
   return (
     // Browser extensions (for example Scribe) and the theme script set attributes on <html> before hydration.
     <html lang="en" className={cn("font-sans", geist.variable, geistMono.variable)} suppressHydrationWarning>
@@ -28,7 +29,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
         <ThemeProvider>
           <TooltipProvider>
             {/* The assistant lives in the root layout so its conversation stays on screen while pages change. */}
-            <AssistantProvider available={Boolean(assistantConfig().oauthToken)}>
+            <AssistantProvider available={assistant.available} offReason={assistant.reason ?? "no-token"}>
               <SiteHeader />
               {children}
               <AssistantSheet />

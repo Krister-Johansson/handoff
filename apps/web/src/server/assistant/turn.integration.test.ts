@@ -10,7 +10,7 @@ import { assistantConversations, eq, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "../graphs";
-import { conversationMessages, createConversation } from "./conversations";
+import { conversationMessages, createConversation, lastAssistantModel } from "./conversations";
 import { assistantConfig } from "./env";
 import type { TurnEvent } from "./relay";
 import { findTurn } from "./relay";
@@ -100,6 +100,9 @@ test("a turn stores the person's message, streams the reply and stores it with t
   ]);
   const [stored] = await db.select().from(assistantConversations).where(eq(assistantConversations.id, conversation.id));
   expect(stored!.cliSessionId).toEqual(expect.any(String));
+  // The model Claude Code reported, not the alias it was asked for.
+  expect(stored!.model).toBe("claude-fable-5-1");
+  expect(await lastAssistantModel(db)).toBe("claude-fable-5-1");
 });
 
 test("the next turn resumes the conversation's CLI session", async () => {

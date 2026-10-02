@@ -69,6 +69,12 @@ test("the chat runner delivers text deltas in order, then tool calls and results
   expect(result).toMatchObject({ outcome: "success", text: "Let me look. Nothing needs you.", sessionId: SESSION_ID, costUsd: 0.002 });
 });
 
+test("the result names the model the init line reported", async () => {
+  const { runner, request, onEvent } = setup({ lines: [lines.init({ model: "claude-sonnet-5-5" }), lines.result()] });
+  const result = await runner.run(request, { signal: new AbortController().signal, onEvent });
+  expect(result.model).toBe("claude-sonnet-5-5");
+});
+
 test("stopping a turn sends SIGINT and reports interrupted with the text so far", async () => {
   const { runner, request, onEvent } = setup({ lines: [lines.init(), delta("Working on "), delta("it")], hangAfterLine: 3 });
   const controller = new AbortController();

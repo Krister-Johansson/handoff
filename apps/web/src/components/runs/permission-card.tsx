@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition, type FormEvent } from "react";
 import Link from "next/link";
 import { ShieldQuestionIcon } from "lucide-react";
 import { answerPermissionAction } from "@/app/inbox/actions";
@@ -29,6 +29,15 @@ export function PermissionCard({ request, run }: { request: PermissionRequestVie
       const result = await answerPermissionAction({ id: request.id, runId: request.runId, ...input });
       setError(result.ok ? undefined : result.error);
     });
+  // Allow once and Deny submit the form, so a browser agent can fill it as a WebMCP tool; the person presses one.
+  const pressed = useRef<"once" | "deny">(undefined);
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const decision = (submitter?.value as "once" | "deny" | undefined) ?? pressed.current;
+    if (decision === "once") answer({ decision: "once" });
+    else if (decision === "deny") answer(note.trim() ? { decision: "deny", message: note.trim() } : { decision: "deny" });
+  };
   return (
     <Card className="gap-3 border-attention-dot/35 py-4">
       <CardContent className="flex flex-col gap-3 px-5">
@@ -50,22 +59,38 @@ export function PermissionCard({ request, run }: { request: PermissionRequestVie
         )}
         <p className="text-sm text-muted-foreground">The step waits for your answer. Its allow rules do not cover this call.</p>
         {detail && <TerminalOutput text={detail} label="request" />}
-        <Field data-invalid={error ? true : undefined}>
-          <FieldLabel htmlFor={`permission-note-${request.id}`}>Note for Claude (optional)</FieldLabel>
-          <Input id={`permission-note-${request.id}`} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Why not, or what to do instead" />
-          {error && <FieldError>{error}</FieldError>}
-        </Field>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" disabled={pending} onClick={() => answer({ decision: "once" })}>
-            Allow once
-          </Button>
-          <Button type="button" variant="outline" disabled={pending} aria-label={`Always allow ${rule}`} onClick={() => answer({ decision: "always", rule })}>
-            Always allow <span className="font-mono text-xs">{rule}</span>
-          </Button>
-          <Button type="button" variant="outline" disabled={pending} onClick={() => answer(note.trim() ? { decision: "deny", message: note.trim() } : { decision: "deny" })}>
-            Deny
-          </Button>
-        </div>
+        <form
+          onSubmit={submit}
+          className="flex flex-col gap-3"
+          toolname={`answer_permission_${request.id}`}
+          tooldescription={`Answers ${request.nodeKey} ${action}: Allow once or Deny with a note. The person presses the button.`}
+        >
+          <Field data-invalid={error ? true : undefined}>
+            <FieldLabel htmlFor={`permission-note-${request.id}`}>Note for Claude (optional)</FieldLabel>
+            <Input
+              id={`permission-note-${request.id}`}
+              name="message"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              // Enter would submit with the first button, Allow once.
+              onKeyDown={(e) => e.key === "Enter" && e.preventDefault()}
+              placeholder="Why not, or what to do instead"
+              toolparamdescription="For a denial: why not, or what the step should do instead"
+            />
+            {error && <FieldError>{error}</FieldError>}
+          </Field>
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" name="decision" value="once" disabled={pending} onClick={() => (pressed.current = "once")}>
+              Allow once
+            </Button>
+            <Button type="button" variant="outline" disabled={pending} aria-label={`Always allow ${rule}`} onClick={() => answer({ decision: "always", rule })}>
+              Always allow <span className="font-mono text-xs">{rule}</span>
+            </Button>
+            <Button type="submit" name="decision" value="deny" variant="outline" disabled={pending} onClick={() => (pressed.current = "deny")}>
+              Deny
+            </Button>
+          </div>
+        </form>
       </CardContent>
     </Card>
   );

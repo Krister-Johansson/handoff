@@ -84,3 +84,12 @@ test("a pull request waiting for review links to GitHub and says how CI went", (
   expect(screen.getByText("CI passing")).toBeInTheDocument();
   expect(screen.getByText("handoff/7-todo-crud")).toBeInTheDocument();
 });
+
+test("a question's answer form is a WebMCP tool the person still submits", () => {
+  render(<QuestionCard item={{ ...run, id: "q1", question: "Which license?", options: [], nodeKey: "gate", reason: "needs_input" }} />);
+  const form = screen.getByRole("button", { name: "Send answer" }).closest("form")!;
+  expect(form).toHaveAttribute("toolname", "answer_question_q1");
+  expect(form.getAttribute("tooldescription")).toMatch(/Which license\?/);
+  expect(form).not.toHaveAttribute("toolautosubmit");
+  expect(screen.getByLabelText("Answer")).toHaveAttribute("toolparamdescription", expect.stringContaining("answer"));
+});

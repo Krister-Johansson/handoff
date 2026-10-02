@@ -72,6 +72,18 @@ To look around without GitHub or Claude, `pnpm demo` seeds a demo run with simul
 
 The library (**Library** in the dashboard) holds skills, MCP servers and subagents that nodes enable by name. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.
 
+## The assistant
+
+The **Assistant** button in the header (or Cmd or Ctrl+J) opens a panel beside every page. Ask what needs you or how a run is going, or tell it to start, answer, merge, repair or cancel something. It can also open pages for you: the inbox for a project, a run, a review or Try it. The panel stays open while the page behind it changes, and earlier conversations are listed in its picker.
+
+- **How it runs.** Each message runs the Claude Code CLI from the dashboard on your subscription, with the same `CLAUDE_CODE_OAUTH_TOKEN`. The CLI gets handoff's tools and nothing else: no shell, no files, no web. Without the token the assistant is off and the panel says so.
+- **Approvals.** Reading happens without asking. Anything that changes something (starting, answering, merging, repairing, cancelling, adding a project) shows an approval card with what it will do and the arguments. Nothing happens until you press Approve. Deny takes a note that tells the assistant why. A card nobody answers within 5 minutes counts as denied.
+- **Settings.** **Settings, Assistant** switches the assistant off, picks the model (Sonnet by default, or Opus or Haiku) and shows the model that ran last. `.env` sets the defaults: `HANDOFF_ASSISTANT_MODEL`, `HANDOFF_ASSISTANT_EFFORT`, `HANDOFF_ASSISTANT_MAX_TURNS` and `HANDOFF_ASSISTANT_APPROVAL_TIMEOUT_MS`.
+- **History.** Conversations are stored in Postgres. `pnpm handoff gc` removes those not used for 30 days, with their transcripts (`--assistant-days` changes that).
+- **Browser agents (WebMCP).** In a browser with WebMCP (in Chrome, `chrome://flags/#enable-webmcp-testing`), every dashboard page offers the same tools to an agent in the browser, with the same approval card for changes. The start run form, the inbox's answer forms and the permission cards are declarative WebMCP forms: an agent can fill them, and you press the button. **Settings, Assistant** turns WebMCP off for this browser.
+
+The assistant shares your subscription's limits with the worker's Claude nodes, and `HANDOFF_CAP_CLI` does not count it.
+
 ## Running each run in a container
 
 ```bash

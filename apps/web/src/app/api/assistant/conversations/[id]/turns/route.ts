@@ -1,5 +1,5 @@
 import { TurnRunningError, type TurnEvent } from "@/server/assistant/relay";
-import { liveTurnDeps } from "@/server/assistant/live";
+import { liveTurnDeps, unavailableMessage } from "@/server/assistant/live";
 import { startTurn } from "@/server/assistant/turn";
 import { isSameLocalOrigin } from "@/server/local-request";
 
@@ -14,7 +14,7 @@ const TERMINAL = new Set<TurnEvent["type"]>(["done", "interrupted", "error"]);
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   if (!isSameLocalOrigin(request.headers.get("origin"), request.headers.get("host"))) return Response.json({ error: "forbidden" }, { status: 403 });
   const deps = liveTurnDeps(request);
-  if (!deps) return Response.json({ error: "The assistant needs CLAUDE_CODE_OAUTH_TOKEN in the dashboard's environment." }, { status: 503 });
+  if (!deps) return Response.json({ error: unavailableMessage() ?? "The assistant is unavailable." }, { status: 503 });
   const { id } = await params;
   const body = (await request.json().catch(() => ({}))) as { text?: unknown; source?: unknown };
   const text = typeof body.text === "string" ? body.text.trim() : "";

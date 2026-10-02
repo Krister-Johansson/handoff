@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useToolFormActive } from "@/lib/assistant/use-tool-form-active";
 import { IssuePicker } from "./issue-picker";
 
 export function NewGraphDialog({ projectId, templates }: { projectId: string; templates: { value: string; label: string }[] }) {
@@ -104,6 +105,7 @@ export function StartRunDialog({
   const [issues, setIssues] = useState<{ issues: IssueSummary[] } | { error: string }>();
   const [linked, setLinked] = useState<IssueSummary[]>(initialIssues);
   const [loadingIssues, startLoadingIssues] = useTransition();
+  const [agentFilling, agentDone] = useToolFormActive("start_run_form");
   const onOpenChange = (open: boolean) => {
     if (open && !issues) startLoadingIssues(async () => setIssues(await listIssuesAction(projectId)));
   };
@@ -116,7 +118,14 @@ export function StartRunDialog({
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <form action={action} className="contents">
+        <form
+          action={action}
+          onSubmit={agentDone}
+          className="contents"
+          // A WebMCP tool: a browser agent may fill it, and the person presses Start run.
+          toolname="start_run_form"
+          tooldescription="Starts a run of a graph on this project's repository with a task. The person reviews the filled form and presses Start run."
+        >
           <DialogHeader>
             <DialogTitle>Start a run</DialogTitle>
             <DialogDescription>
@@ -135,7 +144,7 @@ export function StartRunDialog({
             {graphs && (
               <Field>
                 <FieldLabel htmlFor="run-graph">Graph</FieldLabel>
-                <NativeSelect id="run-graph" name="graphName" defaultValue={state.values?.graphName ?? graphName}>
+                <NativeSelect id="run-graph" name="graphName" defaultValue={state.values?.graphName ?? graphName} toolparamdescription="The graph to run, by name">
                   {graphs.map((g) => (
                     <NativeSelectOption key={g} value={g}>
                       {g}
@@ -164,6 +173,7 @@ export function StartRunDialog({
                 placeholder={linked.length ? "Optional: what to do about the linked issues. Empty uses their titles." : "Add a CHANGELOG.md with today's date"}
                 defaultValue={state.values?.task}
                 onKeyDown={submitOnModEnter}
+                toolparamdescription="What the run should do: the task for the Planner, as specific as for a colleague"
               />
               <FieldDescription>
                 The Planner reads this and the linked issues first; be as specific as you would with a colleague. Cmd or Ctrl+Enter starts the run.
@@ -171,6 +181,7 @@ export function StartRunDialog({
               {state.error && <FieldError>{state.error}</FieldError>}
             </Field>
           </FieldGroup>
+          {agentFilling && <p className="text-xs text-attention">Filled by an agent. Check it before you run.</p>}
           <DialogFooter>
             <Button type="submit" disabled={pending}>
               Start run

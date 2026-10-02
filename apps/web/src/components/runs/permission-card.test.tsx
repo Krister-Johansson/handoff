@@ -33,3 +33,19 @@ test("each answer goes to the step: once, always with its rule, or a denial with
     unmount();
   }
 });
+
+test("the card's form is a WebMCP tool with Allow once and Deny as its submit controls", async () => {
+  render(<PermissionCard request={request} />);
+  const form = screen.getByRole("button", { name: "Deny" }).closest("form")!;
+  expect(form).toHaveAttribute("toolname", `answer_permission_${request.id}`);
+  expect(form.getAttribute("tooldescription")).toMatch(/coder-1 asks to run a command/);
+  expect(form).not.toHaveAttribute("toolautosubmit");
+  expect(screen.getByRole("button", { name: "Allow once" })).toHaveAttribute("type", "submit");
+  expect(screen.getByRole("button", { name: "Deny" })).toHaveAttribute("type", "submit");
+  // Always allow changes the node's rules for later runs: a person's choice, never a form an agent submits.
+  expect(screen.getByRole("button", { name: "Always allow Bash(git *)" })).toHaveAttribute("type", "button");
+  expect(screen.getByLabelText("Note for Claude (optional)")).toHaveAttribute("toolparamdescription", expect.stringContaining("denial"));
+  fireEvent.change(screen.getByLabelText("Note for Claude (optional)"), { target: { value: "Use Read." } });
+  fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+  await waitFor(() => expect(actions.answerPermissionAction).toHaveBeenCalledWith({ id: request.id, runId: request.runId, decision: "deny", message: "Use Read." }));
+});

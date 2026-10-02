@@ -38,6 +38,8 @@ export type ChatTurnResult = {
   /** The reply's text: the result's when the turn finished, otherwise what streamed so far. */
   text: string;
   sessionId?: string;
+  /** The model Claude Code reported on its init line. */
+  model?: string;
   costUsd?: number;
   usage?: unknown;
   errorMessage?: string;
@@ -148,6 +150,7 @@ export class ClaudeChatRunner {
     const spawnError = new Promise<Error>((resolve) => child.on("error", resolve));
     let streamed = "";
     let sessionId: string | undefined;
+    let model: string | undefined;
     let resultLine: StreamJsonLine | undefined;
     const consume = (async () => {
       for await (const line of parseStreamJson(child.stdout)) {
@@ -155,6 +158,7 @@ export class ClaudeChatRunner {
         if (sessionId === undefined && typeof lineSession === "string") sessionId = lineSession;
         if (line.type === "result") resultLine = line as StreamJsonLine;
         const parsed = line as StreamJsonLine;
+        if (parsed.type === "system" && parsed.subtype === "init" && typeof parsed.model === "string") model = parsed.model;
         if (parsed.type === "system" && parsed.subtype === "api_retry" && typeof parsed.error === "string" && FATAL_API_ERRORS.has(parsed.error)) {
           fatal = parsed.error;
           stop("fatal");
@@ -173,7 +177,7 @@ export class ClaudeChatRunner {
     for (const t of timers) clearTimeout(t);
     await tracker?.stop(this.options.killGraceMs);
 
-    const base = { text: streamed, stderrTail: stderrTail.join("\n"), ...(sessionId ? { sessionId } : {}) };
+    const base = { text: streamed, stderrTail: stderrTail.join("\n"), ...(sessionId ? { sessionId } : {}), ...(model ? { model } : {}) };
     if (first.kind === "error") return { ...base, outcome: "error", errorMessage: `failed to start claude: ${first.err.message}` };
     if (stopReason === "fatal") return { ...base, outcome: "error", errorMessage: `Claude rejected the request (${fatal}). Run \`claude setup-token\` and update CLAUDE_CODE_OAUTH_TOKEN.` };
     if (stopReason === "abort") return { ...base, outcome: "interrupted" };

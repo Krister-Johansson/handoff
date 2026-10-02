@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BellIcon, CpuIcon, SunMoonIcon, TerminalIcon, type LucideIcon } from "lucide-react";
+import { BellIcon, CpuIcon, MessageSquareIcon, SunMoonIcon, TerminalIcon, type LucideIcon } from "lucide-react";
 import type { SettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +11,13 @@ const GROUPS: { label: string; items: { tab: SettingsTab; label: string; icon: L
       { tab: "notifications", label: "Notifications", icon: BellIcon },
     ],
   },
-  { label: "Integrations", items: [{ tab: "agents", label: "Claude Code", icon: TerminalIcon }] },
+  {
+    label: "Integrations",
+    items: [
+      { tab: "agents", label: "Claude Code", icon: TerminalIcon },
+      { tab: "assistant", label: "Assistant", icon: MessageSquareIcon },
+    ],
+  },
   { label: "Worker", items: [{ tab: "worker", label: "Worker", icon: CpuIcon }] },
 ];
 

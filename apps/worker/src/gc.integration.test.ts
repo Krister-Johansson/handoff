@@ -2,9 +2,9 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, runs } from "@handoff/db";
+import { assistantConversations, assistantMessages, eq, runs } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
-import { gcClaudeSessions } from "./gc.ts";
+import { gcAssistantConversations, gcClaudeSessions } from "./gc.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -31,4 +31,29 @@ test("gc removes transcripts of runs that finished before the cutoff and keeps t
   expect(existsSync(dirs.old)).toBe(false);
   expect(existsSync(dirs.recent)).toBe(true);
   expect(existsSync(dirs.active)).toBe(true);
+});
+
+test("handoff gc removes assistant conversations older than the given days and their transcripts", async () => {
+  const home = mkdtempSync(join(tmpdir(), "handoff-home-"));
+  const old = "aaaaaaaa-0000-4000-8000-000000000001";
+  const recent = "aaaaaaaa-0000-4000-8000-000000000002";
+  const [stale] = await db
+    .insert(assistantConversations)
+    .values({ title: "Old", cliSessionId: old, updatedAt: new Date(Date.now() - 40 * 86_400_000) })
+    .returning();
+  const [fresh] = await db.insert(assistantConversations).values({ title: "New", cliSessionId: recent }).returning();
+  await db.insert(assistantMessages).values({ conversationId: stale!.id, turnId: crypto.randomUUID(), role: "user", content: { text: "Hi", source: "typed" } });
+  // Every assistant turn runs in one working folder, so its transcripts share one projects folder.
+  const project = join(home, "assistant", "claude-config", "projects", "-Users-x--handoff-assistant-cwd");
+  mkdirSync(join(project, old), { recursive: true });
+  writeFileSync(join(project, `${old}.jsonl`), "{}");
+  writeFileSync(join(project, `${recent}.jsonl`), "{}");
+
+  const removed = await gcAssistantConversations(db, { assistantHome: join(home, "assistant"), olderThanDays: 30 });
+  expect(removed.conversations).toBe(1);
+  expect(removed.transcripts.sort()).toEqual([join(project, old), join(project, `${old}.jsonl`)]);
+  expect((await db.select().from(assistantConversations)).map((c) => c.id)).toEqual([fresh!.id]);
+  expect(await db.select().from(assistantMessages)).toEqual([]);
+  expect(existsSync(join(project, `${old}.jsonl`))).toBe(false);
+  expect(existsSync(join(project, `${recent}.jsonl`))).toBe(true);
 });

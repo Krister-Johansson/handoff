@@ -17,7 +17,7 @@ vi.mock("@/lib/github", () => ({ getGitHub: () => undefined }));
 vi.mock("@/server/assistant/conversations", () => ({ createConversation: assistant.createConversation, listConversations: assistant.listConversations }));
 vi.mock("@/server/assistant/turn", () => ({ startTurn: assistant.startTurn, stopTurn: assistant.stopTurn }));
 vi.mock("@/server/assistant/relay", () => ({ findTurn: assistant.findTurn, TurnRunningError: class extends Error {} }));
-vi.mock("@/server/assistant/live", () => ({ liveTurnDeps: () => ({ config: {} }) }));
+vi.mock("@/server/assistant/live", () => ({ liveTurnDeps: () => ({ config: {} }), unavailableMessage: () => undefined }));
 
 beforeEach(() => {
   for (const fn of Object.values(assistant)) fn.mockClear();
