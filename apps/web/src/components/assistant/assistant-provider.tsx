@@ -72,7 +72,7 @@ function callView(call: { id: string; name: string; args: unknown; result?: stri
 /** A stored message as the panel shows it. */
 function messageView(stored: StoredMessage): ChatMessage {
   const content = stored.content;
-  if (stored.role === "user") return { id: stored.id, role: "user", text: content.text };
+  if (stored.role === "user") return { id: stored.id, role: "user", text: content.text, ...("source" in content && content.source === "voice" ? { source: "voice" as const } : {}) };
   const reply = content as Extract<StoredMessage["content"], { calls: unknown }>;
   const status = reply.outcome === "done" ? "done" : reply.outcome === "interrupted" ? "stopped" : "error";
   return { id: stored.id, role: "assistant", text: reply.text, calls: reply.calls.map(callView), requests: [], status, ...(reply.error ? { error: reply.error } : {}) };
@@ -95,7 +95,19 @@ function applyEvent(message: Extract<ChatMessage, { role: "assistant" }>, event:
     case "confirm":
       return {
         ...message,
-        requests: [...message.requests, { requestId: event.requestId, toolUseId: event.toolUseId, name: event.name, title: event.title, summary: event.summary, args: event.args, status: "open" }],
+        requests: [
+          ...message.requests,
+          {
+            requestId: event.requestId,
+            toolUseId: event.toolUseId,
+            name: event.name,
+            title: event.title,
+            summary: event.summary,
+            args: event.args,
+            status: "open",
+            ...(event.expiresAt ? { expiresAt: event.expiresAt } : {}),
+          },
+        ],
       };
     case "confirmed":
       return {
@@ -170,7 +182,12 @@ export function AssistantProvider({
       if (!message || streaming || !available) return;
       setStreaming(true);
       const replyId = `reply-${Date.now()}`;
-      setMessages((list) => [...list, { id: `user-${Date.now()}`, role: "user", text: message }, { id: replyId, role: "assistant", text: "", calls: [], requests: [], status: "streaming" }]);
+      const source = opts?.source ?? "typed";
+      setMessages((list) => [
+        ...list,
+        { id: `user-${Date.now()}`, role: "user", text: message, ...(source === "voice" ? { source } : {}) },
+        { id: replyId, role: "assistant", text: "", calls: [], requests: [], status: "streaming" },
+      ]);
       try {
         const id = conversationId ?? (await transport.create(message)).id;
         if (!conversationId) setConversationId(id);
@@ -187,7 +204,16 @@ export function AssistantProvider({
           if (event.type === "done") for (const listener of replyListeners.current) listener({ id: replyId, text: event.text || text, done: true });
           setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? applyEvent(m, event) : m)));
           if (event.type === "confirm") {
-            const request: PendingRequest = { requestId: event.requestId, toolUseId: event.toolUseId, name: event.name, title: event.title, summary: event.summary, args: event.args, status: "open" };
+            const request: PendingRequest = {
+              requestId: event.requestId,
+              toolUseId: event.toolUseId,
+              name: event.name,
+              title: event.title,
+              summary: event.summary,
+              args: event.args,
+              status: "open",
+              ...(event.expiresAt ? { expiresAt: event.expiresAt } : {}),
+            };
             for (const listener of requestListeners.current) listener(request);
           }
           if (event.type === "ui_call") {
@@ -248,7 +274,7 @@ export function AssistantProvider({
       };
       const timer = setTimeout(() => settle({ approved: false, note: "No one approved this in time." }), AGENT_APPROVAL_TIMEOUT_MS);
       agentPending.current.set(requestId, settle);
-      setAgentRequests((list) => [...list, { requestId, ...call, status: "open" }]);
+      setAgentRequests((list) => [...list, { requestId, ...call, status: "open", expiresAt: new Date(Date.now() + AGENT_APPROVAL_TIMEOUT_MS).toISOString() }]);
     });
   });
 

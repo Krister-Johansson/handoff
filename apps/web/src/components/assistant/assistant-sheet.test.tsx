@@ -4,6 +4,10 @@ import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-t
 import { AssistantButton } from "./assistant-button";
 import { AssistantProvider } from "./assistant-provider";
 import { AssistantSheet } from "./assistant-sheet";
+import { VoiceButton } from "@/components/voice/voice-button";
+import { VoiceProvider } from "@/components/voice/voice-provider";
+import type { RecognitionCtor } from "@/lib/voice/support";
+import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
 
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => "/projects" }));
@@ -255,4 +259,76 @@ test("switched off in Settings, the panel says so and links to the setting", asy
   expect(await within(panel()).findByText((_, el) => el?.tagName === "P" && el.textContent === "It is switched off in Settings.")).toBeInTheDocument();
   expect(within(panel()).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings?tab=assistant");
   expect(within(panel()).queryByText(/CLAUDE_CODE_OAUTH_TOKEN/)).not.toBeInTheDocument();
+});
+
+test("a message asked by voice is marked Sent by voice", async () => {
+  transport.conversations = [{ id: "c8", title: "What needs me?", updatedAt: "2026-10-02T10:00:00Z" }];
+  transport.stored.set("c8", {
+    conversation: transport.conversations[0]!,
+    messages: [
+      { id: "m1", role: "user", content: { text: "What needs me?", source: "voice" } },
+      { id: "m2", role: "assistant", content: { text: "Nothing.", calls: [], outcome: "done" } },
+      { id: "m3", role: "user", content: { text: "Thanks", source: "typed" } },
+    ],
+  });
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  fireEvent.click(await within(panel()).findByRole("button", { name: "Conversations" }));
+  fireEvent.click(within(await screen.findByRole("list", { name: "Conversations" })).getByRole("button", { name: /What needs me\?/ }));
+  await within(panel()).findByText("Nothing.");
+  expect(within(panel()).getAllByText("Sent by voice")).toHaveLength(1);
+});
+
+test("four or more tool calls fold under a summary row that opens them", async () => {
+  render(<App />);
+  await openAndSend("Why did the sandbox run fail?");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  for (const [id, title] of [["u1", "List runs"], ["u2", "Show a run"], ["u3", "Show a run"], ["u4", "Show a project"]] as const) {
+    act(() => transport.emit({ type: "tool_call", id, name: "x", title, summary: title, args: {} }));
+    act(() => transport.emit({ type: "tool_result", id, result: id === "u2" ? "No run matches" : "{}", isError: id === "u2" }));
+  }
+  act(() => transport.emit({ type: "done", text: "It failed at tester." }));
+  const summary = within(panel()).getByText("4 tool calls");
+  expect(within(panel()).getByText("3 done, 1 failed")).toBeInTheDocument();
+  expect(within(panel()).getByRole("group", { name: "Show a project" })).not.toBeVisible();
+  fireEvent.click(summary);
+  expect(within(panel()).getByRole("group", { name: "Show a project" })).toBeVisible();
+});
+
+test("an open approval card counts down to its timeout", async () => {
+  render(<App />);
+  await openAndSend("Cancel it");
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+  try {
+    act(() => transport.emit({ type: "turn", turnId: "t1" }));
+    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    act(() => transport.emit({ type: "confirm", requestId: "r1", toolUseId: "u1", name: "cancel_run", title: "Cancel a run", summary: "Cancel run 7f3a1b2c", args: { run_id: "7f3a1b2c" }, expiresAt }));
+    const card = within(panel()).getByRole("group", { name: "Approve: Cancel a run" });
+    expect(card).toHaveTextContent("5:00 left");
+    act(() => vi.advanceTimersByTime(8_000));
+    expect(card).toHaveTextContent("4:52 left");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the composer shows Dictating while dictation goes into it", async () => {
+  FakeSpeechRecognition.reset();
+  render(
+    <AssistantProvider transport={transport} available>
+      <VoiceProvider support={{ recognition: FakeSpeechRecognition as unknown as RecognitionCtor, onDeviceCheck: true }}>
+        <AssistantButton />
+        <VoiceButton />
+        <AssistantSheet />
+      </VoiceProvider>
+    </AssistantProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  const composer = await screen.findByLabelText("Message the assistant");
+  composer.focus();
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Listen" }));
+  fireEvent.click(screen.getByRole("button", { name: "Listen" }));
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
+  act(() => FakeSpeechRecognition.instances[0]!.emitStart());
+  expect(within(panel()).getByText("Dictating")).toBeInTheDocument();
 });

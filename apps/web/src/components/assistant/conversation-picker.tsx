@@ -25,27 +25,29 @@ export function ConversationPicker() {
             <HistoryIcon />
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="w-72 p-1">
+        <PopoverContent align="end" className="w-72 p-0">
+          <p className="px-3 pt-2.5 pb-1 text-xs font-medium text-muted-foreground">Conversations</p>
           {panel.conversations?.length ? (
-            <ul aria-label="Conversations" className="flex max-h-80 flex-col overflow-y-auto">
+            <ul aria-label="Conversations" className="flex max-h-80 flex-col gap-px overflow-y-auto p-1">
               {panel.conversations.map((c) => (
                 <li key={c.id}>
                   <button
                     type="button"
-                    className="flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-1.5 text-left text-[13px] hover:bg-muted"
+                    aria-current={c.id === panel.conversationId ? "true" : undefined}
+                    className="flex w-full items-baseline gap-3 rounded-sm px-[9px] py-[7px] text-left text-[13px] text-foreground/85 hover:bg-muted aria-[current=true]:bg-muted aria-[current=true]:font-medium aria-[current=true]:text-foreground"
                     onClick={() => {
                       setOpen(false);
                       void panel.openConversation(c.id);
                     }}
                   >
-                    <span className="w-full truncate">{c.title}</span>
-                    <span className="text-[11px] text-muted-foreground">{formatAgo(new Date(c.updatedAt))}</span>
+                    <span className="min-w-0 flex-1 truncate">{c.title}</span>
+                    <span className="flex-none text-[11px] font-normal whitespace-nowrap text-muted-foreground">{formatAgo(new Date(c.updatedAt))}</span>
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="px-2 py-1.5 text-[13px] text-muted-foreground">{panel.conversations ? "No conversations yet." : "Loading…"}</p>
+            <p className="px-3 pt-1.5 pb-4 text-[13px] text-muted-foreground">{panel.conversations ? "No conversations yet." : "Loading…"}</p>
           )}
         </PopoverContent>
       </Popover>

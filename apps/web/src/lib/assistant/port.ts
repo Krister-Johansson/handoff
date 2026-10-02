@@ -4,10 +4,21 @@ import type { RefObject } from "react";
 export type ToolCallView = { id: string; name: string; title: string; summary: string; status: "running" | "done" | "failed" | "denied"; result?: string };
 
 /** A state-changing call waiting for, or answered by, the person. */
-export type PendingRequest = { requestId: string; toolUseId?: string | undefined; name: string; title: string; summary: string; args: unknown; status: "open" | "approved" | "denied"; note?: string };
+export type PendingRequest = {
+  requestId: string;
+  toolUseId?: string | undefined;
+  name: string;
+  title: string;
+  summary: string;
+  args: unknown;
+  status: "open" | "approved" | "denied";
+  note?: string;
+  /** When an open card counts as denied. */
+  expiresAt?: string;
+};
 
 export type ChatMessage =
-  | { id: string; role: "user"; text: string }
+  | { id: string; role: "user"; text: string; source?: "voice" | "typed" }
   | {
       id: string;
       role: "assistant";

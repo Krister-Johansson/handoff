@@ -60,6 +60,11 @@ export type VoiceContextValue = {
 
 const VoiceContext = createContext<VoiceContextValue | undefined>(undefined);
 
+/** Voice where there may be none, as the assistant's composer uses it. */
+export function useOptionalVoice(): VoiceContextValue | undefined {
+  return useContext(VoiceContext);
+}
+
 export function useVoice(): VoiceContextValue {
   const voice = useContext(VoiceContext);
   if (!voice) throw new Error("useVoice needs a VoiceProvider.");

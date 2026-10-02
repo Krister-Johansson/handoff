@@ -5,7 +5,7 @@ export type TurnEvent =
   | { type: "text"; text: string }
   | { type: "tool_call"; id: string; name: string; title: string; summary: string; args: unknown }
   | { type: "tool_result"; id: string; result: string; isError: boolean }
-  | { type: "confirm"; requestId: string; toolUseId: string | undefined; name: string; title: string; summary: string; args: unknown }
+  | { type: "confirm"; requestId: string; toolUseId: string | undefined; name: string; title: string; summary: string; args: unknown; expiresAt?: string }
   | { type: "confirmed"; requestId: string; approved: boolean; note?: string }
   | { type: "ui_call"; requestId: string; name: string; args: unknown }
   | { type: "done"; text: string; costUsd?: number }
@@ -66,7 +66,7 @@ export class LiveTurn {
       };
       const timer = setTimeout(() => settle({ approved: false, note: "No one approved this in time." }), timeoutMs);
       this.pending.set(requestId, { resolve: settle, timer });
-      this.emit({ type: "confirm", requestId, ...call });
+      this.emit({ type: "confirm", requestId, ...call, expiresAt: new Date(Date.now() + timeoutMs).toISOString() });
     });
   }
 
