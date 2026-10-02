@@ -37,7 +37,10 @@ export async function writePlanStatus(
   );
 }
 
-/** writePlanStatus for a run outside a step (its start, its cancel), with the events appended to the run. */
+/**
+ * writePlanStatus for a run outside a step (its start, its cancel, its task joining a plan), with the
+ * events appended to the run. Returns the events.
+ */
 export async function recordPlanStatus(
   db: Db,
   runId: string,
@@ -45,7 +48,8 @@ export async function recordPlanStatus(
   project: PlannedProject,
   issues: number[],
   status: PlanStatus,
-): Promise<void> {
+): Promise<PlanEvent[]> {
   const written = await writePlanStatus(projects, project, issues, status);
   if (written.length) await db.transaction((tx) => appendEvents(tx, runId, written));
+  return written;
 }

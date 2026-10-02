@@ -63,3 +63,10 @@ test("the Done column shows the last 30 days and Show all reveals the rest", () 
   expect(within(column("Ready")).getByText("Move tasks here when they are shaped. Only Ready tasks reach the backlog.")).toBeInTheDocument();
   expect(within(column("Running")).getByText("Start a run from a Ready task.")).toBeInTheDocument();
 });
+
+test("a card whose Status disagrees with its active run says what the run is doing", () => {
+  const view = planView([epic(12, "Project management", [story(41, "Shaping", 12, [task(16, "Added during its run", "Shaping", { run: run("64fde8ef", "running") })])])]);
+  render(<PlanBoard {...base} board={view.board} epics={view.epics} />);
+  const added = card(column("Shaping"), /#16 Added during its run/);
+  expect(within(added).getByText("run running").closest("[title]")).toHaveAttribute("title", expect.stringContaining("Status says Shaping, but its run is running."));
+});

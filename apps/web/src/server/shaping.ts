@@ -1,6 +1,7 @@
 import { eq, projects, type Db } from "@handoff/db";
 import { STATUS_OPTIONS, type GitHubPort, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
-import { latestRuns } from "./backlog.ts";
+import { recordPlanStatus } from "@handoff/engine/plan-status";
+import { latestRuns, type BacklogRun } from "./backlog.ts";
 import { projectsAccessProblem } from "./plan.ts";
 
 /**
@@ -45,7 +46,8 @@ export async function listGitHubProjects(deps: ShapingDeps, projectId: string) {
  * Sets up a project's plan: the kind labels on the repository and a user-owned GitHub Project with
  * handoff's Status options, linked to the repository, whose number the project stores. `use` adopts an
  * existing Project of the user instead of creating one. With a number already stored it creates
- * nothing: it re-creates missing labels and reports Status options the Project lacks.
+ * nothing: it re-creates missing labels and reports Status options the Project lacks. An adopted or
+ * stored Project's items that active runs work on get the Status each run owns (statuses_from_runs).
  */
 export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { use?: number } = {}) {
   const { project, plan, repo } = await shapingAccess(deps, projectId);
@@ -66,23 +68,27 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
   if (stored !== null) {
     const found = await plan.getProject(repo.owner, stored);
     if (!found) throw new Error(`GitHub Project #${stored} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.`);
-    return { created: false, project: projectSummary(found), missing_status_options: missingOptions(found), ...(await dateFields(found)) };
+    const fromRuns = await statusesFromRuns(deps.db, { plan, project, repo, number: stored });
+    return { created: false, project: projectSummary(found), missing_status_options: missingOptions(found), statuses_from_runs: fromRuns, ...(await dateFields(found)) };
   }
   if (opts.use !== undefined) {
     const adopted = await plan.adoptProject(repo.owner, opts.use, repo);
     await store(adopted.project.number);
+    const fromRuns = await statusesFromRuns(deps.db, { plan, project, repo, number: adopted.project.number });
     return {
       created: false,
       project: projectSummary(adopted.project),
       renamed_status_options: adopted.renamed,
       added_status_options: adopted.added,
       missing_status_options: missingOptions(adopted.project),
+      statuses_from_runs: fromRuns,
       ...(await dateFields(adopted.project)),
     };
   }
   const created = await plan.createProject(repo.owner, repo, `${project.name} plan`);
   await store(created.number);
-  return { created: true, project: projectSummary(created), missing_status_options: missingOptions(created), ...(await dateFields(created)) };
+  // A new Project has no items yet, so no run's Status to write.
+  return { created: true, project: projectSummary(created), missing_status_options: missingOptions(created), statuses_from_runs: [], ...(await dateFields(created)) };
 }
 
 const DATE_FIELDS = [
@@ -158,16 +164,60 @@ export async function createTask(
 }
 
 /**
- * Brings an open issue outside the plan into it as a task in Shaping: the task label, and a sub-issue
- * of `story` when given. The issue is one of the project's repository, as sub-issues need the same owner.
+ * Brings an open issue outside the plan into it as a task: the task label, and a sub-issue of `story`
+ * when given. It lands in Shaping, or in the Status its active run owns, written as the run's own
+ * write. The issue is one of the project's repository, as sub-issues need the same owner.
  */
 export async function planIssue(deps: ShapingDeps, projectId: string, input: { issue: number; story?: number }) {
   const planned = await plannedProject(deps, projectId);
-  const items = await planned.plan.listItems(planned.repo.owner, planned.number, planned.repo);
+  const [items, runs] = await Promise.all([planned.plan.listItems(planned.repo.owner, planned.number, planned.repo), latestRuns(deps.db, planned.project.id)]);
   if (items.some((i) => i.number === input.issue)) throw new Error(`#${input.issue} is already in the plan of ${planned.project.name}.`);
   if (input.story !== undefined) await parentOf(planned, input.story, "story");
   await planned.plan.addIssue(planned.repo, { project: planned.number, issue: input.issue, labels: ["task"], ...(input.story !== undefined ? { parent: input.story } : {}) });
-  return { number: input.issue, kind: "task" as const, status: "Shaping" as const, parent: input.story ?? null };
+  const run = runs.get(input.issue);
+  const status = run ? await statusFromRun(deps.db, planned, run, input.issue) : undefined;
+  return { number: input.issue, kind: "task" as const, status: status ?? ("Shaping" as const), parent: input.story ?? null };
+}
+
+/**
+ * Sets an item of the plan that `run` works on to the Status the run owns, recorded on the run as the
+ * run's own writes are. Returns the Status written; undefined for a run that ended or a skipped write.
+ */
+async function statusFromRun(db: Db, { plan, project, number }: Pick<Planned, "plan" | "project" | "number">, run: BacklogRun, issue: number) {
+  const owned = ownedStatus(run);
+  if (!owned) return undefined;
+  const [event] = await recordPlanStatus(db, run.id, plan, { ...project, planProjectNumber: number }, [issue], owned);
+  return event?.type === "plan.status" ? owned : undefined;
+}
+
+/**
+ * Brings the open items of a plan's Project that active runs work on to the Status each run owns,
+ * as when the items join the plan. Items that agree already, and items without an active run, keep
+ * their Status. Returns the items it set.
+ */
+async function statusesFromRuns(db: Db, planned: Pick<Planned, "plan" | "project" | "number" | "repo">) {
+  const [items, runs] = await Promise.all([planned.plan.listItems(planned.repo.owner, planned.number, planned.repo), latestRuns(db, planned.project.id)]);
+  const set = await Promise.all(
+    items.map(async (item) => {
+      const run = runs.get(item.number);
+      if (!run || item.state === "closed" || item.status === ownedStatus(run)) return [];
+      const status = await statusFromRun(db, planned, run, item.number);
+      return status ? [{ issue: item.number, status, run: run.id }] : [];
+    }),
+  );
+  return set.flat().sort((a, b) => a.issue - b.issue);
+}
+
+/** Run statuses in which a run still owns its tasks. */
+const ACTIVE = new Set(["queued", "running", "waiting"]);
+
+/**
+ * The Status an active run owns for its tasks, as the run's own writes set it: In review once the run
+ * recorded its pull request, else Running. Undefined for a run that ended.
+ */
+function ownedStatus(run: BacklogRun): PlanStatus | undefined {
+  if (!ACTIVE.has(run.status)) return undefined;
+  return run.prNumber === null ? "Running" : "In review";
 }
 
 /** The plan's tasks among `issues`, refusing the whole call for an issue outside the plan or one that is not a task. */
@@ -289,8 +339,6 @@ export async function schedule(deps: ShapingDeps, projectId: string, items: Sche
     .join("; ");
   return { scheduled, summary };
 }
-
-const ACTIVE = new Set(["queued", "running", "waiting"]);
 
 /**
  * Moves tasks back to Shaping, out of the backlog. Refuses the whole call for a task an active run

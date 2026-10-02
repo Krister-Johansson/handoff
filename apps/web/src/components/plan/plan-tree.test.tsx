@@ -151,6 +151,28 @@ test("a task whose status write was skipped says so, with the reason on hover", 
   expect(within(row(/Task #57/)).getByText("Run active")).toBeInTheDocument();
 });
 
+test("a task whose Status disagrees with its active run says what the run is doing", () => {
+  const epics = [
+    epic(12, "Project management", [
+      story(41, "Shaping", 12, [
+        task(16, "Added during its run", "Shaping", { run: run("64fde8ef", "running") }),
+        task(17, "Dragged back", "Ready", { run: run("r17", "waiting", 88) }),
+        task(18, "Agrees", "Running", { run: run("r18", "running") }),
+        task(19, "In review", "In review", { run: run("r19", "waiting", 90) }),
+        task(20, "Run ended", "Shaping", { run: run("r20", "cancelled") }),
+      ]),
+    ]),
+  ];
+  render(<PlanTree {...base} epics={epics} />);
+  const note = within(row(/Task #16/)).getByText("run running");
+  expect(note.closest("[title]")).toHaveAttribute("title", "Status says Shaping, but its run is running. handoff sets Running while a run works on a task.");
+  expect(within(row(/Task #17/)).getByText("run in review").closest("[title]")).toHaveAttribute(
+    "title",
+    "Status says Ready, but its run is waiting with PR #88 open. handoff sets In review while a run's pull request is open.",
+  );
+  for (const agrees of [/Task #18/, /Task #19/, /Task #20/]) expect(within(row(agrees)).queryByText(/^run /)).not.toBeInTheDocument();
+});
+
 test("unplanned issues sit in their own block, stay startable, and Plan it adds one as a task under an optional story", async () => {
   const epics = [epic(12, "Project management", [story(41, "Shaping with the assistant", 12, [task(57, "Add the migration", "Shaping")])])];
   render(<PlanTree {...base} epics={epics} unplanned={[unplannedIssue(301, "Worker restarts while a run is active")]} />);
