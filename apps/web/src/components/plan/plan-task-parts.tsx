@@ -4,7 +4,7 @@ import type { PlanTask } from "@/server/plan";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { runPath } from "@/lib/paths";
-import { hasKindLabel, prNumberOf, taskColumn } from "@/lib/plan/task";
+import { hasActiveRun, hasKindLabel, prNumberOf, taskColumn } from "@/lib/plan/task";
 import { cn } from "@/lib/utils";
 
 /** "#57 Add the migration", opening the issue on GitHub; Enter on a focused tree row follows it. */
@@ -17,14 +17,36 @@ export function IssueTitle({ item, className }: { item: { number: number; title:
 }
 
 /**
+ * "run running" when an open task's Status disagrees with its active run, which owns Running, or In
+ * review once its pull request is open: a card moved on GitHub, or an issue that joined the plan
+ * before handoff wrote the run's Status. The page only says so; the next write from the run sets it.
+ */
+function RunDisagrees({ task }: { task: PlanTask }) {
+  const run = task.run;
+  if (!run || task.state === "closed" || !hasActiveRun(task)) return null;
+  const owned = run.prNumber === null ? "Running" : "In review";
+  const column = taskColumn(task);
+  if (column === owned) return null;
+  const doing = run.prNumber === null ? run.status : `${run.status} with PR #${run.prNumber} open`;
+  const rule = run.prNumber === null ? "handoff sets Running while a run works on a task." : "handoff sets In review while a run's pull request is open.";
+  return (
+    <Tag tone="attention" title={`Status says ${column}, but its run is ${doing}. ${rule}`}>
+      <CircleAlertIcon aria-hidden />
+      {run.prNumber === null ? `run ${run.status}` : "run in review"}
+    </Tag>
+  );
+}
+
+/**
  * What the row says about the task beyond its status: no kind label, reopened after Done, Running
- * without a run, and a status write handoff had to skip.
+ * without a run, a Status that disagrees with its active run, and a status write handoff had to skip.
  */
 export function TaskTags({ task, skipped }: { task: PlanTask; skipped?: string | undefined }) {
   const column = taskColumn(task);
   return (
     <>
       {!hasKindLabel(task.labels) && <Tag className="border-dashed">no kind label</Tag>}
+      <RunDisagrees task={task} />
       {column === "Done" && task.state === "open" && (
         <Tag tone="success" title="Closed, then reopened on GitHub; it keeps Done until someone moves it">
           <RotateCcwIcon aria-hidden />
