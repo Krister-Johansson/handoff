@@ -26,6 +26,8 @@ import type { LibraryChoices } from "@/lib/library-choices";
 import { Inspector } from "./inspector";
 import { InspectorSection } from "./inspector-section";
 import { NODE_ICONS } from "./node-icons";
+import { EditLockButton } from "./edit-lock";
+import { VersionHistory, type VersionItem } from "./version-history";
 import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
 
 const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
@@ -36,7 +38,6 @@ const PALETTE: NodeType[][] = [
   ["pr", "merge", "function", "finish"],
 ];
 
-export type VersionItem = { version: number; createdAt: string; createdBy: string | null };
 type Props = {
   projectId: string;
   graphName: string;
@@ -67,6 +68,8 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   const [pending, startTransition] = useTransition();
   const [versions, setVersions] = useState(initialVersions);
   const [restoring, setRestoring] = useState<number | undefined>();
+  // Every visit starts locked: no adding, deleting, connecting or moving until the lock in the canvas controls is opened.
+  const [locked, setLocked] = useState(true);
 
   // Warn before leaving with edits that are not saved as a version.
   useEffect(() => {
@@ -143,6 +146,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   }, []);
 
   const addNode = (nodeType: NodeType) => {
+    if (locked) return;
     const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     edit({ type: "addNode", nodeType, position: { x: Math.round(center.x), y: Math.round(center.y) } });
   };
@@ -190,10 +194,15 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                 onSelectionChange={onSelectionChange}
                 fitView
                 minZoom={0.15}
-                deleteKeyCode={["Backspace", "Delete"]}
+                nodesDraggable={!locked}
+                nodesConnectable={!locked}
+                deleteKeyCode={locked ? null : ["Backspace", "Delete"]}
               >
                 <CanvasBackground />
-                <Controls className={CONTROLS_CLASS} />
+                <Controls className={CONTROLS_CLASS} showInteractive={false}>
+                  <EditLockButton locked={locked} onToggle={() => setLocked((l) => !l)} />
+                  <VersionHistory versions={versions} version={version} restoring={restoring} pending={pending} onRestore={restore} />
+                </Controls>
                 <CanvasMiniMap />
                 <Panel position="top-left" aria-label="Add a node" className={cn(PANEL_CLASS, "flex flex-col gap-0.5 p-1")}>
                   {PALETTE.map((group, i) => (
@@ -207,16 +216,18 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                               <Button
                                 variant="ghost"
                                 size="icon-sm"
-                                className="text-muted-foreground hover:text-foreground"
+                                className="text-muted-foreground hover:text-foreground aria-disabled:cursor-not-allowed aria-disabled:opacity-50 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
                                 aria-label={`Add ${NODE_LABELS[type]}`}
                                 // A graph has one Start.
                                 disabled={type === "start" && hasStart}
+                                // Not disabled while locked, so the tooltip still shows and says how to unlock.
+                                aria-disabled={locked || undefined}
                                 onClick={() => addNode(type)}
                               >
                                 <Icon />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="right">Add {NODE_LABELS[type]}</TooltipContent>
+                            <TooltipContent side="right">{locked ? "Unlock editing to add nodes" : `Add ${NODE_LABELS[type]}`}</TooltipContent>
                           </Tooltip>
                         );
                       })}
@@ -268,24 +279,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
             <aside aria-label="Inspector" className="flex min-h-0 flex-col border-l bg-card">
               <ScrollArea className="min-h-0 flex-1">
                 <div className="flex flex-col">
-                  <Inspector graph={graph} selection={selection} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
-                  {!selection.nodeId && !selection.edgeId && (
-                    <InspectorSection title="History">
-                      {restoring !== undefined && <p className="text-xs text-muted-foreground">Showing v{restoring}. Save to make it the latest version.</p>}
-                      <ul className="flex flex-col gap-1 text-sm">
-                        {versions.map((v) => (
-                          <li key={v.version} className="flex items-center justify-between gap-2">
-                            <span className="tabular-nums">
-                              <span className="font-mono text-xs">v{v.version}</span> <span className="text-xs text-muted-foreground">{v.createdAt.slice(0, 16).replace("T", " ")}</span>
-                            </span>
-                            <Button variant="ghost" size="xs" disabled={pending || v.version === version} onClick={() => restore(v.version)}>
-                              {v.version === version ? "current" : "Restore"}
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
-                    </InspectorSection>
-                  )}
+                  <Inspector graph={graph} selection={selection} locked={locked} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
                   {(issues.length > 0 || saveError) && (
                     <InspectorSection title="Issues">
                       <ul className="flex flex-col gap-1 text-xs text-danger">

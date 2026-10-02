@@ -26,7 +26,7 @@ const ENDS = new Set<string>(["start", "finish"]);
 
 const TAG = "inline-flex h-4 items-center rounded-[5px] border px-1.5 font-sans text-[10px] font-medium whitespace-nowrap";
 
-function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
+function HandoffNodeView({ id, data, selected, isConnectable }: NodeProps<HandoffNode>) {
   const Icon = NODE_ICONS[data.nodeType as NodeType] ?? NODE_ICONS.function;
   return (
     <div
@@ -43,7 +43,7 @@ function HandoffNodeView({ id, data, selected }: NodeProps<HandoffNode>) {
         <span className="truncate text-[13px] font-medium">{data.label}</span>
       </div>
       <NodeBadges id={id} data={data} />
-      <Ports id={id} data={data} />
+      <Ports id={id} data={data} connectable={isConnectable} />
     </div>
   );
 }
@@ -72,7 +72,8 @@ function NodeBadges({ id, data }: { id: string; data: HandoffNodeData }) {
  * The node's inputs on the left and outputs on the right, one labelled handle each. The rows reach
  * the node's border, so each handle sits on it and ELK can route to its measured position.
  */
-function Ports({ id, data }: { id: string; data: HandoffNodeData }) {
+/** A node's ports. When the flow is not connectable (the editor is locked), no edge can start or end on them. */
+function Ports({ id, data, connectable }: { id: string; data: HandoffNodeData; connectable: boolean }) {
   const { inputs, outputs } = portsOf(data.nodeType, data.config);
   const out = [...outputs.map((o) => ({ id: o.id, label: o.label, back: o.kind === "feedback" })), ...(data.customOut ? [{ id: CUSTOM_HANDLE, label: "custom", back: false }] : [])];
   // While an edge is being dragged, each handle says whether it can take it.
@@ -83,14 +84,26 @@ function Ports({ id, data }: { id: string; data: HandoffNodeData }) {
       <div className="flex flex-col gap-0.5">
         {inputs.map((input) => (
           <PortRow key={input.id} label={input.label} tone={tone("target")}>
-            <Handle type="target" id={input.id} position={Position.Left} isConnectableEnd={tone("target") !== "cannot"} className={handleClass(tone("target"))} />
+            <Handle
+              type="target"
+              id={input.id}
+              position={Position.Left}
+              isConnectable={connectable}
+              isConnectableStart={connectable}
+              isConnectableEnd={connectable && tone("target") !== "cannot"} className={handleClass(tone("target"))} />
           </PortRow>
         ))}
       </div>
       <div className="flex flex-col items-end gap-0.5">
         {out.map((port) => (
           <PortRow key={port.id} label={port.label} tone={tone("source")} back={port.back} side="right">
-            <Handle type="source" id={port.id} position={Position.Right} isConnectableEnd={tone("source") !== "cannot"} className={handleClass(tone("source"))} />
+            <Handle
+              type="source"
+              id={port.id}
+              position={Position.Right}
+              isConnectable={connectable}
+              isConnectableStart={connectable}
+              isConnectableEnd={connectable && tone("source") !== "cannot"} className={handleClass(tone("source"))} />
           </PortRow>
         ))}
       </div>
