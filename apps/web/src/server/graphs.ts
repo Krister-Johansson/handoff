@@ -169,7 +169,7 @@ export async function startRunFromGraph(
   const latest = await getGraphForEdit(db, input.projectId, input.graphName);
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
-  const issues = await linkIssues(input.issues ?? [], repo, github);
+  const issues = await linkIssues(input.issues ?? [], repo, github, plan);
   if (plan && project.planProjectNumber !== null && issues.length > 0) await refuseUnready(plan, repo, project.planProjectNumber, issues);
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
@@ -207,14 +207,24 @@ async function refuseBlocked(github: GitHubPort, repo: { owner: string; name: st
   if (first) throw new Error(`#${first.number} is blocked by ${andList(first.by.map((n) => `#${n}`))} on GitHub. A run can start once they are closed.`);
 }
 
-async function linkIssues(issues: number[] | LinkedIssue[], repo: { owner: string; name: string }, github?: GitHubPort): Promise<LinkedIssue[]> {
+/**
+ * Reads each issue with its lineage: the story and the epic it is part of, through the plan's
+ * ProjectsPort, else through GitHub's sub-issues. A failed lineage read links the issue without it.
+ */
+async function linkIssues(issues: number[] | LinkedIssue[], repo: { owner: string; name: string }, github?: GitHubPort, plan?: ProjectsPort): Promise<LinkedIssue[]> {
   if (issues.length === 0) return [];
   if (typeof issues[0] !== "number") return issues as LinkedIssue[];
   if (!github) throw new Error("Linking issues needs GitHub access (GITHUB_TOKEN or a GitHub App).");
   return Promise.all(
     (issues as number[]).map(async (number) => {
-      const issue = await github.getIssue(repo, number);
-      return { number: issue.number, title: issue.title, url: issue.url, body: issue.body };
+      const [issue, parents] = plan
+        ? await Promise.all([github.getIssue(repo, number), plan.lineage(repo, number).catch(() => [])])
+        : await github
+            .getIssue(repo, number, { parents: true })
+            .catch(() => github.getIssue(repo, number))
+            .then((i) => [i, i.parents ?? []] as const);
+      const lineage = parents.map((p) => ({ ...(p.kind ? { kind: p.kind } : {}), number: p.number, title: p.title, body: p.body }));
+      return { number: issue.number, title: issue.title, url: issue.url, body: issue.body, ...(lineage.length ? { lineage } : {}) };
     }),
   );
 }
