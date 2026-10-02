@@ -96,3 +96,17 @@ test("a nudge that lands during a check brings the next check to 10 seconds afte
   expect(await checkDueProjects(p.deps)).toEqual([p.project.id]);
   expect(await p.gap()).toBe(10);
 });
+
+test("a paused or disabled project is never checked", async () => {
+  const paused = await planned({ pausedAt: sql`now()`, pausedBy: "krister", pauseReason: "Holiday" });
+  const off = await planned({ enabled: false });
+  const on = await planned();
+
+  expect(await checkDueProjects(on.deps)).toEqual([on.project.id]);
+  // Nudges do not make them due either.
+  for (const p of [paused, off, on]) {
+    await p.elapse(60);
+    await nudgeScheduler(db, p.project.id);
+  }
+  expect(await checkDueProjects(on.deps)).toEqual([on.project.id]);
+});
