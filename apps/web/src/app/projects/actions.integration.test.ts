@@ -58,7 +58,8 @@ test("running a cancelled run again sets its task to Running", async () => {
   const [first] = await db.select().from(runs);
   await db.update(runs).set({ status: "cancelled" }).where(eq(runs.id, first!.id));
   (env.projects as FakeProjects).itemsOf(repo).get(issue)!.status = "Ready";
-  await runAgainAction({}, form({ runId: first!.id }));
+  // The action redirects to the new run; it answers only with an error.
+  expect(await runAgainAction({}, form({ runId: first!.id }))).toBeUndefined();
   expect(env.redirects).toHaveLength(2);
   expect(await statusOf()).toBe("Running");
 });
