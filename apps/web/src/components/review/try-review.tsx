@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { cn } from "@/lib/utils";
 import { CARD } from "./styles";
-import { isNextNavigation } from "./submit-review";
+import { isNextNavigation } from "./send-review";
 
 /** The run's app as the gate started it: its address while it runs, or why it did not start. */
 export type TryPreview = { id?: string; url?: string; status: "running" | "failed"; error?: string };

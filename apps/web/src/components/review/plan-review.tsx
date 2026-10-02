@@ -11,7 +11,8 @@ import { quoteRanges } from "@/lib/quote-ranges";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { useReviewDraft } from "@/lib/use-review-draft";
 import { CARD, PROSE } from "./styles";
-import { SubmitReview, submitReviewTool } from "./submit-review";
+import { submitReviewTool } from "./send-review";
+import { SubmitReview } from "./submit-review";
 
 type Comment = { quote: string; body: string };
 
