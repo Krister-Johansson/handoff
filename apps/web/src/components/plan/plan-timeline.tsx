@@ -4,10 +4,10 @@ import { Fragment, startTransition, use, useEffect, useEffectEvent, useMemo, use
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, ChevronRightIcon, ExternalLinkIcon, GripVerticalIcon, KeyboardIcon, MoreHorizontalIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, CalendarRangeIcon, ChevronRightIcon, ExternalLinkIcon, GripVerticalIcon, KeyboardIcon, MoreHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
 import type { PlanColumn, PlanEpic, PlanStory, PlanTask } from "@/server/plan";
-import { moveItemAction } from "@/app/projects/actions";
+import { moveItemAction, saveArrangeAction } from "@/app/projects/actions";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { formatDuration } from "@/lib/plan/duration";
 import type { Duration, Forecast } from "@/lib/plan/forecast";
 import { hoursByDay } from "@/lib/plan/load";
+import { arrangeTimeline } from "@/lib/plan/arrange";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
 import { durationInWords, hoursInWords, usually } from "@/lib/plan/size-text";
@@ -44,6 +45,7 @@ import { addDays, dayAt, dayWidthAt, defaultZoom, shortDay, timeScale, type Time
 import { runPath } from "@/lib/paths";
 import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { ArrangeBanner, ArrangeButton, type ArrangeControl } from "./arrange-preview";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { KindBadge, StatusPill } from "./plan-status";
 import { Sizing, useSearchQuery } from "./plan-context";
@@ -348,7 +350,7 @@ function taskBarClass(column: PlanColumn, entry: TimelineItem, duration: Duratio
  * and a hatched tail to today when overdue. A forecast fades at its end; a manual estimate is solid. A bar
  * that moves drags by its body and, with a duration, sets a manual estimate by its end.
  */
-function TaskBar({ row, entry, span, scale, todayX, ctx, move }: BarProps & { todayX: number; move: BarMove | undefined }) {
+function TaskBar({ row, entry, span, scale, todayX, ctx, move, previewed }: BarProps & { todayX: number; move: BarMove | undefined; previewed: boolean }) {
   const task = row.task!;
   const column = taskColumn(task);
   const { left, width } = barBox(scale, span, ctx.move.capacity);
@@ -374,11 +376,12 @@ function TaskBar({ row, entry, span, scale, todayX, ctx, move }: BarProps & { to
           data-column={column}
           data-late={entry.late}
           data-early={early || undefined}
-          aria-label={`Task #${task.number} ${task.title}, ${column}${durationName(task, ctx)}, ${spanText(span)}${blocked}`}
+          data-preview={previewed || undefined}
+          aria-label={`Task #${task.number} ${task.title}, ${column}${durationName(task, ctx)}, ${spanText(span)}${blocked}${previewed ? ", in preview" : ""}`}
           aria-keyshortcuts={move ? "ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight E Escape" : undefined}
           {...move?.bar}
           onFocus={move?.onFocus}
-          className={taskBarClass(column, entry, durationIn(ctx.move, task), move)}
+          className={cn(taskBarClass(column, entry, durationIn(ctx.move, task), move), previewed && "border-dashed border-active-dot bg-active-bg")}
           style={{ left, width }}
         >
           {text && <span className="truncate">{text}</span>}
@@ -445,10 +448,10 @@ function SpanBar({ row, entry, span, scale, ctx }: BarProps) {
 }
 
 /** A row's planned bar: a task's in its status colour, an epic's or a story's in neutral, a derived span as a dashed bracket. */
-function PlannedBar({ move, ...props }: Omit<BarProps, "span"> & { todayX: number; move: BarMove | undefined }) {
+function PlannedBar({ move, previewed, ...props }: Omit<BarProps, "span"> & { todayX: number; move: BarMove | undefined; previewed: boolean | undefined }) {
   const span = props.entry.planned ?? props.entry.derived;
   if (!span) return null;
-  return props.row.task ? <TaskBar {...props} span={span} move={move} /> : <SpanBar {...props} span={span} />;
+  return props.row.task ? <TaskBar {...props} span={span} move={move} previewed={previewed ?? false} /> : <SpanBar {...props} span={span} />;
 }
 
 /** Where a sized task's strips start and their scale: under its bar, an hour as wide as the bar's hours. */
@@ -553,6 +556,8 @@ type RowLabelProps = {
   /** The size popover is open, as E on the task's focused bar asks. */
   sizeOpen: boolean;
   onSizeOpenChange: (open: boolean) => void;
+  /** Where an Arrange preview puts the task. */
+  preview: DaySpan | undefined;
 };
 
 /** A task's status pill, or an epic's or a story's kind badge; nothing on the Unparented heading. */
@@ -581,7 +586,7 @@ function tasksOf(item: PlanItem): PlanTask[] {
 }
 
 /** The fixed left cell of a row: chevron, status pill or kind badge, number and title with a task's warning icon, then the menu. */
-function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, sizeOpen, onSizeOpenChange }: RowLabelProps) {
+function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, sizeOpen, onSizeOpenChange, preview }: RowLabelProps) {
   const { item, task } = row;
   const sizing = use(Sizing);
   return (
@@ -607,7 +612,13 @@ function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, s
         </span>
       </div>
       {task && sizing && (
-        <div className="flex min-w-0 items-center justify-end pr-7">
+        <div className="flex min-w-0 items-center justify-end gap-1.5 pr-7">
+          {preview && (
+            <Tag tone="active">
+              <CalendarRangeIcon aria-hidden />
+              {spanText(preview)}
+            </Tag>
+          )}
           <SizeChip task={task} open={sizeOpen} onOpenChange={onSizeOpenChange} />
         </div>
       )}
@@ -617,7 +628,6 @@ function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, s
 
 type UnscheduledGroup = { title: string; items: PlanItem[] };
 
-/** Items with neither dates nor a derived span, grouped by epic, each with a Schedule button. */
 /** What the Unscheduled block needs to drag a task onto the chart: its grip's handlers, and the task on the move. */
 type Placing = { grip: (task: PlanTask) => ReturnType<ReturnType<typeof useBarDrag>["gripProps"]> | undefined; issue: number | undefined; enabled: boolean };
 
@@ -649,19 +659,27 @@ function Grip({ task, placing }: { task: PlanTask; placing: Placing }) {
   );
 }
 
-function Unscheduled({ groups, undated, onSchedule, placing }: { groups: UnscheduledGroup[]; undated: boolean; onSchedule: (item: PlanItem) => void; placing: Placing }) {
+/**
+ * Items with neither dates nor a derived span, grouped by epic, each with a Schedule button. Its header offers
+ * Arrange by estimate; while the preview shows, the tasks it places are tagged In preview and the ones it
+ * leaves out Needs a size.
+ */
+function Unscheduled({ groups, undated, onSchedule, placing, arrange }: { groups: UnscheduledGroup[]; undated: boolean; onSchedule: (item: PlanItem) => void; placing: Placing; arrange: ArrangeControl }) {
   const [open, setOpen] = useState(true);
   const count = groups.reduce((n, g) => n + g.items.length, 0);
   if (count === 0) return null;
   return (
     <Collapsible open={open} onOpenChange={setOpen} asChild>
       <section aria-label="Unscheduled" className="border-t">
-        <CollapsibleTrigger className="flex w-full items-center gap-2 bg-muted/50 px-3.5 py-2.5 text-left text-[13px] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
-          <ChevronRightIcon aria-hidden className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-90")} />
-          <span className="font-medium">Unscheduled</span>
-          <Tag tone="fill">{count}</Tag>
-          <span className="text-xs text-muted-foreground">No Start and no Target</span>
-        </CollapsibleTrigger>
+        <div className="flex items-center gap-2 bg-muted/50 pr-3.5 hover:bg-muted">
+          <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 px-3.5 py-2.5 text-left text-[13px] focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
+            <ChevronRightIcon aria-hidden className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-90")} />
+            <span className="font-medium">Unscheduled</span>
+            <Tag tone="fill">{count}</Tag>
+            <span className="truncate text-xs text-muted-foreground">No Start and no Target</span>
+          </CollapsibleTrigger>
+          <ArrangeButton arrange={arrange} />
+        </div>
         <CollapsibleContent>
           {undated && <p className="px-3.5 pt-1 pb-2.5 pl-[38px] text-[13px] text-muted-foreground">Give tasks a Start and Target to see them on the timeline, or ask the assistant to schedule an epic.</p>}
           {groups.map((group) => (
@@ -673,6 +691,7 @@ function Unscheduled({ groups, undated, onSchedule, placing }: { groups: Unsched
                   return (
                     <li
                       key={item.number}
+                      aria-label={`${KIND_NAME[kind]} #${item.number} ${item.title}`}
                       data-placing={placing.issue === item.number || undefined}
                       className="flex min-w-0 items-center gap-2 border-t px-3.5 py-1.5 pl-[38px] data-placing:bg-[repeating-linear-gradient(135deg,color-mix(in_oklab,var(--foreground)_4%,transparent)_0_6px,transparent_6px_12px)]"
                     >
@@ -681,6 +700,8 @@ function Unscheduled({ groups, undated, onSchedule, placing }: { groups: Unsched
                       <IssueTitle item={item} className="text-xs" />
                       {kind === "task" && <StatusPill column={item.state === "closed" ? "Done" : (item.status ?? "Other")} />}
                       {placing.issue === item.number && <Tag tone="outline">Placing</Tag>}
+                      {arrange.preview?.bars.has(item.number) && <Tag tone="active">In preview</Tag>}
+                      {arrange.preview?.leftOut.some((l) => l.issue === item.number) && <Tag tone="outline">Needs a size</Tag>}
                       <span className="ml-auto flex shrink-0 items-center gap-2">
                         {kind === "task" && <SizeChip task={item as PlanTask} />}
                         <Button size="xs" variant="outline" aria-label={`Schedule #${item.number} ${item.title}`} onClick={() => onSchedule(item)}>
@@ -817,13 +838,17 @@ function useMoves(projectId: string, timeline: Timeline) {
   const [state, setState] = useState<{ timeline: Timeline; moves: ReadonlyMap<number, MovePlan> }>({ timeline, moves: NO_MOVES });
   const moves = state.timeline === timeline ? state.moves : NO_MOVES;
 
-  const put = (issue: number, plan: MovePlan | undefined) =>
+  /** Shows each task where its plan puts it, or where GitHub has it for undefined. */
+  const putAll = (plans: ReadonlyMap<number, MovePlan | undefined>) =>
     setState((s) => {
       const next = new Map(s.timeline === timeline ? s.moves : NO_MOVES);
-      if (plan) next.set(issue, plan);
-      else next.delete(issue);
+      for (const [issue, plan] of plans) {
+        if (plan) next.set(issue, plan);
+        else next.delete(issue);
+      }
       return { timeline, moves: next };
     });
+  const put = (issue: number, plan: MovePlan | undefined) => putAll(new Map([[issue, plan]]));
 
   /** Writes a move of `task`, whose bar is `entry` before it; `undo` marks the write that puts it back. */
   const save = (task: PlanTask, entry: TimelineItem | undefined, plan: MovePlan, undo = false) => {
@@ -851,8 +876,38 @@ function useMoves(projectId: string, timeline: Timeline) {
       });
     });
   };
-  return { moves, save };
+
+  /**
+   * Writes the Start and Target of every task an Arrange preview placed, in one save. The bars stay where the
+   * preview put them; a task GitHub refuses goes back to Unscheduled and the toast names it with why.
+   */
+  const saveArranged = (placed: { issue: number; plan: MovePlan }[]) => {
+    const was = new Map(placed.map(({ issue }) => [issue, moves.get(issue)]));
+    const where = placed.map(({ issue, plan }) => `#${issue} on ${shortDay(plan.start!)}`).join(", ");
+    const id = toast.loading(`Saving ${tasksText(placed.length)} to GitHub`, { description: where });
+    putAll(new Map(placed.map(({ issue, plan }) => [issue, plan])));
+    startTransition(async () => {
+      const result = await saveArrangeAction({ projectId, items: placed.map(({ issue, plan }) => ({ issue, start: plan.start!, target: plan.target! })) });
+      if (!result.ok) {
+        putAll(was);
+        toast.error("GitHub did not take the dates", { id, description: `${result.error} The tasks stay unscheduled.`, action: { label: "Try again", onClick: () => saveArranged(placed) } });
+        return;
+      }
+      startTransition(() => router.refresh());
+      if (result.refused.length === 0) {
+        toast.success(`Arranged ${tasksText(result.saved.length)}`, { id, description: "Saved Start and Target to GitHub." });
+        return;
+      }
+      putAll(new Map(result.refused.map(({ issue }) => [issue, was.get(issue)])));
+      const reasons = result.refused.map((r) => `#${r.issue}: ${r.reason}.`).join(" ");
+      const saved = result.saved.length ? ` ${result.saved.map((n) => `#${n}`).join(" and ")} ${result.saved.length === 1 ? "is" : "are"} saved.` : "";
+      toast.error(`GitHub did not take ${result.refused.map((r) => `#${r.issue}`).join(" and ")}`, { id, description: `${reasons}${saved}` });
+    });
+  };
+  return { moves, save, saveArranged };
 }
+
+const tasksText = (n: number) => (n === 1 ? "1 task" : `${n} tasks`);
 
 type ChartArrow = ReturnType<typeof chartArrows>[number];
 
@@ -898,7 +953,7 @@ function TodayMarker({ side, today, onClick }: { side: "left" | "right"; today: 
 }
 
 /** The time axis: months over days or weeks, Today, and under them the load row when the plan has sizes. */
-function TimeAxis({ scale, todayX, load }: { scale: TimeScale; todayX: number; load: ReturnType<typeof loadOf> | undefined }) {
+function TimeAxis({ scale, todayX, load }: { scale: TimeScale; todayX: number; load: (ReturnType<typeof loadOf> & { preview: Record<string, number> | undefined }) | undefined }) {
   return (
     <div role="row" aria-label="Time axis" className={cn("flex", load ? "h-[66px]" : "h-12")}>
       <div role="columnheader" className="sticky left-0 z-10 border-r border-b bg-card" style={{ width: LABEL_WIDTH }}>
@@ -926,7 +981,7 @@ function TimeAxis({ scale, todayX, load }: { scale: TimeScale; todayX: number; l
         <span className="absolute top-7 z-[4] ml-1 rounded-[4px] bg-foreground px-1.5 py-px text-[9.5px] font-semibold text-background" style={{ left: todayX }}>
           Today
         </span>
-        {load && <LoadRow scale={scale} hours={load.hours} capacity={load.capacity} />}
+        {load && <LoadRow scale={scale} hours={load.hours} capacity={load.capacity} preview={load.preview} />}
       </div>
     </div>
   );
@@ -967,6 +1022,13 @@ function unscheduledGroups(epics: PlanEpic[], unparented: PlanTask[], entries: R
     .filter((g) => g.items.length > 0);
 }
 
+/** The unscheduled tasks in view that a person may place: not Done, and no run owns them. */
+function unscheduledTasks(epics: PlanEpic[], unparented: PlanTask[], entries: ReadonlyMap<number, TimelineItem>): PlanTask[] {
+  return unscheduledGroups(epics, unparented, entries)
+    .flatMap((g) => g.items)
+    .flatMap((i) => ((i.kind ?? "task") === "task" && canMove(i as PlanTask) ? [i as PlanTask] : []));
+}
+
 /** What the chart's moves need: the plan as shown, the scale, and the grid for where a pointer is. */
 type ChartMovesInput = { projectId: string; timeline: Timeline; planEpics: PlanEpic[]; planUnparented: PlanTask[]; scale: TimeScale; grid: RefObject<HTMLDivElement | null> };
 
@@ -978,11 +1040,31 @@ function useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, 
   const sizing = use(Sizing);
   const [focused, setFocused] = useState<number>();
   const [sizeOpen, setSizeOpen] = useState<number>();
-  const { moves, save } = useMoves(projectId, timeline);
+  const [arranging, setArranging] = useState(false);
+  const { moves, save, saveArranged } = useMoves(projectId, timeline);
   const { epics, unparented } = useMemo(() => movedPlan(planEpics, planUnparented, moves), [planEpics, planUnparented, moves]);
   const saved = useMemo(() => movedEntries(timeline, moves), [timeline, moves]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
   const move: MoveContext = { capacity: sizing?.capacity, forecasts: sizing?.forecasts, items, entries: saved };
+
+  // Arrange by estimate places the unscheduled tasks in view; its preview shows on the chart until Save or Cancel.
+  const arrangeable = sizing ? unscheduledTasks(epics, unparented, saved).map((t) => ({ number: t.number, hours: durationIn(move, t)?.hours })) : [];
+  const computed = sizing && arranging ? arrangeTimeline(arrangeable, { items: [...saved.values()], arrows: timeline.arrows }, sizing.capacity, timeline.today) : undefined;
+  const preview = computed?.placements.length ? computed : undefined;
+  const previewPlans = new Map(preview?.placements.map((p): [number, MovePlan] => [p.issue, { start: p.start, target: p.target, span: preview.bars.get(p.issue), startsBefore: [] }]));
+  const shown = preview ? new Map([...saved].map(([n, e]) => [n, previewPlans.has(n) ? movedEntry(e, previewPlans.get(n)!) : e])) : saved;
+  const arrange: ArrangeControl = {
+    enabled: sizing !== undefined,
+    possible: arrangeable.some((t) => t.hours !== undefined),
+    preview,
+    previewHours: preview && sizing ? hoursByDay(preview.bars.values(), sizing.capacity) : undefined,
+    start: () => setArranging(true),
+    cancel: () => setArranging(false),
+    save: () => {
+      setArranging(false);
+      if (preview) saveArranged(preview.placements.map((p) => ({ issue: p.issue, plan: previewPlans.get(p.issue)! })));
+    },
+  };
 
   const { drag, barProps, endProps, gripProps } = useBarDrag({
     onDrop: (done) => {
@@ -994,12 +1076,15 @@ function useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, 
   });
   const dragged = drag && (items.get(drag.issue) as PlanTask | undefined);
   const draft = dragged ? planMove(move, dragged, drag) : undefined;
-  const entries = draft && dragged ? new Map(saved).set(dragged.number, movedEntry(saved.get(dragged.number)!, draft)) : saved;
+  const withDraft = (base: Map<number, TimelineItem>) => (draft && dragged ? new Map(base).set(dragged.number, movedEntry(base.get(dragged.number)!, draft)) : base);
+  // The chart shows the preview; Unscheduled keeps listing the tasks in it until they are saved.
+  const entries = withDraft(shown);
+  const listed = withDraft(saved);
 
-  /** How a task's bar moves: not at all when Done or Running, or when it has no dates and no duration. */
+  /** How a task's bar moves: not at all when Done or Running, in the preview, or when it has no dates and no duration. */
   const moveOf = (task: PlanTask, entry: TimelineItem): BarMove | undefined => {
     const span = entry.planned;
-    if (!span || !canMove(task)) return undefined;
+    if (!span || !canMove(task) || previewPlans.has(task.number)) return undefined;
     const hours = sizing && span.hours !== undefined ? span.hours : undefined;
     const dayWidth = dayWidthAt(scale, span.start);
     const bar: DragBar = { issue: task.number, dayWidth, hourWidth: sizing ? dayWidth / sizing.capacity : dayWidth, hours };
@@ -1034,7 +1119,7 @@ function useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, 
     grip: (task) => (durationIn(move, task) ? gripProps(task.number, dayUnder) : undefined),
   };
 
-  return { epics, unparented, items, saved, entries, move, moveOf, placing, focused, sizeOpen, setSizeOpen };
+  return { epics, unparented, items, saved, entries, listed, move, moveOf, placing, arrange, focused, sizeOpen, setSizeOpen };
 }
 
 /**
@@ -1054,11 +1139,11 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
 
-  const { epics, unparented, items, saved, entries, move, moveOf, placing, focused, sizeOpen, setSizeOpen } = useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, grid });
+  const { epics, unparented, items, saved, entries, listed, move, moveOf, placing, arrange, focused, sizeOpen, setSizeOpen } = useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, grid });
   const ctx: CardContext = { items, entries, projectId, move };
   const flags: FlagContext = { projectId, items, entries, needsYou };
 
-  const load = sizing && loadOf(entries, items, sizing.capacity);
+  const load = sizing && { ...loadOf(entries, items, sizing.capacity), preview: arrange.previewHours };
   /** A sized bar's strips start under it at its scale. */
   const stripScale = (entry: TimelineItem): StripScale | undefined => {
     const span = entry.planned;
@@ -1099,7 +1184,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   const touches = (a: (typeof arrows)[number]) => hovered !== undefined && (a.from === hovered || a.to === hovered);
   const related = new Set(hovered === undefined ? [] : [hovered, ...arrows.filter(touches).flatMap((a) => [a.from, a.to])]);
 
-  const unscheduled = unscheduledGroups(epics, unparented, entries);
+  const unscheduled = unscheduledGroups(epics, unparented, listed);
 
   const offscreen = pane && (todayX < pane.left ? "left" : todayX > pane.left + pane.width ? "right" : undefined);
   const fieldsGap = estimateFieldsGap(project);
@@ -1108,6 +1193,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
     <div className="overflow-hidden rounded-lg border bg-card">
       {lacksDateFields(project) && <DateFieldsBanner projectId={projectId} project={project} />}
       {fieldsGap && <EstimateFieldsBanner projectId={projectId} project={project} title={fieldsGap} />}
+      {sizing && <ArrangeBanner arrange={arrange} capacity={sizing.capacity} />}
       <div className="relative">
         <div ref={scroller} className="overflow-x-auto overscroll-x-contain" onScroll={measure}>
           <div
@@ -1147,10 +1233,11 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                       onToggle={() => rowsOpen.toggle(row.key)}
                       onSchedule={setScheduling}
                       sizeOpen={row.task !== undefined && sizeOpen === row.task.number}
+                      preview={row.task && arrange.preview?.bars.get(row.task.number)}
                       onSizeOpenChange={(open) => !open && setSizeOpen(undefined)}
                     />
                     <div role="gridcell" className={cn("relative flex-1 border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ minWidth: scale.width }}>
-                      {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} ctx={ctx} move={row.task && moveOf(row.task, entry)} />}
+                      {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} ctx={ctx} move={row.task && moveOf(row.task, entry)} previewed={row.task !== undefined && arrange.preview?.bars.has(row.task.number)} />}
                       {entry && row.task && <Strips row={row} entry={entry} scale={scale} projectId={projectId} under={stripScale(entry)} />}
                     </div>
                   </div>
@@ -1172,7 +1259,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
         {offscreen && <TodayMarker side={offscreen} today={timeline.today} onClick={() => scrollToToday("smooth")} />}
       </div>
       {focused !== undefined && <KeyHint issue={focused} sized={!!sizing && saved.get(focused)?.planned?.hours !== undefined} />}
-      <Unscheduled groups={unscheduled} undated={timeline.items.every((i) => !i.planned)} onSchedule={setScheduling} placing={placing} />
+      <Unscheduled groups={unscheduled} undated={timeline.items.every((i) => !i.planned)} onSchedule={setScheduling} placing={placing} arrange={arrange} />
       <ScheduleDialog projectId={projectId} item={scheduling} notes={scheduling ? scheduleNotes(scheduling, items, entries) : []} onOpenChange={(open) => !open && setScheduling(undefined)} />
     </div>
   );

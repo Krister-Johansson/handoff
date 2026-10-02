@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TimelineRun } from "@/lib/plan/schedule";
 import type { PlanTask } from "@/server/plan";
+import type { ArrangeState } from "@/app/projects/actions";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
@@ -27,6 +28,7 @@ const actions = vi.hoisted(() => ({
   addEstimateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   setSizeAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   moveItemAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+  saveArrangeAction: vi.fn(async (input: { items: { issue: number }[] }): Promise<ArrangeState> => ({ ok: true, saved: input.items.map((i) => i.issue), refused: [] })),
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
@@ -810,4 +812,57 @@ test("strips start under the bar at its scale and the hover card gives clock tim
   expect(details).toHaveTextContent("Actual1h 40m so far, 50m over");
   expect(details).toHaveTextContent(`${at("2026-10-02T10:20:00Z")} to now`);
   expect(details).toHaveTextContent(`${at("2026-10-01T08:00:00Z")} to ${at("2026-10-01T09:00:00Z").split(", ")[1]}`);
+});
+
+/**
+ * The sized plan for Arrange: in Unscheduled #152 has a manual 4 hours and waits on #153 (S, ~25m), and #154 has
+ * neither a size nor an estimate. Today, Oct 2, is full with #143; Oct 3 holds 4h 40m and Oct 4 #149's 2 hours.
+ */
+const arranging = planView(
+  sized.epics.map((e) => ({
+    ...e,
+    stories: e.stories.map((s) =>
+      s.number !== 126 ? s : { ...s, tasks: [...s.tasks.map((t) => (t.number === 152 ? { ...t, estimate: 4, blockedBy: [153] } : t)), task(154, "Restyle the 404 page", "Shaping", { parent: 126 })] },
+    ),
+  })),
+);
+const unscheduledRow = (n: number) => within(screen.getByRole("region", { name: "Unscheduled" })).getByRole("listitem", { name: new RegExp(`^Task #${n} `) });
+
+test("Arrange shows a preview of the placed tasks and writes nothing until Save", () => {
+  renderSized({ plan: arranging });
+  const arrange = within(screen.getByRole("region", { name: "Unscheduled" })).getByRole("button", { name: "Arrange by estimate" });
+  expect(arrange).toHaveAttribute("aria-pressed", "false");
+  fireEvent.click(arrange);
+  expect(arrange).toHaveAttribute("aria-pressed", "true");
+
+  const banner = screen.getByRole("region", { name: "Arrange preview" });
+  expect(banner).toHaveTextContent("Preview: 2 tasks, Oct 3 to Oct 4");
+  expect(banner).toHaveTextContent(
+    "From today, in blocker order, up to 6h a day after the work already planned. Each task uses its manual estimate, or else its size forecast. #154 has no size and no estimate and stays unscheduled.",
+  );
+  expect(within(banner).getByRole("button", { name: "Save 2 tasks to GitHub" })).toBeInTheDocument();
+
+  // #153 fits after #145 and #146 on Oct 3; #152's 4 hours do not, so it follows #149 on Oct 4 after its blocker.
+  const first = barOf(153);
+  expect(first).toHaveAttribute("data-preview", "true");
+  expect(first).toHaveAccessibleName(/, Oct 3, in preview$/);
+  expect(leftOf(first)).toBeCloseTo(OCT_1 + 2 * DAY + (100 / 60) * 16, 1);
+  const second = barOf(152);
+  expect(second).toHaveAccessibleName(/manual estimate 4 hours, Oct 4, blocked by #153, in preview$/);
+  expect(leftOf(second)).toBe(OCT_1 + 3 * DAY + 32);
+  expect(widthOf(second)).toBe(64);
+  expect(within(row(/^Task #153 /)).getByText("Oct 3")).toBeInTheDocument();
+  expect(within(row(/^Task #152 /)).getByText("Oct 4")).toBeInTheDocument();
+
+  // The load counts the preview with the work already planned.
+  const axis = screen.getByRole("row", { name: "Time axis" });
+  expect(within(axis).getByTitle("Oct 3: 5h 5m of 6h, 25m of it in the preview")).toBeInTheDocument();
+  expect(within(axis).getByTitle("Oct 4: 6h of 6h, 4h of it in the preview")).toBeInTheDocument();
+
+  // The tasks stay in Unscheduled, tagged, until Save.
+  expect(within(unscheduledRow(152)).getByText("In preview")).toBeInTheDocument();
+  expect(within(unscheduledRow(153)).getByText("In preview")).toBeInTheDocument();
+  expect(within(unscheduledRow(154)).getByText("Needs a size")).toBeInTheDocument();
+  expect(actions.saveArrangeAction).not.toHaveBeenCalled();
+  expect(actions.moveItemAction).not.toHaveBeenCalled();
 });
