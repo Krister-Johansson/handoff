@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { eq, graphVersions, projects, runs } from "@handoff/db";
+import { asc, eq, events, graphVersions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphForEdit, getGraphVersion, listGraphVersions, renameGraph, getProjectDetail, listProjectGraphs, listProjects, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
@@ -242,8 +242,35 @@ describe("the Ready gate", () => {
       return created;
     };
     const start = (issues: number[]) => startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "", issues }, github, plan);
-    return { github, issue, start };
+    return { github, plan, issue, start };
   }
+
+  /** The run's plan events, in order, as [type, payload]. */
+  const planEvents = async (runId: string) =>
+    (await db.select().from(events).where(eq(events.runId, runId)).orderBy(asc(events.seq))).filter((e) => e.type.startsWith("plan.")).map((e) => [e.type, e.payload]);
+
+  test("starting a run on a Ready task sets it to Running and records plan.status", async () => {
+    const { github, plan, issue, start } = await planned();
+    const ready = await issue("Ready to build", ["task"], "Ready");
+    github.issues.set(90, { number: 90, title: "Fix the crash", url: "https://github.com/octo/sample/issues/90", body: "", state: "open" });
+    const run = await start([ready, 90]);
+    expect(await plan.getStatus(repo, 1, ready)).toBe("Running");
+    expect(await planEvents(run.id)).toEqual([
+      ["plan.status", { issue: ready, status: "Running" }],
+      ["plan.skipped", { issue: 90, status: "Running", reason: "not-in-project" }],
+    ]);
+  });
+
+  test("a status write that fails records plan.skipped and the run continues", async () => {
+    const { plan, issue, start } = await planned();
+    const ready = await issue("Ready to build", ["task"], "Ready");
+    plan.setStatus = async () => {
+      throw new Error("Resource not accessible by personal access token");
+    };
+    const run = await start([ready]);
+    expect(run.status).toBe("queued");
+    expect(await planEvents(run.id)).toEqual([["plan.skipped", { issue: ready, status: "Running", reason: "Resource not accessible by personal access token" }]]);
+  });
 
   test("start_run refuses a task that is not Ready and names its status", async () => {
     const { issue, start } = await planned();
