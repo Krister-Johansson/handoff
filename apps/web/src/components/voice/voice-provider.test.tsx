@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
+import { DEFAULT_VOICE_PREFS } from "@/lib/voice/prefs";
+import { createSpeaker } from "@/lib/voice/speaker";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
+import { FakeSpeechSynthesis, FakeUtterance } from "@/lib/voice/testing/fake-speech-synthesis";
 import { VoiceTestApp } from "./testing/voice-test-app";
 
 beforeEach(() => {
@@ -9,7 +12,9 @@ beforeEach(() => {
 });
 
 test("start is refused while the speaker is active", async () => {
-  render(<VoiceTestApp speaking />);
+  const speaker = createSpeaker(new FakeSpeechSynthesis() as unknown as SpeechSynthesis, () => DEFAULT_VOICE_PREFS, (t) => new FakeUtterance(t) as unknown as SpeechSynthesisUtterance);
+  speaker.speak("A run failed.", { priority: "notification" });
+  render(<VoiceTestApp speaker={speaker} />);
   fireEvent.click(screen.getByRole("button", { name: "Listen" }));
   await act(async () => {});
   expect(FakeSpeechRecognition.instances).toEqual([]);

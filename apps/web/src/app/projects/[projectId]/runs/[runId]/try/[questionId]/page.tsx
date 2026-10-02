@@ -1,3 +1,4 @@
+import { ReadAloudButton } from "@/components/voice/read-aloud-button";
 import { notFound, redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { TryReview } from "@/components/review/try-review";
@@ -31,6 +32,7 @@ export default async function TryPage({ params }: { params: Promise<{ projectId:
           { label: "Try it" },
         ]}
         title={review.question}
+        actions={<ReadAloudButton title="Acceptance criteria" text={review.acceptance.map((c, i) => `Criterion ${i + 1}: ${c}`).join("\n")} />}
         titleExtra={verdict ? <StatusBadge status={verdict.status} label={verdict.label} /> : <StatusBadge status="waiting" label="waiting for you" />}
         description={
           review.answered

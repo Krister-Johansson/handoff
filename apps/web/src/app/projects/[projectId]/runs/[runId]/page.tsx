@@ -1,3 +1,5 @@
+import { ReadAloudButton } from "@/components/voice/read-aloud-button";
+import { runReadout } from "@/lib/run-readout";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ClockIcon, CoinsIcon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, TimerIcon } from "lucide-react";
@@ -142,6 +144,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
           ),
           actions: (
             <>
+              <ReadAloudButton title="Run summary" text={runReadout({ task: run.task, status: run.status, executions })} />
               {run.prNumber !== null ? (
                 <Button size="sm" variant="outline" asChild>
                   <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
