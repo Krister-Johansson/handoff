@@ -32,7 +32,15 @@ async function othersActive(tx: DbTx, runId: string, excludeId: string): Promise
   return row?.n ?? 0;
 }
 
-type RouteResult = { events: NewEvent[]; created: number; arrived: number; exhausted: boolean; state: RunState };
+/** `ended`: the node finished the run's work, so taking no edge is not a dead end. */
+type RouteResult = { events: NewEvent[]; created: number; arrived: number; exhausted: boolean; ended: boolean; state: RunState };
+
+/**
+ * A merged pull request is the end of the run's work. A merge node with nothing after it still has its
+ * update edge back to the PR node, which a merge does not take.
+ */
+const mergedEnd = (graph: CompiledGraph, row: NodeExecutionRow, outcome: "passed" | "failed", output: unknown) =>
+  outcome === "passed" && graph.node(row.nodeKey).type === "merge" && (output as { merged?: unknown } | undefined)?.merged === true;
 
 type Trigger = NonNullable<NodeExecutionRow["trigger"]>;
 
@@ -138,7 +146,7 @@ async function route(
     events.push({ type: "edge.taken", payload: { edgeKey: edge.key, from: row.nodeKey, to: target }, nodeExecutionId: row.id });
     events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
   }
-  return { events, created, arrived, exhausted, state: next };
+  return { events, created, arrived, exhausted, ended: mergedEnd(graph, row, outcome, output), state: next };
 }
 
 /** Records what this attempt adds to its node's memory, so later attempts of the node are told it too. */
@@ -182,7 +190,7 @@ async function finishRouting(
   const events = [...leadEvents, ...routed.events];
   let status: "running" | "succeeded" | "failed" = "running";
   if (routed.created === 0 && routed.arrived === 0 && active === 0) {
-    const deadEnd = graph.outEdges(row.nodeKey).length > 0;
+    const deadEnd = graph.outEdges(row.nodeKey).length > 0 && !routed.ended;
     if (failure || routed.exhausted || deadEnd) {
       status = "failed";
       const reason = failure ? "node_failed" : routed.exhausted ? "loop_exhausted" : "no_route";

@@ -105,7 +105,7 @@ test("applying a layout moves nodes to its positions and changes nothing else", 
 describe("delete and rename", () => {
   test("removing a selected edge deletes only that edge", () => {
     const state = editorReducer(initial(), { type: "remove", ids: ["coder->pr"] });
-    expect(state.edges.map((e) => e.id)).toEqual(["planner->coder", "pr->merge"]);
+    expect(state.edges.map((e) => e.id)).toEqual(["planner->coder", "pr->merge", "merge->pr"]);
     expect(state.nodes).toHaveLength(4);
   });
 
