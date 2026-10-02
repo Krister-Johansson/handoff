@@ -1,4 +1,4 @@
-import { NodeTypeSchema } from "@handoff/core";
+import { ConditionSchema, EFFORT_LEVELS,LibrarySelectionSchema, nodeCatalog, NodeTypeSchema, notifyKindsOf, REVIEW_LEVELS, type NodeType } from "@handoff/core";
 import { z } from "zod";
 import type { ToolSpec } from "./catalog";
 
@@ -400,6 +400,103 @@ export function pageSpecsOf(page: PageDescriptor | undefined): PageToolSpec[] {
   if (!page) return [];
   const bound = new Set(page.tools);
   return PAGE_TOOLS[page.kind].filter((spec) => bound.has(spec.name));
+}
+
+/** A setting the inspector can empty: null clears it, as emptying its field does. */
+const clearable = <T extends z.ZodType>(schema: T) => schema.nullable();
+const minutes = z.number().int().nonnegative();
+
+/** The fields every CLI step's inspector has: instructions, model, turns, tools and library. */
+const CLI_FIELDS = {
+  instructions: clearable(z.string().min(1)),
+  model: clearable(z.string().min(1)),
+  effort: clearable(z.enum(EFFORT_LEVELS)),
+  maxTurns: clearable(z.number().int().positive()),
+  allTools: z.boolean(),
+  allowedTools: clearable(z.array(z.string().min(1))),
+  library: LibrarySelectionSchema,
+};
+
+/** The checks a coder's inspector offers before it passes: the diff stays in the plan's paths, and a test command. */
+const CODER_CHECKS = z.array(
+  z.discriminatedUnion("kind", [
+    z.strictObject({ kind: z.literal("diff_within_paths") }),
+    z.strictObject({ kind: z.literal("tests_green"), command: z.string().min(1), passEnv: z.array(z.string()).optional() }),
+  ]),
+);
+
+/** Fields a node type has beyond those of its executor. */
+const TYPE_FIELDS: Partial<Record<NodeType, z.ZodRawShape>> = {
+  start: { trigger: z.literal("run") },
+  coder: { checks: CODER_CHECKS },
+  code_review: { level: z.enum(REVIEW_LEVELS) },
+  tester: { command: z.string().min(1), passEnv: z.array(z.string()) },
+  pr: {
+    requireChecks: z.boolean(),
+    noChecksAfterMinutes: clearable(minutes),
+    requireApproval: z.boolean(),
+    waitForReviewers: clearable(z.array(z.string().min(1))),
+    reviewTimeoutMinutes: clearable(minutes),
+    sendReviewComments: z.boolean(),
+  },
+  merge: { mode: z.enum(["manual", "auto"]), method: z.enum(["squash", "merge", "rebase"]) },
+  human_gate: { mode: z.enum(["approval", "question", "try"]), question: clearable(z.string().min(1)), exhaustedGate: z.boolean() },
+};
+
+/**
+ * What page_update_node may change on each node type: the inspector's fields for that type and
+ * nothing else, so a change the model makes is one a person could make and see. Every node has a label
+ * and the notifications its type sends; CLI steps (by their executor in nodeCatalog) have the
+ * instructions, model, tools and library fields; some types add their own.
+ */
+function patchOf(type: NodeType) {
+  const shape: z.ZodRawShape = {
+    label: z.string().min(1),
+    notify: z.strictObject(Object.fromEntries(notifyKindsOf(type).map((kind) => [kind, z.boolean()]))).partial(),
+    ...(nodeCatalog[type].executorKind === "cli" ? CLI_FIELDS : {}),
+    ...TYPE_FIELDS[type],
+  };
+  return z.strictObject(shape).partial();
+}
+export const NODE_PATCHES = Object.fromEntries((Object.keys(nodeCatalog) as NodeType[]).map((type) => [type, patchOf(type)])) as Record<NodeType, ReturnType<typeof patchOf>>;
+
+type Parsed<T> = { ok: true; patch: T } | { ok: false; message: string };
+
+/**
+ * A change checked against an inspector's fields. A key the fields do not have is refused first, with
+ * the fields there are (`what` names the thing, as "A coder"); then the values are checked.
+ */
+function parsePatch<T extends z.ZodObject>(schema: T, patch: Record<string, unknown>, what: string, subject: string): Parsed<z.infer<T>> {
+  const fields = Object.keys(schema.shape);
+  const known = new Set(fields);
+  const unknown = Object.keys(patch).filter((k) => !known.has(k));
+  if (unknown.length) return { ok: false, message: `${what} has no ${unknown.join(", ")}. Its fields are: ${fields.join(", ")}.` };
+  const parsed = schema.safeParse(patch);
+  if (parsed.success) return { ok: true, patch: parsed.data };
+  const issues = parsed.error.issues.map((i) => `${i.path.length ? `${i.path.join(".")}: ` : ""}${i.message}`).join("; ");
+  return { ok: false, message: `The change to ${subject} is not valid: ${issues}` };
+}
+
+/** A node's change, checked against its type's fields: the parsed change, or a refusal that names the fields there are. */
+export function parseNodePatch(key: string, type: NodeType, patch: Record<string, unknown>): Parsed<Record<string, unknown>> {
+  return parsePatch(NODE_PATCHES[type], patch, `${/^[aeiou]/.test(type) ? "An" : "A"} ${type}`, key);
+}
+
+/** What page_update_edge may change: the edge inspector's fields. null clears a loop's attempts or its exhausted gate. */
+export const EDGE_PATCH = z
+  .strictObject({
+    condition: clearable(ConditionSchema),
+    on: z.enum(["passed", "failed", "any"]),
+    loop: z.boolean(),
+    maxAttempts: clearable(z.number().int().positive()),
+    onExhausted: clearable(z.string().min(1)),
+    priority: z.number().int(),
+  })
+  .partial();
+
+/** An edge's change, checked against the edge inspector's fields: the parsed change, or a refusal that names them. */
+export function parseEdgePatch(id: string, patch: Record<string, unknown>): Parsed<z.infer<typeof EDGE_PATCH>> {
+  return parsePatch(EDGE_PATCH, patch, "An edge", `edge ${id}`);
 }
 
 type ToolOf<K extends PageKind> = (typeof TOOLS)[K][number];
