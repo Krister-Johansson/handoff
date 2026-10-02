@@ -34,8 +34,16 @@ function unionLength(intervals: Interval[], from: number, to: number): number {
   return total;
 }
 
-/** An execution's queue time inside the run: a start execution's wait before the run's first claim is not part of it. */
-const queueInRun = (execution: ForecastExecution, start: number) => Math.max(0, execution.queuedMs - Math.max(0, start - execution.createdAt.getTime()));
+/**
+ * An execution's queue time inside the run: a start execution's wait before the run's first claim is not part
+ * of it. An execution from before queued_ms has 0 there and gives its last pending stretch, claimed minus
+ * runnable, which misses earlier stretches.
+ */
+function queueInRun(execution: ForecastExecution, start: number): number {
+  if (execution.queuedMs > 0) return Math.max(0, execution.queuedMs - Math.max(0, start - execution.createdAt.getTime()));
+  if (!execution.claimedAt) return 0;
+  return Math.max(0, execution.claimedAt.getTime() - Math.max(execution.runnableAt.getTime(), start));
+}
 
 /**
  * One run's wall time split into waiting on a person, queue and agent time. Agent time is what is left, so it

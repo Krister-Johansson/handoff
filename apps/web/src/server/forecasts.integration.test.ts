@@ -81,3 +81,19 @@ test("a run without a recorded size counts under its planner's proposal, then it
   expect([forecasts.M.runs, forecasts.M.measuredMinutes]).toEqual([1, 10]);
   expect([forecasts.L.runs, forecasts.L.measuredMinutes]).toEqual([1, 30]);
 });
+
+test("queue time falls back to claimed minus runnable for executions without queued_ms", async () => {
+  const { project, finished } = await seeded();
+  for (let i = 0; i < 5; i++) {
+    const run = await finished({ minutes: 60, size: "S" });
+    // From before queued_ms: created 5 minutes before the run started and claimed when it started, so none of it is inside the run.
+    await seedExecution(db, run.id, { nodeKey: "plan", createdAt: at(-5), runnableAt: at(-5), claimedAt: at(0) });
+    // From before queued_ms: ready at 09:10 and claimed at 09:20, 10 minutes.
+    await seedExecution(db, run.id, { nodeKey: "code", createdAt: at(5), runnableAt: at(10), claimedAt: at(20) });
+    // After the migration: 6 minutes over its claims, whatever its last stretch says.
+    await seedExecution(db, run.id, { nodeKey: "review", createdAt: at(30), runnableAt: at(45), claimedAt: at(46), queuedMs: 6 * 60_000 });
+  }
+
+  const { forecasts } = await loadForecasts(db, project.id, noSizes);
+  expect(forecasts.S).toMatchObject({ source: "runs", minutes: 60, parts: { agent: 44, queue: 16, waiting: 0 } });
+});
