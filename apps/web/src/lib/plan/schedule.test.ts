@@ -160,6 +160,29 @@ test("tasks on one day sit in blocker order, then by number, and a later task's 
   ]);
 });
 
+test("a task that starts the day its blocker ends sits after the blocker's last hour", () => {
+  const items = [
+    // Nine hours from the 12th: #1 ends three hours into the 13th.
+    item(1, { start: "2026-10-12" }),
+    // Not blocked by #1, so it takes the 13th's first hour as before.
+    item(2, { start: "2026-10-13" }),
+    // Blocked by #1: it starts as #1 ends, and #4 follows it.
+    item(3, { start: "2026-10-13", blockedBy: [1] }),
+    item(4, { start: "2026-10-13", blockedBy: [3] }),
+    // Fifteen hours from the 15th run three hours into the 17th, so a task blocked by it on the 16th starts before it ends.
+    item(5, { start: "2026-10-15" }),
+    item(6, { start: "2026-10-16", blockedBy: [5] }),
+  ];
+  const timeline = deriveSpans(items, [], NOW, { durations: hours({ 1: 9, 2: 1, 3: 2, 4: 1, 5: 15, 6: 1 }), capacity: 6 });
+  const of = (n: number) => timeline.items.find((i) => i.number === n)!;
+  expect([2, 3, 4, 6].map((n) => [n, of(n).planned!.offsetHours, of(n).planned!.end, of(n).startsBeforeBlocker])).toEqual([
+    [2, 0, "2026-10-13", []],
+    [3, 3, "2026-10-13", []],
+    [4, 5, "2026-10-13", []],
+    [6, 0, "2026-10-16", [5]],
+  ]);
+});
+
 test("a task with a duration and no Start is unscheduled", () => {
   const items = [
     item(1, { kind: "story" }),
@@ -201,7 +224,8 @@ test("a Start before a blocker's end is flagged with that blocker", () => {
   const items = [
     // Nine hours from the 12th: it ends three hours into the 13th.
     item(1, { start: "2026-10-12" }),
-    item(2, { start: "2026-10-13", blockedBy: [1] }),
+    // The day before #1 starts.
+    item(2, { start: "2026-10-11", blockedBy: [1] }),
     item(3, { start: "2026-10-14", blockedBy: [1] }),
     // Same day as its blocker, so it sits after it and starts as #1 ends.
     item(8, { start: "2026-10-12", blockedBy: [1] }),

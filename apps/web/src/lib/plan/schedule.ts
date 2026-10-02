@@ -106,20 +106,29 @@ const blockersOf = (item: PlanItem) => item.blockers ?? item.blockedBy;
 
 /**
  * The bars of tasks with a Start and a duration. The tasks that start on one day sit one after another in
- * blocker order, then by number, so a later task starts after the hours of the ones before it.
+ * blocker order, then by number, so a later task starts after the hours of the ones before it. A task also
+ * starts after the last hour of a blocker that began on an earlier day and ends on its Start day.
  */
 export function stackBars(tasks: readonly BarTask[], capacity: number): Map<number, PlannedSpan> {
   const byDay = new Map<string, BarTask[]>();
   for (const task of tasks) byDay.set(task.start, [...(byDay.get(task.start) ?? []), task]);
   const bars = new Map<number, PlannedSpan>();
-  for (const day of byDay.values()) {
+  // Earlier days first, so a blocker's bar is laid out before the tasks it holds back on a later day.
+  for (const [start, day] of [...byDay].sort(([a], [b]) => a.localeCompare(b))) {
     let used = 0;
     for (const task of inBlockerOrder(day)) {
-      bars.set(task.number, barOf(task, used, capacity));
-      used += task.hours;
+      const offset = Math.max(used, ...task.blockers.map((b) => hoursInto(start, bars.get(b), capacity)));
+      bars.set(task.number, barOf(task, offset, capacity));
+      used = offset + task.hours;
     }
   }
   return bars;
+}
+
+/** Hours into `day` that a bar from an earlier day ends, when it ends on that day; 0 otherwise. */
+function hoursInto(day: string, bar: PlannedSpan | undefined, capacity: number): number {
+  if (!bar || bar.hours === undefined || bar.start >= day || bar.end !== day) return 0;
+  return (bar.offsetHours ?? 0) + bar.hours - daysBetween(bar.start, day) * capacity;
 }
 
 /** The bars of the plan's items that have a duration and a Start. */

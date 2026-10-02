@@ -535,6 +535,11 @@ function renderSized(over: { plan?: typeof sized; runs?: TimelineRun[]; zoom?: Z
 
 const DAY = 96;
 const OCT_1 = 17 * DAY;
+/**
+ * #146 on Oct 3 at 16 px an hour: #145 and #146 wait on #143, so they start after the 3 hours #143 runs into
+ * Oct 3, and #146 follows #145's 50 minutes (13.3 px).
+ */
+const AT_146 = OCT_1 + 2 * DAY + 3 * 16 + 13.33;
 const barOf = (n: number) => within(row(new RegExp(`^Task #${n} `))).getByRole("link", { name: new RegExp(`^Task #${n} `) });
 const leftOf = (el: HTMLElement) => parseFloat(el.style.left);
 const widthOf = (el: HTMLElement) => parseFloat(el.style.width);
@@ -543,8 +548,7 @@ const dragTip = () => within(screen.getByRole("grid", { name: "Timeline" })).que
 test("dragging a bar moves its Start a day at a time and the tooltip names the Target that follows", () => {
   renderSized();
   const bar = barOf(146);
-  // #146 sits after #145's 50 minutes on Oct 3: 50 minutes is 13.3 px at 16 px an hour.
-  expect(leftOf(bar)).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  expect(leftOf(bar)).toBeCloseTo(AT_146, 1);
   expect(widthOf(bar)).toBeCloseTo(13.33, 1);
 
   fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 500 });
@@ -562,7 +566,7 @@ test("dragging a bar moves its Start a day at a time and the tooltip names the T
   // Escape puts it back and saves nothing.
   fireEvent.keyDown(bar, { key: "Escape" });
   expect(dragTip()).not.toBeInTheDocument();
-  expect(leftOf(bar)).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  expect(leftOf(bar)).toBeCloseTo(AT_146, 1);
   fireEvent.pointerUp(bar, { pointerId: 1, clientX: 700 });
   expect(actions.moveItemAction).not.toHaveBeenCalled();
   // The click that ends a drag does not open the issue; a click after it does.
@@ -593,7 +597,7 @@ test("dropping saves Start and Target and the toast's Undo writes the old dates 
   fireEvent.click(screen.getByRole("button", { name: "Undo" }));
   await waitFor(() => expect(actions.moveItemAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 146, start: "2026-10-03", target: "2026-10-03" }));
   expect(await screen.findByText("Put #146 back on Oct 3")).toBeInTheDocument();
-  expect(leftOf(barOf(146))).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  expect(leftOf(barOf(146))).toBeCloseTo(AT_146, 1);
   expect(actions.moveItemAction).toHaveBeenCalledTimes(2);
 });
 
@@ -604,7 +608,7 @@ test("a refused write puts the bar back and offers Try again", async () => {
 
   expect(await screen.findByText("GitHub did not take the date")).toBeInTheDocument();
   expect(screen.getByText("#146 is back on Oct 3. GitHub API rate limit exceeded.")).toBeInTheDocument();
-  expect(leftOf(barOf(146))).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  expect(leftOf(barOf(146))).toBeCloseTo(AT_146, 1);
   expect(router.refresh).not.toHaveBeenCalled();
 
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
@@ -650,15 +654,19 @@ test("a drop before a blocker ends is allowed with the warning", async () => {
   const label = within(row(/^Task #149 /)).getByRole("rowheader");
   expect(within(label).queryByRole("button", { name: /Starts before/ })).not.toBeInTheDocument();
 
-  // On Oct 3 #149 comes after #145 and #146, 1h 40m in, while #143's nine hours run to 3h into Oct 3.
+  // On Oct 3, the day #143 ends, #149 starts after #143's last 3 hours, #145 and #146, and runs into Oct 4: no warning.
   const bar = barOf(149);
   fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 500 });
   fireEvent.pointerMove(bar, { pointerId: 1, clientX: 500 - DAY });
-  expect(dragTip()).toHaveTextContent("Sat Oct 3L, default ~2h. Target Oct 3Starts before #143 ends on Oct 3");
-  fireEvent.pointerUp(bar, { pointerId: 1, clientX: 500 - DAY });
+  expect(dragTip()).toHaveTextContent("Sat Oct 3 to Sun Oct 4L, default ~2h. Target Oct 4");
+  expect(dragTip()).not.toHaveTextContent("Starts before");
+  // On Oct 1 it starts the day before #143 does.
+  fireEvent.pointerMove(bar, { pointerId: 1, clientX: 500 - 3 * DAY });
+  expect(dragTip()).toHaveTextContent("Thu Oct 1L, default ~2h. Target Oct 1Starts before #143 ends on Oct 3");
+  fireEvent.pointerUp(bar, { pointerId: 1, clientX: 500 - 3 * DAY });
 
-  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 149, start: "2026-10-03", target: "2026-10-03" }));
-  expect(await screen.findByText("Moved #149 to Oct 3")).toBeInTheDocument();
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 149, start: "2026-10-01", target: "2026-10-01" }));
+  expect(await screen.findByText("Moved #149 to Oct 1")).toBeInTheDocument();
   expect(screen.getByText("Saved to GitHub. It starts before #143 ends.")).toBeInTheDocument();
 
   // The row warns, the bar's left edge and the arrow from its blocker turn red, and the blocker stays put.
@@ -761,17 +769,18 @@ const sizedWith = (changes: Record<number, Partial<PlanTask>>) =>
   planView(sized.epics.map((e) => ({ ...e, stories: e.stories.map((s) => ({ ...s, tasks: s.tasks.map((t) => ({ ...t, ...changes[t.number] })) })) })));
 
 test("the load row shows hours per day and marks a day over capacity", () => {
-  // #145 with a manual 4 hours: Oct 3 holds the last 3 of #143's 9 hours, #145's 4 and #146's 50 minutes.
-  renderSized({ plan: sizedWith({ 145: { estimate: 4 }, 152: { start: "2026-10-05", target: "2026-10-06" } }) });
+  // #145 with a manual 4 hours and #149 with 5: Oct 3 holds the last 3 of #143's 9 hours and 3 of #145's, and
+  // Oct 4 #145's last hour, #146's 50 minutes and #149's 5 hours.
+  renderSized({ plan: sizedWith({ 145: { estimate: 4 }, 149: { estimate: 5 }, 152: { start: "2026-10-05", target: "2026-10-06" } }) });
   const axis = screen.getByRole("row", { name: "Time axis" });
   expect(within(axis).getByText("Load at 6h a day")).toHaveAttribute("title", "1 task with dates has no size, so its hours are not counted");
 
   expect(within(axis).getByTitle("Oct 1: 1h 15m of 6h")).not.toHaveAttribute("data-over");
   expect(within(axis).getByTitle("Oct 2: 6h of 6h")).not.toHaveAttribute("data-over");
-  const over = within(axis).getByTitle("Oct 3: 7h 50m of 6h");
+  expect(within(axis).getByTitle("Oct 3: 6h of 6h")).not.toHaveAttribute("data-over");
+  const over = within(axis).getByTitle("Oct 4: 6h 50m of 6h");
   expect(over).toHaveAttribute("data-over", "true");
-  expect(over).toHaveTextContent("7h 50m");
-  expect(within(axis).getByTitle("Oct 4: 2h of 6h")).toBeInTheDocument();
+  expect(over).toHaveTextContent("6h 50m");
   expect(within(axis).queryByTitle(/^Oct 5:/)).not.toBeInTheDocument();
 });
 
@@ -816,7 +825,8 @@ test("strips start under the bar at its scale and the hover card gives clock tim
 
 /**
  * The sized plan for Arrange: in Unscheduled #152 has a manual 4 hours and waits on #153 (S, ~25m), and #154 has
- * neither a size nor an estimate. Today, Oct 2, is full with #143; Oct 3 holds 4h 40m and Oct 4 #149's 2 hours.
+ * neither a size nor an estimate. Today, Oct 2, is full with #143; Oct 3 holds #143's last 3 hours and then #145 and #146 (4h 40m), and Oct 4
+ * #149's 2 hours.
  */
 const arranging = planView(
   sized.epics.map((e) => ({
@@ -826,6 +836,8 @@ const arranging = planView(
     ),
   })),
 );
+/** #152 in the preview: after #153's 25 minutes on Oct 3, 5h 5m in at 16 px an hour. */
+const AT_152 = OCT_1 + 2 * DAY + (305 / 60) * 16;
 const unscheduledRow = (n: number) => within(screen.getByRole("region", { name: "Unscheduled" })).getByRole("listitem", { name: new RegExp(`^Task #${n} `) });
 
 test("Arrange shows a preview of the placed tasks and writes nothing until Save", () => {
@@ -842,22 +854,23 @@ test("Arrange shows a preview of the placed tasks and writes nothing until Save"
   );
   expect(within(banner).getByRole("button", { name: "Save 2 tasks to GitHub" })).toBeInTheDocument();
 
-  // #153 fits after #145 and #146 on Oct 3; #152's 4 hours do not, so it follows #149 on Oct 4 after its blocker.
+  // #153 fits after #145 and #146 on Oct 3, 4h 40m in. #152 follows its blocker there for Oct 3's last 55 minutes
+  // and runs 3h 5m into Oct 4, beside #149's 2 hours.
   const first = barOf(153);
   expect(first).toHaveAttribute("data-preview", "true");
   expect(first).toHaveAccessibleName(/, Oct 3, in preview$/);
-  expect(leftOf(first)).toBeCloseTo(OCT_1 + 2 * DAY + (100 / 60) * 16, 1);
+  expect(leftOf(first)).toBeCloseTo(OCT_1 + 2 * DAY + (280 / 60) * 16, 1);
   const second = barOf(152);
-  expect(second).toHaveAccessibleName(/manual estimate 4 hours, Oct 4, blocked by #153, in preview$/);
-  expect(leftOf(second)).toBe(OCT_1 + 3 * DAY + 32);
+  expect(second).toHaveAccessibleName(/manual estimate 4 hours, Oct 3 to Oct 4, blocked by #153, in preview$/);
+  expect(leftOf(second)).toBeCloseTo(AT_152, 1);
   expect(widthOf(second)).toBe(64);
   expect(within(row(/^Task #153 /)).getByText("Oct 3")).toBeInTheDocument();
-  expect(within(row(/^Task #152 /)).getByText("Oct 4")).toBeInTheDocument();
+  expect(within(row(/^Task #152 /)).getByText("Oct 3 to Oct 4")).toBeInTheDocument();
 
   // The load counts the preview with the work already planned.
   const axis = screen.getByRole("row", { name: "Time axis" });
-  expect(within(axis).getByTitle("Oct 3: 5h 5m of 6h, 25m of it in the preview")).toBeInTheDocument();
-  expect(within(axis).getByTitle("Oct 4: 6h of 6h, 4h of it in the preview")).toBeInTheDocument();
+  expect(within(axis).getByTitle("Oct 3: 6h of 6h, 1h 20m of it in the preview")).toBeInTheDocument();
+  expect(within(axis).getByTitle("Oct 4: 5h 5m of 6h, 3h 5m of it in the preview")).toBeInTheDocument();
 
   // The tasks stay in Unscheduled, tagged, until Save.
   expect(within(unscheduledRow(152)).getByText("In preview")).toBeInTheDocument();
@@ -888,7 +901,7 @@ test("Save writes Start and Target for each task and Cancel leaves them unschedu
       projectId: "p1",
       items: [
         { issue: 153, start: "2026-10-03", target: "2026-10-03" },
-        { issue: 152, start: "2026-10-04", target: "2026-10-04" },
+        { issue: 152, start: "2026-10-03", target: "2026-10-04" },
       ],
     }),
   );
@@ -897,7 +910,7 @@ test("Save writes Start and Target for each task and Cancel leaves them unschedu
   expect(router.refresh).toHaveBeenCalled();
   expect(screen.queryByRole("region", { name: "Arrange preview" })).not.toBeInTheDocument();
   expect(barOf(153)).not.toHaveAttribute("data-preview");
-  expect(leftOf(barOf(152))).toBe(OCT_1 + 3 * DAY + 32);
+  expect(leftOf(barOf(152))).toBeCloseTo(AT_152, 1);
   expect(within(screen.getByRole("region", { name: "Unscheduled" })).queryByRole("listitem", { name: /^Task #15[23] / })).not.toBeInTheDocument();
   expect(unscheduledRow(154)).toBeInTheDocument();
   expect(actions.saveArrangeAction).toHaveBeenCalledTimes(1);

@@ -48,13 +48,26 @@ test("a task starts no earlier than its placed blockers end", () => {
     task(34, 1, { blockers: [35] }),
   ];
   expect(arrange(tasks, planned, 6, TODAY).placements).toEqual([
-    // The 11th has room, but #1 runs into it.
-    { issue: 30, start: "2026-10-12", target: "2026-10-12" },
+    // The 11th, after #1's last three hours.
+    { issue: 30, start: "2026-10-11", target: "2026-10-11" },
     { issue: 31, start: "2026-10-15", target: "2026-10-15" },
-    { issue: 33, start: "2026-10-12", target: "2026-10-12" },
-    // #33 fills the 12th, so its blocked task starts on the 13th although the 11th has room.
-    { issue: 32, start: "2026-10-13", target: "2026-10-13" },
-    { issue: 34, start: "2026-10-11", target: "2026-10-11" },
+    // After #30: the 11th's last two hours, then three on the 12th.
+    { issue: 33, start: "2026-10-11", target: "2026-10-12" },
+    // The 12th, after #33's last three hours.
+    { issue: 32, start: "2026-10-12", target: "2026-10-12" },
+    // The 11th is full, so the 12th's last hour.
+    { issue: 34, start: "2026-10-12", target: "2026-10-12" },
+  ]);
+});
+
+test("a task starts the day its blocker ends, right after the blocker's last hour", () => {
+  // Four hours are planned today, so #50's three hours run one hour into the 11th.
+  const planned = [task(1, 4, { start: "2026-10-10" })];
+  const tasks = [task(50, 3), task(51, 1, { blockers: [50] })];
+  expect(arrange(tasks, planned, 6, TODAY).placements).toEqual([
+    { issue: 50, start: "2026-10-10", target: "2026-10-11" },
+    // The 11th has 5 hours free after #50's last hour.
+    { issue: 51, start: "2026-10-11", target: "2026-10-11" },
   ]);
 });
 
