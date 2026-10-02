@@ -297,7 +297,16 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
         const shown = (nextMode ?? mode) === "whole" ? "the whole file" : "the changes";
         return `Showing ${shown}, ${(nextLayout ?? layout) === "split" ? "side by side" : "in one column"}.`;
       },
-      page_expand_files: undefined,
+      page_expand_files: ({ all, path, open }) => {
+        if (path !== undefined) {
+          findFile(files, { path });
+          setOpen(path, open !== false);
+          return `${open === false ? "Collapsed" : "Expanded"} ${path}.`;
+        }
+        if (all === undefined) throw new Error("Say all, or a path with open.");
+        setClosed(all ? new Set() : new Set(files.map((f) => f.path)));
+        return all ? "Expanded every file." : "Collapsed every file.";
+      },
       page_mark_viewed: readOnly
         ? undefined
         : async ({ path, viewed }) => {
@@ -319,7 +328,21 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
             setOpen(path, true);
             return `Drafted a comment on ${linesText(side, line, comment.endLine)} of ${path}. ${commentCount(comments.length + 1)}.`;
           },
-      page_remove_line_comment: undefined,
+      page_remove_line_comment: readOnly
+        ? undefined
+        : ({ path, line }) => {
+            const at = comments.findIndex((c) => c.path === path && c.line === line);
+            if (at < 0) {
+              const drafted = comments.map((c) => `${c.path} ${linesText(c.side, c.line, c.endLine)}`);
+              throw new Error(`No drafted comment starts at line ${line} of ${path}. ${drafted.length ? `The drafted comments are on: ${drafted.join("; ")}.` : "No comments are drafted."}`);
+            }
+            const removed = comments[at]!;
+            draft.setComments((list) => {
+              const first = list.findIndex((c) => c.path === path && c.line === line);
+              return list.filter((_, i) => i !== first);
+            });
+            return `Removed the comment on ${linesText(removed.side, removed.line, removed.endLine)} of ${path}. ${commentCount(comments.length - 1)}.`;
+          },
       page_set_note: readOnly
         ? undefined
         : ({ note }) => {
@@ -345,6 +368,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
       })),
       comments,
       note: readOnly ? "" : draft.note,
+      readOnly,
     }),
   );
 

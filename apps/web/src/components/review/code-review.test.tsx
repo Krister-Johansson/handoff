@@ -493,3 +493,30 @@ test("page_submit_review changes with no comment and no note is refused, and wit
     comments: [{ path: "src/b.ts", side: "new", line: 2, quote: "export const c = 2;", body: "Drop c." }],
   });
 });
+
+test("an answered review binds only navigation and view tools", async () => {
+  const answered = [{ path: "src/a.ts", side: "new" as const, line: 10, quote: "new 10", body: "Name it." }];
+  const { call, whereAmI } = await withAssistant({ answered });
+  const page = (await whereAmI()).page!;
+  expect(page.tools.map((t) => t.name)).toEqual(["page_go_to_file", "page_set_diff_view", "page_expand_files"]);
+  expect(page.state.data).toMatchObject({ readOnly: true, comments: answered });
+
+  expect(await call("page_go_to_file", { index: 2 })).toEqual({ text: "Now on file 2 of 3: src/b.ts.", isError: false });
+  expect(await call("page_set_diff_view", { layout: "split" })).toEqual({ text: "Showing the changes, side by side.", isError: false });
+
+  expect(await call("page_expand_files", { all: false })).toEqual({ text: "Collapsed every file.", isError: false });
+  expect(within(fileA()).queryByText("new 10")).not.toBeInTheDocument();
+  expect(await call("page_expand_files", { path: "src/a.ts", open: true })).toEqual({ text: "Expanded src/a.ts.", isError: false });
+  expect(within(fileA()).getByText("new 10")).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).queryByText("export const b = 1;")).not.toBeInTheDocument();
+  expect(await call("page_expand_files", { path: "src/a.ts", open: false })).toEqual({ text: "Collapsed src/a.ts.", isError: false });
+  expect(await call("page_expand_files", { all: true })).toEqual({ text: "Expanded every file.", isError: false });
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByText("export const b = 1;")).toBeInTheDocument();
+  expect(await call("page_expand_files")).toEqual({ text: "Say all, or a path with open.", isError: true });
+
+  for (const name of ["page_mark_viewed", "page_comment_on_lines", "page_remove_line_comment", "page_set_note", "page_submit_review"]) {
+    expect(await call(name, { path: "src/a.ts", line: 9, viewed: true, body: "x", note: "x", option: "approve" })).toMatchObject({ isError: true, text: expect.stringContaining(`${name} is not available here`) });
+  }
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+  expect(actions.markViewedAction).not.toHaveBeenCalled();
+});
