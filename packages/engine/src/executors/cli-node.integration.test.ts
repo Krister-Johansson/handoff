@@ -124,6 +124,20 @@ test("a node's model and effort override the worker's defaults, and nodes withou
   expect(cli.requests[1]).toMatchObject({ model: "opus", effort: "xhigh" });
 });
 
+test("maxTurns auto gives a coder 40 turns plus 4 per plan step, at most 150", async () => {
+  const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
+  doc.nodes.find((n) => n.key === "coder")!.attributes.config = { maxTurns: "auto" };
+  const turnsFor = async (steps: number) => {
+    await truncateAll(db);
+    const cli = new FakeCliExecutor([{ output: { ...plannerOut, steps: Array.from({ length: steps }, (_, i) => `step ${i + 1}`) } }, { output: { status: "done", summary: "wrote it" } }]);
+    await startRun(db, doc);
+    await drain(engineDeps(db, registry(cli)));
+    return cli.requests[1]!.maxTurns;
+  };
+  expect(await turnsFor(3)).toBe(52);
+  expect(await turnsFor(40)).toBe(150);
+});
+
 test("a node that allows every tool gets Claude Code's full list, still named one by one", async () => {
   const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
   const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
