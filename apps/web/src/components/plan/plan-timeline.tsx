@@ -1,9 +1,10 @@
 "use client";
 
-import { Fragment, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, use, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, ChevronRightIcon, ExternalLinkIcon, MoreHorizontalIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
+import type { PlanStory, PlanTask } from "@/server/plan";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { BAR_TONE, prNumberOf, taskColumn } from "@/lib/plan/task";
 import {
   arrowPath,
   chartRange,
+  estimateFieldsGap,
   itemsOf,
   KIND_NAME,
   lacksDateFields,
@@ -33,12 +35,13 @@ import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { KindBadge, StatusPill } from "./plan-status";
-import { useSearchQuery } from "./plan-context";
+import { Sizing, useSearchQuery } from "./plan-context";
+import { SizeChip, SizeSum } from "./size-chip";
 import { IssueTitle } from "./plan-task-parts";
 import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
 import { FlagCard, type FlagContext } from "./timeline-flag-card";
-import { DateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
+import { DateFieldsBanner, EstimateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
 
 import { useRowsOpen } from "./use-collapsed";
 
@@ -341,9 +344,17 @@ function RowMenu({ row, projectId, start, onSchedule }: Pick<RowLabelProps, "row
 
 const INDENT: Record<TimelineRow["level"], string> = { 1: "pl-2.5", 2: "pl-[26px]", 3: "pl-11" };
 
+/** The tasks a story or an epic sums: an epic's through its stories and its own. */
+function tasksOf(item: PlanItem): PlanTask[] {
+  const stories = "stories" in item ? (item.stories as PlanStory[]) : [];
+  const own = "tasks" in item ? (item.tasks as PlanTask[]) : [];
+  return [...stories.flatMap((s) => s.tasks), ...own];
+}
+
 /** The fixed left cell of a row: chevron, status pill or kind badge, number and title with a task's warning icon, then the menu. */
 function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule }: RowLabelProps) {
   const { item, task } = row;
+  const sizing = use(Sizing);
   return (
     <div
       role="rowheader"
@@ -361,10 +372,16 @@ function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule }:
         <RowMark row={row} />
         {item ? <IssueTitle item={item} className={cn("text-xs", !task && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}
         {task && entry && <FlagCard task={task} entry={entry} ctx={flags} />}
-        <span className="ml-auto shrink-0">
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {!task && item && <SizeSum tasks={tasksOf(item)} />}
           <RowMenu row={row} projectId={projectId} start={start} onSchedule={onSchedule} />
         </span>
       </div>
+      {task && sizing && (
+        <div className="flex min-w-0 items-center justify-end pr-7">
+          <SizeChip task={task} />
+        </div>
+      )}
     </div>
   );
 }
@@ -398,10 +415,13 @@ function Unscheduled({ groups, undated, onSchedule }: { groups: UnscheduledGroup
                       <KindBadge kind={kind} />
                       <IssueTitle item={item} className="text-xs" />
                       {kind === "task" && <StatusPill column={item.state === "closed" ? "Done" : (item.status ?? "Other")} />}
-                      <Button size="xs" variant="outline" className="ml-auto" aria-label={`Schedule #${item.number} ${item.title}`} onClick={() => onSchedule(item)}>
-                        <CalendarIcon data-icon="inline-start" />
-                        Schedule
-                      </Button>
+                      <span className="ml-auto flex shrink-0 items-center gap-2">
+                        {kind === "task" && <SizeChip task={item as PlanTask} />}
+                        <Button size="xs" variant="outline" aria-label={`Schedule #${item.number} ${item.title}`} onClick={() => onSchedule(item)}>
+                          <CalendarIcon data-icon="inline-start" />
+                          Schedule
+                        </Button>
+                      </span>
                     </li>
                   );
                 })}
@@ -492,10 +512,12 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
     .filter((g) => g.items.length > 0);
 
   const offscreen = pane && (todayX < pane.left ? "left" : todayX > pane.left + pane.width ? "right" : undefined);
+  const fieldsGap = estimateFieldsGap(project);
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
       {lacksDateFields(project) && <DateFieldsBanner projectId={projectId} project={project} />}
+      {fieldsGap && <EstimateFieldsBanner projectId={projectId} project={project} title={fieldsGap} />}
       <div className="relative">
         <div ref={scroller} className="overflow-x-auto overscroll-x-contain" onScroll={measure}>
           <div

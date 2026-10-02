@@ -14,6 +14,21 @@ export const stripDates = (strip: ActualStrip) => `${shortDay(dayOfInstant(strip
 /** Whether the Project lacks Start or Target. */
 export const lacksDateFields = (project: PlanProject) => !project.dateFields?.start || !project.dateFields.target;
 
+/**
+ * What the Project lacks of Size and Estimate, as the banner's title says it; undefined when it has both with
+ * S, M and L, or when the Project was built without reading them.
+ */
+export function estimateFieldsGap(project: PlanProject): string | undefined {
+  const fields = project.estimateFields;
+  if (!fields) return undefined;
+  if (!fields.size) return fields.estimate ? "This Project has no Size field" : "This Project has no Size and no Estimate field";
+  const lacking = (["S", "M", "L"] as const).filter((s) => !fields.size?.options[s]);
+  // "S, M or L": the options GitHub's Size field lacks, its own options kept.
+  const options = lacking.length ? `The Size field has no ${[lacking.slice(0, -1).join(", "), lacking.at(-1)].filter(Boolean).join(" or ")} option` : undefined;
+  if (fields.estimate) return options;
+  return options ? `${options}, and the Project has no Estimate field` : "This Project has no Estimate field";
+}
+
 /** "Oct 6 to Oct 17", or one day alone. */
 export const spanText = (span: DaySpan) => (span.start === span.end ? shortDay(span.start) : `${shortDay(span.start)} to ${shortDay(span.end)}`);
 

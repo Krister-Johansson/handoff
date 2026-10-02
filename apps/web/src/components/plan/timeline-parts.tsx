@@ -3,10 +3,10 @@
 import { useState, useSyncExternalStore, useTransition, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClockIcon, CalendarIcon, ClockAlertIcon, InfoIcon,
- LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon } from "lucide-react";
+ LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
-import { addDateFieldsAction } from "@/app/projects/actions";
+import { addDateFieldsAction, addEstimateFieldsAction } from "@/app/projects/actions";
 import { Tag } from "@/components/tag";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -211,6 +211,64 @@ export const useNarrow = () =>
     () => window.matchMedia(NARROW).matches,
     () => false,
   );
+
+/**
+ * A Project without Size or Estimate, or with a Size field that lacks S, M or L: says what it lacks and
+ * offers to add the fields, behind a confirmation. Existing Size options stay.
+ */
+export function EstimateFieldsBanner({ projectId, project, title }: { projectId: string; project: PlanProject; title: string }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string>();
+  const [pending, startTransition] = useTransition();
+  const both = !project.estimateFields?.size && !project.estimateFields?.estimate;
+  const add = () =>
+    startTransition(async () => {
+      const result = await addEstimateFieldsAction({ projectId });
+      if (result.ok) setOpen(false);
+      else setError(result.error ?? "GitHub did not add the fields.");
+    });
+  return (
+    <div className="p-2.5">
+      <Alert className="border-attention-dot/35 bg-attention-bg sm:pr-40">
+        <RulerIcon className="text-attention" />
+        <AlertTitle>{title}</AlertTitle>
+        <AlertDescription className="text-xs">
+          Size is a single select with S, M and L. Estimate is a Number field in hours.{" "}
+          {both ? "Both are added to the GitHub Project." : "The missing ones are added to the GitHub Project, and its own Size options stay."}
+        </AlertDescription>
+        <div className="col-start-2 mt-1.5 sm:absolute sm:top-1/2 sm:right-2.5 sm:mt-0 sm:-translate-y-1/2">
+          <Button size="sm" onClick={() => setOpen(true)}>
+            <PlusIcon data-icon="inline-start" />
+            Add the fields
+          </Button>
+        </div>
+      </Alert>
+      <AlertDialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          setError(undefined);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Add Size and Estimate to {project.title}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              handoff creates a single select field Size with S, M and L and a Number field Estimate on the GitHub Project, or adds what is missing of them. Existing options and values stay; nothing else changes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {error && <FieldError>{error}</FieldError>}
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">Cancel</AlertDialogCancel>
+            <Button type="button" disabled={pending} onClick={add}>
+              Add the fields
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
 
 /** A Project without Start or Target: says so and offers to add them, behind a confirmation. */
 export function DateFieldsBanner({ projectId, project }: { projectId: string; project: PlanProject }) {
