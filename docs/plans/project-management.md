@@ -118,7 +118,7 @@ Checked on 2026-10-02.
 ### Rate limits
 
 - https://docs.github.com/en/graphql/overview/rate-limits-and-node-limits-for-the-graphql-api: "5,000 points per hour per user"; cost is the sum of requests per unique connection assuming every `first` is reached, "Divide the number by 100 and round the result to the nearest whole number", minimum 1; secondary limits "No more than 100 concurrent requests", "no more than 2,000 points per minute are allowed for the GraphQL API endpoint", 900 points per minute for REST, "No more than 80 content-generating requests per minute". `rateLimit { limit cost remaining used resetAt }` reports the cost.
-- Applied: one page of `items(first: 100) { fieldValues(first: 20) content { ... } }` is 1 (project) + 1 (items) + 100 (field values) = 102 requests, 1 point. A 200-item board is two calls, 2 points. The live measurement (1 point for 58 items) agrees. Polling every 30 seconds while the Plan tab is open costs at most 240 points per hour of the 5,000.
+- Applied: one page of `items(first: 100) { fieldValues(first: 20) content { ... } }` is 1 (project) + 1 (items) + 100 (field values) = 102 requests, 1 point, and the live measurement (1 point for 58 items) agrees. The query Planner 1 built (#351) also reads each item's labels, assignees, blockers and pull requests, four lists per item, which by the same formula is about 4 points per 100 items (not yet measured). A 200-item board is then about 8 points, and polling every 30 seconds while the Plan page is open about 960 points per hour of the 5,000.
 
 ### The codebase
 
@@ -157,7 +157,7 @@ Kind marker: the labels `epic`, `story` and `task`, created by `setup_plan` with
 
 - Depth only (no parent means epic, one parent means story, two means task). Ambiguous for an epic with a direct task, invisible in GitHub's issue list and labels filter, and wrong for an issue someone nests four deep. Rejected as the marker; depth is used as the fallback when a label is missing, and the Plan tab shows "no kind label" so the person can fix it.
 - A single-select "Kind" field on the Project. Only exists for items in the Project, needs a second write per issue, and is invisible on the issue itself. Rejected.
-- Issue types with an organization. The right answer for a repository under an organization; the port reads `issueType` when present and prefers it to the label. Listed under Risks as the upgrade path.
+- Issue types with an organization. The right answer for a repository under an organization; the port reads `issueType` when present and uses it when the kind label is missing (the label wins when both exist, since the shaping tools set it on purpose; decided in Planner 1, #351). Listed under Risks as the upgrade path.
 
 Depth is limited to three in the shaping tools; the reader shows whatever GitHub has, up to GitHub's eight levels, with deeper issues under their nearest task-labelled ancestor.
 
