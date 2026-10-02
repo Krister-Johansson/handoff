@@ -1,8 +1,8 @@
 import type { CodegenConfig } from "@graphql-codegen/cli";
 
-/** Types for our GitHub GraphQL operations, generated from GitHub's published schema. Run `pnpm codegen`. */
+/** Types for our GitHub GraphQL operations, generated from the vendored copy of GitHub's published schema (scripts/refresh-schema.sh updates it). Run `pnpm codegen`. */
 const config: CodegenConfig = {
-  schema: "node_modules/@octokit/graphql-schema/schema.graphql",
+  schema: "src/schema/schema.docs.graphql",
   documents: ["src/queries/**/*.graphql"],
   generates: {
     "./src/gql/": {
@@ -14,7 +14,7 @@ const config: CodegenConfig = {
         emitLegacyCommonJSImports: false,
         enumsAsTypes: true,
         avoidOptionals: false,
-        scalars: { URI: "string", GitObjectID: "string", DateTime: "string", HTML: "string" },
+        scalars: { URI: "string", GitObjectID: "string", DateTime: "string", Date: "string", HTML: "string" },
       },
     },
   },

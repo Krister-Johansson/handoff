@@ -1,0 +1,87 @@
+mutation CreatePlanProject($ownerId: ID!, $title: String!) {
+  createProjectV2(input: { ownerId: $ownerId, title: $title }) {
+    projectV2 {
+      id
+      number
+      url
+      title
+      field(name: "Status") {
+        __typename
+        ... on ProjectV2SingleSelectField {
+          id
+          options {
+            id
+            name
+            color
+            description
+          }
+        }
+      }
+    }
+  }
+}
+
+mutation SetStatusOptions($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+  updateProjectV2Field(input: { fieldId: $fieldId, singleSelectOptions: $options }) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2SingleSelectField {
+        id
+        options {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+
+mutation LinkPlanRepository($projectId: ID!, $repositoryId: ID!) {
+  linkProjectV2ToRepository(input: { projectId: $projectId, repositoryId: $repositoryId }) {
+    repository {
+      id
+    }
+  }
+}
+
+mutation CreatePlanIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $parentIssueId: ID) {
+  createIssue(input: { repositoryId: $repositoryId, title: $title, body: $body, labelIds: $labelIds, parentIssueId: $parentIssueId }) {
+    issue {
+      id
+      number
+      url
+    }
+  }
+}
+
+mutation AddPlanBlocker($issueId: ID!, $blockingIssueId: ID!) {
+  addBlockedBy(input: { issueId: $issueId, blockingIssueId: $blockingIssueId }) {
+    issue {
+      id
+    }
+  }
+}
+
+mutation CreatePlanLabel($repositoryId: ID!, $name: String!, $color: String!, $description: String!) {
+  createLabel(input: { repositoryId: $repositoryId, name: $name, color: $color, description: $description }) {
+    label {
+      id
+    }
+  }
+}
+
+mutation AddPlanItem($projectId: ID!, $contentId: ID!) {
+  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+    item {
+      id
+    }
+  }
+}
+
+mutation SetPlanStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+  updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId } }) {
+    projectV2Item {
+      id
+    }
+  }
+}

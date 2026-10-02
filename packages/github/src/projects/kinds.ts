@@ -1,0 +1,27 @@
+import type { PlanKind, PlanStatus } from "./types.ts";
+
+/** The Status options of a plan's GitHub Project, in board order. */
+export const STATUS_OPTIONS = ["Shaping", "Ready", "Running", "In review", "Done"] as const;
+
+/** The kinds of issue in a plan, from the top of the hierarchy down; also the kind labels' names. */
+export const PLAN_KINDS = ["epic", "story", "task"] as const;
+
+/** The plan status a Status option's name stands for; undefined for an option handoff does not know. */
+export const statusOf = (name: string | null | undefined): PlanStatus | undefined => STATUS_OPTIONS.find((s) => s === name);
+
+const asKind = (name: string | null | undefined): PlanKind | undefined => {
+  const lower = name?.toLowerCase();
+  return PLAN_KINDS.find((k) => k === lower);
+};
+
+/**
+ * An issue's kind: its kind label first, then an issue type named like a kind, then its depth in the
+ * sub-issue tree (no parent is an epic, one a story, two a task). Undefined when nothing fits.
+ */
+export function kindOf(labels: readonly string[], issueType: string | null | undefined, depth: number): PlanKind | undefined {
+  for (const label of labels) {
+    const kind = asKind(label);
+    if (kind) return kind;
+  }
+  return asKind(issueType) ?? PLAN_KINDS[depth];
+}

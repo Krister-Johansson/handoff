@@ -20,6 +20,7 @@
     "graphql": "17.0.2"
   },
   "scripts": {
-    "codegen": "graphql-codegen --config codegen.ts"
+    "codegen": "graphql-codegen --config codegen.ts",
+    "schema:refresh": "sh scripts/refresh-schema.sh"
   }
 }

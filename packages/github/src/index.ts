@@ -4,3 +4,7 @@ export * from "./webhook-events.ts";
 export * from "./feedback.ts";
 export * from "./octokit-client.ts";
 export * from "./from-env.ts";
+export * from "./projects/types.ts";
+export * from "./projects/kinds.ts";
+export * from "./projects/octokit-projects.ts";
+export * from "./projects/from-env.ts";
