@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { parseLaunchFile, previewCommand } from "./launch.ts";
+import { demoConfiguration, parseLaunchFile, previewCommand } from "./launch.ts";
 
 const file = `{
   // Claude Code desktop writes this file; it may hold comments.
@@ -39,4 +39,13 @@ test("cwd may name the worktree with ${workspaceFolder}, and may not leave it", 
   const [web] = parseLaunchFile(file).configurations;
   expect(previewCommand({ ...web!, cwd: "${workspaceFolder}/apps/web" }, { root: "/w/run", port: 1 }).cwd).toBe("/w/run/apps/web");
   expect(() => previewCommand({ ...web!, cwd: "../other" }, { root: "/w/run", port: 1 })).toThrow(/outside/);
+});
+
+test("the handoff-demo configuration wins over the first", () => {
+  expect(demoConfiguration(parseLaunchFile(file)).name).toBe("web");
+  const withDemo = parseLaunchFile(`{ "configurations": [
+    { "name": "dev", "runtimeExecutable": "pnpm", "runtimeArgs": ["dev"] },
+    { "name": "handoff-demo", "runtimeExecutable": "pnpm", "runtimeArgs": ["start"] },
+  ] }`);
+  expect(demoConfiguration(withDemo)).toMatchObject({ name: "handoff-demo", runtimeArgs: ["start"] });
 });

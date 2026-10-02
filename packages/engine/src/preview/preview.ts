@@ -4,7 +4,7 @@ import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { LAUNCH_FILE, parseLaunchFile, previewCommand } from "@handoff/core";
+import { demoConfiguration, LAUNCH_FILE, parseLaunchFile, previewCommand } from "@handoff/core";
 import { and, eq, inArray, previews, type Db } from "@handoff/db";
 import { commandEnv } from "../contract/checks.ts";
 import type { Workdir } from "../types.ts";
@@ -119,7 +119,7 @@ export type StartPreviewOptions = {
   projectId: string;
   workdir: Workdir;
   nodeExecutionId?: string;
-  /** The launch configuration to start; the first one when not given. */
+  /** The launch configuration to start; the one named handoff-demo, else the first, when not given. */
   configuration?: string;
   readyTimeoutMs?: number;
   signal?: AbortSignal;
@@ -147,7 +147,7 @@ export async function startPreview(deps: { db: Db; workerId: string }, opts: Sta
   } catch (error) {
     throw new PreviewError((error as Error).message);
   }
-  const config = opts.configuration ? launch.configurations.find((c) => c.name === opts.configuration) : launch.configurations[0];
+  const config = opts.configuration ? launch.configurations.find((c) => c.name === opts.configuration) : demoConfiguration(launch);
   if (!config) throw new PreviewError(`${LAUNCH_FILE} has no configuration named ${opts.configuration}.`);
 
   await ensureServices(opts.workdir.path, opts.projectId, opts.docker, opts.note);
