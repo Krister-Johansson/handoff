@@ -50,9 +50,10 @@ export function earlyStarts(ctx: MoveContext, item: PlanItem, span: PlannedSpan 
   const capacity = ctx.capacity ?? 1;
   const starts = span && startHour(span, capacity);
   if (starts === undefined) return [];
+  const openOutside = new Set(item.blockedBy);
   return blockersOf(item).flatMap((b) => {
     const blocker = ctx.items.get(b);
-    const open = blocker ? !isDone(blocker) : item.blockedBy.includes(b);
+    const open = blocker ? !isDone(blocker) : openOutside.has(b);
     const bar = ctx.entries.get(b)?.planned;
     const ends = bar && endHour(bar, capacity);
     return open && bar && ends !== undefined && starts < ends - 1e-9 ? [{ number: b, end: bar.end }] : [];

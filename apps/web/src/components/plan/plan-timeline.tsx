@@ -1,12 +1,12 @@
 "use client";
 
-import { Fragment, startTransition, use, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, startTransition, use, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, ChevronRightIcon, ExternalLinkIcon, GripVerticalIcon, KeyboardIcon, MoreHorizontalIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
-import type { PlanEpic, PlanStory, PlanTask } from "@/server/plan";
+import type { PlanColumn, PlanEpic, PlanStory, PlanTask } from "@/server/plan";
 import { moveItemAction } from "@/app/projects/actions";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
@@ -17,6 +17,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDuration } from "@/lib/plan/duration";
+import type { Duration, Forecast } from "@/lib/plan/forecast";
 import { hoursByDay } from "@/lib/plan/load";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
@@ -103,6 +104,43 @@ type CardContext = { items: Map<number, PlanItem>; entries: Map<number, Timeline
 /** Minutes as hours and minutes whatever the capacity: "1h 40m". */
 const minutesText = (minutes: number) => formatDuration(minutes / 60, Infinity);
 
+/** What a size usually takes in this project, with its parts and cost, or its default with the runs so far. */
+function ForecastRow({ forecast, capacity }: { forecast: Forecast; capacity: number }) {
+  const where = forecast.source === "runs" ? `the median of ${forecast.runs} finished ${forecast.size} runs` : `the default for ${forecast.size}; ${forecast.runs} finished ${forecast.size} runs so far`;
+  const cost = forecast.costUsd !== null ? `, about $${forecast.costUsd.toFixed(2)}` : "";
+  return (
+    <>
+      <dt className="text-muted-foreground">Forecast</dt>
+      <dd className="flex flex-col">
+        <span>
+          ~{usually(forecast, capacity)}, {where}
+        </span>
+        {forecast.parts && (
+          <span className="text-muted-foreground">
+            agent {minutesText(forecast.parts.agent)}, queue {minutesText(forecast.parts.queue)}, waiting on you {minutesText(forecast.parts.waiting)}
+            {cost}
+          </span>
+        )}
+      </dd>
+    </>
+  );
+}
+
+/** How long the active run has gone, and how far past the duration. */
+function ActualRow({ entry }: { entry: TimelineItem }) {
+  const active = entry.actual.find((s) => s.active);
+  if (!active) return null;
+  const over = entry.overForecastMinutes;
+  return (
+    <>
+      <dt className="text-muted-foreground">Actual</dt>
+      <dd className={cn(over !== undefined && "font-medium text-danger")}>
+        {minutesText((Date.parse(active.end) - Date.parse(active.start)) / 60_000)} so far{over !== undefined && `, ${minutesText(over)} over`}
+      </dd>
+    </>
+  );
+}
+
 /**
  * A task's size, the forecast or manual estimate its bar uses, and while a run is active how long it has
  * gone against that, in the bar's hover card.
@@ -112,45 +150,33 @@ function DurationRows({ task, entry, ctx }: { task: PlanTask; entry: TimelineIte
   if (!forecasts || capacity === undefined) return null;
   const duration = durationIn(ctx.move, task);
   const size = task.size ?? task.proposal?.size;
-  const forecast = size ? forecasts[size] : undefined;
-  const active = entry.actual.find((s) => s.active);
-  const elapsed = active && (Date.parse(active.end) - Date.parse(active.start)) / 60_000;
-  const over = entry.overForecastMinutes;
   return (
     <>
       <dt className="text-muted-foreground">Size</dt>
       <dd>{task.size ?? (task.proposal ? `${task.proposal.size}, proposed by the planner` : "Not set")}</dd>
-      {forecast && (
-        <>
-          <dt className="text-muted-foreground">Forecast</dt>
-          <dd className="flex flex-col">
-            <span>
-              ~{usually(forecast, capacity)},{" "}
-              {forecast.source === "runs" ? `the median of ${forecast.runs} finished ${forecast.size} runs` : `the default for ${forecast.size}; ${forecast.runs} finished ${forecast.size} runs so far`}
-            </span>
-            {forecast.parts && (
-              <span className="text-muted-foreground">
-                agent {minutesText(forecast.parts.agent)}, queue {minutesText(forecast.parts.queue)}, waiting on you {minutesText(forecast.parts.waiting)}
-                {forecast.costUsd !== null && `, about $${forecast.costUsd.toFixed(2)}`}
-              </span>
-            )}
-          </dd>
-        </>
-      )}
+      {size !== undefined && <ForecastRow forecast={forecasts[size]} capacity={capacity} />}
       {duration?.source === "estimate" && (
         <>
           <dt className="text-muted-foreground">Estimate</dt>
           <dd>{hoursInWords(duration.hours)}, manual</dd>
         </>
       )}
-      {elapsed !== undefined && duration && (
-        <>
-          <dt className="text-muted-foreground">Actual</dt>
-          <dd className={cn(over !== undefined && "font-medium text-danger")}>
-            {minutesText(elapsed)} so far{over !== undefined && `, ${minutesText(over)} over`}
-          </dd>
-        </>
-      )}
+      {duration && <ActualRow entry={entry} />}
+    </>
+  );
+}
+
+/** When each run of a task ran, by the clock, newest first. */
+function RunTimes({ entry }: { entry: TimelineItem }) {
+  if (entry.actual.length === 0) return null;
+  return (
+    <>
+      <dt className="text-muted-foreground">Runs</dt>
+      <dd className="flex flex-col gap-0.5 tabular-nums">
+        {entry.actual.map((strip) => (
+          <span key={strip.runId}>{stripClock(strip)}</span>
+        ))}
+      </dd>
     </>
   );
 }
@@ -237,16 +263,7 @@ function ItemCard({ row, entry, ctx, children }: { row: TimelineRow; entry: Time
                   "None yet"
                 )}
               </dd>
-              {entry.actual.length > 0 && (
-                <>
-                  <dt className="text-muted-foreground">Runs</dt>
-                  <dd className="flex flex-col gap-0.5 tabular-nums">
-                    {entry.actual.map((strip) => (
-                      <span key={strip.runId}>{stripClock(strip)}</span>
-                    ))}
-                  </dd>
-                </>
-              )}
+              <RunTimes entry={entry} />
               <dt className="text-muted-foreground">Pull request</dt>
               <dd>{pr !== undefined ? `#${pr}` : "None"}</dd>
             </>
@@ -303,6 +320,21 @@ function barText(task: PlanTask, ctx: CardContext, width: number): string | unde
   return width > TITLE_INSIDE ? task.title : undefined;
 }
 
+/** A task bar's look: its status colour, a forecast's fade, a red edge when late or early, and the grab of a bar that moves. */
+function taskBarClass(column: PlanColumn, entry: TimelineItem, duration: Duration | undefined, move: BarMove | undefined) {
+  return cn(
+    "absolute top-1.5 z-[2] flex h-5 min-w-1 items-center overflow-hidden rounded-[5px] border-2 px-1.5 text-[11px] font-medium whitespace-nowrap text-foreground",
+    FOCUS,
+    BAR_TONE[column],
+    openEdges(entry),
+    duration && "justify-center px-0.5",
+    duration && duration.source !== "estimate" && "[border-right-style:dotted] [mask-image:linear-gradient(90deg,#000_55%,rgb(0_0_0/0.45))]",
+    (entry.late || entry.startsBeforeBlocker.length > 0) && "border-l-[4px] border-l-danger-dot",
+    move && "cursor-grab touch-none select-none hover:ring-1 hover:ring-foreground/60",
+    move?.tip && "z-[7] cursor-grabbing shadow-lg ring-1 ring-foreground/60",
+  );
+}
+
 /**
  * A task's bar in its status colour, with a red left edge when late or when it starts before a blocker ends,
  * and a hatched tail to today when overdue. A forecast fades at its end; a manual estimate is solid. A bar
@@ -313,13 +345,12 @@ function TaskBar({ row, entry, span, scale, todayX, ctx, move }: BarProps & { to
   const column = taskColumn(task);
   const { left, width } = barBox(scale, span, ctx.move.capacity);
   const blocked = entry.waitingOn.length ? `, blocked by ${entry.waitingOn.map((n) => `#${n}`).join(", ")}` : "";
-  const overdue = entry.overdueDays !== undefined && todayX > left + width;
-  const duration = durationIn(ctx.move, task);
+  const overdue = entry.overdueDays !== undefined && todayX > left + width && !move?.tip;
   const early = entry.startsBeforeBlocker.length > 0;
   const text = barText(task, ctx, width);
   return (
     <>
-      {overdue && !move?.tip && (
+      {overdue && (
         <span
           aria-hidden
           data-bar
@@ -339,17 +370,7 @@ function TaskBar({ row, entry, span, scale, todayX, ctx, move }: BarProps & { to
           aria-keyshortcuts={move ? "ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight E Escape" : undefined}
           {...move?.bar}
           onFocus={move?.onFocus}
-          className={cn(
-            "absolute top-1.5 z-[2] flex h-5 min-w-1 items-center overflow-hidden rounded-[5px] border-2 px-1.5 text-[11px] font-medium whitespace-nowrap text-foreground",
-            FOCUS,
-            BAR_TONE[column],
-            openEdges(entry),
-            duration && "justify-center px-0.5",
-            duration && duration.source !== "estimate" && "[border-right-style:dotted] [mask-image:linear-gradient(90deg,#000_55%,rgb(0_0_0/0.45))]",
-            (entry.late || early) && "border-l-[4px] border-l-danger-dot",
-            move && "cursor-grab touch-none select-none hover:ring-1 hover:ring-foreground/60",
-            move?.tip && "z-[7] cursor-grabbing shadow-lg ring-1 ring-foreground/60",
-          )}
+          className={taskBarClass(column, entry, durationIn(ctx.move, task), move)}
           style={{ left, width }}
         >
           {text && <span className="truncate">{text}</span>}
@@ -826,20 +847,128 @@ function useMoves(projectId: string, timeline: Timeline) {
   return { moves, save };
 }
 
+type ChartArrow = ReturnType<typeof chartArrows>[number];
+
+/** The dependency arrows over the rows; hovering a row keeps its arrows strong and dims the rest. */
+function ArrowLayer({ arrows, width, height, hovered }: { arrows: ChartArrow[]; width: number; height: number; hovered: number | undefined }) {
+  const touches = (a: ChartArrow) => hovered !== undefined && (a.from === hovered || a.to === hovered);
+  return (
+    <svg className="absolute inset-0 z-[1] overflow-visible" width={width} height={height}>
+      {arrows.map((a) => (
+        <g
+          key={`${a.from}-${a.to}`}
+          data-arrow={`${a.from}-${a.to}`}
+          data-late={a.late}
+          data-early={a.early}
+          className={cn(a.red ? "text-danger-dot" : "text-muted-foreground", hovered !== undefined && (touches(a) ? !a.red && "text-foreground" : "opacity-25"))}
+        >
+          <path d={a.d} fill="none" stroke="currentColor" strokeWidth={touches(a) ? 2.25 : a.red ? 1.75 : 1.25} />
+          <path d={`M${a.end.left} ${a.end.y} l-5 -3.5 v7 z`} fill="currentColor" />
+          {!a.start.own && <circle cx={a.start.right} cy={a.start.y} r={2.5} fill="currentColor" />}
+        </g>
+      ))}
+    </svg>
+  );
+}
+
+/** The marker that points to today when it is out of view, scrolling back to it. */
+function TodayMarker({ side, today, onClick }: { side: "left" | "right"; today: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "absolute top-[25px] z-20 inline-flex h-[22px] items-center gap-1 rounded-full bg-foreground px-2 text-[11px] font-semibold text-background shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        side === "right" && "right-2",
+      )}
+      style={side === "left" ? { left: LABEL_WIDTH + 6 } : undefined}
+    >
+      {side === "left" && <ArrowLeftIcon aria-hidden className="size-3" />}
+      Today, {shortDay(today)}
+      {side === "right" && <ArrowRightIcon aria-hidden className="size-3" />}
+    </button>
+  );
+}
+
+/** The time axis: months over days or weeks, Today, and under them the load row when the plan has sizes. */
+function TimeAxis({ scale, todayX, load }: { scale: TimeScale; todayX: number; load: ReturnType<typeof loadOf> | undefined }) {
+  return (
+    <div role="row" aria-label="Time axis" className={cn("flex", load ? "h-[66px]" : "h-12")}>
+      <div role="columnheader" className="sticky left-0 z-10 border-r border-b bg-card" style={{ width: LABEL_WIDTH }}>
+        <span className="absolute top-[26px] left-2.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Item</span>
+        {load && (
+          <span
+            title={load.note}
+            className="absolute inset-x-0 bottom-0 flex h-[18px] items-center justify-end border-t px-2.5 text-[10.5px] font-medium text-muted-foreground"
+          >
+            Load at {formatDuration(load.capacity, Infinity)} a day
+          </span>
+        )}
+      </div>
+      <div role="columnheader" aria-label={`${shortDay(scale.range.start)} to ${shortDay(scale.range.end)}`} className="relative flex-1 border-b" style={{ minWidth: scale.width }}>
+        {scale.top.map((c) => (
+          <span key={`t${c.x}`} className="absolute top-0 flex h-6 items-center truncate border-l pl-1.5 text-[11px] font-medium" style={{ left: c.x, width: c.width }}>
+            {c.label}
+          </span>
+        ))}
+        {scale.bottom.map((c) => (
+          <span key={`b${c.x}`} className="absolute top-6 flex h-6 items-center truncate border-t border-l pl-1.5 font-mono text-[10.5px] text-muted-foreground" style={{ left: c.x, width: c.width }}>
+            {c.label}
+          </span>
+        ))}
+        <span className="absolute top-7 z-[4] ml-1 rounded-[4px] bg-foreground px-1.5 py-px text-[9.5px] font-semibold text-background" style={{ left: todayX }}>
+          Today
+        </span>
+        {load && <LoadRow scale={scale} hours={load.hours} capacity={load.capacity} />}
+      </div>
+    </div>
+  );
+}
+
 /**
- * The plan as a Gantt chart: a fixed column of row labels in the tree's order and a time pane that
- * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
- * arrows and the rows at their other ends strong and dims the rest.
+ * The dependency arrows between the rows on the chart, from each blocker's bar or strips to the blocked
+ * item's, red when the blocked item is late or starts before its blocker ends.
  */
-function TimelineChart({ projectId, project, epics: planEpics, unparented: planUnparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
-  const scroller = useRef<HTMLDivElement>(null);
-  const grid = useRef<HTMLDivElement>(null);
-  const rowsOpen = useRowsOpen(projectId, searchOpen);
-  const q = useSearchQuery();
+function chartArrows(timeline: Timeline, entries: ReadonlyMap<number, TimelineItem>, anchor: Parameters<typeof placeItem>[1], scale: TimeScale, capacity: number | undefined) {
+  const barOf = (n: number) => {
+    const span = entries.get(n)?.planned ?? entries.get(n)?.derived;
+    if (!span) return undefined;
+    const { left, width } = barBox(scale, span, capacity);
+    return { left, right: left + width };
+  };
+  const stripsOf = (n: number) => {
+    const actual = entries.get(n)?.actual ?? [];
+    if (actual.length === 0) return undefined;
+    return { left: Math.min(...actual.map((a) => scale.xAt(a.start))), right: Math.max(...actual.map((a) => scale.xAt(a.end))) };
+  };
+  const early = new Set([...entries.values()].flatMap((e) => e.startsBeforeBlocker.map((b) => `${b}-${e.number}`)));
+  const arrows = timeline.arrows.flatMap((arrow) => {
+    const from = placeItem(arrow.from, anchor, barOf, stripsOf);
+    const to = placeItem(arrow.to, anchor, barOf, stripsOf);
+    if (!from || !to || (from.row === to.row && !from.own)) return [];
+    // Red when the blocked item is late, or starts before its blocker ends.
+    const before = early.has(`${arrow.from}-${arrow.to}`);
+    return [{ ...arrow, early: before, red: arrow.late || before, start: from, end: to, d: arrowPath(from, to) }];
+  });
+  return arrows;
+}
+
+/** The items with neither dates nor a derived span, grouped by epic, with the unparented tasks last. */
+function unscheduledGroups(epics: PlanEpic[], unparented: PlanTask[], entries: ReadonlyMap<number, TimelineItem>): UnscheduledGroup[] {
+  return [...epics.map((e) => ({ title: e.title, items: [e, ...e.stories.flatMap((s) => [s, ...s.tasks]), ...e.tasks] })), { title: "Unparented", items: unparented }]
+    .map((g) => ({ ...g, items: g.items.filter((i) => entries.get(i.number)?.unscheduled) }))
+    .filter((g) => g.items.length > 0);
+}
+
+/** What the chart's moves need: the plan as shown, the scale, and the grid for where a pointer is. */
+type ChartMovesInput = { projectId: string; timeline: Timeline; planEpics: PlanEpic[]; planUnparented: PlanTask[]; scale: TimeScale; grid: RefObject<HTMLDivElement | null> };
+
+/**
+ * The chart's moving parts: the plan with its saved moves, every item's place with the move in progress,
+ * how each bar moves, the Unscheduled grips, and the focused bar and the size popover its E opens.
+ */
+function useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, grid }: ChartMovesInput) {
   const sizing = use(Sizing);
-  const [scheduling, setScheduling] = useState<PlanItem>();
-  const [hovered, setHovered] = useState<number>();
-  const [pane, setPane] = useState<PaneView>();
   const [focused, setFocused] = useState<number>();
   const [sizeOpen, setSizeOpen] = useState<number>();
   const { moves, save } = useMoves(projectId, timeline);
@@ -847,10 +976,6 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   const saved = useMemo(() => movedEntries(timeline, moves), [timeline, moves]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
   const move: MoveContext = { capacity: sizing?.capacity, forecasts: sizing?.forecasts, items, entries: saved };
-
-  const range = chartRange(timeline);
-  const scale = timeScale(range, zoom ?? defaultZoom(range));
-  const todayX = scale.xAt(new Date(readAt).toISOString());
 
   const { drag, barProps, endProps, gripProps } = useBarDrag({
     onDrop: (done) => {
@@ -863,8 +988,6 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   const dragged = drag && (items.get(drag.issue) as PlanTask | undefined);
   const draft = dragged ? planMove(move, dragged, drag) : undefined;
   const entries = draft && dragged ? new Map(saved).set(dragged.number, movedEntry(saved.get(dragged.number)!, draft)) : saved;
-  const ctx: CardContext = { items, entries, projectId, move };
-  const flags: FlagContext = { projectId, items, entries, needsYou };
 
   /** How a task's bar moves: not at all when Done or Running, or when it has no dates and no duration. */
   const moveOf = (task: PlanTask, entry: TimelineItem): BarMove | undefined => {
@@ -904,6 +1027,30 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
     grip: (task) => (durationIn(move, task) ? gripProps(task.number, dayUnder) : undefined),
   };
 
+  return { epics, unparented, items, saved, entries, move, moveOf, placing, focused, sizeOpen, setSizeOpen };
+}
+
+/**
+ * The plan as a Gantt chart: a fixed column of row labels in the tree's order and a time pane that
+ * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
+ * arrows and the rows at their other ends strong and dims the rest.
+ */
+function TimelineChart({ projectId, project, epics: planEpics, unparented: planUnparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const rowsOpen = useRowsOpen(projectId, searchOpen);
+  const q = useSearchQuery();
+  const sizing = use(Sizing);
+  const [scheduling, setScheduling] = useState<PlanItem>();
+  const [hovered, setHovered] = useState<number>();
+  const range = chartRange(timeline);
+  const scale = timeScale(range, zoom ?? defaultZoom(range));
+  const todayX = scale.xAt(new Date(readAt).toISOString());
+
+  const { epics, unparented, items, saved, entries, move, moveOf, placing, focused, sizeOpen, setSizeOpen } = useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, grid });
+  const ctx: CardContext = { items, entries, projectId, move };
+  const flags: FlagContext = { projectId, items, entries, needsYou };
+
   const load = sizing && loadOf(entries, items, sizing.capacity);
   /** A sized bar's strips start under it at its scale. */
   const stripScale = (entry: TimelineItem): StripScale | undefined => {
@@ -914,6 +1061,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
 
   const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
 
+  const [pane, setPane] = useState<PaneView>();
   const measure = () => {
     const el = scroller.current;
     if (el && el.clientWidth > 0) setPane({ left: el.scrollLeft, width: el.clientWidth - LABEL_WIDTH });
@@ -939,34 +1087,12 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
     };
   }, [todayRef]);
 
-  const barOf = (n: number) => {
-    const span = entries.get(n)?.planned ?? entries.get(n)?.derived;
-    if (!span) return undefined;
-    const { left, width } = barBox(scale, span, sizing?.capacity);
-    return { left, right: left + width };
-  };
-  const stripsOf = (n: number) => {
-    const actual = entries.get(n)?.actual ?? [];
-    if (actual.length === 0) return undefined;
-    return { left: Math.min(...actual.map((a) => scale.xAt(a.start))), right: Math.max(...actual.map((a) => scale.xAt(a.end))) };
-  };
-  const arrows = timeline.arrows.flatMap((arrow) => {
-    const from = placeItem(arrow.from, anchor, barOf, stripsOf);
-    const to = placeItem(arrow.to, anchor, barOf, stripsOf);
-    if (!from || !to || (from.row === to.row && !from.own)) return [];
-    // Red when the blocked item is late, or starts before its blocker ends.
-    const early = entries.get(arrow.to)?.startsBeforeBlocker.includes(arrow.from) ?? false;
-    return [{ ...arrow, early, red: arrow.late || early, start: from, end: to, d: arrowPath(from, to) }];
-  });
+
+  const arrows = chartArrows(timeline, entries, anchor, scale, sizing?.capacity);
   const touches = (a: (typeof arrows)[number]) => hovered !== undefined && (a.from === hovered || a.to === hovered);
   const related = new Set(hovered === undefined ? [] : [hovered, ...arrows.filter(touches).flatMap((a) => [a.from, a.to])]);
 
-  const unscheduled: UnscheduledGroup[] = [
-    ...epics.map((e) => ({ title: e.title, items: [e, ...e.stories.flatMap((s) => [s, ...s.tasks]), ...e.tasks] })),
-    { title: "Unparented", items: unparented },
-  ]
-    .map((g) => ({ ...g, items: g.items.filter((i) => entries.get(i.number)?.unscheduled) }))
-    .filter((g) => g.items.length > 0);
+  const unscheduled = unscheduledGroups(epics, unparented, entries);
 
   const offscreen = pane && (todayX < pane.left ? "left" : todayX > pane.left + pane.width ? "right" : undefined);
   const fieldsGap = estimateFieldsGap(project);
@@ -987,35 +1113,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
             style={{ width: LABEL_WIDTH + scale.width, minWidth: "100%" }}
           >
             <div role="rowgroup">
-              <div role="row" aria-label="Time axis" className={cn("flex", load ? "h-[66px]" : "h-12")}>
-                <div role="columnheader" className="sticky left-0 z-10 border-r border-b bg-card" style={{ width: LABEL_WIDTH }}>
-                  <span className="absolute top-[26px] left-2.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Item</span>
-                  {load && (
-                    <span
-                      title={load.note}
-                      className="absolute inset-x-0 bottom-0 flex h-[18px] items-center justify-end border-t px-2.5 text-[10.5px] font-medium text-muted-foreground"
-                    >
-                      Load at {formatDuration(load.capacity, Infinity)} a day
-                    </span>
-                  )}
-                </div>
-                <div role="columnheader" aria-label={`${shortDay(scale.range.start)} to ${shortDay(scale.range.end)}`} className="relative flex-1 border-b" style={{ minWidth: scale.width }}>
-                  {scale.top.map((c) => (
-                    <span key={`t${c.x}`} className="absolute top-0 flex h-6 items-center truncate border-l pl-1.5 text-[11px] font-medium" style={{ left: c.x, width: c.width }}>
-                      {c.label}
-                    </span>
-                  ))}
-                  {scale.bottom.map((c) => (
-                    <span key={`b${c.x}`} className="absolute top-6 flex h-6 items-center truncate border-t border-l pl-1.5 font-mono text-[10.5px] text-muted-foreground" style={{ left: c.x, width: c.width }}>
-                      {c.label}
-                    </span>
-                  ))}
-                  <span className="absolute top-7 z-[4] ml-1 rounded-[4px] bg-foreground px-1.5 py-px text-[9.5px] font-semibold text-background" style={{ left: todayX }}>
-                    Today
-                  </span>
-                  {load && <LoadRow scale={scale} hours={load.hours} capacity={load.capacity} />}
-                </div>
-              </div>
+              <TimeAxis scale={scale} todayX={todayX} load={load} />
             </div>
             <div role="rowgroup" className="relative" style={{ height }} onPointerLeave={() => setHovered(undefined)}>
               {rows.map((row) => {
@@ -1058,41 +1156,13 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                 {scale.bottom.map((c) => (
                   <span key={c.x} className="absolute inset-y-0 w-px bg-border/70" style={{ left: c.x }} />
                 ))}
-                <svg className="absolute inset-0 z-[1] overflow-visible" width={scale.width} height={height}>
-                  {arrows.map((a) => (
-                    <g
-                      key={`${a.from}-${a.to}`}
-                      data-arrow={`${a.from}-${a.to}`}
-                      data-late={a.late}
-                      data-early={a.early}
-                      className={cn(a.red ? "text-danger-dot" : "text-muted-foreground", hovered !== undefined && (touches(a) ? !a.red && "text-foreground" : "opacity-25"))}
-                    >
-                      <path d={a.d} fill="none" stroke="currentColor" strokeWidth={touches(a) ? 2.25 : a.red ? 1.75 : 1.25} />
-                      <path d={`M${a.end.left} ${a.end.y} l-5 -3.5 v7 z`} fill="currentColor" />
-                      {!a.start.own && <circle cx={a.start.right} cy={a.start.y} r={2.5} fill="currentColor" />}
-                    </g>
-                  ))}
-                </svg>
+                <ArrowLayer arrows={arrows} width={scale.width} height={height} hovered={hovered} />
                 <span className="absolute inset-y-0 z-[3] w-0.5 -translate-x-1/2 bg-foreground/85" style={{ left: todayX }} />
               </div>
             </div>
           </div>
         </div>
-        {offscreen && (
-          <button
-            type="button"
-            onClick={() => scrollToToday("smooth")}
-            className={cn(
-              "absolute top-[25px] z-20 inline-flex h-[22px] items-center gap-1 rounded-full bg-foreground px-2 text-[11px] font-semibold text-background shadow-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-              offscreen === "right" && "right-2",
-            )}
-            style={offscreen === "left" ? { left: LABEL_WIDTH + 6 } : undefined}
-          >
-            {offscreen === "left" && <ArrowLeftIcon aria-hidden className="size-3" />}
-            Today, {shortDay(timeline.today)}
-            {offscreen === "right" && <ArrowRightIcon aria-hidden className="size-3" />}
-          </button>
-        )}
+        {offscreen && <TodayMarker side={offscreen} today={timeline.today} onClick={() => scrollToToday("smooth")} />}
       </div>
       {focused !== undefined && <KeyHint issue={focused} sized={!!sizing && saved.get(focused)?.planned?.hours !== undefined} />}
       <Unscheduled groups={unscheduled} undated={timeline.items.every((i) => !i.planned)} onSchedule={setScheduling} placing={placing} />
