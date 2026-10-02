@@ -1,5 +1,5 @@
 import { toneOf } from "@handoff/core";
-import { and, createNotification, desc, eq, inArray, projects, projectSchedulers, runs, schedulerEvents, sql, type Db, type DbExecutor, type ProjectSchedulerRow } from "@handoff/db";
+import { and, createNotification, desc, eq, inArray, isNull, projects, projectSchedulers, runs, schedulerEvents, sql, type Db, type DbExecutor, type ProjectSchedulerRow } from "@handoff/db";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 import { StartRefusal, startRun } from "../start-run.ts";
 import { candidates, type Candidate, type IssueRun, type Skipped } from "./candidates.ts";
@@ -11,8 +11,10 @@ export type CheckDeps = {
   db: Db;
   github: GitHubPort;
   projects: ProjectsPort;
-  /** Who checks: the worker's id. */
+  /** Who checks: the worker's id, kept as the lease owner while the check runs. */
   owner: string;
+  /** How long a check may hold the project before another worker may check it; 2 minutes unless given. */
+  leaseMs?: number | undefined;
 };
 
 /** Why a check that could start something started nothing. */
@@ -43,6 +45,7 @@ const ACTIVE = ["queued", "running", "waiting"] as const;
 const isActive = (status: string) => (ACTIVE as readonly string[]).includes(status);
 const CHECK_EVERY = "60 seconds";
 const PAUSE_AFTER = 3;
+const LEASE_MS = 120_000;
 
 /**
  * One check of a project's scheduler: stops on a hold, a full project or a run of its own still
@@ -51,8 +54,41 @@ const PAUSE_AFTER = 3;
  */
 export async function checkProject(deps: CheckDeps, projectId: string): Promise<CheckResult | undefined> {
   const { db } = deps;
-  const [row] = await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId));
-  if (!row || !row.enabled || row.pausedAt) return undefined;
+  const row = await claim(db, projectId, deps.owner, deps.leaseMs ?? LEASE_MS);
+  if (!row) return undefined;
+  try {
+    return await check(deps, row);
+  } finally {
+    await db
+      .update(projectSchedulers)
+      .set({ leaseOwner: null, leaseExpiresAt: null })
+      .where(and(eq(projectSchedulers.projectId, projectId), eq(projectSchedulers.leaseOwner, deps.owner)));
+  }
+}
+
+/**
+ * Takes the project's lease when its scheduler is on, not paused and no other check holds it, so
+ * two checks of one project never run at once. Undefined when the lease is taken or nothing is to check.
+ */
+async function claim(db: DbExecutor, projectId: string, owner: string, leaseMs: number): Promise<ProjectSchedulerRow | undefined> {
+  const [row] = await db
+    .update(projectSchedulers)
+    .set({ leaseOwner: owner, leaseExpiresAt: sql`now() + make_interval(secs => ${leaseMs / 1000})` })
+    .where(
+      and(
+        eq(projectSchedulers.projectId, projectId),
+        eq(projectSchedulers.enabled, true),
+        isNull(projectSchedulers.pausedAt),
+        sql`(${projectSchedulers.leaseExpiresAt} is null or ${projectSchedulers.leaseExpiresAt} < now())`,
+      ),
+    )
+    .returning();
+  return row;
+}
+
+async function check(deps: CheckDeps, row: ProjectSchedulerRow): Promise<CheckResult | undefined> {
+  const { db } = deps;
+  const projectId = row.projectId;
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) return undefined;
   const previous = row.lastResult as CheckResult | null;
@@ -91,7 +127,8 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
   const result: CheckResult = { state: "held", holds, active, maxRuns: row.maxRuns, started: [], candidates: [], skipped: [] };
   // A hold waits on a person, a full project has no slot, and a run still planning has no paths yet: none reads GitHub.
   if (holds.length) return result;
-  if (active >= row.maxRuns || project.planProjectNumber === null) return { ...result, state: "full" };
+  if (active >= row.maxRuns) return { ...result, state: "full" };
+  if (project.planProjectNumber === null) throw new Error("The project has no plan: link a GitHub Project to it with setup_plan.");
   const planning = await planningRun(db, projectId);
   if (planning) return { ...result, state: "idle", reason: "planning", runId: planning };
   const repo = { owner: project.repoOwner, name: project.repoName };
@@ -112,6 +149,7 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
           issues: [candidate.number],
           startedBy: "scheduler",
           items,
+          maxActive: row.maxRuns,
           events: [{ type: "run.scheduled", payload: { place, settings: settingsOf(row) } }],
         },
         { github: deps.github, projects: deps.projects },
@@ -120,6 +158,8 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
       return { ...result, candidates: found.candidates.slice(place), skipped, state: "running", started: [{ runId: run.id, issue: candidate.number }] };
     } catch (error) {
       if (!(error instanceof StartRefusal)) throw error;
+      // A run started since the count took the last slot.
+      if (error.reason === "full") return { ...result, active: row.maxRuns, candidates: found.candidates.slice(index), skipped, state: "full" };
       // A refusal is about this task only: it is skipped for this check and the next candidate is tried.
       const skip = { number: candidate.number, title: candidate.title, reason: error.message };
       skipped.push(skip);

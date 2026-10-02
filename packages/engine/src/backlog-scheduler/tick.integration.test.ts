@@ -222,6 +222,43 @@ test("three failed starts in a row pause the scheduler with the reason", async (
   expect(await p.started()).toHaveLength(1);
 });
 
+test("two checks of one project at once start each task once", async () => {
+  const p = await planned({ maxRuns: 3 });
+  const tasks = [await p.task("First"), await p.task("Second"), await p.task("Third")];
+
+  const results = await Promise.all([p.check("worker-1"), p.check("worker-2"), p.check("worker-1"), p.check("worker-3")]);
+
+  expect((await p.started()).map((r) => r.issue)).toEqual([tasks[0]]);
+  expect(results.filter((r) => r?.state === "running")).toHaveLength(1);
+  expect(await p.events("scheduler.skipped")).toEqual([]);
+  // The check let go of its lease: the next check runs.
+  await p.planOf((await p.started())[0]!.id);
+  await p.check("worker-2");
+  expect((await p.started()).map((r) => r.issue)).toEqual(tasks.slice(0, 2));
+  expect(await p.row()).toMatchObject({ leaseOwner: null, leaseExpiresAt: null });
+});
+
+test("a run a person starts while a check starts one counts, and the check does not pass max_runs", async () => {
+  const p = await planned({ maxRuns: 1 });
+  const next = await p.task("Next for the scheduler");
+  const mine = await p.task("Started by hand");
+  // The person's run starts after the check counted the active runs and before it inserts its own.
+  let byHand: Promise<unknown> | undefined;
+  vi.spyOn(p.github, "openBlockers").mockImplementation(async (_repo, number) => {
+    if (number === next && !byHand) {
+      byHand = startRun(db, { projectId: p.project.id, graphName: "g", task: "", issues: [mine], startedBy: "dashboard" }, { github: p.github, projects: p.plan });
+      await byHand;
+    }
+    return [];
+  });
+
+  const result = await p.check();
+
+  expect((await p.started()).map((r) => [r.issue, r.startedBy])).toEqual([[mine, "dashboard"]]);
+  expect(result).toMatchObject({ state: "full" });
+  expect(await p.events("scheduler.skipped")).toEqual([]);
+});
+
 test("held is recorded once until the reasons change", async () => {
   const p = await planned({ maxRuns: 3 });
   const one = await p.task("Its run failed");

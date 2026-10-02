@@ -19,16 +19,25 @@ export type StartRunInput = {
   startedBy?: string | undefined;
   /** The plan's items as the caller already read them: the Ready gate uses them instead of reading the Project again. */
   items?: PlanItem[] | undefined;
+  /** The most active runs the project may have, counted under the start lock: the scheduler's limit. */
+  maxActive?: number | undefined;
   /** Events the starter records on the run right after run.created, such as the scheduler's run.scheduled. */
   events?: NewEvent[] | undefined;
 };
 
 /**
- * startRun refused to start a run on a task, for a reason of that task: an active run links it, it is
- * blocked, or it is not a Ready task on the plan. Any other error is a failure to start at all.
+ * startRun refused to start a run: for a reason of the task (an active run links it, it is blocked, or
+ * it is not a Ready task on the plan), or because the project already has `maxActive` active runs
+ * (`full`). Any other error is a failure to start at all.
  */
 export class StartRefusal extends Error {
   override readonly name = "StartRefusal";
+  constructor(
+    message: string,
+    readonly reason: "task" | "full" = "task",
+  ) {
+    super(message);
+  }
 }
 
 export type StartRunPorts = { github?: GitHubPort | undefined; projects?: ProjectsPort | undefined };
@@ -66,11 +75,22 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   const run = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
+    if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
     return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, events: input.events });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");
   return run;
+}
+
+/** A project with `max` active runs, whoever started them, has no room for another. */
+async function refuseFull(db: DbExecutor, projectId: string, max: number) {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(runs)
+    .where(and(eq(runs.projectId, projectId), inArray(runs.status, ["queued", "running", "waiting"])));
+  const active = row?.n ?? 0;
+  if (active >= max) throw new StartRefusal(`The project has ${active} active run${active === 1 ? "" : "s"}, and at most ${max} may be active.`, "full");
 }
 
 /** An issue an active run links is taken: a second run on it would build the same work twice. */
