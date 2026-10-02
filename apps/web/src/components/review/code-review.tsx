@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { BotIcon, CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, FileCodeIcon, HistoryIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, FileCodeIcon, HistoryIcon } from "lucide-react";
 import type { DiffFile } from "@handoff/core";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -11,13 +11,14 @@ import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitl
 import { markViewedAction } from "@/app/inbox/actions";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { commentedAt, placeEarlier, type EarlierRound } from "@/lib/earlier";
-import { placeFindings, type Finding, type Findings } from "@/lib/findings";
+import { placeFindings, type Findings, type FollowUp } from "@/lib/findings";
 import type { LineTokens } from "@/lib/highlight-types";
 import { numberOn, type LineComment, type LineSelection, type Side } from "@/lib/line-comments";
 import { useReviewDraft } from "@/lib/use-review-draft";
 import { cn } from "@/lib/utils";
 import { viewState, type View, type ViewState } from "@/lib/viewed";
 import { FileDiff } from "./file-diff";
+import { FindingsSummary } from "./findings-summary";
 import { CARD, PROSE, PROSE_TIGHT } from "./styles";
 import { SubmitReview } from "./submit-review";
 
@@ -139,61 +140,6 @@ function LastRound({ round }: { round: EarlierRound }) {
   );
 }
 
-const VERDICTS: Record<Findings["verdict"], string> = { approve: "approved", request_changes: "requested changes" };
-
-const locationOf = (f: Finding) => (f.line !== undefined ? `${f.path}:${f.line}` : f.path);
-
-/** A finding's first paragraph, for a one-line summary of a finding the diff shows in full. */
-const firstParagraph = (body: string) => body.trim().split(/\n\s*\n/)[0] ?? "";
-
-/**
- * The code reviewing step's verdict and every finding with where it is. A finding on a file in the
- * diff links to that file and shows its first paragraph, since the whole of it sits on its line; a
- * finding on a file outside the diff is shown in full here, the only place it appears.
- */
-function FindingsSummary({ findings, by, files, open }: { findings: Findings; by: string; files: DiffFile[]; open: (index: number) => void }) {
-  const index = new Map(files.map((f, i) => [f.path, i]));
-  const n = findings.comments.length;
-  const inDiff = findings.comments.filter((c) => index.has(c.path)).length;
-  return (
-    <section aria-label="Code review findings" className={cn(CARD, "grid grid-cols-[auto_minmax(0,1fr)] items-start gap-4 px-[18px] py-3.5")}>
-      <span className="grid size-8 place-items-center rounded-md bg-active-bg text-active">
-        <BotIcon className="size-3.5" />
-      </span>
-      <div className="flex min-w-0 flex-col">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <h2 className="text-sm font-semibold">
-            {n === 0 ? "Code review found nothing" : `Code review found ${n} ${n === 1 ? "thing" : "things"}`}
-          </h2>
-          <span className="text-xs text-muted-foreground">{`· ${by} · ${VERDICTS[findings.verdict]}${n > 0 ? ` · ${inDiff} in the diff` : ""}`}</span>
-        </div>
-        {inDiff > 0 && <p className="mt-0.5 text-[13px] text-muted-foreground">Findings on files in the diff also sit on their lines below.</p>}
-        {n > 0 && (
-          <ul className="mt-2 flex flex-col gap-1.5 text-[13px]">
-            {findings.comments.map((c) => {
-              const at = index.get(c.path);
-              return (
-                <li key={`${c.path}:${c.line}:${c.body}`} className="flex flex-col gap-x-2 gap-y-0.5 sm:flex-row sm:items-baseline">
-                  {at === undefined ? (
-                    <span className="shrink-0 font-mono text-xs whitespace-nowrap text-muted-foreground">{locationOf(c)}</span>
-                  ) : (
-                    <button type="button" className="shrink-0 text-left font-mono text-xs whitespace-nowrap text-muted-foreground hover:text-foreground hover:underline" onClick={() => open(at)}>
-                      {locationOf(c)}
-                    </button>
-                  )}
-                  <div className={cn(PROSE_TIGHT, "min-w-0 flex-1", at !== undefined && "line-clamp-2")}>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{at === undefined ? c.body : firstParagraph(c.body)}</ReactMarkdown>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </div>
-    </section>
-  );
-}
-
 type Props = {
   questionId: string;
   runId: string;
@@ -204,8 +150,11 @@ type Props = {
   earlier: EarlierRound[];
   tokens?: Record<string, LineTokens> | undefined;
   answered?: LineComment[];
-  /** The code reviewing step's verdict and comments; they replace the summary text and sit on their lines. */
-  findings?: (Findings & { by: string }) | undefined;
+  /**
+   * The code reviewing step's verdict and comments; they replace the summary text and sit on their
+   * lines. `followUp` is the issue a person already opened from them.
+   */
+  findings?: (Findings & { by: string; followUp?: FollowUp | undefined }) | undefined;
 };
 
 /** Which files count as viewed: the saved marks, overridden by what the person clicks on this page. */
@@ -274,6 +223,9 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
         <FindingsSummary
           findings={findings}
           by={findings.by}
+          followUp={findings.followUp}
+          runId={runId}
+          questionId={questionId}
           files={files}
           open={(index) => {
             setOpen(files[index]!.path, true);

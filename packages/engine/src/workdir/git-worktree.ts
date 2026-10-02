@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { Workdir, WorkdirProvider, WorkdirSpec } from "../types.ts";
+import { withNetworkRetry } from "./network.ts";
 
 const run = promisify(execFile);
 
@@ -12,6 +13,8 @@ export type GitWorktreeOptions = {
   root: string;
   /** GIT_CONFIG_* environment per remote, e.g. an http.extraheader with a GitHub token. Never argv. */
   gitEnv?: (remoteUrl: string) => Promise<Record<string, string>>;
+  /** The first wait before a failed clone or fetch is tried again; tests shorten it. */
+  retryMs?: number;
 };
 
 /** One clone per remote under repos/, one worktree per run under worktrees/, on the run's branch. */
@@ -35,9 +38,9 @@ export class GitWorktreeProvider implements WorkdirProvider {
       const auth = (await this.options.gitEnv?.(spec.remoteUrl)) ?? {};
       if (!existsSync(mirror)) {
         mkdirSync(join(this.options.root, "repos"), { recursive: true });
-        await this.git(this.options.root, ["clone", "-q", "--no-checkout", spec.remoteUrl, mirror], auth);
+        await this.network(() => this.git(this.options.root, ["clone", "-q", "--no-checkout", spec.remoteUrl, mirror], auth), () => rmSync(mirror, { recursive: true, force: true }));
       } else if (!existsSync(path)) {
-        await this.git(mirror, ["fetch", "-q", "--prune", "origin"], auth);
+        await this.network(() => this.git(mirror, ["fetch", "-q", "--prune", "origin"], auth));
       }
       const baseSha = await this.git(mirror, ["rev-parse", `origin/${spec.baseBranch}`]);
       if (existsSync(path)) return { path, baseSha };
@@ -64,7 +67,8 @@ export class GitWorktreeProvider implements WorkdirProvider {
       if (!existsSync(path)) return undefined;
       const base = `origin/${spec.baseBranch}`;
       if ((await this.git(path, ["rev-list", "--count", `${base}..HEAD`])) !== "0") return undefined;
-      await this.git(mirror, ["fetch", "-q", "--prune", "origin"], (await this.options.gitEnv?.(spec.remoteUrl)) ?? {});
+      const auth = (await this.options.gitEnv?.(spec.remoteUrl)) ?? {};
+      await this.network(() => this.git(mirror, ["fetch", "-q", "--prune", "origin"], auth));
       const [from, to] = [await this.git(path, ["rev-parse", "HEAD"]), await this.git(path, ["rev-parse", base])];
       if (from === to || (await this.git(path, ["rev-list", "--count", `${base}..HEAD`])) !== "0") return undefined;
       await this.git(path, ["merge", "-q", "--ff-only", base]);
@@ -81,6 +85,18 @@ export class GitWorktreeProvider implements WorkdirProvider {
       if (existsSync(path)) await this.git(mirror, ["worktree", "remove", "--force", path]);
       await this.git(mirror, ["worktree", "prune"]);
     });
+  }
+
+  /** A clone or fetch, tried again when it fails; `cleanUp` removes what a failed try left behind first. */
+  private network<T>(command: () => Promise<T>, cleanUp?: () => void): Promise<T> {
+    return withNetworkRetry(async () => {
+      try {
+        return await command();
+      } catch (error) {
+        cleanUp?.();
+        throw error;
+      }
+    }, this.options.retryMs);
   }
 
   private async git(cwd: string, args: string[], env: Record<string, string> = {}): Promise<string> {

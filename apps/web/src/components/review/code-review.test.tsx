@@ -5,7 +5,10 @@ import { CodeReview } from "./code-review";
 
 const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn(), markViewedAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
+const followUp = vi.hoisted(() => ({ createFollowUpAction: vi.fn() }));
+vi.mock("@/app/inbox/follow-up-action", () => followUp);
 beforeEach(() => {
+  followUp.createFollowUpAction.mockReset();
   actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true });
   actions.markViewedAction.mockReset().mockResolvedValue({ ok: true });
   window.localStorage.clear();
@@ -284,6 +287,39 @@ test("the code reviewer's findings sit on their lines, and the summary lists eac
   const a = screen.getByRole("region", { name: "src/a.ts" });
   expect(within(a).getByText("Suggestion: name the constant.")).toBeInTheDocument();
   expect(within(a).getByText("1 finding")).toBeInTheDocument();
+});
+
+const graded = {
+  verdict: "request_changes" as const,
+  by: "code_review-1",
+  comments: [
+    { path: "src/a.ts", line: 10, body: "Name the constant.", severity: "should_fix" as const },
+    { path: "src/b.ts", line: 2, body: "Crashes on an empty list.", severity: "blocking" as const },
+    { path: "docs/notes.md", body: "Link the ADR.", severity: "follow_up" as const },
+  ],
+};
+
+test("findings are grouped by severity", () => {
+  render(<CodeReview {...props} findings={graded} />);
+  const summary = screen.getByRole("region", { name: "Code review findings" });
+  expect(within(summary).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Blocking1", "Should fix1", "Follow-up1"]);
+  expect(within(within(summary).getByRole("region", { name: "Blocking" })).getByText("Crashes on an empty list.")).toBeInTheDocument();
+  expect(within(within(summary).getByRole("region", { name: "Should fix" })).getByText("Name the constant.")).toBeInTheDocument();
+  expect(within(within(summary).getByRole("region", { name: "Follow-up" })).getByText("Link the ADR.")).toBeInTheDocument();
+});
+
+test("Create follow-up issue opens one issue with the chosen findings", async () => {
+  followUp.createFollowUpAction.mockResolvedValue({ ok: true, issue: { number: 57, url: "https://github.com/o/r/issues/57" } });
+  render(<CodeReview {...props} findings={graded} />);
+  // Follow-up findings start picked; a person adds or drops the others.
+  expect(screen.getByRole("checkbox", { name: "Pick docs/notes.md for a follow-up issue" })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: "Pick src/b.ts:2 for a follow-up issue" })).not.toBeChecked();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Pick src/a.ts:10 for a follow-up issue" }));
+  fireEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
+  await waitFor(() => expect(followUp.createFollowUpAction).toHaveBeenCalledTimes(1));
+  expect(followUp.createFollowUpAction).toHaveBeenCalledWith({ runId: "r1", questionId: "q1", findings: [0, 2] });
+  expect(await screen.findByRole("link", { name: "#57" })).toHaveAttribute("href", "https://github.com/o/r/issues/57");
+  expect(screen.queryByRole("button", { name: "Create follow-up issue" })).not.toBeInTheDocument();
 });
 
 test("a code review without findings says the reviewer found nothing", () => {

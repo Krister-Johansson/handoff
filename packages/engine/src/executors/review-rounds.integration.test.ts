@@ -24,7 +24,7 @@ const graph = {
 test("a code review asks for changes only for blocking findings, and its next round checks its earlier comments", async () => {
   const cli = new FakeCliExecutor([
     { output: { status: "done", summary: "Added the env schema." } },
-    { output: { verdict: "request_changes", comments: [{ path: "src/env.ts", line: 5, body: "Only checks the scheme." }] } },
+    { output: { verdict: "request_changes", comments: [{ path: "src/env.ts", line: 5, body: "Only checks the scheme.", severity: "blocking" }] } },
     { output: { status: "done", summary: "Validated the host too." } },
     { output: { verdict: "approve", comments: [] } },
   ]);
@@ -33,10 +33,10 @@ test("a code review asks for changes only for blocking findings, and its next ro
   await drain(engineDeps(db, { coder: agent, code_review: agent }));
 
   const [, firstReview, , secondReview] = cli.requests;
-  expect(firstReview!.prompt).toMatch(/request_changes only for a finding that makes the change wrong, insecure, or misses the task/);
+  expect(firstReview!.prompt).toContain("The verdict follows the findings: request_changes when one is blocking, approve otherwise.");
   expect(firstReview!.systemPrompt).not.toContain("# Your previous review");
   expect(secondReview!.prompt).toContain("You reviewed this work before");
   expect(secondReview!.systemPrompt).toContain("# Your previous review");
-  expect(secondReview!.systemPrompt).toContain("- src/env.ts:5: Only checks the scheme.");
+  expect(secondReview!.systemPrompt).toContain("- [blocking] src/env.ts:5: Only checks the scheme.");
   expect(secondReview!.systemPrompt).toContain("Validated the host too.");
 });

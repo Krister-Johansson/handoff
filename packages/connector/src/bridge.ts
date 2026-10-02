@@ -2,7 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export type BridgeOptions = {
   /** The dashboard, such as http://localhost:3000. */
@@ -55,6 +55,18 @@ function explain(url: string, error: unknown): string {
 }
 
 const runIdOf = (url: string) => url.match(/\/runs\/([^/?#]+)/)?.[1];
+
+/**
+ * How long a tool call may take before the bridge gives up on the dashboard's answer. The MCP SDK's
+ * default is one minute, which a schedule of a large plan can outlast while every write lands. The
+ * dashboard answers a call in one HTTP response, and Node's fetch drops a response whose headers take
+ * longer than five minutes, so the limit stays under that. Claude Code waits far longer on a stdio server.
+ */
+const TOOL_CALL_TIMEOUT_MS = 4 * 60_000;
+
+/** A tool call that outlasted TOOL_CALL_TIMEOUT_MS: the dashboard is up and may still be working on it. */
+const stillWorking = (name: string) =>
+  `handoff did not answer ${name} within ${TOOL_CALL_TIMEOUT_MS / 60_000} minutes. It may still be working, and writes it started can still land: check the result (list_plan, get_run or the dashboard) before calling ${name} again.`;
 
 /**
  * The plugin's MCP server for Claude Code. It passes the dashboard's tools through from /api/mcp,
@@ -153,8 +165,9 @@ export function createBridge(options: BridgeOptions): Bridge {
       if (request.params.name === CURRENT_PROJECT.name) return toolJson(await currentProject(client));
       const filled = await withSessionArguments(client, request.params.name, request.params.arguments ?? {});
       if ("error" in filled) return toolError(filled.error);
-      return (await client.callTool({ ...request.params, arguments: filled.args })) as CallToolResult;
+      return (await client.callTool({ ...request.params, arguments: filled.args }, undefined, { timeout: TOOL_CALL_TIMEOUT_MS })) as CallToolResult;
     } catch (error) {
+      if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) return toolError(stillWorking(request.params.name));
       upstream = undefined;
       return toolError(explain(url, error));
     }

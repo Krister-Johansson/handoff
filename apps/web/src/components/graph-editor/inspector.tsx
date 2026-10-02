@@ -88,6 +88,7 @@ function ContractChecks({ node, dispatch }: { node: FlowNode; dispatch: Dispatch
         <Field>
           <FieldLabel htmlFor="check-tests">Tests must pass</FieldLabel>
           <Input
+            key={tests?.command ?? ""}
             id="check-tests"
             placeholder="npm test"
             defaultValue={tests?.command ?? ""}
@@ -204,6 +205,8 @@ function NodeInspector({
                   Instructions
                 </FieldLabel>
                 <Textarea
+                  // Keyed by the stored text, so a change made elsewhere (a page tool) shows here too.
+                  key={str(config.instructions)}
                   id="node-instructions"
                   rows={4}
                   placeholder={INSTRUCTION_HINTS[type]}
@@ -338,6 +341,7 @@ function TypeSettings({
             <Field>
               <FieldLabel htmlFor="gate-question">Question</FieldLabel>
               <Textarea
+                key={str(config.question)}
                 id="gate-question"
                 rows={2}
                 placeholder="Review the plan from planner-1"
@@ -420,6 +424,7 @@ function ToolsField({
           Allowed tools
         </FieldLabel>
         <Textarea
+          key={Array.isArray(config.allowedTools) ? (config.allowedTools as string[]).join(", ") : ""}
           id="node-tools"
           rows={3}
           className="font-mono text-xs"
@@ -672,6 +677,7 @@ function ModelFields({ config, setConfig, clearConfig }: { config: Record<string
       </div>
       {custom && (
         <Input
+          key={model}
           aria-label="Model id"
           className="font-mono text-xs"
           placeholder="claude-opus-5-5"

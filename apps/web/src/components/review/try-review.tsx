@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, ExternalLinkIcon, ListChecksIcon, RotateCwIcon } from "lucide-react";
+import { unstable_rethrow } from "next/navigation";
 import { answerReviewAction, restartTryItAction } from "@/app/inbox/actions";
 import { Screenshot, type Shot } from "@/components/runs/screenshot";
 import { Tag } from "@/components/tag";
@@ -13,6 +14,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Textarea } from "@/components/ui/textarea";
+import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { cn } from "@/lib/utils";
 import { CARD } from "./styles";
 
@@ -37,6 +39,40 @@ type Props = {
 
 const isTyping = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 const sectionId = (index: number) => `try-criterion-${index}`;
+
+type Option = "approve" | "changes";
+
+/** Whether an error is Next's own: the redirect a server action ends with, after Next has started the navigation. */
+function isNextNavigation(error: unknown) {
+  try {
+    unstable_rethrow(error);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** How a refusal lists the criteria a page tool can take. */
+const criteriaList = (acceptance: string[]) => `The criteria are: ${acceptance.map((text, i) => `${i + 1}. ${text}`).join("; ")}.`;
+
+/**
+ * The criterion a page tool names, from 0: by its index from 1, or by its text, matched without
+ * regard to case or surrounding space, or by a part only one criterion has. Throws a refusal that says
+ * what there is to choose from.
+ */
+function findCriterion(acceptance: string[], which: { index?: number | undefined; criterion?: string | undefined }): number {
+  if (which.index !== undefined) {
+    if (which.index > acceptance.length) throw new Error(`There is no criterion ${which.index}. ${acceptance.length ? `The criteria run from 1 to ${acceptance.length}.` : "This run has no acceptance criteria."}`);
+    return which.index - 1;
+  }
+  if (which.criterion === undefined) throw new Error("Name the criterion by its index or its text.");
+  const wanted = which.criterion.trim().toLowerCase();
+  const exact = acceptance.findIndex((text) => text.trim().toLowerCase() === wanted);
+  if (exact >= 0) return exact;
+  const partial = acceptance.flatMap((text, i) => (wanted && text.toLowerCase().includes(wanted) ? [i] : []));
+  if (partial.length === 1) return partial[0]!;
+  throw new Error(`No criterion reads "${which.criterion}". ${criteriaList(acceptance)}`);
+}
 
 /** Moves between criteria with prev and next, the [ and ] keys, and the list of every criterion. */
 function useCursor(count: number) {
@@ -71,9 +107,7 @@ function answeredChecks(acceptance: string[], answered: Answered | undefined): C
 }
 
 /** The run's app: open it while it runs, see why it did not start, or start it again. */
-function AppBar({ preview, readOnly, questionId, runId }: { preview: TryPreview; readOnly: boolean; questionId: string; runId: string }) {
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string>();
+function AppBar({ preview, readOnly, pending, error, onRestart }: { preview: TryPreview; readOnly: boolean; pending: boolean; error: string | undefined; onRestart: () => void }) {
   return (
     <section aria-label="The app" className={cn(CARD, "flex flex-col gap-3 px-5 py-4")}>
       <div className="flex flex-wrap items-center gap-2">
@@ -96,12 +130,7 @@ function AppBar({ preview, readOnly, questionId, runId }: { preview: TryPreview;
             size="sm"
             variant="outline"
             disabled={pending}
-            onClick={() =>
-              start(async () => {
-                const result = await restartTryItAction({ questionId, runId });
-                setError(result.ok ? undefined : result.error);
-              })
-            }
+            onClick={onRestart}
           >
             <RotateCwIcon data-icon="inline-start" />
             Start the app again
@@ -236,17 +265,27 @@ function Criterion({
 }
 
 /** Approve when every criterion works, or send back what does not, with an overall note. */
-function Submit({ from, checks, acceptance, questionId, runId }: { from: string; checks: Check[]; acceptance: string[]; questionId: string; runId: string }) {
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string>();
-  const [pending, start] = useTransition();
-  const failed = acceptance.flatMap((quote, i) => (checks[i]?.works === false ? [{ quote, body: checks[i]!.note.trim() || "Does not work." }] : []));
-  const allWork = checks.every((c) => c.works === true);
-  const answer = (option: "approve" | "changes") =>
-    start(async () => {
-      const result = await answerReviewAction({ questionId, runId, option, note: note.trim(), comments: option === "changes" ? failed : [] });
-      setError(result.ok ? undefined : result.error);
-    });
+function Submit({
+  from,
+  questionId,
+  failed,
+  allWork,
+  note,
+  onNote,
+  error,
+  pending,
+  onAnswer,
+}: {
+  from: string;
+  questionId: string;
+  failed: number;
+  allWork: boolean;
+  note: string;
+  onNote: (note: string) => void;
+  error: string | undefined;
+  pending: boolean;
+  onAnswer: (option: Option) => void;
+}) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -258,19 +297,19 @@ function Submit({ from, checks, acceptance, questionId, runId }: { from: string;
         <PopoverHeader>
           <PopoverTitle>Submit</PopoverTitle>
           <PopoverDescription>
-            {failed.length ? `${failed.length} ${failed.length === 1 ? "criterion does" : "criteria do"} not work; they go back to ${from}.` : allWork ? "Every criterion works." : "Check every criterion to approve."}
+            {failed ? `${failed} ${failed === 1 ? "criterion does" : "criteria do"} not work; they go back to ${from}.` : allWork ? "Every criterion works." : "Check every criterion to approve."}
           </PopoverDescription>
         </PopoverHeader>
         <Field data-invalid={error ? true : undefined}>
           <FieldLabel htmlFor={`try-overall-${questionId}`}>Note (optional)</FieldLabel>
-          <Textarea id={`try-overall-${questionId}`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything else the coder should know." />
+          <Textarea id={`try-overall-${questionId}`} rows={2} value={note} onChange={(e) => onNote(e.target.value)} placeholder="Anything else the coder should know." />
           {error && <FieldError>{error}</FieldError>}
         </Field>
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" disabled={pending || (failed.length === 0 && !note.trim())} onClick={() => answer("changes")}>
+          <Button type="button" variant="outline" disabled={pending || (failed === 0 && !note.trim())} onClick={() => onAnswer("changes")}>
             {`Send back to ${from}`}
           </Button>
-          <Button type="button" disabled={pending || !allWork} onClick={() => answer("approve")}>
+          <Button type="button" disabled={pending || !allWork} onClick={() => onAnswer("approve")}>
             Approve
           </Button>
         </div>
@@ -291,6 +330,13 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
   const [closed, setClosed] = useState<ReadonlySet<number>>(() => new Set(checks.flatMap((c, i) => (c.works === true ? [i] : []))));
   const [current, go] = useCursor(acceptance.length);
   const checked = checks.filter((c) => c.works !== undefined).length;
+  const [note, setNote] = useState("");
+  const [submitError, setSubmitError] = useState<string>();
+  const [submitting, startSubmit] = useTransition();
+  const [restartError, setRestartError] = useState<string>();
+  const [restarting, startRestart] = useTransition();
+  const failed = acceptance.flatMap((quote, i) => (checks[i]?.works === false ? [{ quote, body: checks[i]!.note.trim() || "Does not work." }] : []));
+  const allWork = checks.every((c) => c.works === true);
   const criteria = new Set(acceptance);
   const loose = shots.filter((s) => !s.criterion || !criteria.has(s.criterion));
 
@@ -301,39 +347,144 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
       else next.add(index);
       return next;
     });
-  const mark = (index: number, works: boolean | undefined) => {
-    const next = checks.map((c, i) => (i === index ? { ...c, works } : c));
+  const expandAll = (all: boolean) => setClosed(all ? new Set() : new Set(acceptance.map((_, i) => i)));
+  /** Marks a criterion, with what is wrong when a note comes with it; returns the criterion the cursor moved to. */
+  const mark = (index: number, works: boolean | undefined, note?: string) => {
+    const next = checks.map((c, i) => (i === index ? { ...c, works, ...(note === undefined ? {} : { note }) } : c));
     setChecks(next);
     setOpen(index, works !== true);
-    if (works === true) {
-      // On to the next criterion still to check, after this one first.
-      const after = next.findIndex((c, i) => i > index && c.works === undefined);
-      const anywhere = next.findIndex((c) => c.works === undefined);
-      const to = after >= 0 ? after : anywhere;
-      if (to >= 0) go(to);
-    }
+    if (works !== true) return undefined;
+    // On to the next criterion still to check, after this one first.
+    const after = next.findIndex((c, i) => i > index && c.works === undefined);
+    const anywhere = next.findIndex((c) => c.works === undefined);
+    const to = after >= 0 ? after : anywhere;
+    if (to >= 0) go(to);
+    return to >= 0 ? to : undefined;
   };
+
+  /**
+   * Sends the answer: approve, or the criteria that do not work back to the coder, with the overall
+   * note. Resolves to the action's error; on success the action redirects to the run page, which
+   * reaches here as Next's redirect error.
+   */
+  const send = async (option: Option, overall: string) => {
+    const result = await answerReviewAction({ questionId, runId, option, note: overall.trim(), comments: option === "changes" ? failed : [] });
+    const error = result.ok ? undefined : result.error;
+    setSubmitError(error);
+    return error;
+  };
+  /** Starts the run's app again from its branch; resolves to why it could not. */
+  const restart = async () => {
+    const result = await restartTryItAction({ questionId, runId });
+    const error = result.ok ? undefined : result.error;
+    setRestartError(error);
+    return error;
+  };
+
+  const submitOptions = {
+    from,
+    questionId,
+    failed: failed.length,
+    allWork,
+    note,
+    onNote: setNote,
+    error: submitError,
+    pending: submitting,
+    onAnswer: (option: Option) => startSubmit(async () => void (await send(option, note))),
+  };
+
+  usePageTools(
+    "try",
+    {
+      page_mark_criterion: readOnly
+        ? undefined
+        : ({ index, criterion, works, note }) => {
+            const at = findCriterion(acceptance, { index, criterion });
+            const moved = mark(at, works ?? undefined, note);
+            if (works === null) return `Unchecked criterion ${at + 1}.`;
+            if (!works) return `Marked criterion ${at + 1} as not working${note?.trim() ? ", with the note" : ""}.`;
+            return `Marked criterion ${at + 1} as working.${moved === undefined ? " Every criterion is checked." : ` Now on criterion ${moved + 1}.`}`;
+          },
+      page_go_to_criterion: ({ index, direction }) => {
+        if (!acceptance.length) throw new Error("This run has no acceptance criteria.");
+        const to = index === undefined ? current + (direction === "previous" ? -1 : 1) : findCriterion(acceptance, { index });
+        const at = Math.max(0, Math.min(acceptance.length - 1, to));
+        const named = `${at + 1} of ${acceptance.length}: "${acceptance[at]}".`;
+        if (at === current && to !== current) return `Already on the ${to < 0 ? "first" : "last"} criterion, ${named}`;
+        go(at);
+        return `Now on criterion ${named}`;
+      },
+      page_set_note: readOnly
+        ? undefined
+        : ({ note: next }) => {
+            setNote(next);
+            return next.trim() ? `Set the overall note to "${next}"` : "Cleared the overall note.";
+          },
+      page_submit: readOnly
+        ? undefined
+        : async ({ option, note: given }) => {
+            // The same rules as the popover's buttons, said in words.
+            const overall = given ?? note;
+            if (option === "approve" && !allWork) {
+              const unchecked = checks.flatMap((c, i) => (c.works === true ? [] : [i + 1]));
+              throw new Error(`Check every criterion to approve. Not marked as working: ${unchecked.join(", ")}.`);
+            }
+            if (option === "changes" && failed.length === 0 && !overall.trim()) throw new Error("Say what to change: mark a criterion that does not work, or add a note.");
+            if (given !== undefined) setNote(given);
+            try {
+              const error = await send(option, overall);
+              if (error) throw new Error(error);
+            } catch (error) {
+              if (!isNextNavigation(error)) throw error;
+            }
+            if (option === "approve") return "Approved: every criterion works. The run page opens.";
+            if (!failed.length) return `Sent back to ${from} with the note. The run page opens.`;
+            return `Sent back to ${from}: ${failed.length} ${failed.length === 1 ? "criterion does" : "criteria do"} not work${overall.trim() ? ", with the note" : ""}. The run page opens.`;
+          },
+      page_restart_app: readOnly
+        ? undefined
+        : async () => {
+            const error = await restart();
+            if (error) throw new Error(error);
+            return "Started the app again from the run's branch.";
+          },
+      page_expand_criteria: ({ all }) => {
+        expandAll(all);
+        return all ? "Expanded every criterion." : "Collapsed every criterion.";
+      },
+    },
+    () => ({
+      questionId,
+      runId,
+      from,
+      current: acceptance.length ? current + 1 : null,
+      criteria: acceptance.map((text, i) => ({ index: i + 1, text, works: checks[i]?.works ?? null, note: checks[i]?.note ?? "" })),
+      note,
+      app: readOnly ? { status: "stopped" } : { status: preview.status, url: preview.url ?? null, error: preview.error ?? null },
+      readOnly,
+    }),
+  );
 
   return (
     <div className="flex flex-col gap-4">
-      <AppBar preview={preview} readOnly={readOnly} questionId={questionId} runId={runId} />
+      <AppBar preview={preview} readOnly={readOnly} pending={restarting} error={restartError} onRestart={() => startRestart(async () => void (await restart()))} />
       {acceptance.length > 0 && (
         <div className="sticky top-[60px] z-20 flex flex-wrap items-center gap-2 rounded-lg border bg-background/90 p-2 backdrop-blur-md">
           <CriterionMenu acceptance={acceptance} checks={checks} current={current} go={go} />
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Collapse all criteria" onClick={() => setClosed(new Set(acceptance.map((_, i) => i)))}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Collapse all criteria" onClick={() => expandAll(false)}>
             <ChevronsDownUpIcon />
           </Button>
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Expand all criteria" onClick={() => setClosed(new Set())}>
+          <Button type="button" variant="ghost" size="icon-sm" aria-label="Expand all criteria" onClick={() => expandAll(true)}>
             <ChevronsUpDownIcon />
           </Button>
           <span className={cn("text-xs text-muted-foreground", readOnly && "ml-auto")}>{`${checked} of ${acceptance.length} checked`}</span>
-          {!readOnly && <Submit from={from} checks={checks} acceptance={acceptance} questionId={questionId} runId={runId} />}
+          {!readOnly && <Submit {...submitOptions} />}
         </div>
       )}
       {acceptance.length === 0 && !readOnly && (
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted-foreground">This run has no acceptance criteria. Try the app, then approve it or send it back with a note.</p>
-          <Submit from={from} checks={checks} acceptance={acceptance} questionId={questionId} runId={runId} />
+          <Submit {...submitOptions} />
         </div>
       )}
       {acceptance.map((criterion, index) => (

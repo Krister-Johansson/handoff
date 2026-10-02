@@ -449,13 +449,17 @@ export async function schedule(deps: ShapingDeps, projectId: string, items: Sche
     checkDates(`#${change.issue}`, start, target);
     return { change, item };
   });
-  await Promise.all(
-    changes.map(async ({ change }) => {
-      const dates = { ...(change.start !== undefined ? { start: change.start } : {}), ...(change.target !== undefined ? { target: change.target } : {}) };
-      const result = await plan.setDates(repo, number, change.issue, dates);
-      if (result !== "set") throw new Error(`#${change.issue} could not be scheduled: ${result === "no-field" ? "the Project has no Start or Target field; run setup_plan" : "it is not in the Project"}.`);
-    }),
+  // Octokit spaces GraphQL calls a second apart, so the dates go out in a few batched requests, not one per item (#464).
+  const results = await plan.setManyPlanFields(
+    repo,
+    number,
+    changes.map(({ change }) => ({
+      issue: change.issue,
+      fields: { ...(change.start !== undefined ? { start: change.start } : {}), ...(change.target !== undefined ? { target: change.target } : {}) },
+    })),
   );
+  const failed = results.find((r) => r.result !== "set");
+  if (failed) throw new Error(`#${failed.issue} could not be scheduled: ${failed.result === "not-in-project" ? "it is not in the Project" : "the Project has no Start or Target field; run setup_plan"}. Nothing was written.`);
   const scheduled = changes.map(({ change, item }) => ({
     issue: item.number,
     kind: item.kind ?? null,

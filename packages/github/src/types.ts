@@ -111,6 +111,8 @@ export interface GitHubPort {
   addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void>;
   /** Comments on an issue, then closes it as completed. */
   closeIssue(repo: RepoRef, number: number, comment: string): Promise<void>;
+  /** Opens an issue with a title and a body, outside any plan. */
+  createIssue(repo: RepoRef, input: { title: string; body: string }): Promise<{ number: number; url: string }>;
   /** The login of the token's user ("you" on the dashboard); undefined with a GitHub App, which acts as no person. */
   viewer(): Promise<string | undefined>;
   /** Repositories this credential can reach, most recently pushed first. */

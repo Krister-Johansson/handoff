@@ -35,7 +35,7 @@ const coder: NodeExecutor = {
   },
 };
 
-/** The linear graph with the merge node in `mode`, a Finish after it, and the edge that sends a stale pull request back to catch up. */
+/** The linear graph, whose update edge sends a stale pull request back to catch up, with the merge node in `mode` and a Finish after it. */
 const graph = (mode: "manual" | "auto", notify?: Record<string, boolean>) => ({
   ...linear,
   nodes: [
@@ -44,11 +44,7 @@ const graph = (mode: "manual" | "auto", notify?: Record<string, boolean>) => ({
     ),
     { key: "finish", attributes: { type: "finish", label: "Finish", config: {}, x: 1200, y: 0 } },
   ],
-  edges: [
-    ...linear.edges,
-    { key: "merge->finish", source: "merge", target: "finish", attributes: { port: "merged" } },
-    { key: "merge->pr:update", source: "merge", target: "pr", attributes: { port: "update", input: "in", loop: true, maxAttempts: 2 } },
-  ],
+  edges: [...linear.edges, { key: "merge->finish", source: "merge", target: "finish", attributes: { port: "merged" } }],
 });
 
 /** Two runs of one project, each with its pull request open and CI green; the first works on `issues` when given. */

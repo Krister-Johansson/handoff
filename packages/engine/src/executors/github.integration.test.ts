@@ -8,7 +8,7 @@ import { eq, projects, screenshots, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createRun } from "../runs.ts";
-import { createOriginRepo, git } from "../testing/git.ts";
+import { createOriginRepo, flakyFetches, git, landOnMain } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import type { ExecutorRegistry, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
@@ -32,10 +32,10 @@ const coder: NodeExecutor = {
   },
 };
 
-async function setup() {
+async function setup(document: unknown = linear) {
   const origin = createOriginRepo();
   const github = new FakeGitHub();
-  const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+  const { project, graphVersion } = await seedGraph(db, document, { localClonePath: origin });
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
   const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) };
   const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
@@ -161,7 +161,7 @@ describe("PR node", () => {
 
 describe("Merge node", () => {
   test("Merge node fails when GitHub refuses the merge", async () => {
-    const { github, run, deps } = await setup();
+    const { github, run, deps } = await setup({ ...linear, edges: linear.edges.filter((e) => e.source !== "merge") });
     await drain(deps);
     github.setChecks(1, "SUCCESS");
     github.prs.get(1)!.mergeable = "CONFLICTING";
@@ -225,25 +225,11 @@ describe("status on the plan", () => {
   });
 });
 
-/** The linear graph with the edges that keep a run up with main: fix (which takes conflicts) back to the coder, a refused merge back to the PR node. */
+/** The linear graph, whose refused merge goes back to the PR node, with fix (which takes conflicts) back to the coder too. */
 const withSyncEdges = (document: typeof linear) => ({
   ...document,
-  edges: [
-    ...document.edges,
-    { key: "pr->coder:fix", source: "pr", target: "coder", attributes: { port: "fix", input: "feedback", loop: true, maxAttempts: 2 } },
-    { key: "merge->pr:update", source: "merge", target: "pr", attributes: { port: "update", input: "in", loop: true, maxAttempts: 2 } },
-  ],
+  edges: [...document.edges, { key: "pr->coder:fix", source: "pr", target: "coder", attributes: { port: "fix", input: "feedback", loop: true, maxAttempts: 2 } }],
 });
-
-/** Lands a commit on origin's main, as another pull request merging while the run works. */
-function landOnMain(origin: string, path: string, content: string) {
-  const work = mkdtempSync(join(tmpdir(), "handoff-other-"));
-  git(work, "clone", "-q", origin, ".");
-  writeFileSync(join(work, path), content);
-  git(work, "add", "-A");
-  git(work, "commit", "-qm", `Change ${path} on main`);
-  git(work, "push", "-q", "origin", "main");
-}
 
 async function syncSetup(document: unknown, onMain: (origin: string) => void, seen: { conflict?: unknown } = {}) {
   const origin = createOriginRepo();
@@ -313,6 +299,24 @@ describe("keeping up with main", () => {
     const { executions } = await inspect(db, run.id);
     expect(executions.find((e) => e.nodeKey === "merge")).toMatchObject({ status: "passed", output: { merged: false, needsUpdate: true } });
     expect(executions.some((e) => e.nodeKey === "pr" && e.attempt === 2)).toBe(true);
+  });
+});
+
+describe("network git commands", () => {
+  test("a fetch that fails twice and then succeeds does not fail the step", async () => {
+    const origin = createOriginRepo();
+    const flaky = flakyFetches(2);
+    // GitHub's git credentials are where the PR node gets its git config from.
+    const github = new FakeGitHub();
+    github.gitAuthEnv = async () => flaky.env;
+    const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, gitRetryMs: 10 }), merge: mergeNodeExecutor({ github }) };
+    await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+    const { run: row, executions } = await inspect(db, run.id);
+    expect(flaky.tried()).toBe(3);
+    expect(executions.find((e) => e.nodeKey === "pr")).toMatchObject({ status: "waiting", error: null });
+    expect(git(origin, "log", "--format=%s", "-1", row.branchName)).toBe("Add changelog");
   });
 });
 

@@ -1,5 +1,5 @@
 import { ReviewerOutputSchema, type DiffFile } from "@handoff/core";
-import { and, asc, desc, eq, isNotNull, lt, nodeExecutions, projects, questions, reviewViews, runs, sql, type Db } from "@handoff/db";
+import { and, asc, desc, eq, events, isNotNull, lt, nodeExecutions, projects, questions, reviewViews, runs, sql, type Db } from "@handoff/db";
 
 /** What the gate showed for review; a code review also carries the branch's changed files. */
 export type ReviewContext = { from: string; kind: string; markdown: string; files?: DiffFile[]; backTo?: string };
@@ -32,6 +32,18 @@ async function findingsOf(db: Db, question: typeof questions.$inferSelect, revie
   return parsed.success ? parsed.data : undefined;
 }
 
+/** The issue a person opened from this question's findings, recorded as `review.follow_up` on the run. */
+async function followUpOf(db: Db, question: typeof questions.$inferSelect) {
+  const rows = await db
+    .select({ payload: events.payload })
+    .from(events)
+    .where(and(eq(events.runId, question.runId), eq(events.type, "review.follow_up"), sql`${events.payload}->>'questionId' = ${question.id}`))
+    .orderBy(desc(events.seq))
+    .limit(1);
+  const payload = rows[0]?.payload as { number?: unknown; url?: unknown } | undefined;
+  return typeof payload?.number === "number" && typeof payload.url === "string" ? { number: payload.number, url: payload.url } : undefined;
+}
+
 /** A human gate's review question with its run, or undefined when there is none with that id on that run. */
 export async function getReview(db: Db, runId: string, questionId: string) {
   const [row] = await db
@@ -44,10 +56,11 @@ export async function getReview(db: Db, runId: string, questionId: string) {
   const review = (row.question.context as { review?: ReviewContext }).review;
   if (!review) return undefined;
   const q = row.question;
-  const [views, earlier, findings] = await Promise.all([
+  const [views, earlier, findings, followUp] = await Promise.all([
     db.select({ path: reviewViews.path, blobSha: reviewViews.blobSha, viewedAt: reviewViews.viewedAt }).from(reviewViews).where(eq(reviewViews.runId, runId)),
     earlierRounds(db, q),
     findingsOf(db, q, review),
+    review.kind === "code" ? followUpOf(db, q) : undefined,
   ]);
   return {
     id: q.id,
@@ -60,6 +73,7 @@ export async function getReview(db: Db, runId: string, questionId: string) {
     answered: q.answer === null ? null : { option: q.option, answer: q.answer, comments: q.comments, answeredBy: q.answeredBy, answeredAt: q.answeredAt },
     views,
     findings,
+    followUp,
     earlier: earlier.map((e) => ({ answer: e.answer!, option: e.option, comments: e.comments, answeredAt: e.answeredAt })),
   };
 }

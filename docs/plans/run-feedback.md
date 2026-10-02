@@ -139,7 +139,7 @@ handoff gives the setup command, the tester and every agent the run's identity: 
 
 Project readiness warns when the repository has a lockfile and the project has no setup command, and suggests one.
 
-The tester gets `retries` (default 1): a failing command runs once more, and a pass on the retry passes with a note that the first run failed. A tester failure whose output names no test failure (the command was not found, or it ended before running any test) fails the step as an environment failure instead of going to the coder.
+The tester gets `retries` (default 1): a failing command runs once more, and a pass on the retry passes with a note that the first run failed. A tester failure where the shell did not find a command it runs (exit 127, or the shell's own "not found" line for that command) fails the step as an environment failure instead of going to the coder. Any other failure goes to the coder with its output.
 
 ### 4. Approvals hold until the change changes
 
