@@ -220,10 +220,19 @@ function useViewed(runId: string, files: DiffFile[], views: View[], earlier: Ear
     const own = clicked.get(file.path);
     return own === undefined ? (initial.get(file.path) ?? { viewed: false }) : own ? { viewed: true } : { viewed: false };
   };
-  const mark = (file: DiffFile, viewed: boolean) => {
-    if (!enabled || !file.blob) return;
+  /** Marks a file and saves the mark; resolves to why it could not be saved, when it could not. */
+  const mark = async (file: DiffFile, viewed: boolean) => {
+    if (!enabled || !file.blob) return undefined;
     setClicked((map) => new Map(map).set(file.path, viewed));
-    void markViewedAction({ runId, path: file.path, blobSha: file.blob, viewed });
+    const result = await markViewedAction({ runId, path: file.path, blobSha: file.blob, viewed });
+    if (!result?.error) return undefined;
+    // A mark that was not saved does not stay on the page.
+    setClicked((map) => {
+      const next = new Map(map);
+      next.delete(file.path);
+      return next;
+    });
+    return result.error;
   };
   return { stateOf, mark, initial };
 }
@@ -289,7 +298,17 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
         return `Showing ${shown}, ${(nextLayout ?? layout) === "split" ? "side by side" : "in one column"}.`;
       },
       page_expand_files: undefined,
-      page_mark_viewed: undefined,
+      page_mark_viewed: readOnly
+        ? undefined
+        : async ({ path, viewed }) => {
+            const file = files[findFile(files, { path })]!;
+            if (!file.blob) throw new Error(`${path} cannot be marked viewed: the review does not show its content.`);
+            const error = await mark(file, viewed);
+            if (error) throw new Error(error);
+            setOpen(path, !viewed);
+            const seen = files.filter((f) => (f.path === path ? viewed : stateOf(f).viewed)).length;
+            return `Marked ${path} as ${viewed ? "viewed and collapsed" : "not viewed and expanded"} it. ${seen} of ${files.length} viewed.`;
+          },
       page_comment_on_lines: readOnly
         ? undefined
         : ({ path, line, endLine, side = "new", body }) => {
@@ -304,7 +323,20 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
       page_set_note: undefined,
       page_submit_review: undefined,
     },
-    () => ({ questionId, runId, from, current: files.length ? current + 1 : null, mode, layout, comments }),
+    () => ({ questionId, runId, from, current: files.length ? current + 1 : null,
+      mode,
+      layout,
+      files: files.map((f, i) => ({
+        index: i + 1,
+        path: f.path,
+        additions: f.additions,
+        deletions: f.deletions,
+        viewed: stateOf(f).viewed,
+        open: !closed.has(f.path),
+        comments: comments.filter((c) => c.path === f.path).length,
+      })),
+      comments,
+    }),
   );
 
   return (
@@ -393,7 +425,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
             readOnly
               ? undefined
               : (viewed) => {
-                  mark(file, viewed);
+                  void mark(file, viewed);
                   setOpen(file.path, !viewed);
                 }
           }

@@ -439,3 +439,24 @@ test("page_comment_on_lines adds a draft comment with the quoted code, and a lin
   expect(await call("page_comment_on_lines", { path: "src/c.ts", line: 1, body: "Here?" })).toMatchObject({ text: expect.stringContaining("src/c.ts is not in this review."), isError: true });
   expect(screen.getByText("2 comments drafted")).toBeInTheDocument();
 });
+
+test("page_mark_viewed saves the mark and collapses the file", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(await call("page_mark_viewed", { path: "src/a.ts", viewed: true })).toEqual({ text: "Marked src/a.ts as viewed and collapsed it. 1 of 3 viewed.", isError: false });
+  expect(actions.markViewedAction).toHaveBeenCalledWith({ runId: "r1", path: "src/a.ts", blobSha: "b1", viewed: true });
+  expect(within(fileA()).getByRole("checkbox", { name: "Viewed" })).toBeChecked();
+  expect(within(fileA()).queryByText("new 10")).not.toBeInTheDocument();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ files: [{ index: 1, path: "src/a.ts", viewed: true, open: false }, { path: "src/b.ts", viewed: false, open: true }, { path: "pnpm-lock.yaml" }] });
+
+  expect(await call("page_mark_viewed", { path: "src/a.ts", viewed: false })).toEqual({ text: "Marked src/a.ts as not viewed and expanded it. 0 of 3 viewed.", isError: false });
+  expect(within(fileA()).getByRole("checkbox", { name: "Viewed" })).not.toBeChecked();
+  expect(within(fileA()).getByText("new 10")).toBeInTheDocument();
+
+  // A file the review shows no content of has no Viewed box.
+  expect(await call("page_mark_viewed", { path: "pnpm-lock.yaml", viewed: true })).toEqual({ text: "pnpm-lock.yaml cannot be marked viewed: the review does not show its content.", isError: true });
+  // What the save refuses comes back as the tool's error.
+  actions.markViewedAction.mockResolvedValueOnce({ ok: false, error: "That file cannot be marked." });
+  expect(await call("page_mark_viewed", { path: "src/b.ts", viewed: true })).toEqual({ text: "That file cannot be marked.", isError: true });
+  expect(within(screen.getByRole("region", { name: "src/b.ts" })).getByRole("checkbox", { name: "Viewed" })).not.toBeChecked();
+  expect(actions.markViewedAction).toHaveBeenCalledTimes(3);
+});
