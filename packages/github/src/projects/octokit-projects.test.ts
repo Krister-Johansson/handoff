@@ -244,7 +244,7 @@ const planProject = (number: number, ownerId = "U_octo", dates = true) => ({
 });
 
 /** The IssuePlan answer for an issue that is an item of the given Projects. */
-function issuePlan(number: number, items: { id: string; project: ReturnType<typeof planProject>; status?: string }[], over: Record<string, unknown> = {}) {
+function issuePlan(number: number, items: { id: string; project: ReturnType<typeof planProject> & Record<string, unknown>; status?: string }[], over: Record<string, unknown> = {}) {
   return {
     repository: {
       owner: { id: "U_octo" },
@@ -405,18 +405,15 @@ test("createIssue sets Start and Target after adding the item", async () => {
       return { addProjectV2ItemById: { item: { id: "PVTI_20" } } };
     },
     SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
-    SetPlanDate: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
+    SetPlanFields: () => ({ start: { projectV2Item: { id: "PVTI_20" } }, target: { projectV2Item: { id: "PVTI_20" } } }),
   });
   const projects = port(fetch);
 
   await projects.createIssue(repo, { project: 3, title: "Add the migration", body: "A column.", labels: ["task"], start: "2026-10-06", target: "2026-10-09" });
 
-  expect(operations.map((o) => o.operation).slice(-3)).toEqual(["IssuePlan", "SetPlanDate", "SetPlanDate"]);
-  expect(operations.filter((o) => o.operation === "SetPlanDate").map((o) => o.variables)).toEqual([
-    { projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_start", date: "2026-10-06" },
-    { projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_target", date: "2026-10-09" },
-  ]);
-  expect(operations.findIndex((o) => o.operation === "SetPlanStatus")).toBeLessThan(operations.findIndex((o) => o.operation === "SetPlanDate"));
+  expect(operations.map((o) => o.operation).slice(-2)).toEqual(["IssuePlan", "SetPlanFields"]);
+  expect(operations.at(-1)!.variables).toEqual({ projectId: "PVT_3", itemId: "PVTI_20", startField: "F_start", startValue: "2026-10-06", targetField: "F_target", targetValue: "2026-10-09" });
+  expect(operations.findIndex((o) => o.operation === "SetPlanStatus")).toBeLessThan(operations.findIndex((o) => o.operation === "SetPlanFields"));
 });
 
 test("createIssue refuses a label the repository does not have, before creating anything", async () => {
@@ -791,23 +788,23 @@ test("setDates writes a date, clears one with null, and reports no-field on a Pr
           ? issuePlan(13, [{ id: "PVTI_2", project: planProject(2) }])
           : // A Project with a text field named Start and no Target field.
             issuePlan(14, [{ id: "PVTI_14", project: { ...planProject(3, "U_octo", false), start: projectField("F_text", "TEXT") } }]),
-    SetPlanDate: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_3" } } }),
-    ClearPlanField: () => ({ clearProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_3" } } }),
+    SetPlanFields: () => ({ start: { projectV2Item: { id: "PVTI_3" } } }),
   });
   const projects = port(fetch);
 
   expect(await projects.setDates(repo, 3, 12, { start: "2026-10-06", target: null })).toBe("set");
   expect(operations.map((o) => [o.operation, o.variables])).toEqual([
     ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
-    ["SetPlanDate", { projectId: "PVT_3", itemId: "PVTI_3", fieldId: "F_start", date: "2026-10-06" }],
-    ["ClearPlanField", { projectId: "PVT_3", itemId: "PVTI_3", fieldId: "F_target" }],
+    ["SetPlanFields", { projectId: "PVT_3", itemId: "PVTI_3", startField: "F_start", startValue: "2026-10-06", targetField: "F_target" }],
   ]);
 
   // Only the dates given change: target alone leaves Start as it is.
   operations.length = 0;
   expect(await projects.setDates(repo, 3, 12, { target: "2026-10-17" })).toBe("set");
-  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "SetPlanDate"]);
-  expect(operations[1]!.variables).toMatchObject({ fieldId: "F_target", date: "2026-10-17" });
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
+    ["SetPlanFields", { projectId: "PVT_3", itemId: "PVTI_3", targetField: "F_target", targetValue: "2026-10-17" }],
+  ]);
 
   operations.length = 0;
   expect(await projects.setDates(repo, 3, 13, { start: "2026-10-06" })).toBe("not-in-project");

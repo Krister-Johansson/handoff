@@ -4,7 +4,6 @@ import {
   AddPlanItemDocument,
   AddPlanLabelsDocument,
   AddPlanSubIssueDocument,
-  ClearPlanFieldDocument,
   CreatePlanDateFieldDocument,
   CreatePlanLabelDocument,
   CreatePlanIssueDocument,
@@ -18,7 +17,6 @@ import {
   PlanProjectDocument,
   PlanProjectsDocument,
   PlanProjectSetupDocument,
-  SetPlanDateDocument,
   SetPlanStatusDocument,
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
@@ -257,18 +255,10 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async setDates(repo: RepoRef, project: number, issue: number, dates: PlanDates): Promise<SetDatesResult> {
-    const { item } = await this.issuePlan(repo, project, issue);
-    if (!item) return "not-in-project";
-    const fields = dateFieldIds(item.project);
-    const writes = DATE_KEYS.filter((key) => dates[key] !== undefined).map((key) => ({ fieldId: fields[key], date: dates[key] }));
-    // Check every field first, so a Project with Start but no Target changes nothing.
-    if (writes.some((w) => !w.fieldId)) return "no-field";
-    for (const { fieldId, date } of writes) {
-      const ids = { projectId: item.project.id, itemId: item.id, fieldId };
-      if (date === null) await this.octokit.graphql(ClearPlanFieldDocument.toString(), ids);
-      else await this.octokit.graphql(SetPlanDateDocument.toString(), { ...ids, date });
-    }
-    return "set";
+    const result = await this.setPlanFields(repo, project, issue, dates);
+    // Only a Size write can miss an option.
+    if (result === "no-option") throw new Error(`setDates got no-option for #${issue}`);
+    return result;
   }
 
   async setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult> {

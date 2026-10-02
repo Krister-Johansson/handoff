@@ -479,25 +479,6 @@ export type CreatePlanDateFieldMutation = { createProjectV2Field: { projectV2Fie
       | { __typename: 'ProjectV2SingleSelectField' }
      | null } | null };
 
-export type SetPlanDateMutationVariables = Exact<{
-  projectId: string | number;
-  itemId: string | number;
-  fieldId: string | number;
-  date: string;
-}>;
-
-
-export type SetPlanDateMutation = { updateProjectV2ItemFieldValue: { projectV2Item: { id: string } | null } | null };
-
-export type ClearPlanFieldMutationVariables = Exact<{
-  projectId: string | number;
-  itemId: string | number;
-  fieldId: string | number;
-}>;
-
-
-export type ClearPlanFieldMutation = { clearProjectV2ItemFieldValue: { projectV2Item: { id: string } | null } | null };
-
 export type SetPlanStatusMutationVariables = Exact<{
   projectId: string | number;
   itemId: string | number;
@@ -1320,33 +1301,6 @@ export const CreatePlanDateFieldDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<CreatePlanDateFieldMutation, CreatePlanDateFieldMutationVariables>;
-export const SetPlanDateDocument = new TypedDocumentString(`
-    mutation SetPlanDate($projectId: ID!, $itemId: ID!, $fieldId: ID!, $date: Date!) {
-  updateProjectV2ItemFieldValue(
-    input: {
-      projectId: $projectId
-      itemId: $itemId
-      fieldId: $fieldId
-      value: { date: $date }
-    }
-  ) {
-    projectV2Item {
-      id
-    }
-  }
-}
-    `) as unknown as TypedDocumentString<SetPlanDateMutation, SetPlanDateMutationVariables>;
-export const ClearPlanFieldDocument = new TypedDocumentString(`
-    mutation ClearPlanField($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
-  clearProjectV2ItemFieldValue(
-    input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId }
-  ) {
-    projectV2Item {
-      id
-    }
-  }
-}
-    `) as unknown as TypedDocumentString<ClearPlanFieldMutation, ClearPlanFieldMutationVariables>;
 export const SetPlanStatusDocument = new TypedDocumentString(`
     mutation SetPlanStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
   updateProjectV2ItemFieldValue(
