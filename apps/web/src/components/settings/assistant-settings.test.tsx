@@ -32,7 +32,10 @@ test("with WebMCP in the browser the switch turns it off for this browser", () =
   try {
     render(<AssistantSettings hasToken enabled model="sonnet" />);
     const webmcp = screen.getByRole("switch", { name: "Expose tools to browser agents (WebMCP)" });
-    expect(screen.getByText(/Browser agents on this page can use handoff's tools/)).toBeInTheDocument();
+    // The switch covers the page's own tools as well as the catalog.
+    expect(screen.getByText(/Browser agents in this tab can use handoff's tools/)).toHaveTextContent(
+      "Browser agents in this tab can use handoff's tools, and the tools of the page you have open, such as a run, Try it or the Inbox. Anything that changes something waits for your approval in the assistant. Off, this browser offers none of them.",
+    );
     fireEvent.click(webmcp);
     expect(localStorage.getItem("handoff.webmcp")).toBe("off");
   } finally {
