@@ -28,7 +28,7 @@ function Waiting({ run, projectId }: { run: IssueRun; projectId: string }) {
   return (
     <div className="col-span-2 flex flex-wrap items-center gap-3 rounded-lg border border-attention-dot/30 bg-attention-bg px-3.5 py-2.5">
       <Icon aria-hidden className="size-4 shrink-0 text-attention" />
-      <span className="min-w-0 flex-1 text-[13px] font-medium break-words">{run.waitingOn.text}</span>
+      <span className="min-w-0 flex-1 basis-48 text-[13px] font-medium break-words">{run.waitingOn.text}</span>
       <span className="flex shrink-0 gap-2">
         <Button size="sm" asChild>
           <Link href={run.waitingOn.href}>{run.waitingOn.kind === "review" ? "Open the review" : "Answer"}</Link>

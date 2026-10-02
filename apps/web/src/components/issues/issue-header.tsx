@@ -68,7 +68,7 @@ function Actions({ page, project, start, runs }: { page: FoundIssue; project: Pr
   if (!place.planned) {
     return (
       <>
-        {place.project && <PlanItButton issue={issue} projectId={project.id} stories={place.stories} />}
+        {place.project && issue.state === "open" && <PlanItButton issue={issue} projectId={project.id} stories={place.stories} />}
         {startable(!ACTIVE.has(runs[0]?.status ?? "")) && startRun}
       </>
     );

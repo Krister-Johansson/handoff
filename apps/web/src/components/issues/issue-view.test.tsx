@@ -132,6 +132,15 @@ test("an issue outside the plan offers Plan it and Start run, says it is not in 
   expect(region("Comments")).toHaveTextContent("No comments on GitHub yet.");
 });
 
+test("a closed issue outside the plan offers neither Plan it nor Start run", () => {
+  const page = unplannedPage();
+  show({ ...page, issue: { ...page.issue, state: "closed", stateReason: "completed" } });
+  const header = screen.getByRole("banner", { name: "Issue #407" });
+  expect(header).toHaveTextContent("closed");
+  expect(within(header).queryByRole("button", { name: "Plan it" })).not.toBeInTheDocument();
+  expect(within(header).queryByRole("button", { name: "Start run" })).not.toBeInTheDocument();
+});
+
 test("the description renders the body with its references as issue pages, and the comments come from GitHub with their author and role", () => {
   show(taskPage(), [waitingRun()]);
   const description = region("Description");

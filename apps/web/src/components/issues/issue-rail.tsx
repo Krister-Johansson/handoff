@@ -129,7 +129,10 @@ function PartOf({ parents }: { parents: PlanParent[] }) {
 function whyNoMove(place: PlannedTask, blockedBy: number[]): string | undefined {
   const task = place.item;
   const column = taskColumn(task);
-  if (task.run && hasActiveRun(task)) return `Back to Shaping and Start run come back when run ${task.run.id.slice(0, 8)} ends. A ${column === "In review" ? "task in review" : `${column.toLowerCase()} task`} keeps its status.`;
+  if (task.run && hasActiveRun(task)) {
+    const keeps = column === "Running" ? " A running task keeps its status." : column === "In review" ? " A task in review keeps its status." : "";
+    return `Back to Shaping and Start run come back when run ${task.run.id.slice(0, 8)} ends.${keeps}`;
+  }
   if (column === "Ready" && blockedBy.length) return `Start run comes back when ${andList(blockedBy.map((n) => `#${n}`))} ${blockedBy.length === 1 ? "closes" : "close"}.`;
   if (column === "Shaping") return "Move to Ready lets it into the backlog, where a run can start on it.";
   return undefined;

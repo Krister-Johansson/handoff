@@ -1,21 +1,13 @@
 import Link from "next/link";
 import { CircleAlertIcon, GitPullRequestIcon, HandIcon, LockIcon, RotateCcwIcon } from "lucide-react";
 import type { PlanTask } from "@/server/plan";
-import { useIssueHref } from "@/components/issues/issue-pages";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { runPath } from "@/lib/paths";
 import { hasActiveRun, hasKindLabel, prNumberOf, taskColumn } from "@/lib/plan/task";
-import { cn } from "@/lib/utils";
 
-/** "#57 Add the migration", opening the issue's page (on GitHub outside IssuePages); Enter on a focused tree row follows it. */
-export function IssueTitle({ item, className }: { item: { number: number; title: string; url: string }; className?: string }) {
-  return (
-    <Link href={useIssueHref(item)} data-title className={cn("min-w-0 truncate text-[13px] hover:underline hover:underline-offset-3", className)} title={item.title}>
-      <span className="font-mono text-xs font-normal text-muted-foreground">#{item.number}</span> {item.title}
-    </Link>
-  );
-}
+/** "#57 Add the migration", opening the issue's page; the issue pages own it, so the Plan and the issue page link the same way. */
+export { IssueTitle } from "@/components/issues/issue-pages";
 
 /**
  * "run running" when an open task's Status disagrees with its active run, which owns Running, or In
