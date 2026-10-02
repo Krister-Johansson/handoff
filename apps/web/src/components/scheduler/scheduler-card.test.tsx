@@ -64,6 +64,36 @@ const running = cardOf({
   events: [{ id: 3, type: "scheduler.run_started", text: "Started run 3b9e21c4 on #141, 1st in order", at: ago(26 * 60) }],
 });
 
+test("held lists each failed run and permission prompt with a link to its run, and what starts once they clear", () => {
+  const runHref = (id: string) => `/projects/${PROJECT.id}/runs/${id}`;
+  show(
+    cardOf({
+      status: {
+        state: "held",
+        summary: "1 of 3 runs active, 1 Claude slot",
+        holds: [
+          { kind: "failed", runId: OTHER, nodeKey: "coder-1", text: "Run 64fde8ef failed at coder-1", href: runHref(OTHER) },
+          { kind: "permission", runId: RUN, nodeKey: "coder-1", permissionId: "p1", toolName: "Bash", text: "Run 3b9e21c4 asks permission to use Bash at coder-1", href: runHref(RUN) },
+        ],
+      },
+      holdIssues: { [OTHER]: { number: 66, title: "F52 Tasks service follow-ups" }, [RUN]: { number: 141, title: "R1 Redesign tokens" } },
+      next: [{ number: 67, title: "F53 Shared localStorage store helper" }],
+    }),
+  );
+  expect(screen.getByText("Held")).toBeInTheDocument();
+
+  const holds = within(screen.getByRole("list", { name: "Holding new starts" })).getAllByRole("listitem");
+  expect(holds).toHaveLength(2);
+  expect(holds[0]).toHaveTextContent("#66Run 64fde8ef failed at coder-1");
+  expect(within(holds[0]!).getByRole("link", { name: "Open run" })).toHaveAttribute("href", runHref(OTHER));
+  expect(holds[1]).toHaveTextContent("#141Run 3b9e21c4 asks permission to use Bash at coder-1");
+  expect(within(holds[1]!).getByRole("link", { name: "Open run" })).toHaveAttribute("href", runHref(RUN));
+
+  expect(screen.getByText("Within 10 seconds of the last one clearing, it starts these in order, one at a time:")).toBeInTheDocument();
+  expect(within(screen.getByRole("list", { name: "Next up" })).getByText(/F53 Shared localStorage store helper/)).toBeInTheDocument();
+  expect(screen.getByText("Holds count every run of todooverkill, also runs a person started. Active runs go on.")).toBeInTheDocument();
+});
+
 test("running shows active runs of max_runs and the Claude slots, with Pause", async () => {
   show(running);
   expect(screen.getByText("Running")).toBeInTheDocument();

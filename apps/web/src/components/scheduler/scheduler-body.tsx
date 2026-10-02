@@ -2,9 +2,10 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
-import { LayersIcon } from "lucide-react";
+import { CircleXIcon, InfoIcon, LayersIcon, RepeatIcon, ShieldQuestionIcon, type LucideIcon } from "lucide-react";
 import type { StartRunContext } from "@/components/plan/plan-actions";
 import { Tag } from "@/components/tag";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { ActiveRunView, SchedulerCard } from "@/server/scheduler-card";
 import { SchedulerEvents } from "./scheduler-events";
@@ -137,12 +138,64 @@ function Columns(props: Props) {
   );
 }
 
+const HOLD_ICON: Record<string, { icon: LucideIcon; tone: string }> = {
+  failed: { icon: CircleXIcon, tone: "bg-danger-bg text-danger" },
+  loop: { icon: RepeatIcon, tone: "bg-danger-bg text-danger" },
+  permission: { icon: ShieldQuestionIcon, tone: "bg-attention-bg text-attention" },
+};
+
+/** Held: each hold on its line with the page that clears it, and what starts once they clear. */
+function Held(props: Props) {
+  const { project, card } = props;
+  const { holds } = card.status;
+  return (
+    <>
+      <div className="grid gap-x-8 gap-y-4 px-3.5 pt-2.5 pb-3 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <Column
+          label={
+            <span className="inline-flex items-center gap-1.5">
+              Holding new starts <Tag tone="fill">{holds.length}</Tag>
+            </span>
+          }
+        >
+          <ul aria-label="Holding new starts" className="flex flex-col gap-1.5">
+            {holds.map((hold) => {
+              const { icon: Icon, tone } = HOLD_ICON[hold.kind] ?? HOLD_ICON.failed!;
+              const issue = card.holdIssues[hold.runId];
+              return (
+                <li key={`${hold.kind}:${hold.runId}:${"permissionId" in hold ? hold.permissionId : ""}`} className="flex min-w-0 items-center gap-2 text-[13px]">
+                  <span aria-hidden className={cn("inline-flex size-[22px] shrink-0 items-center justify-center rounded-md", tone)}>
+                    <Icon className="size-3.5" />
+                  </span>
+                  {issue && <span className="shrink-0 font-mono text-xs text-muted-foreground">#{issue.number}</span>}
+                  <span className="min-w-0 truncate">{hold.text}</span>
+                  <Button size="xs" variant="outline" className="ml-auto shrink-0" asChild>
+                    <Link href={hold.href}>Open run</Link>
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        </Column>
+        <Column label="When these clear">
+          <p className="text-[13px] text-muted-foreground">Within 10 seconds of the last one clearing, it starts these in order, one at a time:</p>
+          <NextUp next={card.next} />
+        </Column>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-dashed px-3.5 py-2">
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <InfoIcon aria-hidden className="size-3.5" />
+          Holds count every run of {project.name}, also runs a person started. Active runs go on.
+        </p>
+        <SchedulerEvents project={project} events={card.events} />
+      </div>
+    </>
+  );
+}
+
 /** What the scheduler is doing, under the card's header. */
 export function SchedulerBody(props: Props) {
-  return (
-    <div className="border-t">
-      <Columns {...props} />
-    </div>
-  );
+  const { state } = props.card.status;
+  return <div className="border-t">{state === "held" ? <Held {...props} /> : <Columns {...props} />}</div>;
 }
 
