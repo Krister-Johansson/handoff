@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { loadGraphVersionAction } from "@/app/projects/actions";
+import { loadGraphVersionAction, saveGraphAction } from "@/app/projects/actions";
 import { GraphEditor } from "./graph-editor";
 
 vi.mock("@/app/projects/actions", () => ({ loadGraphVersionAction: vi.fn(), saveGraphAction: vi.fn() }));
@@ -127,7 +127,7 @@ test("the inspector keeps the Graph help and no longer lists the versions", () =
 const canvasNode = (container: HTMLElement, id: string) => container.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)!;
 const nodeCount = (container: HTMLElement) => container.querySelectorAll(".react-flow__node").length;
 
-test("a locked graph cannot be added to, deleted from, connected or dragged", () => {
+test("a locked graph cannot be added to, deleted from, connected or dragged", async () => {
   const { container } = renderEditor(twoNodes);
   fireEvent.click(screen.getByRole("button", { name: "Add Coder" }));
   expect(nodeCount(container)).toBe(2);
@@ -138,6 +138,39 @@ test("a locked graph cannot be added to, deleted from, connected or dragged", ()
   expect(within(inspector).getByRole("button", { name: "Delete node" })).toBeDisabled();
   fireEvent.keyDown(window.document.body, { key: "Backspace" });
   fireEvent.keyDown(window.document.body, { key: "Delete" });
+  // React Flow deletes after a promise; let it settle before checking nothing went.
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
   expect(nodeCount(container)).toBe(2);
   expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+});
+
+test("a locked graph still lets you select a node, edit its properties and save", async () => {
+  vi.mocked(saveGraphAction).mockResolvedValue({ ok: true, version: 5 });
+  const { container } = renderEditor();
+  fireEvent.click(canvasNode(container, "planner"));
+  fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Plan the work" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save as v5" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled());
+  expect(saveGraphAction).toHaveBeenCalledWith(
+    "p1",
+    "plan-review",
+    expect.objectContaining({ nodes: [expect.objectContaining({ key: "planner", attributes: expect.objectContaining({ label: "Plan the work" }) })] }),
+  );
+  expect(screen.getByRole("button", { name: "Unlock editing" })).toBeInTheDocument();
+});
+
+test("unlocking lets you add a node and delete the selected one", async () => {
+  const { container } = renderEditor(twoNodes);
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
+  expect(screen.getByRole("button", { name: "Lock editing" })).toBeInTheDocument();
+  expect(canvasNode(container, "planner")).toHaveClass("draggable");
+  fireEvent.click(screen.getByRole("button", { name: "Add Reviewer" }));
+  expect(nodeCount(container)).toBe(3);
+  fireEvent.click(canvasNode(container, "coder"));
+  fireEvent.keyDown(window.document.body, { key: "Backspace" });
+  // React Flow deletes the selection after a promise (its onBeforeDelete).
+  await waitFor(() => expect(canvasNode(container, "coder")).toBeNull());
+  fireEvent.click(canvasNode(container, "planner"));
+  fireEvent.click(within(screen.getByRole("complementary", { name: "Inspector" })).getByRole("button", { name: "Delete node" }));
+  expect(nodeCount(container)).toBe(1);
 });
