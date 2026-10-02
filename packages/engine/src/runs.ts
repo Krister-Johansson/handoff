@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { initialRunState, type LinkedIssue } from "@handoff/core";
-import { appendEvents, nodeExecutions, projects, runs, type Db } from "@handoff/db";
+import { appendEvents, nodeExecutions, projects, runs, type DbExecutor } from "@handoff/db";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import type { RunRow } from "./types.ts";
 
@@ -13,7 +13,7 @@ const slug = (text: string) =>
 
 /** Creates a queued run pinned to a graph version, with a pending execution for the start node. */
 export async function createRun(
-  db: Db,
+  db: DbExecutor,
   input: { projectId: string; graphVersionId: string; task: string; baseBranch?: string; branchName?: string; issues?: LinkedIssue[] },
 ): Promise<RunRow> {
   const graph = await loadCompiledGraph(db, input.graphVersionId);
