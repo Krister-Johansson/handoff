@@ -35,6 +35,7 @@ test("the project group links to each project route and marks the current one", 
   renderSidebar({ pathname: "/projects/p1/issues" });
   const project = screen.getByRole("navigation", { name: "Project" });
   expect(links(project)).toEqual([
+    ["Overview", "/projects/p1"],
     ["Runs", "/projects/p1/runs"],
     ["Plan", "/projects/p1/plan"],
     ["Issues", "/projects/p1/issues"],
@@ -51,7 +52,9 @@ test("the project group links to each project route and marks the current one", 
   ]);
 
   // The Plan page and a run page mark their items too.
+  // The project's own address is its Overview.
   for (const [pathname, item] of [
+    ["/projects/p1", "Overview"],
     ["/projects/p1/plan", "Plan"],
     ["/projects/p1/runs/r1", "Runs"],
   ] as const) {
@@ -68,7 +71,7 @@ test("outside a project the switcher shows the last project from the cookie", ()
 
   renderSidebar({ pathname: "/inbox", lastProjectId: "p2" });
   expect(screen.getByRole("button", { name: "Project: example-shop. Switch project" })).toBeInTheDocument();
-  expect(links(screen.getByRole("navigation", { name: "Project" }))[0]).toEqual(["Runs", "/projects/p2/runs"]);
+  expect(links(screen.getByRole("navigation", { name: "Project" }))[0]).toEqual(["Overview", "/projects/p2"]);
   expect(current()).toEqual(["Inbox"]);
 });
 
