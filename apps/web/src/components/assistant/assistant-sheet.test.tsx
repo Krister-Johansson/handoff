@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState, type ReactNode } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
+import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { AssistantButton } from "./assistant-button";
 import { AssistantProvider } from "./assistant-provider";
@@ -20,12 +22,13 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/projects");
 });
 
-function App({ page = "Projects", available = true, offReason }: { page?: string; available?: boolean; offReason?: "no-token" | "off" }) {
+function App({ page = "Projects", available = true, offReason, children }: { page?: string; available?: boolean; offReason?: "no-token" | "off"; children?: ReactNode }) {
   return (
     <AssistantProvider transport={transport} available={available} {...(offReason ? { offReason } : {})}>
       <AssistantButton />
       <main>
         <h1>{page}</h1>
+        {children}
       </main>
       <AssistantSheet />
     </AssistantProvider>
@@ -236,6 +239,59 @@ test("a browser agent's confirm tool opens the panel with an approval card, and 
     expect(fetchMock).toHaveBeenCalledWith("/api/assistant/tools/cancel_run", expect.objectContaining({ method: "POST" }));
   } finally {
     vi.unstubAllGlobals();
+    delete (document as { modelContext?: unknown }).modelContext;
+  }
+});
+
+/** A run page in miniature whose Show a view waits for `finish`, so the status line can be read while it runs. */
+function RunViews({ finish }: { finish: Promise<void> }) {
+  const [view, setView] = useState("steps");
+  usePageTools(
+    "run",
+    {
+      page_show_view: async ({ view }) => {
+        await finish;
+        setView(view);
+        return `Showing the ${view} view.`;
+      },
+      page_open_step: undefined,
+      page_close_step: undefined,
+      page_pop_out: undefined,
+      page_filter_events: undefined,
+    },
+    () => ({ view }),
+  );
+  return <p>Showing {view}</p>;
+}
+
+test("a browser agent's page tool call runs in the page and shows the agent's activity in the status line", async () => {
+  const context = installModelContext();
+  let finish = () => {};
+  const finished = new Promise<void>((resolve) => (finish = resolve));
+  try {
+    const view = render(
+      <App page="Add a CHANGELOG.md">
+        <RunViews finish={finished} />
+      </App>,
+    );
+    await waitFor(() => expect(context.tools.has("page_show_view")).toBe(true));
+    expect(context.tools.has("page_open_step")).toBe(false);
+    expect(context.tools.has("list_runs")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+
+    let result: unknown;
+    act(() => void context.run("page_show_view", { view: "graph" }).then((r) => (result = r)));
+    expect(await within(panel()).findByText("A browser agent is using Show a view")).toBeInTheDocument();
+    await act(async () => finish());
+    await waitFor(() => expect(result).toBe("Showing the graph view."));
+    expect(screen.getByText("Showing graph")).toBeInTheDocument();
+    expect(within(panel()).queryByText("A browser agent is using Show a view")).not.toBeInTheDocument();
+
+    // Leaving the page takes its tools off WebMCP; the catalog stays.
+    view.rerender(<App page="Inbox" />);
+    await waitFor(() => expect(context.tools.has("page_show_view")).toBe(false));
+    expect(context.tools.has("list_runs")).toBe(true);
+  } finally {
     delete (document as { modelContext?: unknown }).modelContext;
   }
 });
