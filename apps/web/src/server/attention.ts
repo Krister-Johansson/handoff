@@ -113,8 +113,8 @@ export async function listAttention(db: Db, opts: { projectId?: string } = {}): 
   ]);
   const items = [
     ...permissions.map((p): AttentionItem => {
-      const { action, detail } = describePermission(p.toolName, p.input);
-      return { id: `permission:${p.id}`, kind: "permission", title: `${p.projectName}: ${p.nodeKey} ${action}`, body: brief(detail || p.task), href: runPath(p.projectId, p.runId), projectId: p.projectId };
+      const { action, summary } = describePermission(p.toolName, p.input);
+      return { id: `permission:${p.id}`, kind: "permission", title: `${p.projectName}: ${p.nodeKey} ${action}`, body: brief(summary || p.task), href: runPath(p.projectId, p.runId), projectId: p.projectId };
     }),
     ...inbox.questions.map((q): AttentionItem => {
       const review = (q.context as { review?: { from?: string; kind?: string } }).review;

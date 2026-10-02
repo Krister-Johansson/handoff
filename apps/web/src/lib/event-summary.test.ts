@@ -5,6 +5,13 @@ test("summarizes node lifecycle events with node and attempt", () => {
   expect(summarizeEvent({ type: "node.passed", payload: { nodeKey: "coder", attempt: 2 } })).toBe("coder, attempt 2");
 });
 
+test("summarizes a call an earlier Always allow in the run covered, by what it did and the rule", () => {
+  const input = { command: "until grep -q finished /tmp/e2e.log; do sleep 5; done", description: "e2e run finishing (re-arm)" };
+  expect(summarizeEvent({ type: "permission.auto_allowed", payload: { id: "p1", toolName: "Monitor", input, rule: "Monitor" } })).toBe(
+    "Allowed by Monitor, chosen earlier in this run: e2e run finishing (re-arm) · until grep -q finished /tmp/e2e.log; do sleep 5; done",
+  );
+});
+
 test("summarizes an edge by its endpoints", () => {
   expect(summarizeEvent({ type: "edge.taken", payload: { from: "coder", to: "pr" } })).toBe("coder to pr");
 });

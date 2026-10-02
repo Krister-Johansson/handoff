@@ -4,10 +4,10 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import type { CliRunOptions, CliRunRequest, CliRunResult } from "@handoff/cli-adapter";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { eq, nodeExecutions, notifications, permissionRequests, projects, type Caps } from "@handoff/db";
+import { and, eq, events, nodeExecutions, notifications, permissionRequests, projects, type Caps } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
-import { decidePermission } from "../operations.ts";
+import { decidePermission, repairNodeExecution } from "../operations.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { outputs, scripted } from "../testing/scripted.ts";
 import { PERMISSION_TOOL } from "./broker.ts";
@@ -112,4 +112,72 @@ test("a request nobody answered expires when the step ends", async () => {
   const [row] = await db.select().from(permissionRequests).where(eq(permissionRequests.runId, run.id));
   expect(row!.status).toBe("expired");
   await expect(decidePermission(db, ID, { allow: true, decidedBy: "late" })).rejects.toThrow(/already/);
+});
+
+const MONITOR = { command: "until grep -q finished /tmp/e2e.log; do sleep 5; done", timeout_ms: 600000, description: "e2e run finishing (re-arm)" };
+
+/**
+ * A planner whose Claude Code asks permission for each call in turn, the next once the last was
+ * answered, and records the answers. `person` answers a request when it waits for one.
+ */
+function askingEach(calls: { id: string; toolName: string; input: Record<string, unknown> }[], person: (id: string) => Promise<void>, result: Partial<CliRunResult> = {}) {
+  const answers: Record<string, unknown> = {};
+  const cli = new FakeCliExecutor([
+    async (request: CliRunRequest, options: CliRunOptions): Promise<CliRunResult> => {
+      const dir = (JSON.parse(readFileSync(request.mcpConfigPath!, "utf8")) as McpConfig).mcpServers.handoff!.args[1]!;
+      for (const call of calls) {
+        writeFileSync(join(dir, `${call.id}.request.json`), JSON.stringify(call));
+        const row = await until(async () => (await db.select().from(permissionRequests).where(eq(permissionRequests.id, call.id)))[0]);
+        if (row.status === "pending") await person(call.id);
+        const response = join(dir, `${call.id}.response.json`);
+        answers[call.id] = await until(() => (existsSync(response) ? JSON.parse(readFileSync(response, "utf8")) : undefined));
+      }
+      await options.onSessionId?.(request.session.id);
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: outputs.planner, validated: outputs.planner, ...result };
+    },
+  ]);
+  return { cli, answers };
+}
+
+test("a Monitor prompt's notification reads as its description and command, not as JSON", async () => {
+  const { cli } = askingEach([{ id: ID, toolName: "Monitor", input: MONITOR }], (id) => decidePermission(db, id, { allow: true, decidedBy: "krister" }).then(() => {}));
+  const run = await runPlanner(cli);
+  const [note] = await db.select().from(notifications).where(eq(notifications.runId, run.id));
+  expect(note!.body).toBe("e2e run finishing (re-arm) · until grep -q finished /tmp/e2e.log; do sleep 5; done");
+});
+
+test("after Always allow, the step's next matching call is allowed without asking, and the run records it", async () => {
+  const again = "3f6b2a10-0000-4000-8000-000000000002";
+  const other = "3f6b2a10-0000-4000-8000-000000000003";
+  const { cli, answers } = askingEach(
+    [
+      { id: ID, toolName: "Monitor", input: MONITOR },
+      { id: again, toolName: "Monitor", input: { ...MONITOR, description: "e2e run finishing (re-arm 2)" } },
+      { id: other, toolName: "Bash", input: { command: "rm -rf dist" } },
+    ],
+    (id) => decidePermission(db, id, id === ID ? { allow: true, decidedBy: "krister", rule: "Monitor" } : { allow: false, decidedBy: "krister" }).then(() => {}),
+  );
+  const run = await runPlanner(cli);
+  expect(answers).toEqual({ [ID]: { behavior: "allow" }, [again]: { behavior: "allow" }, [other]: { behavior: "deny" } });
+  const [auto] = await db.select().from(permissionRequests).where(eq(permissionRequests.id, again));
+  expect(auto).toMatchObject({ status: "allowed", rule: "Monitor", decidedBy: "always allow" });
+  // Only the calls a person answered told them.
+  expect(await db.select().from(notifications).where(eq(notifications.runId, run.id))).toHaveLength(2);
+  const recorded = await db.select().from(events).where(and(eq(events.runId, run.id), eq(events.type, "permission.auto_allowed")));
+  expect(recorded.map((e) => e.payload)).toEqual([{ id: again, toolName: "Monitor", input: { ...MONITOR, description: "e2e run finishing (re-arm 2)" }, rule: "Monitor" }]);
+});
+
+test("a later attempt of the node gets the run's Always allow rules in its allowed tools", async () => {
+  const { cli } = askingEach([{ id: ID, toolName: "Monitor", input: MONITOR }], (id) => decidePermission(db, id, { allow: true, decidedBy: "krister", rule: "Monitor" }).then(() => {}), {
+    outcome: "error",
+    exitCode: 1,
+    stderrTail: "boom",
+  });
+  const run = await runPlanner(cli);
+  const [failed] = await db.select().from(nodeExecutions).where(and(eq(nodeExecutions.runId, run.id), eq(nodeExecutions.status, "failed")));
+  expect(cli.requests[0]!.allowedTools).not.toContain("Monitor");
+  cli.push({ output: outputs.planner });
+  await repairNodeExecution(db, failed!.id, {});
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 10, timeoutMs: 60_000, permissions: { db } }), coder: scripted({ kind: "waiting", wait: { kind: "human", token: crypto.randomUUID() } }) }));
+  expect(cli.requests[1]!.allowedTools).toContain("Monitor");
 });

@@ -288,6 +288,18 @@ test("get_run lists a pending permission prompt with the full command", async ()
   expect(permissions).toEqual([{ id, node: "coder", attempt: 1, tool: "Bash", asks: "asks to run a command", detail: command, input: { command }, asked_at: expect.any(String) }]);
 });
 
+test("get_run describes a Monitor prompt by its description and command, next to the full input", async () => {
+  const runId = await startedRun();
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running", waitingOn: "permission" });
+  const input = { command: "until grep -q finished /tmp/e2e.log; do sleep 5; done", timeout_ms: 600000, description: "e2e run finishing (re-arm)" };
+  const id = "3f6b2a10-0000-4000-8000-000000000005";
+  await db.insert(permissionRequests).values({ id, runId, nodeExecutionId: coder.id, toolName: "Monitor", input });
+  const { permissions } = await call("get_run", { run_id: runId });
+  expect(permissions).toEqual([
+    { id, node: "coder", attempt: 1, tool: "Monitor", asks: "asks to use Monitor", detail: "e2e run finishing (re-arm)\nuntil grep -q finished /tmp/e2e.log; do sleep 5; done", input, asked_at: expect.any(String) },
+  ]);
+});
+
 test("get_run on a Try it gate has the app URL, the criteria and the demo's notes", async () => {
   const runId = await startedRun();
   await seedExecution(db, runId, { nodeKey: "demo", nodeType: "demo", status: "passed", output: { summary: "Created a task and reloaded the page.", shots: [] } });
