@@ -49,7 +49,6 @@ test("under 640 px the timeline lists items with their dates and waiting-on text
 
   expect(screen.queryByRole("grid")).not.toBeInTheDocument();
   expect(container.querySelector("[data-arrow]")).toBeNull();
-  expect(screen.getByText("Sep 7 to Nov 1, today Oct 2")).toBeInTheDocument();
 
   const list = screen.getByRole("list", { name: "Timeline" });
   const items = within(list).getAllByRole("listitem");

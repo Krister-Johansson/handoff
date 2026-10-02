@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TimelineRun } from "@/lib/plan/schedule";
 import { parsePlanFilters } from "@/lib/plan/filters";
@@ -239,8 +240,9 @@ test("the schedule dialog is prefilled, refuses a Target before Start, and saves
   expect(await within(empty).findByText("This Project has no Start and Target fields.")).toBeInTheDocument();
 });
 
-test("the Weeks and Months zoom and the Today button live in the URL and scroll to today", () => {
+test("the chart opens on today with Weeks under ten weeks of dates, its Today button scrolls back, and Months shows quarters", () => {
   const scrollTo = vi.spyOn(Element.prototype, "scrollTo");
+  const todayRef: { current: (() => void) | null } = { current: null };
   const { unmount } = render(
     <PlanTimeline
       projectId="p1"
@@ -255,24 +257,19 @@ test("the Weeks and Months zoom and the Today button live in the URL and scroll 
       graphs={["loop"]}
       graphName="loop"
       readAt={NOW.getTime()}
+      todayRef={todayRef}
     />,
   );
-  // Under ten weeks of dates: Weeks by default, and the chart opens on today.
-  const zoom = screen.getByRole("radiogroup", { name: "Zoom" });
-  expect(within(zoom).getByRole("radio", { name: "Weeks" })).toHaveAttribute("aria-checked", "true");
   expect(screen.getByText("W40")).toBeInTheDocument();
   expect(scrollTo).toHaveBeenCalledTimes(1);
 
-  fireEvent.click(within(zoom).getByRole("radio", { name: "Months" }));
-  expect(router.replace).toHaveBeenCalledWith("/projects/p1/plan?view=timeline&epic=12&zoom=months", { scroll: false });
-
-  fireEvent.click(screen.getByRole("button", { name: "Today" }));
+  act(() => todayRef.current?.());
   expect(scrollTo).toHaveBeenCalledTimes(2);
   expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: "smooth", left: expect.any(Number) }));
   unmount();
+  expect(todayRef.current).toBeNull();
 
   renderTimeline({ zoom: "months" });
-  expect(within(screen.getByRole("radiogroup", { name: "Zoom" })).getByRole("radio", { name: "Months" })).toHaveAttribute("aria-checked", "true");
   expect(screen.getByText("Q4 2026")).toBeInTheDocument();
   expect(screen.queryByText("W40")).not.toBeInTheDocument();
   scrollTo.mockRestore();

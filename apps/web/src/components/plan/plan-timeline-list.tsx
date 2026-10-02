@@ -1,17 +1,16 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { CalendarIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
 import type { PlanTask } from "@/server/plan";
 import { Button } from "@/components/ui/button";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+
 import type { TimelineItem } from "@/lib/plan/schedule";
 import { COLUMN_TONE, taskColumn } from "@/lib/plan/task";
 import { chartRange, itemsOf, KIND_NAME, lacksDateFields, progressOf, scheduleNotes, spanText, stripDates } from "@/lib/plan/timeline-rows";
-import { addDays, defaultZoom, shortDay, timeScale, type TimeScale, type Zoom } from "@/lib/plan/timeline-scale";
-import { planPath } from "@/lib/paths";
+import { addDays, defaultZoom, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
+
 import { cn } from "@/lib/utils";
 import { KindBadge, StatusPill } from "./plan-status";
 import { IssueTitle } from "./plan-task-parts";
@@ -61,8 +60,7 @@ function MiniBar({ row, entry, scale, todayX }: { row: ListRow; entry: TimelineI
  * the late, waiting or overdue chips and the latest run's dates. There are no arrows; the chips say
  * what each task waits on.
  */
-export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, filters, readAt }: TimelineProps) {
-  const router = useRouter();
+export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, readAt }: TimelineProps) {
   const [scheduling, setScheduling] = useState<PlanItem>();
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
@@ -73,23 +71,6 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        <span className="text-xs text-muted-foreground">
-          {shortDay(scale.range.start)} to {shortDay(scale.range.end)}, today {shortDay(timeline.today)}
-        </span>
-        <ToggleGroup
-          type="single"
-          variant="outline"
-          size="sm"
-          className="ml-auto"
-          value={scale.zoom}
-          onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: v as Zoom }), { scroll: false })}
-          aria-label="Zoom"
-        >
-          <ToggleGroupItem value="weeks">Weeks</ToggleGroupItem>
-          <ToggleGroupItem value="months">Months</ToggleGroupItem>
-        </ToggleGroup>
-      </div>
       {lacksDateFields(project) && <DateFieldsBanner projectId={projectId} project={project} />}
       <ul aria-label="Timeline">
         {listRows(epics, unparented).map((row) => {

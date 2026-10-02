@@ -2,24 +2,14 @@
 
 import { Fragment, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, ChevronRightIcon, ExternalLinkIcon, LocateFixedIcon, MoreHorizontalIcon, MoveHorizontalIcon } from "lucide-react";
-import type { PlanItem, PlanProject } from "@handoff/github";
+import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, ChevronRightIcon, ExternalLinkIcon, MoreHorizontalIcon } from "lucide-react";
+import type { PlanItem } from "@handoff/github";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { DaySpan, TimelineItem } from "@/lib/plan/schedule";
 import { BAR_TONE, prNumberOf, taskColumn } from "@/lib/plan/task";
 import {
@@ -36,17 +26,19 @@ import {
   timelineRows,
   type TimelineRow,
 } from "@/lib/plan/timeline-rows";
-import { addDays, defaultZoom, shortDay, timeScale, type TimeScale, type Zoom } from "@/lib/plan/timeline-scale";
-import { planPath, runPath } from "@/lib/paths";
+import { matchesQuery } from "@/lib/plan/search";
+import { addDays, defaultZoom, shortDay, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
+import { runPath } from "@/lib/paths";
 import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { KindBadge, StatusPill } from "./plan-status";
+import { useSearchQuery } from "./plan-search";
 import { IssueTitle } from "./plan-task-parts";
 import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
 import { DateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
-import { useCollapsed } from "./use-collapsed";
+import { useRowsOpen } from "./use-collapsed";
 
 const LABEL_WIDTH = 280;
 /** A bar wider than this repeats the title inside it. */
@@ -379,61 +371,6 @@ function RowLabel({ row, entry, window, projectId, start, onToggle, onSchedule }
   );
 }
 
-const LEGEND: { label: string; swatch: string }[] = [
-  ...(["Shaping", "Ready", "Running", "In review", "Done"] as const).map((c) => ({ label: c, swatch: cn("h-2 rounded-[2px] border", BAR_TONE[c]) })),
-  { label: "Derived", swatch: "h-2 rounded-[2px] border border-dashed border-muted-foreground/60" },
-  { label: "Run", swatch: "h-1 rounded-[2px] bg-active-dot" },
-  { label: "Blocks", swatch: "h-0 border-t-[1.5px] border-muted-foreground" },
-  { label: "Late", swatch: "h-0 border-t-[1.5px] border-danger-dot" },
-];
-
-/** The chart's header: the legend, then Today, the zoom and the menu that points to GitHub's roadmap. */
-function ChartHeader({ zoom, project, onZoom, onToday }: { zoom: Zoom; project: PlanProject; onZoom: (zoom: Zoom) => void; onToday: () => void }) {
-  return (
-    <div className="flex flex-wrap items-center gap-3.5 border-b py-2 pr-2.5 pl-3.5">
-      <ul aria-label="Legend" className="flex flex-wrap items-center gap-3 text-[11.5px] text-muted-foreground">
-        {LEGEND.map((l) => (
-          <li key={l.label} className="inline-flex items-center gap-1.5">
-            <span aria-hidden className={cn("w-3.5 shrink-0", l.swatch)} />
-            {l.label}
-          </li>
-        ))}
-      </ul>
-      <div className="ml-auto flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={onToday}>
-          <LocateFixedIcon data-icon="inline-start" />
-          Today
-        </Button>
-        <ToggleGroup type="single" variant="outline" size="sm" value={zoom} onValueChange={(v) => v && onZoom(v as Zoom)} aria-label="Zoom">
-          <ToggleGroupItem value="weeks">Weeks</ToggleGroupItem>
-          <ToggleGroupItem value="months">Months</ToggleGroupItem>
-        </ToggleGroup>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button size="icon-sm" variant="ghost" aria-label="Timeline menu">
-              <MoreHorizontalIcon />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuLabel className="flex gap-2 text-xs font-normal text-muted-foreground">
-              <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-              Drag dates on GitHub&apos;s roadmap. This timeline shows the Project; it does not move dates.
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuItem asChild>
-                <a href={project.url}>
-                  <ExternalLinkIcon />
-                  Open {project.title} on GitHub
-                </a>
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
-  );
-}
 
 type UnscheduledGroup = { title: string; items: PlanItem[] };
 
@@ -488,10 +425,10 @@ type PaneView = { left: number; width: number };
  * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
  * arrows and the rows at their other ends strong and dims the rest.
  */
-function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, filters, readAt, graphs, graphName }: TimelineProps) {
-  const router = useRouter();
+function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, readAt, graphs, graphName, todayRef, searchOpen }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
-  const collapsed = useCollapsed(projectId);
+  const rowsOpen = useRowsOpen(projectId, searchOpen);
+  const q = useSearchQuery();
   const [scheduling, setScheduling] = useState<PlanItem>();
   const [hovered, setHovered] = useState<number>();
   const [pane, setPane] = useState<PaneView>();
@@ -500,7 +437,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
   const stories = useMemo(() => new Set(epics.flatMap((e) => e.stories.map((s) => s.number))), [epics]);
   const ctx: CardContext = { items, entries, projectId };
 
-  const { rows, height, anchor } = timelineRows(epics, unparented, (key) => !collapsed.has(key), (n) => entries.get(n)?.actual.length ?? 0);
+  const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
   const range = chartRange(timeline);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
@@ -520,6 +457,15 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
   });
   // The chart opens on today, and again when the zoom changes the scale; a refresh keeps the scroll.
   useEffect(() => openOnToday(), [scale.zoom]);
+  // The toolbar's Today button scrolls the chart back to today.
+  const toToday = useEffectEvent(() => scrollToToday("smooth"));
+  useEffect(() => {
+    if (!todayRef) return;
+    todayRef.current = () => toToday();
+    return () => {
+      todayRef.current = null;
+    };
+  }, [todayRef]);
 
   const barOf = (n: number) => {
     const span = entries.get(n)?.planned ?? entries.get(n)?.derived;
@@ -552,12 +498,6 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
-      <ChartHeader
-        zoom={scale.zoom}
-        project={project}
-        onZoom={(next) => router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: next }), { scroll: false })}
-        onToday={() => scrollToToday("smooth")}
-      />
       {lacksDateFields(project) && <DateFieldsBanner projectId={projectId} project={project} />}
       <div className="relative">
         <div ref={scroller} className="overflow-x-auto overscroll-x-contain" onScroll={measure}>
@@ -606,6 +546,7 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
                     aria-label={rowLabel(row)}
                     aria-expanded={row.expanded}
                     data-related={isRelated}
+                    data-match={(row.item && matchesQuery(row.item, q)) || undefined}
                     className={cn("group/row absolute inset-x-0 flex", isHead(row) && "bg-muted/50", isRelated && "bg-active-bg")}
                     style={{ top: row.top, height: row.height }}
                     onPointerEnter={() => setHovered(row.task ? row.task.number : undefined)}
@@ -616,7 +557,8 @@ function TimelineChart({ projectId, project, epics, unparented, timeline, zoom, 
                       window={row.item?.parent !== undefined && stories.has(row.item.parent) ? "story" : "epic"}
                       projectId={projectId}
                       start={{ graphs, graphName }}
-                      onToggle={() => collapsed.toggle(row.key)}
+                      onToggle={() => rowsOpen.toggle(row.key)}
+
                       onSchedule={setScheduling}
                     />
                     <div role="gridcell" className={cn("relative flex-1 border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ minWidth: scale.width }}>

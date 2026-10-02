@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import Link from "next/link";
 import { SearchXIcon } from "lucide-react";
 import type { PlanColumn, PlanView } from "@/server/plan";
@@ -12,7 +12,7 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { formatAgo } from "@/lib/format";
 import { planPath } from "@/lib/paths";
 import { filterPlan, isFiltered, type NarrowedPlan, type PlanFilters as Filters } from "@/lib/plan/filters";
-import { deriveSpans } from "@/lib/plan/schedule";
+import { deriveSpans, type Timeline } from "@/lib/plan/schedule";
 import { searchPlan, type SearchResult } from "@/lib/plan/search";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import type { PlanViewName } from "@/lib/project-tab";
@@ -25,6 +25,7 @@ import { PlanSearchField, SearchQuery } from "./plan-search";
 import { PlanTimeline } from "./plan-timeline";
 import { ExpandCollapse, PlanToolbar } from "./plan-toolbar";
 import { PlanTree } from "./plan-tree";
+import { TimelineControls, useNarrow } from "./timeline-parts";
 import { useCollapsed } from "./use-collapsed";
 
 /** How long the search waits after the last key before it writes ?q= to the URL. */
@@ -85,10 +86,16 @@ type PlanTabProps = {
   me?: string | undefined;
 };
 
-type BodyProps = Omit<PlanTabProps, "activity" | "me"> & { narrowed: NarrowedPlan; found: SearchResult; onClearSearch: () => void };
+type BodyProps = Omit<PlanTabProps, "activity" | "me"> & {
+  narrowed: NarrowedPlan;
+  found: SearchResult;
+  onClearSearch: () => void;
+  timeline: Timeline;
+  todayRef: RefObject<(() => void) | null>;
+};
 
 /** The chosen view of the plan narrowed by the filters and the search, or what to say when there is nothing to show. */
-function PlanBody({ project, plan, view, zoom, filters, narrowed, found, signals, start, readAt, onClearSearch }: BodyProps) {
+function PlanBody({ project, plan, view, zoom, filters, narrowed, found, signals, start, readAt, onClearSearch, timeline, todayRef }: BodyProps) {
   if (plan.epics.length === 0 && plan.unparented.length === 0 && plan.unplanned.length === 0) {
     return <PlanEmpty reason="empty" project={{ id: project.id, name: project.name, repo: `${project.repoOwner}/${project.repoName}` }} />;
   }
@@ -108,10 +115,12 @@ function PlanBody({ project, plan, view, zoom, filters, narrowed, found, signals
           project={plan.project}
           epics={shown.epics}
           unparented={shown.unparented}
-          timeline={plan.timeline ?? deriveSpans([], [], new Date(readAt))}
+          timeline={timeline}
           zoom={zoom}
           filters={filters}
           readAt={readAt}
+          todayRef={todayRef}
+          searchOpen={found.active ? found.open : undefined}
         />
       );
     default: {
@@ -176,6 +185,9 @@ function firstIn(body: HTMLElement | null, match: boolean): HTMLElement | null {
 export function PlanTab({ activity, me, ...props }: PlanTabProps) {
   const { project, plan, view, zoom, filters, readAt, signals } = props;
   const voice = useOptionalVoice();
+  const narrow = useNarrow();
+  const todayRef = useRef<(() => void) | null>(null);
+  const timeline = useMemo(() => plan.timeline ?? deriveSpans([], [], new Date(readAt)), [plan.timeline, readAt]);
   const collapsed = useCollapsed(project.id);
   const body = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useSearchText(filters.q, (q) => planPath(project.id, { view, ...filters, q, zoom }));
@@ -218,10 +230,16 @@ export function PlanTab({ activity, me, ...props }: PlanTabProps) {
             />
           }
           filterButtons={<PlanFilters projectId={project.id} view={view} filters={current} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
+          timeline={
+            view === "timeline" && (
+              <TimelineControls projectId={project.id} filters={current} timeline={timeline} zoom={zoom} narrow={narrow} onToday={() => todayRef.current?.()} />
+            )
+          }
         />
         <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} />
         <div ref={body} onKeyDown={onBodyKeyDown}>
-          <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} />
+          <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} timeline={timeline} todayRef={todayRef} />
+
         </div>
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>{activity && `Last from GitHub: ${activity.summary}, ${formatAgo(activity.receivedAt, new Date(readAt))}`}</span>

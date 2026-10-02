@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -192,4 +192,50 @@ test("Expand all and Collapse all act on every epic, story and block, are off wh
   expect(screen.queryByRole("row", { name: /Task #58/ })).not.toBeInTheDocument();
   // The timeline has no Unplanned block, so it collapses only epics and stories.
   expect(collapsedRows().toSorted()).toEqual(["e10", "e12", "s18", "s40", "s41"]);
+});
+
+test("in Timeline the toolbar holds Today, Weeks or Months and the Legend, the chart starts at its date axis, and the search narrows its rows", async () => {
+  const scrollTo = vi.spyOn(Element.prototype, "scrollTo");
+  renderTab({ view: "timeline", filters: parsePlanFilters({ epic: "12" }) });
+  expect(screen.queryByRole("button", { name: "Timeline menu" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("list", { name: "Legend" })).not.toBeInTheDocument();
+
+  const zoom = screen.getByRole("radiogroup", { name: "Zoom" });
+  expect(within(zoom).getByRole("radio", { name: "Weeks" })).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(within(zoom).getByRole("radio", { name: "Months" }));
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=timeline&epic=12&zoom=months", { scroll: false });
+
+  const opened = scrollTo.mock.calls.length;
+  fireEvent.click(screen.getByRole("button", { name: "Today" }));
+  expect(scrollTo).toHaveBeenCalledTimes(opened + 1);
+  expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: "smooth" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Legend" }));
+  const legend = screen.getByRole("dialog", { name: "Legend" });
+  expect(within(legend).getByText("Derived")).toBeInTheDocument();
+  expect(within(legend).getByText("Drag dates on GitHub's roadmap. This timeline shows the Project; it does not move dates.")).toBeInTheDocument();
+  fireEvent.keyDown(legend, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Legend" })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Legend" })).toHaveFocus());
+
+  fireEvent.change(searchBox(), { target: { value: "#57" } });
+  expect(screen.getByRole("row", { name: "Task #57 Add the migration" })).toBeInTheDocument();
+  expect(screen.queryByRole("row", { name: /Task #58/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("1 match");
+  scrollTo.mockRestore();
+});
+
+test("under 640 px the timeline's toolbar shows the range it lists in place of Today", () => {
+  const wide = window.matchMedia;
+  window.matchMedia = (query: string) =>
+    ({ matches: query === "(max-width: 639px)", media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as MediaQueryList;
+  try {
+    renderTab({ view: "timeline", zoom: "weeks" });
+    expect(screen.getByText(/to .+, today Oct 2$/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Zoom" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Timeline" })).toBeInTheDocument();
+  } finally {
+    window.matchMedia = wide;
+  }
 });
