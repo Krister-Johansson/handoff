@@ -1,6 +1,7 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { wakeByKey } from "@handoff/db";
+import { wakeByKey, type Db } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import type { ExecutorOutcome, ExecutorRegistry, NodeExecutor } from "../types.ts";
@@ -202,6 +203,40 @@ describe("scheduler", () => {
     const cli = events.filter((e) => e.type.startsWith("cli."));
     expect(cli.map((e) => e.type)).toEqual(["cli.system.init", "cli.assistant"]);
     expect(cli.every((e) => e.nodeExecutionId === executions[0]?.id)).toBe(true);
+  });
+
+  test("events a timed flush is still writing when the executor returns are stored before the node passes", async () => {
+    const { run } = await startRun(db, linear);
+    // The first transaction after the executor arms this waits 300ms: it is the timed flush of the emitted event.
+    let holdNext = false;
+    const slow = new Proxy(db, {
+      get(target, prop) {
+        if (prop !== "transaction") {
+          const value: unknown = Reflect.get(target, prop, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (...args: Parameters<Db["transaction"]>) => {
+          if (holdNext) {
+            holdNext = false;
+            await sleep(300);
+          }
+          return target.transaction(...args);
+        };
+      },
+    });
+    const planner: NodeExecutor = {
+      needsWorkdir: false,
+      execute: async (ctx) => {
+        ctx.emit("cli.assistant", { text: "hi" });
+        holdNext = true;
+        await sleep(150);
+        return { kind: "completed", output: plannerOut };
+      },
+    };
+    await runOnce(engineDeps(slow, registry({ planner })));
+    const { types } = await inspect(db, run.id);
+    expect(types).toContain("cli.assistant");
+    expect(types.indexOf("cli.assistant")).toBeLessThan(types.indexOf("node.passed"));
   });
 
   test("a lost lease discards the executor's result", async () => {

@@ -249,12 +249,15 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
   }, Math.max(50, Math.floor(deps.leaseMs / 3)));
 
   let buffer: NewEvent[] = [];
-  const flush = async () => {
-    if (buffer.length === 0) return;
-    const batch = buffer;
-    buffer = [];
-    await db.transaction((tx) => appendEvents(tx, run.id, batch));
-  };
+  // Flushes run one after another, so the last one waits for a timed flush still writing.
+  let flushing: Promise<void> = Promise.resolve();
+  const flush = () =>
+    (flushing = flushing.catch(() => {}).then(async () => {
+      if (buffer.length === 0) return;
+      const batch = buffer;
+      buffer = [];
+      await db.transaction((tx) => appendEvents(tx, run.id, batch));
+    }));
   const flusher = setInterval(() => void flush().catch((e) => deps.log?.("event flush failed", String(e))), EVENT_FLUSH_MS);
 
   const stagingDir = join(deps.stagingRoot, row.id);
