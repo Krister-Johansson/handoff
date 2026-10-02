@@ -6,8 +6,9 @@ type GraphNode = { key: string; attributes: { type: NodeType; config?: Record<st
 
 /**
  * Lets a node use a tool the CLI denied it: adds the permission rule to that node in the graph's
- * latest version, starting from the node's default tools, and saves a new version. The run that hit
- * the denial stays on its pinned version; the next run gets the rule.
+ * latest version, starting from the node's default tools, and saves a new version, so the next run gets
+ * the rule. The run that asked stays on its pinned version: the rule recorded on its permission request
+ * covers the rest of that run.
  */
 export async function allowToolForNode(db: Db, input: { runId: string; executionId: string; rule: string }) {
   const [row] = await db

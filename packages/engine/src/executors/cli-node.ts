@@ -228,9 +228,10 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           ...(options.permissions.caps ? { caps: options.permissions.caps } : {}),
           onRequest: async (request) => {
             ctx.emit("permission.requested", request);
-            const { action, detail } = describePermission(request.toolName, request.input);
-            await ctx.notify("permission", { title: `${ctx.project.name}: ${ctx.node.key} ${action}`, body: brief(detail || ctx.run.task), href: runPath(ctx.project.id, ctx.run.id) });
+            const { action, summary } = describePermission(request.toolName, request.input);
+            await ctx.notify("permission", { title: `${ctx.project.name}: ${ctx.node.key} ${action}`, body: brief(summary || ctx.run.task), href: runPath(ctx.project.id, ctx.run.id) });
           },
+          onAutoAllowed: (request) => ctx.emit("permission.auto_allowed", request),
         });
       }
       const base: Omit<CliRunRequest, "prompt" | "session" | "maxTurns"> = {

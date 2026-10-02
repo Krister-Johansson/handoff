@@ -33,6 +33,7 @@ import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary }
 import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
 import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
+import { runAllowRules } from "../permissions/broker.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider, WorkdirSpec } from "../types.ts";
 import { askAboutPaths, completeFailed, completePassed, failAndRetry, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
@@ -316,7 +317,10 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       const sentBackTo = graph.outEdges(node.key).filter((e) => e.loop).map((e) => e.target);
       const packet = selectContext(node, state, row, sentBackTo);
       if (workdir) packet.environment = { branch: run.branchName, setupCommand: project.setupCommand, ...(project.agentNotes ? { agentNotes: project.agentNotes } : {}) };
-      if (library?.allowedTools.length) packet.constraints.allowedTools = [...new Set([...packet.constraints.allowedTools, ...library.allowedTools])];
+      // A person's Always allow in this run covers the node's later attempts too, though the run keeps its graph version.
+      const allowedInRun = graph.executorKind(node.key) === "cli" ? await runAllowRules(db, run.id, node.key) : [];
+      const extraTools = [...(library?.allowedTools ?? []), ...allowedInRun];
+      if (extraTools.length) packet.constraints.allowedTools = [...new Set([...packet.constraints.allowedTools, ...extraTools])];
       await db.update(nodeExecutions).set({ contextPacket: packet }).where(eq(nodeExecutions.id, row.id));
       outcome = await executor.execute({
         run,

@@ -139,7 +139,8 @@ const PermissionAnswerSchema = z.discriminatedUnion("decision", [
 ]);
 
 /**
- * Answers a step's permission request. Always allow also adds the rule to the node in the graph's next
+ * Answers a step's permission request. Always allow records the rule on the request, so the node's
+ * matching calls and later attempts in this run do not ask, and adds it to the node in the graph's next
  * version, so later runs do not ask.
  */
 export async function answerPermissionAction(input: z.input<typeof PermissionAnswerSchema>): Promise<InboxActionState> {

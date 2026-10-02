@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { redactSecrets } from "@handoff/core";
-import { and, eq, inArray, nodeExecutions, permissionRequests, resumeAfterPermission, waitOnPermission, type Caps, type Db } from "@handoff/db";
+import { allowedBy, redactSecrets } from "@handoff/core";
+import { and, eq, inArray, isNotNull, nodeExecutions, permissionRequests, resumeAfterPermission, waitOnPermission, type Caps, type Db } from "@handoff/db";
 
 /** The MCP tool Claude Code asks for permission through: the `approve` tool of handoff's permission server. */
 export const PERMISSION_TOOL = "mcp__handoff__approve";
@@ -26,9 +26,23 @@ export type PermissionWatch = {
 type Request = { id: string; toolName: string; input: Record<string, unknown> };
 
 /**
+ * The rules a person chose Always allow for in this run, for one node: they cover the node's later calls
+ * and later attempts in the run, which stays on the graph version it started with.
+ */
+export async function runAllowRules(db: Db, runId: string, nodeKey: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ rule: permissionRequests.rule })
+    .from(permissionRequests)
+    .innerJoin(nodeExecutions, eq(nodeExecutions.id, permissionRequests.nodeExecutionId))
+    .where(and(eq(permissionRequests.runId, runId), eq(nodeExecutions.nodeKey, nodeKey), eq(permissionRequests.status, "allowed"), isNotNull(permissionRequests.rule)));
+  return rows.map((r) => r.rule!).sort();
+}
+
+/**
  * Watches a step's permission folder while Claude Code runs. Each request the permission server writes
  * is recorded, and `onRequest` tells the person. Once they answer, the answer is written back for the
- * server to hand to Claude Code.
+ * server to hand to Claude Code. A request one of the run's Always allow rules for the node covers is
+ * allowed at once, and `onAutoAllowed` records it.
  */
 export function watchPermissions(
   db: Db,
@@ -37,6 +51,7 @@ export function watchPermissions(
     executionId: string;
     dir: string;
     onRequest: (request: Request) => void | Promise<void>;
+    onAutoAllowed?: (request: Request & { rule: string }) => void | Promise<void>;
     intervalMs?: number;
     /** The executor caps a step must fit in again before its answer goes back. Without them, it goes back at once. */
     caps?: Partial<Caps>;
@@ -50,6 +65,11 @@ export function watchPermissions(
   const askedAt = new Map<string, number>();
   const timeoutMs = step.timeoutMs ?? PERMISSION_TIMEOUT_MS;
   let ticking: Promise<void> = Promise.resolve();
+  let nodeKey: string | undefined;
+  const rulesOfRun = async () => {
+    nodeKey ??= (await db.select({ nodeKey: nodeExecutions.nodeKey }).from(nodeExecutions).where(eq(nodeExecutions.id, step.executionId)))[0]?.nodeKey;
+    return nodeKey ? runAllowRules(db, step.runId, nodeKey) : [];
+  };
 
   const tick = async () => {
     for (const file of existsSync(step.dir) ? readdirSync(step.dir) : []) {
@@ -60,6 +80,17 @@ export function watchPermissions(
       // What the person sees, and what is stored, never carries a token the agent put in a command.
       const raw = JSON.parse(readFileSync(join(step.dir, file), "utf8")) as Request;
       const request = { ...raw, input: JSON.parse(redactSecrets(JSON.stringify(raw.input ?? {}))) as Record<string, unknown> };
+      // Matched against what the agent sent, not the redacted copy, which is what the CLI runs.
+      const rule = allowedBy(await rulesOfRun(), raw.toolName, raw.input ?? {});
+      if (rule) {
+        await db
+          .insert(permissionRequests)
+          .values({ id, runId: step.runId, nodeExecutionId: step.executionId, toolName: request.toolName, input: request.input, status: "allowed", rule, decidedBy: "always allow", decidedAt: new Date() })
+          .onConflictDoNothing();
+        writeFileSync(join(step.dir, `${id}.response.json`), JSON.stringify({ behavior: "allow" }));
+        await step.onAutoAllowed?.({ id, toolName: request.toolName, input: request.input, rule });
+        continue;
+      }
       await db
         .insert(permissionRequests)
         .values({ id, runId: step.runId, nodeExecutionId: step.executionId, toolName: request.toolName, input: request.input })

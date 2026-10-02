@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, nodeExecutions, questions, runs, sql } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, permissionRequests, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { dismissAttention, listAttention } from "./attention";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
@@ -122,4 +122,16 @@ test("a dismissed failure hides only that failure: the run's next failure and it
   await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, run.id));
   await db.transaction((tx) => appendEvents(tx, run.id, [{ type: "run.finish", payload: { notify: true } }]));
   expect((await listAttention(db)).map((i) => i.id)).toEqual([`finished:${run.id}`]);
+});
+
+test("a permission prompt reads as its description and command, not as JSON", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add a CHANGELOG.md" });
+  const coder = await seedExecution(db, run.id, { nodeKey: "coder-1", status: "running", waitingOn: "permission" });
+  const input = { command: "until grep -q finished /tmp/e2e.log; do sleep 5; done", timeout_ms: 600000, description: "e2e run finishing (re-arm)" };
+  await db.insert(permissionRequests).values({ id: "3f6b2a10-0000-4000-8000-000000000001", runId: run.id, nodeExecutionId: coder.id, toolName: "Monitor", input });
+  expect(await listAttention(db)).toEqual([
+    expect.objectContaining({ kind: "permission", title: "sandbox: coder-1 asks to use Monitor", body: "e2e run finishing (re-arm) · until grep -q finished /tmp/e2e.log; do sleep 5; done" }),
+  ]);
 });
