@@ -40,3 +40,23 @@ test("FakeProjects shapes a plan in its Project and shares issue state with Fake
   expect(await projects.setStatus(repo, project.number, 50, "Shaping", { add: true })).toBe("set");
   expect(await projects.getStatus(repo, project.number, 50)).toBe("Shaping");
 });
+
+test("FakeProjects keeps Start and Target on items, and a Project without the date fields refuses them until ensureDateFields adds them", async () => {
+  const github = new FakeGitHub();
+  const projects = new FakeProjects(github);
+  const project = await projects.createProject("octo", repo, "sample plan");
+  expect(project.dateFields).toEqual({ start: expect.any(String), target: expect.any(String) });
+
+  const task = await projects.createIssue(repo, { project: project.number, title: "Add the column", body: "brief", labels: ["task"], start: "2026-10-06", target: "2026-10-09" });
+  expect(await projects.setDates(repo, project.number, task.number, { target: null })).toBe("set");
+  expect(await projects.setDates(repo, project.number, 99, { start: "2026-10-06" })).toBe("not-in-project");
+  const [item] = await projects.listItems("octo", project.number, repo);
+  expect([item?.start, item?.target]).toEqual(["2026-10-06", undefined]);
+
+  // A Project adopted from elsewhere has no date fields until setup adds them.
+  projects.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
+  expect(await projects.setDates(repo, project.number, task.number, { target: "2026-10-09" })).toBe("no-field");
+  expect(await projects.ensureDateFields("octo", project.number)).toEqual({ start: expect.any(String), target: expect.any(String) });
+  expect(await projects.setDates(repo, project.number, task.number, { target: "2026-10-09" })).toBe("set");
+  expect((await projects.getProject("octo", project.number))?.dateFields?.target).toEqual(expect.any(String));
+});

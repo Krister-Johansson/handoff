@@ -84,6 +84,7 @@ query IssuePlan($owner: String!, $name: String!, $number: Int!) {
             owner {
               id
             }
+            ...PlanDateFields
             field(name: "Status") {
               __typename
               ... on ProjectV2SingleSelectField {

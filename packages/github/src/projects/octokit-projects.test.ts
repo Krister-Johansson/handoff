@@ -71,6 +71,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       assignees: [],
       subIssues: { total: 1, completed: 0 },
       blockedBy: [],
+      blockers: [],
       prNumbers: [],
       updatedAt: "2026-10-01T10:00:00Z",
     },
@@ -86,6 +87,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       assignees: [],
       subIssues: { total: 2, completed: 1 },
       blockedBy: [],
+      blockers: [],
       prNumbers: [],
       updatedAt: "2026-10-01T10:00:00Z",
     },
@@ -101,6 +103,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       assignees: ["ann"],
       subIssues: { total: 0, completed: 0 },
       blockedBy: [3],
+      blockers: [3, 4],
       prNumbers: [40],
       updatedAt: "2026-10-02T09:00:00Z",
     },
@@ -116,6 +119,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       assignees: [],
       subIssues: { total: 0, completed: 0 },
       blockedBy: [],
+      blockers: [],
       prNumbers: [],
       updatedAt: "2026-10-01T10:00:00Z",
     },
@@ -139,6 +143,28 @@ test("listItems skips draft issues, pull requests and issues of other repositori
   expect((await projects.listItems("octo", 3, repo)).map((i) => i.number)).toEqual([7]);
 });
 
+test("listItems reads Start and Target as YYYY-MM-DD and an iteration's title, start and duration", async () => {
+  const date = (value: string) => ({ __typename: "ProjectV2ItemFieldDateValue", date: value });
+  const dated = { ...issueItem(20), start: date("2026-10-06"), target: date("2026-10-17") };
+  const startOnly = { ...issueItem(21), start: date("2026-10-20"), target: null };
+  const sprint = {
+    ...issueItem(22),
+    iteration: { __typename: "ProjectV2ItemFieldIterationValue", title: "Sprint 3", startDate: "2026-10-05", duration: 14 },
+  };
+  // A field named Start that is not a date field answers with another value type: handoff reads no date from it.
+  const textStart = { ...issueItem(23), start: { __typename: "ProjectV2ItemFieldTextValue" } };
+  const { fetch } = fakeGraphql({ PlanItems: () => page([dated, startOnly, sprint, textStart], null, false) });
+  const projects = port(fetch);
+
+  const items = await projects.listItems("octo", 3, repo);
+  expect(items.map((i) => ({ number: i.number, start: i.start, target: i.target, iteration: i.iteration }))).toEqual([
+    { number: 20, start: "2026-10-06", target: "2026-10-17", iteration: undefined },
+    { number: 21, start: "2026-10-20", target: undefined, iteration: undefined },
+    { number: 22, start: undefined, target: undefined, iteration: { title: "Sprint 3", startDate: "2026-10-05", duration: 14 } },
+    { number: 23, start: undefined, target: undefined, iteration: undefined },
+  ]);
+});
+
 const statusField = {
   __typename: "ProjectV2SingleSelectField",
   id: "F_status",
@@ -150,7 +176,17 @@ const statusField = {
     { id: "o_done", name: "Done" },
   ],
 };
-const planProject = (number: number, ownerId = "U_octo") => ({ id: `PVT_${number}`, number, owner: { id: ownerId }, field: statusField });
+/** A Project field as `field(name:)` answers it: a date field by default. */
+const projectField = (id: string, dataType = "DATE") => ({ __typename: "ProjectV2Field", id, dataType });
+/** A Project with handoff's Status options and, unless `dates` is false, the Start and Target date fields. */
+const planProject = (number: number, ownerId = "U_octo", dates = true) => ({
+  id: `PVT_${number}`,
+  number,
+  owner: { id: ownerId },
+  field: statusField,
+  start: dates ? projectField("F_start") : null,
+  target: dates ? projectField("F_target") : null,
+});
 
 /** The IssuePlan answer for an issue that is an item of the given Projects. */
 function issuePlan(number: number, items: { id: string; project: ReturnType<typeof planProject>; status?: string }[], over: Record<string, unknown> = {}) {
@@ -212,7 +248,7 @@ test("setStatus with add adds the issue to the Project first", async () => {
   ]);
 });
 
-test("createProject creates a user Project, renames the Status options keeping Done, links the repository and returns the option ids", async () => {
+test("createProject creates a user Project, renames the Status options keeping Done, adds the Start and Target date fields, links the repository and returns the ids", async () => {
   const defaults = {
     __typename: "ProjectV2SingleSelectField",
     id: "F_status",
@@ -237,6 +273,7 @@ test("createProject creates a user Project, renames the Status options keeping D
     PlanOwnerIds: () => ({ user: { id: "U_octo" }, repository: { id: "R_sample" } }),
     CreatePlanProject: () => ({ createProjectV2: { projectV2: { id: "PVT_9", number: 9, url: "https://github.com/users/octo/projects/9", title: "sample plan", field: defaults } } }),
     SetStatusOptions: () => ({ updateProjectV2Field: { projectV2Field: renamed } }),
+    CreatePlanDateField: (v) => ({ createProjectV2Field: { projectV2Field: { __typename: "ProjectV2Field", id: `F_${String(v.name).toLowerCase()}`, dataType: "DATE" } } }),
     LinkPlanRepository: () => ({ linkProjectV2ToRepository: { repository: { id: "R_sample" } } }),
   });
   const projects = port(fetch);
@@ -246,8 +283,13 @@ test("createProject creates a user Project, renames the Status options keeping D
     url: "https://github.com/users/octo/projects/9",
     title: "sample plan",
     statusOptions: { Shaping: "o_s", Ready: "o_r", Running: "o_run", "In review": "o_rev", Done: "o_done" },
+    dateFields: { start: "F_start", target: "F_target" },
   });
-  expect(operations.map((o) => o.operation)).toEqual(["PlanOwnerIds", "CreatePlanProject", "SetStatusOptions", "LinkPlanRepository"]);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanOwnerIds", "CreatePlanProject", "SetStatusOptions", "CreatePlanDateField", "CreatePlanDateField", "LinkPlanRepository"]);
+  expect(operations.filter((o) => o.operation === "CreatePlanDateField").map((o) => o.variables)).toEqual([
+    { projectId: "PVT_9", name: "Start" },
+    { projectId: "PVT_9", name: "Target" },
+  ]);
   expect(operations[0]!.variables).toEqual({ login: "octo", owner: "octo", name: "sample" });
   expect(operations[1]!.variables).toEqual({ ownerId: "U_octo", title: "sample plan" });
   const options = (operations[2]!.variables.options as { id?: string; name: string; color: string; description: string }[]).map(({ id, name, color, description }) => ({ id, name, color, description }));
@@ -256,7 +298,7 @@ test("createProject creates a user Project, renames the Status options keeping D
   // Done keeps its option id, colour and description, so GitHub's "Item closed" workflow still finds it.
   expect(options[4]).toEqual({ id: "o_done", name: "Done", color: "PURPLE", description: "This has been completed" });
   expect(options.slice(0, 4).every((o) => o.id === undefined)).toBe(true);
-  expect(operations[3]!.variables).toEqual({ projectId: "PVT_9", repositoryId: "R_sample" });
+  expect(operations.at(-1)!.variables).toEqual({ projectId: "PVT_9", repositoryId: "R_sample" });
 });
 
 test("createIssue sends the parent, the labels and the blockers, and leaves the issue in Shaping", async () => {
@@ -294,6 +336,32 @@ test("createIssue sends the parent, the labels and the blockers, and leaves the 
   expect(sent("SetPlanStatus")).toEqual([{ projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_status", optionId: "o_shaping" }]);
   // The status is written last, after every link is in place.
   expect(operations.at(-1)!.operation).toBe("SetPlanStatus");
+});
+
+test("createIssue sets Start and Target after adding the item", async () => {
+  let added = false;
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] } } }),
+    CreatePlanIssue: () => ({ createIssue: { issue: { id: "I_20", number: 20, url: "https://github.com/octo/sample/issues/20" } } }),
+    IssuePlan: () => issuePlan(20, added ? [{ id: "PVTI_20", project: planProject(3), status: "Shaping" }] : []),
+    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    AddPlanItem: () => {
+      added = true;
+      return { addProjectV2ItemById: { item: { id: "PVTI_20" } } };
+    },
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
+    SetPlanDate: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
+  });
+  const projects = port(fetch);
+
+  await projects.createIssue(repo, { project: 3, title: "Add the migration", body: "A column.", labels: ["task"], start: "2026-10-06", target: "2026-10-09" });
+
+  expect(operations.map((o) => o.operation).slice(-3)).toEqual(["IssuePlan", "SetPlanDate", "SetPlanDate"]);
+  expect(operations.filter((o) => o.operation === "SetPlanDate").map((o) => o.variables)).toEqual([
+    { projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_start", date: "2026-10-06" },
+    { projectId: "PVT_3", itemId: "PVTI_20", fieldId: "F_target", date: "2026-10-09" },
+  ]);
+  expect(operations.findIndex((o) => o.operation === "SetPlanStatus")).toBeLessThan(operations.findIndex((o) => o.operation === "SetPlanDate"));
 });
 
 test("createIssue refuses a label the repository does not have, before creating anything", async () => {
@@ -388,6 +456,8 @@ test("adoptProject links the repository and renames or adds handoff's Status opt
       url: "https://github.com/users/octo/projects/1",
       title: "Untitled",
       statusOptions: { Shaping: "new_0", Ready: "o_2", Running: "new_2", "In review": "o_4", Done: "o_5" },
+      // The Project has no date fields yet; setup_plan adds them with ensureDateFields.
+      dateFields: { start: undefined, target: undefined },
     },
     renamed: [
       { from: "✅ ready", to: "Ready" },
@@ -399,11 +469,23 @@ test("adoptProject links the repository and renames or adds handoff's Status opt
 
 test("adoptProject leaves a Project that already has handoff's options and is linked alone", async () => {
   const { fetch, operations } = fakeGraphql({
-    PlanProjectSetup: () => ({ user: { projectV2: userProject(2, "sample plan", statusOptions("Shaping", "Ready", "Running", "In review", "Done", "Parked"), [{ name: "sample", owner: "octo" }]) } }),
+    PlanProjectSetup: () => ({
+      user: {
+        projectV2: {
+          ...userProject(2, "sample plan", statusOptions("Shaping", "Ready", "Running", "In review", "Done", "Parked"), [{ name: "sample", owner: "octo" }]),
+          start: projectField("F_start"),
+          target: projectField("F_target"),
+        },
+      },
+    }),
   });
   const projects = port(fetch);
 
-  expect(await projects.adoptProject("octo", 2, repo)).toMatchObject({ project: { number: 2, statusOptions: { Shaping: "o_0", Done: "o_4" } }, renamed: [], added: [] });
+  expect(await projects.adoptProject("octo", 2, repo)).toMatchObject({
+    project: { number: 2, statusOptions: { Shaping: "o_0", Done: "o_4" }, dateFields: { start: "F_start", target: "F_target" } },
+    renamed: [],
+    added: [],
+  });
   expect(operations.map((o) => o.operation)).toEqual(["PlanProjectSetup"]);
 });
 
@@ -455,7 +537,7 @@ test("lineage walks parent then grandparent with their bodies and kinds", async 
   expect(await projects.lineage(repo, 30)).toEqual([]);
 });
 
-test("getProject reads a user's Project with its Status option ids, and is undefined when GitHub cannot resolve it", async () => {
+test("getProject reads a user's Project with its Status option ids and date field ids, and is undefined when GitHub cannot resolve it", async () => {
   const { fetch } = fakeGraphql({
     PlanProject: (v) =>
       v.number === 3
@@ -470,6 +552,7 @@ test("getProject reads a user's Project with its Status option ids, and is undef
     url: "https://github.com/users/octo/projects/3",
     title: "sample plan",
     statusOptions: { Shaping: "o_shaping", Ready: "o_ready", Running: "o_running", "In review": "o_review", Done: "o_done" },
+    dateFields: { start: "F_start", target: "F_target" },
   });
   expect(await projects.getProject("octo", 99)).toBeUndefined();
 });
@@ -504,4 +587,65 @@ test("setStatus reports no-option when the Project's Status has no such option",
 
   expect(await projects.setStatus(repo, 3, 12, "Ready")).toBe("no-option");
   expect(operations.map((o) => o.operation)).toEqual(["IssuePlan"]);
+});
+
+test("ensureDateFields creates Start and Target once and returns the ids", async () => {
+  let project: Record<string, unknown> = { ...planProject(3), url: "u", title: "t", start: null, target: projectField("F_target") };
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: () => ({ user: { projectV2: project } }),
+    CreatePlanDateField: (v) => {
+      project = { ...project, start: projectField("F_start") };
+      return { createProjectV2Field: { projectV2Field: { __typename: "ProjectV2Field", id: "F_start", dataType: "DATE", name: v.name } } };
+    },
+  });
+  const projects = port(fetch);
+
+  expect(await projects.ensureDateFields("octo", 3)).toEqual({ start: "F_start", target: "F_target" });
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["PlanProject", { login: "octo", number: 3 }],
+    ["CreatePlanDateField", { projectId: "PVT_3", name: "Start" }],
+  ]);
+
+  operations.length = 0;
+  expect(await projects.ensureDateFields("octo", 3)).toEqual({ start: "F_start", target: "F_target" });
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+
+  // A field named Start that is not a date field blocks a date field of that name; handoff says so and creates nothing.
+  project = { ...project, start: projectField("F_text", "TEXT"), target: null };
+  operations.length = 0;
+  await expect(projects.ensureDateFields("octo", 3)).rejects.toThrow(/Start field that is not a date field/);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
+test("setDates writes a date, clears one with null, and reports no-field on a Project without the fields", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: (v) =>
+      v.number === 12
+        ? issuePlan(12, [{ id: "PVTI_3", project: planProject(3) }])
+        : v.number === 13
+          ? issuePlan(13, [{ id: "PVTI_2", project: planProject(2) }])
+          : // A Project with a text field named Start and no Target field.
+            issuePlan(14, [{ id: "PVTI_14", project: { ...planProject(3, "U_octo", false), start: projectField("F_text", "TEXT") } }]),
+    SetPlanDate: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_3" } } }),
+    ClearPlanField: () => ({ clearProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_3" } } }),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.setDates(repo, 3, 12, { start: "2026-10-06", target: null })).toBe("set");
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([
+    ["IssuePlan", { owner: "octo", name: "sample", number: 12 }],
+    ["SetPlanDate", { projectId: "PVT_3", itemId: "PVTI_3", fieldId: "F_start", date: "2026-10-06" }],
+    ["ClearPlanField", { projectId: "PVT_3", itemId: "PVTI_3", fieldId: "F_target" }],
+  ]);
+
+  // Only the dates given change: target alone leaves Start as it is.
+  operations.length = 0;
+  expect(await projects.setDates(repo, 3, 12, { target: "2026-10-17" })).toBe("set");
+  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "SetPlanDate"]);
+  expect(operations[1]!.variables).toMatchObject({ fieldId: "F_target", date: "2026-10-17" });
+
+  operations.length = 0;
+  expect(await projects.setDates(repo, 3, 13, { start: "2026-10-06" })).toBe("not-in-project");
+  expect(await projects.setDates(repo, 3, 14, { start: "2026-10-06" })).toBe("no-field");
+  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan"]);
 });

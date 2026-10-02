@@ -4,6 +4,8 @@ import {
   AddPlanItemDocument,
   AddPlanLabelsDocument,
   AddPlanSubIssueDocument,
+  ClearPlanFieldDocument,
+  CreatePlanDateFieldDocument,
   CreatePlanLabelDocument,
   CreatePlanIssueDocument,
   IssueCreateRefsDocument,
@@ -16,14 +18,17 @@ import {
   PlanProjectDocument,
   PlanProjectsDocument,
   PlanProjectSetupDocument,
+  SetPlanDateDocument,
   SetPlanStatusDocument,
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
+  type CreatePlanDateFieldMutation,
   type CreatePlanIssueMutation,
   type CreatePlanProjectMutation,
   type IssueCreateRefsQuery,
   type IssueNodeIdQuery,
   type IssuePlanQuery,
+  type PlanDateFieldsFragment,
   type PlanItemsQuery,
   type PlanOwnerIdsQuery,
   type PlanProjectChoiceFragment,
@@ -36,7 +41,7 @@ import {
 import type { RepoRef } from "../types.ts";
 import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import type { AdoptedProject, PlanAncestor, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetStatusResult } from "./types.ts";
+import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -71,7 +76,7 @@ export class OctokitProjects implements ProjectsPort {
   async getProject(login: string, number: number): Promise<PlanProject | undefined> {
     const project = await this.projectNode(login, number);
     if (!project) return undefined;
-    return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(project.field)) };
+    return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(project.field)), dateFields: dateFieldIds(project) };
   }
 
   async getStatus(repo: RepoRef, project: number, issue: number): Promise<PlanStatus | undefined> {
@@ -142,7 +147,7 @@ export class OctokitProjects implements ProjectsPort {
       if (!owner.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
       await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: owner.repository.id });
     }
-    return { project: { number: project.number, url: project.url, title: project.title, statusOptions: ids }, renamed, added };
+    return { project: { number: project.number, url: project.url, title: project.title, statusOptions: ids, dateFields: dateFieldIds(project) }, renamed, added };
   }
 
   async createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject> {
@@ -158,13 +163,14 @@ export class OctokitProjects implements ProjectsPort {
       name === "Done" && done ? { id: done.id, name, color: done.color, description: done.description } : { name, ...STATUS_STYLE[name] },
     );
     const updated = await this.octokit.graphql<SetStatusOptionsMutation>(SetStatusOptionsDocument.toString(), { fieldId: field.id, options });
+    const dateFields = { start: await this.createDateField(project.id, "start"), target: await this.createDateField(project.id, "target") };
     await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: ids.repository.id });
-    return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(updated.updateProjectV2Field?.projectV2Field)) };
+    return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(updated.updateProjectV2Field?.projectV2Field)), dateFields };
   }
 
   async createIssue(
     repo: RepoRef,
-    input: { project: number; title: string; body: string; labels: string[]; parent?: number; blockedBy?: number[] },
+    input: NewPlanIssue,
   ): Promise<{ number: number; url: string }> {
     const refs = await this.octokit.graphql<IssueCreateRefsQuery>(IssueCreateRefsDocument.toString(), {
       owner: repo.owner,
@@ -190,6 +196,7 @@ export class OctokitProjects implements ProjectsPort {
     if (!issue) throw new Error(`creating the issue "${input.title}" returned nothing`);
     for (const blockingIssueId of blockerIds) await this.octokit.graphql(AddPlanBlockerDocument.toString(), { issueId: issue.id, blockingIssueId });
     await this.setStatus(repo, input.project, issue.number, "Shaping", { add: true });
+    await this.setNewDates(repo, input, issue.number);
     return { number: issue.number, url: issue.url };
   }
 
@@ -207,6 +214,50 @@ export class OctokitProjects implements ProjectsPort {
     if (labelIds.length) await this.octokit.graphql(AddPlanLabelsDocument.toString(), { labelableId: issueId, labelIds });
     if (refs.repository.parent) await this.octokit.graphql(AddPlanSubIssueDocument.toString(), { issueId: refs.repository.parent.id, subIssueId: issueId });
     await this.setStatus(repo, input.project, input.issue, "Shaping", { add: true });
+  }
+
+  async ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds> {
+    const project = await this.projectNode(login, number);
+    if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
+    const ids = dateFieldIds(project);
+    for (const key of DATE_KEYS) {
+      if (project[key] && !ids[key]) {
+        throw new Error(`GitHub Project #${number} has a ${DATE_FIELD_NAMES[key]} field that is not a date field. Rename it on GitHub, then try again.`);
+      }
+    }
+    for (const key of DATE_KEYS) ids[key] ??= await this.createDateField(project.id, key);
+    return ids;
+  }
+
+  /** Sets a new issue's Start and Target, once it is an item; throws naming the issue when they cannot be written. */
+  private async setNewDates(repo: RepoRef, input: NewPlanIssue, issue: number) {
+    const dates = { ...(input.start ? { start: input.start } : {}), ...(input.target ? { target: input.target } : {}) };
+    if (!dates.start && !dates.target) return;
+    const result = await this.setDates(repo, input.project, issue, dates);
+    if (result !== "set") throw new Error(`Created #${issue}, but could not set its dates: ${result === "no-field" ? "the Project has no Start or Target date field" : "it is not in the Project"}.`);
+  }
+
+  /** Creates the Start or Target date field on a Project and returns its id. */
+  private async createDateField(projectId: string, key: (typeof DATE_KEYS)[number]): Promise<string> {
+    const created = await this.octokit.graphql<CreatePlanDateFieldMutation>(CreatePlanDateFieldDocument.toString(), { projectId, name: DATE_FIELD_NAMES[key] });
+    const field = created.createProjectV2Field?.projectV2Field;
+    if (field?.__typename !== "ProjectV2Field") throw new Error(`creating the ${DATE_FIELD_NAMES[key]} field returned no date field`);
+    return field.id;
+  }
+
+  async setDates(repo: RepoRef, project: number, issue: number, dates: PlanDates): Promise<SetDatesResult> {
+    const { item } = await this.issuePlan(repo, project, issue);
+    if (!item) return "not-in-project";
+    const fields = dateFieldIds(item.project);
+    const writes = DATE_KEYS.filter((key) => dates[key] !== undefined).map((key) => ({ fieldId: fields[key], date: dates[key] }));
+    // Check every field first, so a Project with Start but no Target changes nothing.
+    if (writes.some((w) => !w.fieldId)) return "no-field";
+    for (const { fieldId, date } of writes) {
+      const ids = { projectId: item.project.id, itemId: item.id, fieldId };
+      if (date === null) await this.octokit.graphql(ClearPlanFieldDocument.toString(), ids);
+      else await this.octokit.graphql(SetPlanDateDocument.toString(), { ...ids, date });
+    }
+    return "set";
   }
 
   async lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
@@ -344,8 +395,30 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef): PlanItem[] {
       blockedBy: present(issue.blockedBy.nodes)
         .filter((b) => b.state === "OPEN")
         .map((b) => b.number),
+      blockers: present(issue.blockedBy.nodes).map((b) => b.number),
       prNumbers: present(issue.closedByPullRequestsReferences?.nodes).map((pr) => pr.number),
       updatedAt: issue.updatedAt,
+      start: dateOf(item.start),
+      target: dateOf(item.target),
+      iteration:
+        item.iteration?.__typename === "ProjectV2ItemFieldIterationValue"
+          ? { title: item.iteration.title, startDate: item.iteration.startDate, duration: item.iteration.duration }
+          : undefined,
     },
   ];
+}
+
+const DATE_KEYS = ["start", "target"] as const;
+/** The names of the date fields on GitHub, the pair the roadmap layout reads once a person picks them. */
+const DATE_FIELD_NAMES = { start: "Start", target: "Target" } as const;
+
+/** The ids of a Project's Start and Target fields, each undefined when missing or not a date field. */
+function dateFieldIds(project: PlanDateFieldsFragment): PlanDateFieldIds {
+  const id = (field: PlanDateFieldsFragment["start"]) => (field?.__typename === "ProjectV2Field" && field.dataType === "DATE" ? field.id : undefined);
+  return { start: id(project.start), target: id(project.target) };
+}
+
+/** The day of a date field's value; undefined when the item has none or the field is not a date field. */
+function dateOf(value: { __typename: string; date?: string | null } | null | undefined): string | undefined {
+  return value?.__typename === "ProjectV2ItemFieldDateValue" ? (value.date?.slice(0, 10) ?? undefined) : undefined;
 }

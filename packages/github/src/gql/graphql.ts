@@ -56,6 +56,51 @@ export type MergeableState =
   /** The mergeability of the pull request is still being calculated. */
   | 'UNKNOWN';
 
+/** The type of a project field. */
+export type ProjectV2FieldType =
+  /** Assignees */
+  | 'ASSIGNEES'
+  /** Closed */
+  | 'CLOSED'
+  /** Created */
+  | 'CREATED'
+  /** Date */
+  | 'DATE'
+  /** Issue type */
+  | 'ISSUE_TYPE'
+  /** Iteration */
+  | 'ITERATION'
+  /** Labels */
+  | 'LABELS'
+  /** Linked Pull Requests */
+  | 'LINKED_PULL_REQUESTS'
+  /** Milestone */
+  | 'MILESTONE'
+  /** Multi Select */
+  | 'MULTI_SELECT'
+  /** Number */
+  | 'NUMBER'
+  /** Parent issue */
+  | 'PARENT_ISSUE'
+  /** Repository */
+  | 'REPOSITORY'
+  /** Reviewers */
+  | 'REVIEWERS'
+  /** Single Select */
+  | 'SINGLE_SELECT'
+  /** Sub-issues progress */
+  | 'SUB_ISSUES_PROGRESS'
+  /** Text */
+  | 'TEXT'
+  /** Title */
+  | 'TITLE'
+  /** Tracked by */
+  | 'TRACKED_BY'
+  /** Tracks */
+  | 'TRACKS'
+  /** Updated */
+  | 'UPDATED';
+
 /** The display color of a single-select field option. */
 export type ProjectV2SingleSelectFieldOptionColor =
   /** BLUE */
@@ -184,6 +229,16 @@ export type IssuePlanQuery = { repository: { owner:
               | { __typename: 'ProjectV2IterationField' }
               | { __typename: 'ProjectV2MultiSelectField' }
               | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+             | null, start:
+              | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+              | { __typename: 'ProjectV2IterationField' }
+              | { __typename: 'ProjectV2MultiSelectField' }
+              | { __typename: 'ProjectV2SingleSelectField' }
+             | null, target:
+              | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+              | { __typename: 'ProjectV2IterationField' }
+              | { __typename: 'ProjectV2MultiSelectField' }
+              | { __typename: 'ProjectV2SingleSelectField' }
              | null }, status:
             | { __typename: 'ProjectV2ItemFieldDateValue' }
             | { __typename: 'ProjectV2ItemFieldIterationValue' }
@@ -218,6 +273,48 @@ export type PlanItemsQuery = { user: { projectV2: { items: { pageInfo: { hasNext
             | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
             | { __typename: 'ProjectV2ItemFieldReviewerValue' }
             | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+            | { __typename: 'ProjectV2ItemFieldTextValue' }
+            | { __typename: 'ProjectV2ItemFieldUserValue' }
+            | { __typename: 'ProjectV2ItemIssueFieldValue' }
+           | null, start:
+            | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
+            | { __typename: 'ProjectV2ItemFieldIterationValue' }
+            | { __typename: 'ProjectV2ItemFieldLabelValue' }
+            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldNumberValue' }
+            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+            | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldTextValue' }
+            | { __typename: 'ProjectV2ItemFieldUserValue' }
+            | { __typename: 'ProjectV2ItemIssueFieldValue' }
+           | null, target:
+            | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
+            | { __typename: 'ProjectV2ItemFieldIterationValue' }
+            | { __typename: 'ProjectV2ItemFieldLabelValue' }
+            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldNumberValue' }
+            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+            | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldTextValue' }
+            | { __typename: 'ProjectV2ItemFieldUserValue' }
+            | { __typename: 'ProjectV2ItemIssueFieldValue' }
+           | null, iteration:
+            | { __typename: 'ProjectV2ItemFieldDateValue' }
+            | { __typename: 'ProjectV2ItemFieldIterationValue', title: string, startDate: string, duration: number }
+            | { __typename: 'ProjectV2ItemFieldLabelValue' }
+            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldNumberValue' }
+            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+            | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
             | { __typename: 'ProjectV2ItemFieldTextValue' }
             | { __typename: 'ProjectV2ItemFieldUserValue' }
             | { __typename: 'ProjectV2ItemIssueFieldValue' }
@@ -317,6 +414,38 @@ export type AddPlanItemMutationVariables = Exact<{
 
 export type AddPlanItemMutation = { addProjectV2ItemById: { item: { id: string } | null } | null };
 
+export type CreatePlanDateFieldMutationVariables = Exact<{
+  projectId: string | number;
+  name: string;
+}>;
+
+
+export type CreatePlanDateFieldMutation = { createProjectV2Field: { projectV2Field:
+      | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+      | { __typename: 'ProjectV2IterationField' }
+      | { __typename: 'ProjectV2MultiSelectField' }
+      | { __typename: 'ProjectV2SingleSelectField' }
+     | null } | null };
+
+export type SetPlanDateMutationVariables = Exact<{
+  projectId: string | number;
+  itemId: string | number;
+  fieldId: string | number;
+  date: string;
+}>;
+
+
+export type SetPlanDateMutation = { updateProjectV2ItemFieldValue: { projectV2Item: { id: string } | null } | null };
+
+export type ClearPlanFieldMutationVariables = Exact<{
+  projectId: string | number;
+  itemId: string | number;
+  fieldId: string | number;
+}>;
+
+
+export type ClearPlanFieldMutation = { clearProjectV2ItemFieldValue: { projectV2Item: { id: string } | null } | null };
+
 export type SetPlanStatusMutationVariables = Exact<{
   projectId: string | number;
   itemId: string | number;
@@ -326,6 +455,18 @@ export type SetPlanStatusMutationVariables = Exact<{
 
 
 export type SetPlanStatusMutation = { updateProjectV2ItemFieldValue: { projectV2Item: { id: string } | null } | null };
+
+export type PlanDateFieldsFragment = { start:
+    | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+    | { __typename: 'ProjectV2IterationField' }
+    | { __typename: 'ProjectV2MultiSelectField' }
+    | { __typename: 'ProjectV2SingleSelectField' }
+   | null, target:
+    | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+    | { __typename: 'ProjectV2IterationField' }
+    | { __typename: 'ProjectV2MultiSelectField' }
+    | { __typename: 'ProjectV2SingleSelectField' }
+   | null };
 
 export type PlanOwnerIdsQueryVariables = Exact<{
   login: string;
@@ -344,7 +485,17 @@ export type PlanProjectChoiceFragment = { id: string, number: number, title: str
    | null, repositories: { nodes: Array<{ id: string, name: string, owner:
         | { login: string }
         | { login: string }
-       } | null> | null } };
+       } | null> | null }, start:
+    | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+    | { __typename: 'ProjectV2IterationField' }
+    | { __typename: 'ProjectV2MultiSelectField' }
+    | { __typename: 'ProjectV2SingleSelectField' }
+   | null, target:
+    | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+    | { __typename: 'ProjectV2IterationField' }
+    | { __typename: 'ProjectV2MultiSelectField' }
+    | { __typename: 'ProjectV2SingleSelectField' }
+   | null };
 
 export type PlanProjectsQueryVariables = Exact<{
   login: string;
@@ -359,7 +510,17 @@ export type PlanProjectsQuery = { user: { projectsV2: { nodes: Array<{ id: strin
          | null, repositories: { nodes: Array<{ id: string, name: string, owner:
               | { login: string }
               | { login: string }
-             } | null> | null } } | null> | null } } | null };
+             } | null> | null }, start:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null, target:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null } | null> | null } } | null };
 
 export type PlanProjectSetupQueryVariables = Exact<{
   login: string;
@@ -375,7 +536,17 @@ export type PlanProjectSetupQuery = { user: { projectV2: { id: string, number: n
        | null, repositories: { nodes: Array<{ id: string, name: string, owner:
             | { login: string }
             | { login: string }
-           } | null> | null } } | null } | null };
+           } | null> | null }, start:
+        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField' }
+       | null, target:
+        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField' }
+       | null } | null } | null };
 
 export type PlanProjectQueryVariables = Exact<{
   login: string;
@@ -388,6 +559,16 @@ export type PlanProjectQuery = { user: { projectV2: { id: string, number: number
         | { __typename: 'ProjectV2IterationField' }
         | { __typename: 'ProjectV2MultiSelectField' }
         | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+       | null, start:
+        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField' }
+       | null, target:
+        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField' }
        | null } | null } | null };
 
 export type PullRequestSnapshotQueryVariables = Exact<{
@@ -477,6 +658,24 @@ export const IssueAncestorsFragmentDoc = new TypedDocumentString(`
   }
 }
     `, {"fragmentName":"IssueAncestors"}) as unknown as TypedDocumentString<IssueAncestorsFragment, unknown>;
+export const PlanDateFieldsFragmentDoc = new TypedDocumentString(`
+    fragment PlanDateFields on ProjectV2 {
+  start: field(name: "Start") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+  target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}
+    `, {"fragmentName":"PlanDateFields"}) as unknown as TypedDocumentString<PlanDateFieldsFragment, unknown>;
 export const PlanProjectChoiceFragmentDoc = new TypedDocumentString(`
     fragment PlanProjectChoice on ProjectV2 {
   id
@@ -484,6 +683,7 @@ export const PlanProjectChoiceFragmentDoc = new TypedDocumentString(`
   title
   url
   closed
+  ...PlanDateFields
   field(name: "Status") {
     __typename
     ... on ProjectV2SingleSelectField {
@@ -506,7 +706,22 @@ export const PlanProjectChoiceFragmentDoc = new TypedDocumentString(`
     }
   }
 }
-    `, {"fragmentName":"PlanProjectChoice"}) as unknown as TypedDocumentString<PlanProjectChoiceFragment, unknown>;
+    fragment PlanDateFields on ProjectV2 {
+  start: field(name: "Start") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+  target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}`, {"fragmentName":"PlanProjectChoice"}) as unknown as TypedDocumentString<PlanProjectChoiceFragment, unknown>;
 export const IssueParentsDocument = new TypedDocumentString(`
     query IssueParents($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -640,6 +855,7 @@ export const IssuePlanDocument = new TypedDocumentString(`
             owner {
               id
             }
+            ...PlanDateFields
             field(name: "Status") {
               __typename
               ... on ProjectV2SingleSelectField {
@@ -662,7 +878,22 @@ export const IssuePlanDocument = new TypedDocumentString(`
     }
   }
 }
-    `) as unknown as TypedDocumentString<IssuePlanQuery, IssuePlanQueryVariables>;
+    fragment PlanDateFields on ProjectV2 {
+  start: field(name: "Start") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+  target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}`) as unknown as TypedDocumentString<IssuePlanQuery, IssuePlanQueryVariables>;
 export const PlanItemsDocument = new TypedDocumentString(`
     query PlanItems($login: String!, $number: Int!, $cursor: String) {
   user(login: $login) {
@@ -677,6 +908,26 @@ export const PlanItemsDocument = new TypedDocumentString(`
             __typename
             ... on ProjectV2ItemFieldSingleSelectValue {
               name
+            }
+          }
+          start: fieldValueByName(name: "Start") {
+            __typename
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
+          }
+          target: fieldValueByName(name: "Target") {
+            __typename
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
+          }
+          iteration: fieldValueByName(name: "Iteration") {
+            __typename
+            ... on ProjectV2ItemFieldIterationValue {
+              title
+              startDate
+              duration
             }
           }
           content {
@@ -860,6 +1111,48 @@ export const AddPlanItemDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<AddPlanItemMutation, AddPlanItemMutationVariables>;
+export const CreatePlanDateFieldDocument = new TypedDocumentString(`
+    mutation CreatePlanDateField($projectId: ID!, $name: String!) {
+  createProjectV2Field(
+    input: { projectId: $projectId, dataType: DATE, name: $name }
+  ) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2Field {
+        id
+        dataType
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreatePlanDateFieldMutation, CreatePlanDateFieldMutationVariables>;
+export const SetPlanDateDocument = new TypedDocumentString(`
+    mutation SetPlanDate($projectId: ID!, $itemId: ID!, $fieldId: ID!, $date: Date!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { date: $date }
+    }
+  ) {
+    projectV2Item {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<SetPlanDateMutation, SetPlanDateMutationVariables>;
+export const ClearPlanFieldDocument = new TypedDocumentString(`
+    mutation ClearPlanField($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
+  clearProjectV2ItemFieldValue(
+    input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId }
+  ) {
+    projectV2Item {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<ClearPlanFieldMutation, ClearPlanFieldMutationVariables>;
 export const SetPlanStatusDocument = new TypedDocumentString(`
     mutation SetPlanStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
   updateProjectV2ItemFieldValue(
@@ -896,12 +1189,29 @@ export const PlanProjectsDocument = new TypedDocumentString(`
     }
   }
 }
-    fragment PlanProjectChoice on ProjectV2 {
+    fragment PlanDateFields on ProjectV2 {
+  start: field(name: "Start") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+  target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}
+fragment PlanProjectChoice on ProjectV2 {
   id
   number
   title
   url
   closed
+  ...PlanDateFields
   field(name: "Status") {
     __typename
     ... on ProjectV2SingleSelectField {
@@ -932,12 +1242,29 @@ export const PlanProjectSetupDocument = new TypedDocumentString(`
     }
   }
 }
-    fragment PlanProjectChoice on ProjectV2 {
+    fragment PlanDateFields on ProjectV2 {
+  start: field(name: "Start") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+  target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}
+fragment PlanProjectChoice on ProjectV2 {
   id
   number
   title
   url
   closed
+  ...PlanDateFields
   field(name: "Status") {
     __typename
     ... on ProjectV2SingleSelectField {
@@ -968,6 +1295,7 @@ export const PlanProjectDocument = new TypedDocumentString(`
       number
       url
       title
+      ...PlanDateFields
       field(name: "Status") {
         __typename
         ... on ProjectV2SingleSelectField {
@@ -981,7 +1309,22 @@ export const PlanProjectDocument = new TypedDocumentString(`
     }
   }
 }
-    `) as unknown as TypedDocumentString<PlanProjectQuery, PlanProjectQueryVariables>;
+    fragment PlanDateFields on ProjectV2 {
+  start: field(name: "Start") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+  target: field(name: "Target") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}`) as unknown as TypedDocumentString<PlanProjectQuery, PlanProjectQueryVariables>;
 export const PullRequestSnapshotDocument = new TypedDocumentString(`
     query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
