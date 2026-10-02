@@ -557,6 +557,26 @@ test("getProject reads a user's Project with its Status option ids and date fiel
   expect(await projects.getProject("octo", 99)).toBeUndefined();
 });
 
+/** How GitHub answers `field(name: "Start")` and `field(name: "Target")` on a Project without those fields: the data plus a NOT_FOUND per field. */
+const missingDateFields = (path: string[]) =>
+  ["start", "target"].map((alias) => ({
+    type: "NOT_FOUND",
+    path: [...path, alias],
+    message: `Could not resolve to a Unions::ProjectV2FieldConfiguration with the name ${alias === "start" ? "Start" : "Target"}`,
+  }));
+
+test("a Project without Start and Target fields is still read, with no date field ids", async () => {
+  const project = { ...planProject(5, "U_octo", false), url: "https://github.com/users/octo/projects/5", title: "older plan", closed: false, repositories: { nodes: [] } };
+  const { fetch } = fakeGraphql({
+    PlanProject: () => new GraphqlErrors({ user: { projectV2: project } }, missingDateFields(["user", "projectV2"])),
+    PlanProjects: () => new GraphqlErrors({ user: { projectsV2: { nodes: [project] } } }, missingDateFields(["user", "projectsV2", "nodes", "0"])),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getProject("octo", 5)).toMatchObject({ number: 5, title: "older plan", dateFields: { start: undefined, target: undefined } });
+  expect((await projects.listProjects("octo", repo)).map((p) => p.number)).toEqual([5]);
+});
+
 test("getStatus reads the issue's Status in the Project, and is undefined when the issue is not an item", async () => {
   const { fetch } = fakeGraphql({
     IssuePlan: (v) => (v.number === 12 ? issuePlan(12, [{ id: "PVTI_3", project: planProject(3), status: "Running" }]) : issuePlan(13, [{ id: "PVTI_2", project: planProject(2), status: "Ready" }])),

@@ -121,7 +121,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]> {
-    const data = await this.octokit.graphql<PlanProjectsQuery>(PlanProjectsDocument.toString(), { login });
+    const data = await this.withDateFields<PlanProjectsQuery>(PlanProjectsDocument.toString(), { login });
     const choices = present(data.user?.projectsV2.nodes)
       .filter((p) => !p.closed)
       .map((p) => {
@@ -132,7 +132,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject> {
-    const data = await this.octokit.graphql<PlanProjectSetupQuery>(PlanProjectSetupDocument.toString(), { login, number });
+    const data = await this.withDateFields<PlanProjectSetupQuery>(PlanProjectSetupDocument.toString(), { login, number });
     const project = data.user?.projectV2;
     const field = project ? choiceStatusField(project) : undefined;
     if (!project || !field) throw new Error(`GitHub Project #${number} of ${login} does not exist or has no Status field`);
@@ -273,9 +273,20 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   /** A user's Project with its Status field, or undefined when there is none the token can see. */
+  /** Runs a query that looks up the Start and Target fields by name. A Project without them answers with a NOT_FOUND per field next to complete data, which is a Project without dates, not an error. */
+  private async withDateFields<T>(document: string, variables: Record<string, unknown>): Promise<T> {
+    try {
+      return await this.octokit.graphql<T>(document, variables);
+    } catch (error) {
+      const data = dataDespiteMissingDateFields(error);
+      if (data) return data as T;
+      throw error;
+    }
+  }
+
   private async projectNode(login: string, number: number) {
     try {
-      const data = await this.octokit.graphql<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
+      const data = await this.withDateFields<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
       return data.user?.projectV2 ?? undefined;
     } catch (error) {
       if (isNotFound(error)) return undefined;
@@ -343,6 +354,13 @@ function labelIdsOf(known: { id: string; name: string }[], names: string[], repo
 type StatusFieldConfig ={ __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
 
 /** A GraphQL answer whose only errors are NOT_FOUND, as for a Project number nobody has. */
+/** The data of a GraphQL answer whose only errors are the Start and Target field lookups finding no such field. */
+function dataDespiteMissingDateFields(error: unknown): unknown {
+  const { errors, data } = (error ?? {}) as { errors?: { type?: string; path?: (string | number)[] }[]; data?: unknown };
+  if (!data || !Array.isArray(errors) || errors.length === 0) return undefined;
+  return errors.every((e) => e.type === "NOT_FOUND" && DATE_FIELD_ALIASES.has(String(e.path?.at(-1)))) ? data : undefined;
+}
+
 function isNotFound(error: unknown): boolean {
   const errors = (error as { errors?: { type?: string }[] } | null)?.errors;
   return Array.isArray(errors) && errors.length > 0 && errors.every((e) => e.type === "NOT_FOUND");
@@ -411,6 +429,8 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef): PlanItem[] {
 const DATE_KEYS = ["start", "target"] as const;
 /** The names of the date fields on GitHub, the pair the roadmap layout reads once a person picks them. */
 const DATE_FIELD_NAMES = { start: "Start", target: "Target" } as const;
+/** The aliases the queries give the two date field lookups (`PlanDateFields`). */
+const DATE_FIELD_ALIASES = new Set<string>(Object.keys(DATE_FIELD_NAMES));
 
 /** The ids of a Project's Start and Target fields, each undefined when missing or not a date field. */
 function dateFieldIds(project: PlanDateFieldsFragment): PlanDateFieldIds {
