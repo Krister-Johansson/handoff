@@ -163,7 +163,7 @@ export async function startRunFromGraph(db: Db, input: StartRunInput, github?: G
  */
 export async function runAgain(db: Db, runId: string, opts: { projects?: ProjectsPort | undefined; startedBy?: string | undefined } = {}) {
   const [earlier] = await db
-    .select({ projectId: runs.projectId, task: runs.task, status: runs.status, state: runs.state, graphName: graphs.name })
+    .select({ projectId: runs.projectId, task: runs.task, status: runs.status, state: runs.state, size: runs.size, graphName: graphs.name })
     .from(runs)
     .innerJoin(graphVersions, eq(graphVersions.id, runs.graphVersionId))
     .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
@@ -175,7 +175,7 @@ export async function runAgain(db: Db, runId: string, opts: { projects?: Project
   const issues = RunStateSchema.shape.issues.parse(earlier.state.issues) ?? [];
   return startRunFromGraph(
     db,
-    { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues, again: true, startedBy: opts.startedBy },
+    { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues, again: true, size: earlier.size, startedBy: opts.startedBy },
     undefined,
     opts.projects,
   );
