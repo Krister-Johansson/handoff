@@ -304,6 +304,20 @@ export type PlanItemsQuery = { user: { projectV2: { items: { pageInfo: { hasNext
             | { __typename: 'ProjectV2ItemFieldTextValue' }
             | { __typename: 'ProjectV2ItemFieldUserValue' }
             | { __typename: 'ProjectV2ItemIssueFieldValue' }
+           | null, priority:
+            | { __typename: 'ProjectV2ItemFieldDateValue' }
+            | { __typename: 'ProjectV2ItemFieldIterationValue' }
+            | { __typename: 'ProjectV2ItemFieldLabelValue' }
+            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldNumberValue' }
+            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+            | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+            | { __typename: 'ProjectV2ItemFieldTextValue' }
+            | { __typename: 'ProjectV2ItemFieldUserValue' }
+            | { __typename: 'ProjectV2ItemIssueFieldValue' }
            | null, iteration:
             | { __typename: 'ProjectV2ItemFieldDateValue' }
             | { __typename: 'ProjectV2ItemFieldIterationValue', title: string, startDate: string, duration: number }
@@ -559,6 +573,11 @@ export type PlanProjectQuery = { user: { projectV2: { id: string, number: number
         | { __typename: 'ProjectV2IterationField' }
         | { __typename: 'ProjectV2MultiSelectField' }
         | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+       | null, priority:
+        | { __typename: 'ProjectV2Field' }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField', options: Array<{ name: string }> }
        | null, start:
         | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
         | { __typename: 'ProjectV2IterationField' }
@@ -920,6 +939,12 @@ export const PlanItemsDocument = new TypedDocumentString(`
             __typename
             ... on ProjectV2ItemFieldDateValue {
               date
+            }
+          }
+          priority: fieldValueByName(name: "Priority") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
             }
           }
           iteration: fieldValueByName(name: "Iteration") {
@@ -1302,6 +1327,14 @@ export const PlanProjectDocument = new TypedDocumentString(`
           id
           options {
             id
+            name
+          }
+        }
+      }
+      priority: field(name: "Priority") {
+        __typename
+        ... on ProjectV2SingleSelectField {
+          options {
             name
           }
         }

@@ -30,6 +30,13 @@ export type PlanItem = {
    */
   /** Every issue GitHub records as blocking this one, open or closed; `blockedBy` is the open ones. */
   blockers?: number[] | undefined;
+  /**
+   * The item's place in Project order, 1 for the first item. Every item of the Project counts, so drafts,
+   * pull requests and other repositories' issues leave gaps.
+   */
+  position?: number | undefined;
+  /** The option name of the Project's single select field named Priority; undefined without a value or such a field. */
+  priority?: string | undefined;
   /** YYYY-MM-DD from the Project's Start date field. */
   start?: string | undefined;
   /** YYYY-MM-DD from the Project's Target date field. */
@@ -52,6 +59,11 @@ export type PlanProject = {
    * Projects built by hand need not name it; the readers always set it.
    */
   dateFields?: PlanDateFieldIds | undefined;
+  /**
+   * The option names of the single select field named Priority in the field's order, the highest first;
+   * undefined when the Project has no such field. Optional like `dateFields`.
+   */
+  priorityOptions?: string[] | undefined;
 };
 
 /** The field ids of a Project's Start and Target date fields; undefined for one it lacks. */

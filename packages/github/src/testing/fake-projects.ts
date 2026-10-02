@@ -12,6 +12,8 @@ export type FakePlanItem = {
   start?: string | undefined;
   target?: string | undefined;
   iteration?: PlanIteration | undefined;
+  /** The option name of the Priority field; listItems reads it only while the Project has `priorityOptions`. */
+  priority?: string | undefined;
 };
 
 type FakePlan = { login: string; project: PlanProject; items: Map<number, FakePlanItem> };
@@ -21,7 +23,8 @@ const keyOf = (repo: RepoRef) => `${repo.owner}/${repo.name}`.toLowerCase();
 /**
  * In-memory GitHub Projects for tests: one Project per repository. Issue titles, bodies, labels, state and
  * blockers live in the FakeGitHub it is given, so closing an issue there shows as closed in the plan.
- * Tests change `itemsOf(repo)` directly to simulate a person moving a card on GitHub's board.
+ * Tests change `itemsOf(repo)` directly to simulate a person moving a card on GitHub's board. Project order
+ * is the order items joined `itemsOf(repo)`.
  */
 export class FakeProjects implements ProjectsPort {
   readonly plans = new Map<string, FakePlan>();
@@ -52,7 +55,7 @@ export class FakeProjects implements ProjectsPort {
   async listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]> {
     const plan = this.planOf(repo, number);
     if (!plan || plan.login !== login) return [];
-    return [...plan.items].flatMap(([issueNumber, item]) => {
+    return [...plan.items].flatMap(([issueNumber, item], index) => {
       const issue = this.github.issues.get(issueNumber);
       if (!issue) return [];
       const labels = issue.labels ?? [];
@@ -71,6 +74,8 @@ export class FakeProjects implements ProjectsPort {
           subIssues: { total: children.length, completed: children.filter((c) => c?.state === "closed").length },
           blockedBy: (issue.blockedBy ?? []).filter((n) => this.github.issues.get(n)?.state !== "closed"),
           blockers: [...(issue.blockedBy ?? [])],
+          position: index + 1,
+          priority: plan.project.priorityOptions ? item.priority : undefined,
           prNumbers: item.prNumbers ?? [],
           updatedAt: issue.updatedAt ?? "",
           start: item.start,

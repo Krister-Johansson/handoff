@@ -76,7 +76,14 @@ export class OctokitProjects implements ProjectsPort {
   async getProject(login: string, number: number): Promise<PlanProject | undefined> {
     const project = await this.projectNode(login, number);
     if (!project) return undefined;
-    return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(project.field)), dateFields: dateFieldIds(project) };
+    return {
+      number: project.number,
+      url: project.url,
+      title: project.title,
+      statusOptions: optionIds(statusField(project.field)),
+      dateFields: dateFieldIds(project),
+      priorityOptions: project.priority?.__typename === "ProjectV2SingleSelectField" ? project.priority.options.map((o) => o.name) : undefined,
+    };
   }
 
   async getStatus(repo: RepoRef, project: number, issue: number): Promise<PlanStatus | undefined> {
@@ -96,7 +103,8 @@ export class OctokitProjects implements ProjectsPort {
 
   async listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]> {
     const data = await this.octokit.graphql.paginate<PlanItemsQuery>(PlanItemsDocument.toString(), { login, number });
-    return present<NonNullable<GqlItem>>(data.user?.projectV2?.items.nodes).flatMap((item) => toPlanItem(item, repo));
+    // GitHub returns items by POSITION, so an item's index across the merged pages is its place in the Project.
+    return present<NonNullable<GqlItem>>(data.user?.projectV2?.items.nodes).flatMap((item, index) => toPlanItem(item, repo, index + 1));
   }
 
   async setStatus(repo: RepoRef, project: number, issue: number, status: PlanStatus, opts: { add?: boolean } = {}): Promise<SetStatusResult> {
@@ -121,7 +129,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]> {
-    const data = await this.withDateFields<PlanProjectsQuery>(PlanProjectsDocument.toString(), { login });
+    const data = await this.withOptionalFields<PlanProjectsQuery>(PlanProjectsDocument.toString(), { login });
     const choices = present(data.user?.projectsV2.nodes)
       .filter((p) => !p.closed)
       .map((p) => {
@@ -132,7 +140,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject> {
-    const data = await this.withDateFields<PlanProjectSetupQuery>(PlanProjectSetupDocument.toString(), { login, number });
+    const data = await this.withOptionalFields<PlanProjectSetupQuery>(PlanProjectSetupDocument.toString(), { login, number });
     const project = data.user?.projectV2;
     const field = project ? choiceStatusField(project) : undefined;
     if (!project || !field) throw new Error(`GitHub Project #${number} of ${login} does not exist or has no Status field`);
@@ -272,21 +280,24 @@ export class OctokitProjects implements ProjectsPort {
     return id;
   }
 
-  /** A user's Project with its Status field, or undefined when there is none the token can see. */
-  /** Runs a query that looks up the Start and Target fields by name. A Project without them answers with a NOT_FOUND per field next to complete data, which is a Project without dates, not an error. */
-  private async withDateFields<T>(document: string, variables: Record<string, unknown>): Promise<T> {
+  /**
+   * Runs a query that looks up the Start, Target or Priority field by name. A Project without one answers
+   * with a NOT_FOUND per missing field next to complete data, which is a Project without that field, not an error.
+   */
+  private async withOptionalFields<T>(document: string, variables: Record<string, unknown>): Promise<T> {
     try {
       return await this.octokit.graphql<T>(document, variables);
     } catch (error) {
-      const data = dataDespiteMissingDateFields(error);
+      const data = dataDespiteMissingFields(error);
       if (data) return data as T;
       throw error;
     }
   }
 
+  /** A user's Project with its Status, date and Priority fields, or undefined when there is none the token can see. */
   private async projectNode(login: string, number: number) {
     try {
-      const data = await this.withDateFields<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
+      const data = await this.withOptionalFields<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
       return data.user?.projectV2 ?? undefined;
     } catch (error) {
       if (isNotFound(error)) return undefined;
@@ -353,14 +364,14 @@ function labelIdsOf(known: { id: string; name: string }[], names: string[], repo
 
 type StatusFieldConfig ={ __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
 
-/** A GraphQL answer whose only errors are NOT_FOUND, as for a Project number nobody has. */
-/** The data of a GraphQL answer whose only errors are the Start and Target field lookups finding no such field. */
-function dataDespiteMissingDateFields(error: unknown): unknown {
+/** The data of a GraphQL answer whose only errors are the Start, Target and Priority field lookups finding no such field. */
+function dataDespiteMissingFields(error: unknown): unknown {
   const { errors, data } = (error ?? {}) as { errors?: { type?: string; path?: (string | number)[] }[]; data?: unknown };
   if (!data || !Array.isArray(errors) || errors.length === 0) return undefined;
-  return errors.every((e) => e.type === "NOT_FOUND" && DATE_FIELD_ALIASES.has(String(e.path?.at(-1)))) ? data : undefined;
+  return errors.every((e) => e.type === "NOT_FOUND" && OPTIONAL_FIELD_ALIASES.has(String(e.path?.at(-1)))) ? data : undefined;
 }
 
+/** A GraphQL answer whose only errors are NOT_FOUND, as for a Project number nobody has. */
 function isNotFound(error: unknown): boolean {
   const errors = (error as { errors?: { type?: string }[] } | null)?.errors;
   return Array.isArray(errors) && errors.length > 0 && errors.every((e) => e.type === "NOT_FOUND");
@@ -393,7 +404,7 @@ function statusField(field: StatusFieldConfig): { id: string; options: { id: str
   return field?.__typename === "ProjectV2SingleSelectField" && field.id && field.options ? { id: field.id, options: field.options } : undefined;
 }
 
-function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef): PlanItem[] {
+function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number): PlanItem[] {
   const issue = item.content;
   if (issue?.__typename !== "Issue") return [];
   if (issue.repository.owner.login.toLowerCase() !== repo.owner.toLowerCase() || issue.repository.name.toLowerCase() !== repo.name.toLowerCase()) return [];
@@ -414,8 +425,10 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef): PlanItem[] {
         .filter((b) => b.state === "OPEN")
         .map((b) => b.number),
       blockers: present(issue.blockedBy.nodes).map((b) => b.number),
+      position,
       prNumbers: present(issue.closedByPullRequestsReferences?.nodes).map((pr) => pr.number),
       updatedAt: issue.updatedAt,
+      priority: item.priority?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? (item.priority.name ?? undefined) : undefined,
       start: dateOf(item.start),
       target: dateOf(item.target),
       iteration:
@@ -429,8 +442,8 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef): PlanItem[] {
 const DATE_KEYS = ["start", "target"] as const;
 /** The names of the date fields on GitHub, the pair the roadmap layout reads once a person picks them. */
 const DATE_FIELD_NAMES = { start: "Start", target: "Target" } as const;
-/** The aliases the queries give the two date field lookups (`PlanDateFields`). */
-const DATE_FIELD_ALIASES = new Set<string>(Object.keys(DATE_FIELD_NAMES));
+/** The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`) and Priority (`PlanProject`). */
+const OPTIONAL_FIELD_ALIASES = new Set<string>([...Object.keys(DATE_FIELD_NAMES), "priority"]);
 
 /** The ids of a Project's Start and Target fields, each undefined when missing or not a date field. */
 function dateFieldIds(project: PlanDateFieldsFragment): PlanDateFieldIds {

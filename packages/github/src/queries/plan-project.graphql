@@ -90,6 +90,15 @@ query PlanProject($login: String!, $number: Int!) {
           }
         }
       }
+      # A Project without a Priority field answers with a NOT_FOUND error for this lookup, next to complete data.
+      priority: field(name: "Priority") {
+        __typename
+        ... on ProjectV2SingleSelectField {
+          options {
+            name
+          }
+        }
+      }
     }
   }
 }

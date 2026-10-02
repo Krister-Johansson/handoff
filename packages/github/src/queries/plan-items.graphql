@@ -26,6 +26,13 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
               date
             }
           }
+          # A Project without a Priority field answers null here, without an error.
+          priority: fieldValueByName(name: "Priority") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
           # GitHub names a new iteration field "Iteration"; a renamed one is not read.
           iteration: fieldValueByName(name: "Iteration") {
             __typename
