@@ -26,6 +26,7 @@ import type { LibraryChoices } from "@/lib/library-choices";
 import { Inspector } from "./inspector";
 import { InspectorSection } from "./inspector-section";
 import { NODE_ICONS } from "./node-icons";
+import { VersionHistory, type VersionItem } from "./version-history";
 import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
 
 const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
@@ -36,7 +37,6 @@ const PALETTE: NodeType[][] = [
   ["pr", "merge", "function", "finish"],
 ];
 
-export type VersionItem = { version: number; createdAt: string; createdBy: string | null };
 type Props = {
   projectId: string;
   graphName: string;
@@ -193,7 +193,9 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                 deleteKeyCode={["Backspace", "Delete"]}
               >
                 <CanvasBackground />
-                <Controls className={CONTROLS_CLASS} />
+                <Controls className={CONTROLS_CLASS}>
+                  <VersionHistory versions={versions} version={version} restoring={restoring} pending={pending} onRestore={restore} />
+                </Controls>
                 <CanvasMiniMap />
                 <Panel position="top-left" aria-label="Add a node" className={cn(PANEL_CLASS, "flex flex-col gap-0.5 p-1")}>
                   {PALETTE.map((group, i) => (

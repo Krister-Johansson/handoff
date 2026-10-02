@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { GraphEditor } from "./graph-editor";
@@ -51,4 +51,17 @@ test("an unsaved edit offers to save as the version after the newest one", () =>
 test("the trail says when the shown version was saved and by whom", () => {
   renderEditor();
   expect(screen.getByText(/^v3 saved .+ by cli$/)).toBeInTheDocument();
+});
+
+test("the Version history button on the canvas controls opens a drawer that lists each version", () => {
+  renderEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Version history" }));
+  const drawer = screen.getByRole("dialog", { name: "Version history" });
+  const items = within(drawer).getAllByRole("listitem");
+  expect(items).toHaveLength(2);
+  expect(items[0]).toHaveTextContent("v4");
+  expect(items[0]).toHaveTextContent("2026-09-30 10:00");
+  expect(within(items[0]!).getByRole("button", { name: "Restore" })).toBeEnabled();
+  expect(items[1]).toHaveTextContent("v3");
+  expect(items[1]).toHaveTextContent("current");
 });
