@@ -11,7 +11,7 @@ import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGr
 import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
-import { createEpic, createStory, createTask, moveToReady, moveToShaping, planIssue, setupPlan } from "./shaping";
+import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, setupPlan } from "./shaping";
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
@@ -350,7 +350,9 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       };
     },
 
-    setup_plan: async ({ project }: { project: string }) => setupPlan(shaping, (await findProject(db, project)).id),
+    list_github_projects: async ({ project }: { project: string }) => listGitHubProjects(shaping, (await findProject(db, project)).id),
+
+    setup_plan: async ({ project, use }: { project: string; use?: number }) => setupPlan(shaping, (await findProject(db, project)).id, use !== undefined ? { use } : {}),
 
     create_epic: async ({ project, title, goal }: { project: string; title: string; goal: string }) => createEpic(shaping, (await findProject(db, project)).id, { title, goal }),
 

@@ -1,5 +1,5 @@
-import { kindOf, PLAN_KINDS, statusOf } from "../projects/kinds.ts";
-import type { PlanAncestor, PlanItem, PlanProject, PlanStatus, ProjectsPort, SetStatusResult } from "../projects/types.ts";
+import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "../projects/kinds.ts";
+import type { AdoptedProject, PlanAncestor, PlanItem, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetStatusResult } from "../projects/types.ts";
 import type { RepoRef } from "../types.ts";
 import { FakeGitHub } from "./fake-github.ts";
 
@@ -85,6 +85,29 @@ export class FakeProjects implements ProjectsPort {
     if (!plan.project.statusOptions[status]) return "no-option";
     item.status = status;
     return "set";
+  }
+
+  async listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]> {
+    const choices = [...this.plans].filter(([, plan]) => plan.login === login).map(([key, plan]) => ({
+      number: plan.project.number,
+      title: plan.project.title,
+      url: plan.project.url,
+      linked: key === keyOf(repo),
+      missingStatusOptions: STATUS_OPTIONS.filter((s) => !plan.project.statusOptions[s]),
+    }));
+    return [...choices.filter((c) => c.linked), ...choices.filter((c) => !c.linked)];
+  }
+
+  /** Links the Project to `repo` (it becomes that repository's Project here) and adds the Status options it lacks. */
+  async adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject> {
+    const entry = [...this.plans].find(([, p]) => p.login === login && p.project.number === number);
+    if (!entry) throw new Error(`GitHub Project #${number} of ${login} not found`);
+    const [key, plan] = entry;
+    const added = STATUS_OPTIONS.filter((s) => !plan.project.statusOptions[s]);
+    for (const status of added) plan.project.statusOptions[status] = `opt-${status.toLowerCase().replace(" ", "-")}`;
+    this.plans.delete(key);
+    this.plans.set(keyOf(repo), plan);
+    return { project: structuredClone(plan.project), renamed: [], added };
   }
 
   async createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject> {

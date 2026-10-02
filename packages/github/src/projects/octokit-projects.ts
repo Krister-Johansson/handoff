@@ -14,6 +14,8 @@ import {
   PlanItemsDocument,
   PlanOwnerIdsDocument,
   PlanProjectDocument,
+  PlanProjectsDocument,
+  PlanProjectSetupDocument,
   SetPlanStatusDocument,
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
@@ -24,14 +26,17 @@ import {
   type IssuePlanQuery,
   type PlanItemsQuery,
   type PlanOwnerIdsQuery,
+  type PlanProjectChoiceFragment,
   type PlanProjectQuery,
+  type PlanProjectSetupQuery,
+  type PlanProjectsQuery,
   type ProjectV2SingleSelectFieldOptionInput,
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
 import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import type { PlanAncestor, PlanItem, PlanKind, PlanProject, PlanStatus, ProjectsPort, SetStatusResult } from "./types.ts";
+import type { AdoptedProject, PlanAncestor, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -108,6 +113,36 @@ export class OctokitProjects implements ProjectsPort {
     if (!field || !optionId) return "no-option";
     await this.octokit.graphql(SetPlanStatusDocument.toString(), { projectId: target.projectId, itemId: target.itemId, fieldId: field.id, optionId });
     return "set";
+  }
+
+  async listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]> {
+    const data = await this.octokit.graphql<PlanProjectsQuery>(PlanProjectsDocument.toString(), { login });
+    const choices = present(data.user?.projectsV2.nodes)
+      .filter((p) => !p.closed)
+      .map((p) => {
+        const options = optionIds(choiceStatusField(p));
+        return { number: p.number, title: p.title, url: p.url, linked: isLinked(p, repo), missingStatusOptions: STATUS_OPTIONS.filter((s) => !options[s]) };
+      });
+    return [...choices.filter((c) => c.linked), ...choices.filter((c) => !c.linked)];
+  }
+
+  async adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject> {
+    const data = await this.octokit.graphql<PlanProjectSetupQuery>(PlanProjectSetupDocument.toString(), { login, number });
+    const project = data.user?.projectV2;
+    const field = project ? choiceStatusField(project) : undefined;
+    if (!project || !field) throw new Error(`GitHub Project #${number} of ${login} does not exist or has no Status field`);
+    const { options, renamed, added } = adoptedOptions(field.options);
+    let ids = optionIds(field);
+    if (renamed.length || added.length) {
+      const updated = await this.octokit.graphql<SetStatusOptionsMutation>(SetStatusOptionsDocument.toString(), { fieldId: field.id, options });
+      ids = optionIds(statusField(updated.updateProjectV2Field?.projectV2Field));
+    }
+    if (!isLinked(project, repo)) {
+      const owner = await this.octokit.graphql<PlanOwnerIdsQuery>(PlanOwnerIdsDocument.toString(), { login, owner: repo.owner, name: repo.name });
+      if (!owner.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
+      await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: owner.repository.id });
+    }
+    return { project: { number: project.number, url: project.url, title: project.title, statusOptions: ids }, renamed, added };
   }
 
   async createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject> {
@@ -205,6 +240,44 @@ export class OctokitProjects implements ProjectsPort {
     const item = present(issue.projectItems?.nodes).find((i) => i.project.number === project && i.project.owner.id === repository.owner.id);
     return { issue, item };
   }
+}
+
+type ChoiceOption = { id: string; name: string; color: ProjectV2SingleSelectFieldOptionInput["color"]; description: string };
+
+/** The Status field of a Project as setup reads it, with each option's look. */
+function choiceStatusField(project: PlanProjectChoiceFragment): { id: string; options: ChoiceOption[] } | undefined {
+  const field = project.field;
+  return field?.__typename === "ProjectV2SingleSelectField" ? { id: field.id, options: field.options } : undefined;
+}
+
+/** Whether a Project is linked to the repository. */
+const isLinked = (project: PlanProjectChoiceFragment, repo: RepoRef) =>
+  present(project.repositories.nodes).some((r) => r.owner.login.toLowerCase() === repo.owner.toLowerCase() && r.name.toLowerCase() === repo.name.toLowerCase());
+
+/** An option's name without case, emoji or extra spaces, so "✅ ready" matches Ready. */
+const bareName = (name: string) => name.replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * The Status options a Project gets when handoff adopts it: handoff's five in board order, each
+ * keeping the id and look of an option whose bare name matches (renamed when the name differs), new
+ * ones for the rest, then every other option unchanged so no item loses its value.
+ */
+function adoptedOptions(current: ChoiceOption[]) {
+  const used = new Set<string>();
+  const renamed: { from: string; to: PlanStatus }[] = [];
+  const added: PlanStatus[] = [];
+  const ours: ProjectV2SingleSelectFieldOptionInput[] = STATUS_OPTIONS.map((status) => {
+    const match = current.find((o) => o.name === status) ?? current.find((o) => !used.has(o.id) && bareName(o.name) === bareName(status));
+    if (!match) {
+      added.push(status);
+      return { name: status, ...STATUS_STYLE[status] };
+    }
+    used.add(match.id);
+    if (match.name !== status) renamed.push({ from: match.name, to: status });
+    return { id: match.id, name: status, color: match.color, description: match.description };
+  });
+  const others = current.filter((o) => !used.has(o.id)).map((o) => ({ id: o.id, name: o.name, color: o.color, description: o.description }));
+  return { options: [...ours, ...others], renamed, added };
 }
 
 /** The ids of the named labels among the repository's; throws for a name the repository does not have. */

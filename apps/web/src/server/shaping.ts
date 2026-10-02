@@ -142,15 +142,37 @@ async function setStatuses({ plan, repo, number }: Planned, issues: number[], st
   }
 }
 
+/** The user's GitHub Projects setup can use, those linked to the project's repository first. */
+export async function listGitHubProjects(deps: ShapingDeps, projectId: string) {
+  const { plan, repo } = await shapingAccess(deps, projectId);
+  return (await plan.listProjects(repo.owner, repo)).map((p) => ({ number: p.number, title: p.title, url: p.url, linked: p.linked, missing_status_options: p.missingStatusOptions }));
+}
+
 /**
  * Sets up a project's plan: the kind labels on the repository and a user-owned GitHub Project with
- * handoff's Status options, linked to the repository, whose number the project stores. With a number
- * already stored it creates nothing: it re-creates missing labels and reports Status options the
- * Project lacks.
+ * handoff's Status options, linked to the repository, whose number the project stores. `use` adopts an
+ * existing Project of the user instead of creating one. With a number already stored it creates
+ * nothing: it re-creates missing labels and reports Status options the Project lacks.
  */
-export async function setupPlan(deps: ShapingDeps, projectId: string) {
+export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { use?: number } = {}) {
   const { project, plan, repo } = await shapingAccess(deps, projectId);
+  const stored = project.planProjectNumber;
+  if (stored !== null && opts.use !== undefined && opts.use !== stored) {
+    throw new Error(`${project.name} already has a plan: GitHub Project #${stored}. handoff keeps one Project per project.`);
+  }
   await plan.ensureLabels(repo);
+  if (stored === null && opts.use !== undefined) {
+    const adopted = await plan.adoptProject(repo.owner, opts.use, repo);
+    await deps.db.update(projects).set({ planProjectNumber: adopted.project.number }).where(eq(projects.id, project.id));
+    const { number, title, url, statusOptions } = adopted.project;
+    return {
+      created: false,
+      project: { number, title, url },
+      renamed_status_options: adopted.renamed,
+      added_status_options: adopted.added,
+      missing_status_options: STATUS_OPTIONS.filter((s) => !statusOptions[s]),
+    };
+  }
   if (project.planProjectNumber !== null) {
     const found = await plan.getProject(repo.owner, project.planProjectNumber);
     if (!found) throw new Error(`GitHub Project #${project.planProjectNumber} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.`);

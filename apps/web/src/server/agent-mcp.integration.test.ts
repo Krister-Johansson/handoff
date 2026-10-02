@@ -324,6 +324,33 @@ test("setup_plan creates the labels and the Project once, stores the number and 
   expect([...plan.labels.get("octo/sample")!].sort()).toEqual(["epic", "story", "task"]);
 });
 
+/** A Project of the user's for another repository, with GitHub's default Status options Todo, In Progress and Done. */
+async function roadmap() {
+  const other = await plan.createProject("octo", { owner: "octo", name: "roadmap" }, "Roadmap");
+  plan.plans.get("octo/roadmap")!.project.statusOptions = { Shaping: undefined, Ready: undefined, Running: undefined, "In review": undefined, Done: "opt-done" };
+  return other.number;
+}
+
+test("list_github_projects lists the user's Projects, those linked to the repository first, with the Status options each lacks", async () => {
+  const other = await roadmap();
+  const { number } = await withPlan();
+  expect(await call("list_github_projects", { project: "sandbox" })).toEqual([
+    { number, title: "sandbox plan", url: expect.stringContaining(`/projects/${number}`), linked: true, missing_status_options: [] },
+    { number: other, title: "Roadmap", url: expect.stringContaining(`/projects/${other}`), linked: false, missing_status_options: ["Shaping", "Ready", "Running", "In review"] },
+  ]);
+});
+
+test("setup_plan with use adopts an existing Project: links it, adds the Status options it lacks and stores its number", async () => {
+  const other = await roadmap();
+  const adopted = await call("setup_plan", { project: "sandbox", use: other });
+  expect(adopted).toMatchObject({ created: false, project: { number: other, title: "Roadmap" }, added_status_options: ["Shaping", "Ready", "Running", "In review"], missing_status_options: [] });
+  const [stored] = await db.select().from(projects).where(eq(projects.id, projectId));
+  expect(stored?.planProjectNumber).toBe(other);
+  expect((await call("list_github_projects", { project: "sandbox" }))[0]).toMatchObject({ number: other, linked: true, missing_status_options: [] });
+  expect([...(plan.labels.get("octo/sample") ?? [])].sort()).toEqual(["epic", "story", "task"]);
+  expect((await call("setup_plan", { project: "sandbox", use: 99 })).error).toMatch(/already has a plan: GitHub Project #\d+/);
+});
+
 test("create_epic creates an issue labelled epic in Shaping in the Project", async () => {
   expect(await call("create_epic", { project: "sandbox", title: "Project management", goal: "See what each task is part of." })).toEqual({
     error: expect.stringContaining("setup_plan"),
@@ -479,7 +506,9 @@ test("every shaping tool refuses with the scope sentence when the Projects port 
   const without = new Client({ name: "test", version: "1.0.0" });
   await Promise.all([server.connect(serverSide), without.connect(clientSide)]);
   const calls: [string, Record<string, unknown>][] = [
+    ["list_github_projects", {}],
     ["setup_plan", {}],
+    ["setup_plan", { use: 3 }],
     ["list_plan", {}],
     ["create_epic", { title: "Project management", goal: "A plan." }],
     ["create_story", { epic: 1, title: "Shaping tools", acceptance: ["x"] }],

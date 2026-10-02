@@ -323,17 +323,32 @@ export const CATALOG: ToolSpec[] = [
     summarize: (a) => `Show the plan of ${a.project}${a.epic ? ` for epic #${a.epic}` : ""}`,
   }),
   spec({
+    name: "list_github_projects",
+    title: "List GitHub Projects",
+    description:
+      "The user's own GitHub Projects, those linked to the project's repository first, each with the Status options it lacks of Shaping, Ready, Running, In review and Done. Call it before setup_plan and ask the user whether to use one of them or create a new Project.",
+    input: z.object({ project }),
+    kind: "data",
+    confirm: false,
+    readOnly: true,
+    untrusted: true,
+    summarize: (a) => `List the GitHub Projects for ${a.project}`,
+  }),
+  spec({
     name: "setup_plan",
     title: "Set up the plan",
     description:
-      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done, linked to the repository. Once a plan exists it creates nothing, re-creates missing labels and reports Status options the Project lacks.",
-    input: z.object({ project }),
+      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done, linked to the repository. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it creates nothing, re-creates missing labels and reports Status options the Project lacks.",
+    input: z.object({ project, use: z.number().int().positive().optional().describe("An existing Project's number to use instead of creating one") }),
     kind: "data",
     confirm: true,
     readOnly: false,
     openWorld: true,
     idempotent: true,
-    summarize: (a) => `Set up the plan of ${a.project} on GitHub: the labels epic, story and task, and a Project with the columns Shaping, Ready, Running, In review and Done`,
+    summarize: (a) =>
+      a.use
+        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks), and add the labels epic, story and task`
+        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done, and the labels epic, story and task`,
   }),
   spec({
     name: "create_epic",

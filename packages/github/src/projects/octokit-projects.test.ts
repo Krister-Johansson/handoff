@@ -306,6 +306,107 @@ test("createIssue refuses a label the repository does not have, before creating 
   expect(operations.map((o) => o.operation)).toEqual(["IssueCreateRefs"]);
 });
 
+/** A Status field with the named options, ids o_<index>. */
+const statusOptions = (...names: string[]) => ({
+  __typename: "ProjectV2SingleSelectField",
+  id: "F_status",
+  options: names.map((name, i) => ({ id: `o_${i}`, name, color: "GRAY", description: "" })),
+});
+
+/** A user Project as the PlanProjects and PlanProjectSetup queries return it. */
+const userProject = (number: number, title: string, field: unknown, repositories: { name: string; owner: string }[] = []) => ({
+  id: `PVT_${number}`,
+  number,
+  title,
+  url: `https://github.com/users/octo/projects/${number}`,
+  closed: false,
+  field,
+  repositories: { nodes: repositories.map((r) => ({ id: `R_${r.name}`, name: r.name, owner: { login: r.owner } })) },
+});
+
+test("listProjects lists the user's open Projects, those linked to the repository first, with the Status options each lacks", async () => {
+  const { fetch, operations } = fakeGraphql({
+    PlanProjects: () => ({
+      user: {
+        projectsV2: {
+          nodes: [
+            userProject(3, "gqlPrune Roadmap", statusOptions("Todo", "In Progress", "Done"), [{ name: "gqlPrune", owner: "octo" }]),
+            { ...userProject(4, "Old", statusOptions("Done")), closed: true },
+            userProject(2, "sample plan", statusOptions("Shaping", "Ready", "Running", "In review", "Done"), [{ name: "Sample", owner: "Octo" }]),
+            userProject(1, "Untitled", null),
+          ],
+        },
+      },
+    }),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.listProjects("octo", repo)).toEqual([
+    { number: 2, title: "sample plan", url: "https://github.com/users/octo/projects/2", linked: true, missingStatusOptions: [] },
+    { number: 3, title: "gqlPrune Roadmap", url: "https://github.com/users/octo/projects/3", linked: false, missingStatusOptions: ["Shaping", "Ready", "Running", "In review"] },
+    { number: 1, title: "Untitled", url: "https://github.com/users/octo/projects/1", linked: false, missingStatusOptions: ["Shaping", "Ready", "Running", "In review", "Done"] },
+  ]);
+  expect(operations.map((o) => [o.operation, o.variables])).toEqual([["PlanProjects", { login: "octo" }]]);
+});
+
+test("adoptProject links the repository and renames or adds handoff's Status options, keeping the other options and their ids", async () => {
+  const current = statusOptions("🆕 New", "📋 Backlog", "✅ ready", "🏗 In progress", "👀 In review", "Done");
+  const { fetch, operations } = fakeGraphql({
+    PlanProjectSetup: () => ({ user: { projectV2: userProject(1, "Untitled", current) } }),
+    PlanOwnerIds: () => ({ user: { id: "U_octo" }, repository: { id: "R_sample" } }),
+    SetStatusOptions: (v) => ({
+      updateProjectV2Field: {
+        projectV2Field: { __typename: "ProjectV2SingleSelectField", id: "F_status", options: (v.options as { id?: string; name: string }[]).map((o, i) => ({ id: o.id ?? `new_${i}`, name: o.name })) },
+      },
+    }),
+    LinkPlanRepository: () => ({ linkProjectV2ToRepository: { repository: { id: "R_sample" } } }),
+  });
+  const projects = port(fetch);
+
+  const adopted = await projects.adoptProject("octo", 1, repo);
+
+  const sent = (name: string) => operations.filter((o) => o.operation === name).map((o) => o.variables);
+  expect(sent("SetStatusOptions")).toEqual([
+    {
+      fieldId: "F_status",
+      options: [
+        { name: "Shaping", color: "GRAY", description: "Being shaped; not ready to build yet" },
+        { id: "o_2", name: "Ready", color: "GRAY", description: "" },
+        { name: "Running", color: "YELLOW", description: "A handoff run is working on it" },
+        { id: "o_4", name: "In review", color: "GRAY", description: "" },
+        { id: "o_5", name: "Done", color: "GRAY", description: "" },
+        { id: "o_0", name: "🆕 New", color: "GRAY", description: "" },
+        { id: "o_1", name: "📋 Backlog", color: "GRAY", description: "" },
+        { id: "o_3", name: "🏗 In progress", color: "GRAY", description: "" },
+      ],
+    },
+  ]);
+  expect(sent("LinkPlanRepository")).toEqual([{ projectId: "PVT_1", repositoryId: "R_sample" }]);
+  expect(adopted).toEqual({
+    project: {
+      number: 1,
+      url: "https://github.com/users/octo/projects/1",
+      title: "Untitled",
+      statusOptions: { Shaping: "new_0", Ready: "o_2", Running: "new_2", "In review": "o_4", Done: "o_5" },
+    },
+    renamed: [
+      { from: "✅ ready", to: "Ready" },
+      { from: "👀 In review", to: "In review" },
+    ],
+    added: ["Shaping", "Running"],
+  });
+});
+
+test("adoptProject leaves a Project that already has handoff's options and is linked alone", async () => {
+  const { fetch, operations } = fakeGraphql({
+    PlanProjectSetup: () => ({ user: { projectV2: userProject(2, "sample plan", statusOptions("Shaping", "Ready", "Running", "In review", "Done", "Parked"), [{ name: "sample", owner: "octo" }]) } }),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.adoptProject("octo", 2, repo)).toMatchObject({ project: { number: 2, statusOptions: { Shaping: "o_0", Done: "o_4" } }, renamed: [], added: [] });
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProjectSetup"]);
+});
+
 test("addIssue labels an existing issue, makes it a sub-issue of the parent and adds it to the Project in Shaping", async () => {
   const { fetch, operations } = fakeGraphql({
     IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] }, parent: { id: "I_11" } } }),
