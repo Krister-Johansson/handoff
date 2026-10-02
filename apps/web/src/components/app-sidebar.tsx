@@ -3,7 +3,7 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CircleDotIcon, GitForkIcon, GitPullRequestIcon, InboxIcon, LibraryIcon, ListTreeIcon, PlayIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
+import { CircleDotIcon, GitForkIcon, GitPullRequestIcon, HouseIcon, InboxIcon, LibraryIcon, ListTreeIcon, PlayIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -28,7 +28,8 @@ import type { ProjectSection } from "@/lib/project-tab";
 
 export type { SidebarProject };
 
-const PROJECT_ITEMS: { section: ProjectSection; label: string; icon: ComponentType }[] = [
+const PROJECT_ITEMS: { section: ProjectSection | undefined; label: string; icon: ComponentType }[] = [
+  { section: undefined, label: "Home", icon: HouseIcon },
   { section: "runs", label: "Runs", icon: PlayIcon },
   { section: "plan", label: "Plan", icon: ListTreeIcon },
   { section: "issues", label: "Issues", icon: CircleDotIcon },
@@ -121,7 +122,7 @@ export function AppSidebar({
             <nav aria-label="Project">
               <SidebarMenu className="gap-0.5">
                 {PROJECT_ITEMS.map((item) => (
-                  <NavItem key={item.section} href={projectPath(project.id, item.section)} label={item.label} icon={item.icon} current={at?.projectId === project.id && at.section === item.section}>
+                  <NavItem key={item.label} href={projectPath(project.id, item.section)} label={item.label} icon={item.icon} current={at?.projectId === project.id && at.section === item.section}>
                     {item.section === "runs" && project.activeRuns > 0 && <SidebarMenuBadge className="text-muted-foreground">{project.activeRuns}</SidebarMenuBadge>}
                   </NavItem>
                 ))}

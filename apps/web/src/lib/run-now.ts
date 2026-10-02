@@ -14,6 +14,8 @@ export type NowInput = {
   queue?: RunQueue | undefined;
   /** Open issues GitHub says block the run's issues, while the run waits for them at its start. */
   blockedBy?: number[] | undefined;
+  /** Tool calls the run's steps wait for a person to allow, oldest first, each with what it asks to do. */
+  permissions?: { nodeKey: string; action: string }[] | undefined;
 };
 
 const andList = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
@@ -29,7 +31,7 @@ function queueText({ position, requested, mode }: RunQueue): string {
 }
 
 /** One line saying what a run is doing now, or how it ended, with the tone to show it in. */
-export function describeNow({ status, executions, labels, prNumber, questions, reviews, queue, blockedBy }: NowInput): { tone: StatusTone; text: string } {
+export function describeNow({ status, executions, labels, prNumber, questions, reviews, queue, blockedBy, permissions }: NowInput): { tone: StatusTone; text: string } {
   const label = (key: string) => labels[key] ?? key;
   const latest = (s: string) => executions.findLast((e) => e.status === s);
   if (status === "cancelled") return { tone: "muted", text: "Cancelled." };
@@ -41,6 +43,9 @@ export function describeNow({ status, executions, labels, prNumber, questions, r
     const failed = latest("failed");
     return { tone: "danger", text: failed ? `Stopped at ${label(failed.nodeKey)}${failed.error ? `: ${failed.error}` : ""}` : "Failed." };
   }
+  // A step waiting on a permission request still runs, but it is blocked until someone answers.
+  const asking = permissions?.[0];
+  if (asking) return { tone: "attention", text: `${label(asking.nodeKey)} ${asking.action}` };
   const running = latest("running");
   if (running) return { tone: "active", text: `${label(running.nodeKey)} is working${running.attempt > 1 ? `, attempt ${running.attempt}` : ""}` };
   const waiting = latest("waiting");

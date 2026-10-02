@@ -1,5 +1,5 @@
 /** Something to tell a person about. A finished run is news, but needs no action, unlike the other kinds. */
-export type AttentionItem = { id: string; kind: "question" | "failed" | "review" | "finished"; title: string; body: string; href: string };
+export type AttentionItem = { id: string; kind: "question" | "failed" | "review" | "finished"; title: string; body: string; href: string; projectId: string };
 
 export type NotifyPrefs = { desktop: boolean; sound: boolean };
 

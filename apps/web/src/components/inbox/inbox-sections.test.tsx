@@ -64,7 +64,7 @@ test("a pull request first in its project's merge queue can be merged from the i
 });
 
 test("permission requests come first, each with its run and the answers a person can give", () => {
-  const request = { ...todo, id: "3f6b2a10-0000-4000-8000-000000000001", runId: "22222222-2222-4222-8222-222222222222", task: "#10 Projects in the sidebar", nodeKey: "coder-1", toolName: "Bash", input: { command: "git -C /w log" } };
+  const request = { ...todo, id: "3f6b2a10-0000-4000-8000-000000000001", runId: "22222222-2222-4222-8222-222222222222", task: "#10 Projects in the sidebar", nodeKey: "coder-1", toolName: "Bash", input: { command: "git -C /w log" }, createdAt: new Date() };
   render(<InboxSections view={{ ...view, permissions: [request] }} />);
   const [first] = screen.getAllByRole("region");
   expect(within(first!).getByRole("heading", { level: 2 }).textContent).toBe("Permission requests1");

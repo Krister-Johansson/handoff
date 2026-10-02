@@ -70,24 +70,26 @@ export async function dismissAttention(db: Db, itemId: string) {
 /**
  * Everything that needs a person right now, one item per thing with a stable id, so the dashboard
  * can notify once per new item: open questions, failed runs awaiting repair, PRs waiting for review,
- * and runs that reached a Finish node with notify on, which need no action.
+ * and runs that reached a Finish node with notify on, which need no action. Each item names its
+ * project; with a project id, only that project's items.
  */
-export async function listAttention(db: Db): Promise<AttentionItem[]> {
+export async function listAttention(db: Db, opts: { projectId?: string } = {}): Promise<AttentionItem[]> {
   const [inbox, reviews, finished, stuck] = await Promise.all([listInbox(db), waitingReviews(db), finishedRuns(db), stuckRuns(db)]);
-  return [
+  const items = [
     ...inbox.questions.map((q): AttentionItem => {
       const review = (q.context as { review?: { from?: string; kind?: string } }).review;
       return review
-        ? { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: the ${review.kind} from ${review.from} needs your approval`, body: brief(q.task), href: reviewPath(q.projectId, q.runId, q.id) }
-        : { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: questionBrief(q.question, q.context), href: runPath(q.projectId, q.runId) };
+        ? { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: the ${review.kind} from ${review.from} needs your approval`, body: brief(q.task), href: reviewPath(q.projectId, q.runId, q.id), projectId: q.projectId }
+        : { id: `question:${q.id}`, kind: "question", title: `${q.projectName}: ${q.nodeKey} asks a question`, body: questionBrief(q.question, q.context), href: runPath(q.projectId, q.runId), projectId: q.projectId };
     }),
-    ...inbox.failedRuns.map((f): AttentionItem => ({ id: `failed:${f.executionId}`, kind: "failed", title: `${f.projectName}: run failed at ${f.nodeKey}`, body: brief(f.task), href: runPath(f.projectId, f.runId) })),
+    ...inbox.failedRuns.map((f): AttentionItem => ({ id: `failed:${f.executionId}`, kind: "failed", title: `${f.projectName}: run failed at ${f.nodeKey}`, body: brief(f.task), href: runPath(f.projectId, f.runId), projectId: f.projectId })),
     ...reviews.map((r): AttentionItem => ({
       id: `review:${r.executionId}:${r.pr!.number}`,
       kind: "review",
       title: `${r.projectName}: PR #${r.pr!.number} waits for your review`,
       body: brief(r.task),
       href: runPath(r.projectId, r.runId),
+      projectId: r.projectId,
     })),
     ...stuck.map((s): AttentionItem => ({
       id: `stuck:${s.runId}`,
@@ -95,7 +97,9 @@ export async function listAttention(db: Db): Promise<AttentionItem[]> {
       title: `${s.projectName}: ${s.failure?.nodeKey ?? "a step"} ran out of rounds`,
       body: brief(s.task),
       href: runPath(s.projectId, s.runId),
+      projectId: s.projectId,
     })),
-    ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: brief(f.task), href: runPath(f.projectId, f.runId) })),
+    ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: brief(f.task), href: runPath(f.projectId, f.runId), projectId: f.projectId })),
   ];
+  return opts.projectId ? items.filter((i) => i.projectId === opts.projectId) : items;
 }

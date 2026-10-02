@@ -1,5 +1,5 @@
-import { GraphDocumentSchema } from "@handoff/core";
-import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, nodeExecutions, questions, runs, type DbExecutor } from "@handoff/db";
+import { describePermission, GraphDocumentSchema } from "@handoff/core";
+import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, nodeExecutions, permissionRequests, questions, runs, type DbExecutor } from "@handoff/db";
 import { reviewPath } from "../lib/paths";
 import { describeNow } from "../lib/run-now";
 import type { StatusTone } from "../lib/status";
@@ -13,7 +13,25 @@ export type RunLine = {
   now: { tone: StatusTone; text: string };
   /** The review page, when the run waits for one. */
   reviewHref?: string;
+  /** The steps so far in the order they first ran, each once with its latest status and how often it ran. */
+  steps: RunStep[];
+  /** When the current step began, while one is running, waiting or queued. */
+  stepSince: Date | null;
 };
+
+export type RunStep = { nodeKey: string; status: string; times: number };
+
+/** Each step once, in the order it first ran, with its latest status and how many times it ran. */
+function stepsSoFar(executions: { nodeKey: string; status: string }[]): RunStep[] {
+  const steps = new Map<string, RunStep>();
+  for (const e of executions) {
+    const seen = steps.get(e.nodeKey);
+    steps.set(e.nodeKey, { nodeKey: e.nodeKey, status: e.status, times: (seen?.times ?? 0) + 1 });
+  }
+  return [...steps.values()];
+}
+
+const IN_PROGRESS = new Set(["running", "waiting", "pending"]);
 
 /** Node labels by key from a graph document. */
 function nodeLabels(document: unknown): Record<string, string> {
@@ -26,7 +44,7 @@ function nodeLabels(document: unknown): Record<string, string> {
 export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<string, RunLine>> {
   const lines = new Map<string, RunLine>();
   if (runIds.length === 0) return lines;
-  const [rows, executions, open] = await Promise.all([
+  const [rows, executions, open, asking] = await Promise.all([
     db
       .select({
         id: runs.id,
@@ -49,6 +67,8 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
         status: nodeExecutions.status,
         error: nodeExecutions.error,
         costUsd: nodeExecutions.costUsd,
+        startedAt: nodeExecutions.startedAt,
+        createdAt: nodeExecutions.createdAt,
       })
       .from(nodeExecutions)
       .where(inArray(nodeExecutions.runId, runIds))
@@ -58,6 +78,12 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
       .from(questions)
       .where(and(inArray(questions.runId, runIds), isNull(questions.answer)))
       .orderBy(asc(questions.createdAt)),
+    db
+      .select({ runId: permissionRequests.runId, nodeKey: nodeExecutions.nodeKey, toolName: permissionRequests.toolName, input: permissionRequests.input })
+      .from(permissionRequests)
+      .innerJoin(nodeExecutions, eq(nodeExecutions.id, permissionRequests.nodeExecutionId))
+      .where(and(inArray(permissionRequests.runId, runIds), eq(permissionRequests.status, "pending")))
+      .orderBy(asc(permissionRequests.createdAt)),
   ]);
   const versionIds = [...new Set(rows.map((r) => r.versionId))];
   const documents = await db.select({ id: graphVersions.id, document: graphVersions.document }).from(graphVersions).where(inArray(graphVersions.id, versionIds));
@@ -66,7 +92,10 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
     const steps = executions.filter((e) => e.runId === run.id);
     const asked = open.filter((q) => q.runId === run.id);
     const review = asked.find((q) => (q.context as { review?: unknown }).review);
+    const current = IN_PROGRESS.has(run.status) ? steps.findLast((e) => IN_PROGRESS.has(e.status)) : undefined;
     lines.set(run.id, {
+      steps: stepsSoFar(steps),
+      stepSince: current ? (current.startedAt ?? current.createdAt) : null,
       graph: run.graph,
       version: run.version,
       costUsd: steps.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0),
@@ -82,6 +111,7 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
         prNumber: run.prNumber,
         questions: asked.length,
         reviews: review ? 1 : 0,
+        permissions: asking.filter((p) => p.runId === run.id).map((p) => ({ nodeKey: p.nodeKey, action: describePermission(p.toolName, p.input).action })),
       }),
       ...(review ? { reviewHref: reviewPath(run.projectId, run.id, review.id) } : {}),
     });

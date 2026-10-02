@@ -1,10 +1,13 @@
-import { and, asc, desc, edgeTraversals, eq, graphs, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
+import { and, asc, desc, edgeTraversals, eq, graphs, gt, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
 import { loopEdgeKeys } from "../lib/sent-back.ts";
 import type { StreamedEvent } from "./events-stream";
 
-/** Newest first, optionally narrowed to a status ("active" covers queued, running and waiting) and a project name. */
+/**
+ * Newest first, optionally narrowed to a status ("active" covers queued, running and waiting), a project
+ * by name or by id, and runs that finished since a moment.
+ */
 export type RunStatusFilter = "active" | "succeeded" | "failed" | "cancelled";
-export type RunFilter = { status?: RunStatusFilter; project?: string };
+export type RunFilter = { status?: RunStatusFilter; project?: string; projectId?: string; finishedSince?: Date };
 
 export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 50) {
   const status =
@@ -19,13 +22,21 @@ export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 5
       branchName: runs.branchName,
       prNumber: runs.prNumber,
       createdAt: runs.createdAt,
+      finishedAt: runs.finishedAt,
       project: projects.name,
       repo: projects.repoName,
       owner: projects.repoOwner,
     })
     .from(runs)
     .innerJoin(projects, eq(projects.id, runs.projectId))
-    .where(and(status, filter.project ? eq(projects.name, filter.project) : undefined))
+    .where(
+      and(
+        status,
+        filter.project ? eq(projects.name, filter.project) : undefined,
+        filter.projectId ? eq(runs.projectId, filter.projectId) : undefined,
+        filter.finishedSince ? gt(runs.finishedAt, filter.finishedSince) : undefined,
+      ),
+    )
     .orderBy(desc(runs.createdAt))
     .limit(limit);
 }

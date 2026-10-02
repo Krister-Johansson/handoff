@@ -24,9 +24,13 @@ async function readyToMerge(db: Db) {
  * What waits on a person, grouped by what they must do: reviews to open, questions to answer, runs
  * that stopped (failed, or stuck on a loop that ran out of rounds), and pull requests to review on
  * GitHub. A run stuck on a loop is listed only as stuck, since it needs a decision rather than a repair.
+ * With a project id, only that project's items.
  */
-export async function inboxGroups(db: Db) {
-  const [inbox, reviews, stuck, ready, permissions] = await Promise.all([listInbox(db), waitingReviews(db), stuckRuns(db), readyToMerge(db), allPendingPermissions(db)]);
+export async function inboxGroups(db: Db, opts: { projectId?: string } = {}) {
+  const mine = <T extends { projectId: string }>(items: T[]) => (opts.projectId ? items.filter((i) => i.projectId === opts.projectId) : items);
+  const [all, allReviews, allStuck, allReady, allPermissions] = await Promise.all([listInbox(db), waitingReviews(db), stuckRuns(db), readyToMerge(db), allPendingPermissions(db)]);
+  const inbox = { questions: mine(all.questions), failedRuns: mine(all.failedRuns) };
+  const [reviews, stuck, ready, permissions] = [mine(allReviews), mine(allStuck), mine(allReady), mine(allPermissions)];
   const loops = await Promise.all(stuck.map(async (s) => ({ run: s, loop: await stuckLoop(db, s.runId) })));
   const stuckRunsList = loops.flatMap(({ run, loop }) =>
     loop

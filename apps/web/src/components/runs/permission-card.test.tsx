@@ -1,12 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
+import { ProjectCards } from "@/components/inbox/card-place";
 import { PermissionCard } from "./permission-card";
 
 const actions = vi.hoisted(() => ({ answerPermissionAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
 beforeEach(() => actions.answerPermissionAction.mockReset().mockResolvedValue({ ok: true }));
 
-const request = { id: "3f6b2a10-0000-4000-8000-000000000001", runId: "22222222-2222-4222-8222-222222222222", nodeKey: "coder-1", toolName: "Bash", input: { command: "git -C /w log --oneline -8" } };
+const request = { id: "3f6b2a10-0000-4000-8000-000000000001", runId: "22222222-2222-4222-8222-222222222222", nodeKey: "coder-1", toolName: "Bash", input: { command: "git -C /w log --oneline -8" }, createdAt: new Date() };
 
 test("a step waiting on a permission shows what it wants to run, with the rule Always allow would add", () => {
   render(<PermissionCard request={request} />);
@@ -48,4 +49,23 @@ test("the card's form is a WebMCP tool with Allow once and Deny as its submit co
   fireEvent.change(screen.getByLabelText("Note for Claude (optional)"), { target: { value: "Use Read." } });
   fireEvent.click(screen.getByRole("button", { name: "Deny" }));
   await waitFor(() => expect(actions.answerPermissionAction).toHaveBeenCalledWith({ id: request.id, runId: request.runId, decision: "deny", message: "Use Read." }));
+});
+
+test("the card says how long the step has waited for an answer", () => {
+  render(<PermissionCard request={{ ...request, createdAt: new Date(Date.now() - 8 * 60_000) }} />);
+  expect(screen.getByText("asked 8 minutes ago")).toBeInTheDocument();
+});
+
+test("in the inbox the card names the project and the run; on a project's page only the run", () => {
+  const run = { projectId: "p1", projectName: "handoff", task: "#70 Speak replies with a Stop control" };
+  const { unmount } = render(<PermissionCard request={request} run={run} />);
+  expect(screen.getByText(/handoff ·/)).toBeInTheDocument();
+  unmount();
+  render(
+    <ProjectCards>
+      <PermissionCard request={request} run={run} />
+    </ProjectCards>,
+  );
+  expect(screen.getByRole("link", { name: "#70 Speak replies with a Stop control" })).toHaveAttribute("href", `/projects/p1/runs/${request.runId}`);
+  expect(screen.queryByText(/handoff/)).not.toBeInTheDocument();
 });
