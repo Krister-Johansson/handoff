@@ -87,7 +87,7 @@ test("without a project used last, the switcher shows the first project; without
   );
   expect(screen.queryByRole("navigation", { name: "Project" })).not.toBeInTheDocument();
   fireEvent.keyDown(screen.getByRole("button", { name: "No project yet. Add one" }), { key: "Enter" });
-  expect(screen.getByRole("menuitem", { name: "Add project" })).toHaveAttribute("href", "/projects");
+  expect(screen.getByRole("menuitem", { name: "Add project" })).toHaveAttribute("href", "/settings?tab=projects&add=1");
 });
 
 /** The text a screen reader reads, without the decorative letter tiles. */
@@ -109,8 +109,8 @@ test("picking another project keeps the page type", () => {
   expect(openSwitcher(/^Project: handoff/)).toEqual([
     ["example-shopexample-org/example-shop", "/projects/p2/plan"],
     ["demo-docsexample-org/demo-docs", "/projects/p3/plan"],
-    ["Add project", "/projects"],
-    ["Manage projects", "/settings"],
+    ["Add project", "/settings?tab=projects&add=1"],
+    ["Manage projects", "/settings?tab=projects"],
   ]);
   unmount();
 

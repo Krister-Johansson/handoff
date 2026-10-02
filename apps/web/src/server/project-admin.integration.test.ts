@@ -2,8 +2,9 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import { appendEvents, createNotification, eq, events, graphs, nodeExecutions, notifications, projects, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
-import { deleteProject, projectAttention, updateProject } from "./project-admin.ts";
+import { deleteProject, projectAttention, projectsForSettings, unlinkPlan, updateProject } from "./project-admin.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -30,6 +31,41 @@ describe("updateProject", () => {
     await expect(updateProject(db, project.id, { name: "Bad Name", defaultBranch: "main" })).rejects.toThrow(/lowercase/);
     await expect(updateProject(db, project.id, { name: "other", defaultBranch: "main" })).rejects.toThrow(/already/);
     await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: " " })).rejects.toThrow(/branch/);
+  });
+});
+
+describe("Settings, Projects", () => {
+  async function planned() {
+    const plan = new FakeProjects(new FakeGitHub());
+    const { project } = await projectWithRun();
+    const { number } = await plan.createProject("octo", { owner: "octo", name: "sample" }, "sandbox plan");
+    await db.update(projects).set({ planProjectNumber: number, setupCommand: "pnpm install" }).where(eq(projects.id, project.id));
+    await createProject(db, { name: "quiet", repo: "octo/quiet", defaultBranch: "trunk" });
+    return { plan, project, number };
+  }
+
+  test("lists every project with its run count, setup command and the plan's GitHub Project read from GitHub", async () => {
+    const { plan, project, number } = await planned();
+    const rows = await projectsForSettings(db, plan);
+    expect(rows).toEqual([
+      expect.objectContaining({ name: "quiet", repoOwner: "octo", repoName: "quiet", defaultBranch: "trunk", setupCommand: null, runCount: 0, plan: null }),
+      expect.objectContaining({ id: project.id, name: "sandbox", setupCommand: "pnpm install", runCount: 1, plan: { number, title: "sandbox plan", url: expect.stringContaining(`/projects/${number}`) } }),
+    ]);
+  });
+
+  test("keeps the plan's number when GitHub cannot be read", async () => {
+    const { plan, number } = await planned();
+    plan.scopesAnswer = { project: false, classic: true };
+    expect((await projectsForSettings(db, plan)).find((p) => p.name === "sandbox")?.plan).toEqual({ number });
+    expect((await projectsForSettings(db, undefined)).find((p) => p.name === "sandbox")?.plan).toEqual({ number });
+  });
+
+  test("unlinkPlan forgets the plan's GitHub Project and leaves the Project on GitHub", async () => {
+    const { plan, project, number } = await planned();
+    await unlinkPlan(db, project.id);
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(row?.planProjectNumber).toBeNull();
+    expect(await plan.getProject("octo", number)).toBeDefined();
   });
 });
 

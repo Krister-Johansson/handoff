@@ -2,6 +2,9 @@ import type { PlanStatus } from "@handoff/github";
 import type { RunFilter } from "./plan/filters";
 import { PROJECT_SECTIONS, type PlanViewName, type ProjectSection } from "./project-tab";
 
+/** Settings, Projects: where projects are added, edited and deleted. */
+export const PROJECTS_SETTINGS_PATH = "/settings?tab=projects";
+
 /** A project's page: its Overview without a section, else the section's route. */
 export const projectPath = (projectId: string, section?: ProjectSection) => `/projects/${projectId}${section ? `/${section}` : ""}`;
 

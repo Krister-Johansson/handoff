@@ -11,7 +11,7 @@ import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
 import { listGitHubProjects, moveToReady, moveToShaping, planIssue, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
-import { deleteProject, updateProject } from "@/server/project-admin";
+import { deleteProject, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { linkDependencies } from "@/server/link-dependencies";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
@@ -31,7 +31,8 @@ export async function createProjectAction(_: ActionState, form: FormData): Promi
     const duplicate = message.includes("repo_id") ? "That repository already is a project." : "A project with that name exists.";
     return { ok: false, error: message.includes("duplicate") ? duplicate : message, values };
   }
-  revalidatePath("/projects");
+  // The sidebar in the root layout lists the projects; Settings, Projects shows them too.
+  revalidatePath("/", "layout");
   redirect(`/projects/${id}`);
 }
 
@@ -53,8 +54,8 @@ export async function updateProjectAction(_: ActionState, form: FormData): Promi
   } catch (error) {
     return { ok: false, error: (error as Error).message, values };
   }
-  revalidatePath("/projects");
-  revalidatePath(`/projects/${projectId}`);
+  // The sidebar in the root layout lists the projects; Settings, Projects shows them too.
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -64,7 +65,8 @@ export async function deleteProjectAction(_: ActionState, form: FormData): Promi
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  revalidatePath("/projects");
+  // The sidebar in the root layout lists the projects; Settings, Projects shows them too.
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -274,10 +276,26 @@ export async function listGitHubProjectsAction(projectId: string): Promise<{ pro
 
 const SetupPlanSchema = z.object({ projectId: z.string().uuid(), use: z.number().int().positive().optional() });
 
-/** A person sets up the project's plan from the Plan page: an existing GitHub Project of theirs (use), or a new one. */
+/** A person sets up the project's plan from the Plan page or Settings, Projects: an existing GitHub Project of theirs (use), or a new one. */
 export async function setupPlanAction(input: z.input<typeof SetupPlanSchema>): Promise<ActionState> {
   const parsed = SetupPlanSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That project cannot get a plan from here." };
   const { projectId, use } = parsed.data;
-  return onPlan(projectId, (deps) => setupPlan(deps, projectId, use !== undefined ? { use } : {}));
+  const result = await onPlan(projectId, (deps) => setupPlan(deps, projectId, use !== undefined ? { use } : {}));
+  if (result.ok) revalidatePath("/settings");
+  return result;
+}
+
+/** A person unlinks the plan's GitHub Project in Settings, Projects; the Project stays on GitHub. */
+export async function unlinkPlanAction(input: { projectId: string }): Promise<ActionState> {
+  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project cannot be unlinked from here." };
+  try {
+    await unlinkPlan(getDb(), parsed.data.projectId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath("/settings");
+  revalidatePath(planPath(parsed.data.projectId));
+  return { ok: true };
 }
