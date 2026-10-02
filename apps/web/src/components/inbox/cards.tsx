@@ -56,6 +56,19 @@ function InboxCard({ icon: Icon, tone, children }: { icon: LucideIcon; tone: Ton
   );
 }
 
+/**
+ * A card in the Inbox under the id the assistant's page_show_item takes: a question's or permission's
+ * id, the run's for one ready to merge or out of rounds, the execution's for a failed step or a pull
+ * request. It takes focus from script only, which shows its ring.
+ */
+export function InboxItem({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <div id={id} tabIndex={-1} className="rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+      {children}
+    </div>
+  );
+}
+
 /** How long ago something happened. The server and the browser may disagree by a minute, which is fine. */
 function When({ prefix, at }: { prefix: string; at: Date | string | null | undefined }) {
   if (!at) return null;

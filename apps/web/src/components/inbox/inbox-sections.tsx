@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FailedRunCard, PullRequestCard, QuestionCard, ReadyToMergeCard, StuckRunCard } from "./cards";
+import { FailedRunCard, InboxItem, PullRequestCard, QuestionCard, ReadyToMergeCard, StuckRunCard } from "./cards";
 import { FilterLinks } from "@/components/filter-links";
 import { PermissionCard } from "@/components/runs/permission-card";
 import { inboxCount, inboxItems, type InboxView } from "./inbox-view";
@@ -50,35 +50,49 @@ export function InboxSections({ view }: { view: InboxView }) {
     <div className="flex flex-col gap-6">
       <Group id="inbox-permissions" title="Permission requests" count={view.permissions?.length ?? 0}>
         {view.permissions?.map((p) => (
-          <PermissionCard key={p.id} request={p} run={p} />
+          <InboxItem key={p.id} id={p.id}>
+            <PermissionCard request={p} run={p} />
+          </InboxItem>
         ))}
       </Group>
       <Group id="inbox-reviews" title="Reviews to open" count={view.reviews.length}>
         {view.reviews.map((q) => (
-          <QuestionCard key={q.id} item={q} />
+          <InboxItem key={q.id} id={q.id}>
+            <QuestionCard item={q} />
+          </InboxItem>
         ))}
       </Group>
       <Group id="inbox-questions" title="Questions to answer" count={view.questions.length}>
         {view.questions.map((q) => (
-          <QuestionCard key={q.id} item={q} />
+          <InboxItem key={q.id} id={q.id}>
+            <QuestionCard item={q} />
+          </InboxItem>
         ))}
       </Group>
       <Group id="inbox-ready" title="Ready to merge" count={view.readyToMerge.length}>
         {view.readyToMerge.map((r) => (
-          <ReadyToMergeCard key={r.runId} item={r} />
+          <InboxItem key={r.runId} id={r.runId}>
+            <ReadyToMergeCard item={r} />
+          </InboxItem>
         ))}
       </Group>
       <Group id="inbox-stopped" title="Runs that stopped" count={view.failedRuns.length + view.stuckRuns.length}>
         {view.failedRuns.map((f) => (
-          <FailedRunCard key={f.executionId} item={f} />
+          <InboxItem key={f.executionId} id={f.executionId}>
+            <FailedRunCard item={f} />
+          </InboxItem>
         ))}
         {view.stuckRuns.map((s) => (
-          <StuckRunCard key={s.runId} item={s} />
+          <InboxItem key={s.runId} id={s.runId}>
+            <StuckRunCard item={s} />
+          </InboxItem>
         ))}
       </Group>
       <Group id="inbox-pulls" title="Pull requests waiting for your review" count={view.pullRequests.length}>
         {view.pullRequests.map((p) => (
-          <PullRequestCard key={p.executionId} item={p} />
+          <InboxItem key={p.executionId} id={p.executionId}>
+            <PullRequestCard item={p} />
+          </InboxItem>
         ))}
       </Group>
     </div>
