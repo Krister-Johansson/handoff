@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { FeedbackSchema, HumanAnswerSchema } from "./outputs.ts";
+import { FeedbackSchema, HumanAnswerSchema, PlanSizeSchema } from "./outputs.ts";
 
 export const NodeResultSchema = z.object({
   output: z.unknown().optional(),
@@ -44,7 +44,7 @@ export const RunStateSchema = z
   .object({
     task: z.string(),
     issues: z.array(LinkedIssueSchema).optional(),
-    plan: z.object({ plan: z.string(), steps: z.array(z.string()), ownedPaths: z.array(z.string()), acceptance: z.array(z.string()).optional() }).optional(),
+    plan: z.object({ plan: z.string(), steps: z.array(z.string()), ownedPaths: z.array(z.string()), acceptance: z.array(z.string()).optional(), size: PlanSizeSchema.optional() }).optional(),
     prNumber: z.number().int().optional(),
     feedback: FeedbackSchema.optional(),
     loops: z.record(z.string(), z.object({ attempts: z.number().int() })).default({}),

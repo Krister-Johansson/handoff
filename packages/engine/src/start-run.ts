@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { LinkedIssue } from "@handoff/core";
 import { graphs, graphVersions, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
-import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
+import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
 import { recordPlanStatus } from "./plan-status.ts";
 import { createRun } from "./runs.ts";
 import type { RunRow } from "./types.ts";
@@ -17,6 +17,8 @@ export type StartRunInput = {
   again?: boolean | undefined;
   /** Who starts the run: dashboard, claude-code, assistant, webmcp, cli or scheduler. */
   startedBy?: string | undefined;
+  /** The size to record when the gate reads no items: a run started again keeps the size of the run it repeats. */
+  size?: PlanSize | null | undefined;
   /** The plan's items as the caller already read them: the Ready gate uses them instead of reading the Project again. */
   items?: PlanItem[] | undefined;
   /** The most active runs the project may have, counted under the start lock: the scheduler's limit. */
@@ -65,22 +67,34 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   // Checked first so a taken task names its run rather than the Running status its run gave it; checked again under the lock.
   await refuseTaken(db, input.projectId, numbers);
   const issues = await linkIssues(input.issues ?? [], repo, github, plan);
+  let items: PlanItem[] | undefined;
   if (plan && project.planProjectNumber !== null && issues.length > 0 && !input.again) {
-    refuseUnready(input.items ?? (await plan.listItems(repo.owner, project.planProjectNumber, repo)), issues);
+    items = input.items ?? (await plan.listItems(repo.owner, project.planProjectNumber, repo));
+    refuseUnready(items, issues);
   }
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
   if (!task) throw new Error("Describe the task, or link at least one issue.");
+  const size = input.again ? (input.size ?? undefined) : sizeOfSingleTask(items, issues);
   // Starts on one project take turns, so two starts (a person's and the scheduler's) cannot both take an issue.
   const run = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
-    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, events: input.events });
+    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");
   return run;
+}
+
+/**
+ * The Size of a run's one linked task as the Ready gate read it. The run keeps it, so a later change of
+ * the task's size does not move the run; a run on several tasks, or on none, has no size.
+ */
+function sizeOfSingleTask(items: PlanItem[] | undefined, issues: LinkedIssue[]): PlanSize | undefined {
+  if (issues.length !== 1) return undefined;
+  return items?.find((item) => item.number === issues[0]!.number)?.size;
 }
 
 /** A project with `max` active runs, whoever started them, has no room for another. */

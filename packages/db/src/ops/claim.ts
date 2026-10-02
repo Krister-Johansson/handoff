@@ -50,6 +50,8 @@ export async function claimNext(
         leaseExpiresAt: sql`now() + (${opts.leaseMs}::int * interval '1 millisecond')`,
         heartbeatAt: sql`now()`,
         claimedAt: sql`now()`,
+        // A retry's runnable_at is the end of its delay, so the delay is not queue time.
+        queuedMs: sql`${nodeExecutions.queuedMs} + greatest(0, floor(extract(epoch from now() - ${nodeExecutions.runnableAt}) * 1000))::int`,
         startedAt: sql`coalesce(${nodeExecutions.startedAt}, now())`,
       })
       .where(eq(nodeExecutions.id, id))

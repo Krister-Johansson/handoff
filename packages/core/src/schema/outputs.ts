@@ -7,6 +7,9 @@ const QuestionSchema = z.object({
   options: z.array(z.string()).optional(),
 });
 
+/** A task's size, the same S, M and L as the plan's Size field. */
+export const PlanSizeSchema = z.enum(["S", "M", "L"]);
+
 /**
  * A plan, or a question when the task leaves a decision to a person. Outputs from before planners
  * could ask have no status and are plans.
@@ -19,6 +22,8 @@ export const PlannerOutputSchema = z
     ownedPaths: z.array(z.string()),
     /** What a person can check in the running app to see the task is done, when the issue lists none. */
     acceptance: z.array(z.string().min(1)).optional(),
+    /** The planner's proposal for the task's Size; the plan's timeline shows it until a person picks a size. */
+    size: PlanSizeSchema.optional().describe("S for a change in one place, M for a feature across a few files, L for a change across several areas."),
     question: QuestionSchema.optional(),
   })
   .refine((o) => (o.status === "needs_input" ? o.question !== undefined : o.plan.trim().length > 0), {
