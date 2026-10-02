@@ -1,30 +1,87 @@
 "use client";
 
-import { use } from "react";
+import { startTransition, use, useOptimistic, useState, type ComponentProps } from "react";
+import { useRouter } from "next/navigation";
 import { PinIcon, PlusIcon } from "lucide-react";
 import type { PlanTask } from "@/server/plan";
-import { chipOf } from "@/lib/plan/size-text";
+import { setSizeAction } from "@/app/projects/actions";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
+import { chipOf, type SizeChange } from "@/lib/plan/size-text";
 import { cn } from "@/lib/utils";
 import { Sizing, type SizingControl } from "./plan-context";
+import { SizePopover, type SizeValue } from "./size-popover";
 
-const CHIP = "inline-flex h-5 shrink-0 items-center overflow-hidden rounded-[5px] border text-[11px] leading-none font-medium whitespace-nowrap tabular-nums";
+const CHIP = "inline-flex h-5 shrink-0 items-center overflow-hidden rounded-[5px] border text-[11px] leading-none font-medium whitespace-nowrap tabular-nums focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none";
 
 /**
  * A task's size and the duration its bar uses: "M ~50m" from this project's runs, a dotted value for a
  * size's default, dashed for the planner's proposal, a pin for a manual estimate, and "Size" with none.
- * Without the Plan page's forecasts it shows nothing.
+ * It opens the size popover. Without the Plan page's forecasts it shows nothing.
  */
 export function SizeChip({ task }: { task: PlanTask }) {
   const sizing = use(Sizing);
   if (!sizing) return null;
-  return <SizeButton task={task} sizing={sizing} />;
+  return <SizeControl task={task} sizing={sizing} />;
 }
 
-function SizeButton({ task, sizing }: { task: PlanTask; sizing: SizingControl }) {
+const applied = (value: SizeValue, change: SizeChange): SizeValue => ({
+  size: change.size === undefined ? value.size : (change.size ?? undefined),
+  estimate: change.estimate === undefined ? value.estimate : (change.estimate ?? undefined),
+});
+
+/** The chip and its popover: a pick shows at once with a spinner while it saves, and a refusal reopens the popover with the reason. */
+function SizeControl({ task, sizing }: { task: PlanTask; sizing: SizingControl }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string>();
+  const [value, showValue] = useOptimistic<SizeValue, SizeChange>({ size: task.size, estimate: task.estimate }, applied);
+  const [saving, setSaving] = useOptimistic(false);
+
+  const save = (change: SizeChange) => {
+    setOpen(false);
+    setError(undefined);
+    startTransition(async () => {
+      showValue(change);
+      setSaving(true);
+      const result = await setSizeAction({ projectId: sizing.projectId, issue: task.number, ...change });
+      startTransition(() => {
+        if (result.ok) {
+          router.refresh();
+          return;
+        }
+        setError(result.error ?? "GitHub did not take the size.");
+        setOpen(true);
+      });
+    });
+  };
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setError(undefined);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <ChipButton task={{ ...task, ...value }} sizing={sizing} saving={saving} />
+      </PopoverTrigger>
+      {open && <SizePopover task={task} value={value} sizing={sizing} error={error} onSave={save} />}
+    </Popover>
+  );
+}
+
+function ChipButton({ task, sizing, saving, ...trigger }: { task: PlanTask; sizing: SizingControl; saving: boolean } & ComponentProps<"button">) {
   const chip = chipOf(task, sizing.forecasts, sizing.capacity);
-  if (chip.kind === "none") {
+  if (chip.kind === "none" && !saving) {
     return (
-      <button type="button" aria-label={chip.label} className={cn(CHIP, "gap-0.5 border-dashed border-border px-1.5 font-normal text-muted-foreground hover:border-foreground/60 hover:text-foreground [&_svg]:size-[11px]")}>
+      <button
+        type="button"
+        {...trigger}
+        aria-label={chip.label}
+        className={cn(CHIP, "gap-0.5 border-dashed border-border px-1.5 font-normal text-muted-foreground hover:border-foreground/60 hover:text-foreground [&_svg]:size-[11px]")}
+      >
         <PlusIcon aria-hidden />
         Size
       </button>
@@ -34,12 +91,18 @@ function SizeButton({ task, sizing }: { task: PlanTask; sizing: SizingControl })
   return (
     <button
       type="button"
-      aria-label={chip.label}
+      {...trigger}
+      aria-label={saving ? `Saving the size of #${task.number} to GitHub` : chip.label}
+      aria-busy={saving || undefined}
       title={chip.title}
-      className={cn(CHIP, "border-input bg-card text-foreground/80 hover:border-foreground/60 hover:text-foreground", proposed && "border-dashed")}
+      className={cn(
+        CHIP,
+        "border-input bg-card text-foreground/80 hover:border-foreground/60 hover:text-foreground data-[state=open]:border-foreground/60 data-[state=open]:ring-2 data-[state=open]:ring-ring/35",
+        proposed && "border-dashed",
+      )}
     >
       {chip.size && (
-        <b className={cn("grid min-w-[18px] self-stretch place-items-center bg-secondary px-1 font-mono text-[10.5px] font-semibold text-foreground", proposed && "border-r border-dashed border-input bg-transparent text-foreground/80")}>
+        <b className={cn("grid min-w-[18px] place-items-center self-stretch bg-secondary px-1 font-mono text-[10.5px] font-semibold text-foreground", proposed && "border-r border-dashed border-input bg-transparent text-foreground/80")}>
           {chip.size}
         </b>
       )}
@@ -50,8 +113,14 @@ function SizeButton({ task, sizing }: { task: PlanTask; sizing: SizingControl })
           chip.kind === "default" && "text-muted-foreground underline decoration-muted-foreground decoration-dotted underline-offset-2",
         )}
       >
-        {chip.kind === "estimate" && <PinIcon aria-hidden />}
-        {chip.text}
+        {saving ? (
+          <Spinner aria-hidden className="size-2.5" />
+        ) : (
+          <>
+            {chip.kind === "estimate" && <PinIcon aria-hidden />}
+            {chip.text}
+          </>
+        )}
       </span>
     </button>
   );

@@ -5,6 +5,12 @@ import { durationOf, FORECAST_MIN_RUNS, type Forecast, type Forecasts } from "./
 /** What a size chip needs of a task: its Size, its manual estimate in hours, and the planner's proposal. */
 export type SizedTask = { number: number; size?: PlanSize | undefined; estimate?: number | undefined; proposal?: { size: PlanSize } | null | undefined };
 
+/** The sizes in order; the client keeps its own copy so the GitHub package stays on the server. */
+export const SIZES: readonly PlanSize[] = ["S", "M", "L"];
+
+/** A change to a task's Size or manual estimate in hours: a value sets it, null clears it, a missing key leaves it. */
+export type SizeChange = { size?: PlanSize | null; estimate?: number | null };
+
 /** How a chip reads: a forecast from runs, a size's default, the planner's proposal, a manual estimate, or nothing. */
 export type ChipKind = "forecast" | "default" | "proposal" | "estimate" | "none";
 
