@@ -43,10 +43,20 @@ test("the toolbar names the graph and its version, and says it is valid", () => 
 test("an unsaved edit offers to save as the version after the newest one", () => {
   renderEditor();
   expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
   fireEvent.click(screen.getByRole("button", { name: "Add Coder" }));
   // The new Coder is not connected yet, so the graph has an issue and cannot be saved until it is.
   expect(screen.getByRole("button", { name: "Save as v5" })).toBeDisabled();
   expect(screen.getByRole("toolbar", { name: "Graph" })).toHaveTextContent(/\d+ issues?/);
+});
+
+test("the editor opens locked: the controls offer to unlock, the palette is disabled and the Graph help says how to unlock", () => {
+  renderEditor();
+  expect(screen.getByRole("button", { name: "Unlock editing" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add Coder" })).toHaveAttribute("aria-disabled", "true");
+  const inspector = screen.getByRole("complementary", { name: "Inspector" });
+  expect(inspector).toHaveTextContent("The graph is locked");
+  expect(inspector).toHaveTextContent("lock button");
 });
 
 test("the trail says when the shown version was saved and by whom", () => {

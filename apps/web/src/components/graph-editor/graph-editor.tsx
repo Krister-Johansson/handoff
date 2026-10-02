@@ -26,6 +26,7 @@ import type { LibraryChoices } from "@/lib/library-choices";
 import { Inspector } from "./inspector";
 import { InspectorSection } from "./inspector-section";
 import { NODE_ICONS } from "./node-icons";
+import { EditLockButton } from "./edit-lock";
 import { VersionHistory, type VersionItem } from "./version-history";
 import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
 
@@ -67,6 +68,8 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   const [pending, startTransition] = useTransition();
   const [versions, setVersions] = useState(initialVersions);
   const [restoring, setRestoring] = useState<number | undefined>();
+  // Every visit starts locked: no adding, deleting, connecting or moving until the lock in the canvas controls is opened.
+  const [locked, setLocked] = useState(true);
 
   // Warn before leaving with edits that are not saved as a version.
   useEffect(() => {
@@ -143,6 +146,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   }, []);
 
   const addNode = (nodeType: NodeType) => {
+    if (locked) return;
     const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
     edit({ type: "addNode", nodeType, position: { x: Math.round(center.x), y: Math.round(center.y) } });
   };
@@ -193,7 +197,8 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                 deleteKeyCode={["Backspace", "Delete"]}
               >
                 <CanvasBackground />
-                <Controls className={CONTROLS_CLASS}>
+                <Controls className={CONTROLS_CLASS} showInteractive={false}>
+                  <EditLockButton locked={locked} onToggle={() => setLocked((l) => !l)} />
                   <VersionHistory versions={versions} version={version} restoring={restoring} pending={pending} onRestore={restore} />
                 </Controls>
                 <CanvasMiniMap />
@@ -213,12 +218,14 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                                 aria-label={`Add ${NODE_LABELS[type]}`}
                                 // A graph has one Start.
                                 disabled={type === "start" && hasStart}
+                                // Not disabled while locked, so the tooltip still shows and says how to unlock.
+                                aria-disabled={locked || undefined}
                                 onClick={() => addNode(type)}
                               >
                                 <Icon />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent side="right">Add {NODE_LABELS[type]}</TooltipContent>
+                            <TooltipContent side="right">{locked ? "Unlock editing to add nodes" : `Add ${NODE_LABELS[type]}`}</TooltipContent>
                           </Tooltip>
                         );
                       })}
@@ -270,7 +277,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
             <aside aria-label="Inspector" className="flex min-h-0 flex-col border-l bg-card">
               <ScrollArea className="min-h-0 flex-1">
                 <div className="flex flex-col">
-                  <Inspector graph={graph} selection={selection} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
+                  <Inspector graph={graph} selection={selection} locked={locked} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
                   {(issues.length > 0 || saveError) && (
                     <InspectorSection title="Issues">
                       <ul className="flex flex-col gap-1 text-xs text-danger">

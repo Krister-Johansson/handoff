@@ -851,12 +851,15 @@ function EdgeInspector({ edge, graph, dispatch }: { edge: FlowEdge; graph: FlowG
 export function Inspector({
   graph,
   selection,
+  locked = false,
   library,
   dispatch,
   onSelect,
 }: {
   graph: FlowGraph;
   selection: { nodeId?: string; edgeId?: string };
+  /** A locked graph keeps its nodes and edges: no deleting, but their properties can still be edited. */
+  locked?: boolean;
   library: LibraryChoices;
   dispatch: Dispatch<EditorAction>;
   onSelect: (nodeId: string) => void;
@@ -867,7 +870,13 @@ export function Inspector({
   if (edge) return <EdgeInspector key={edge.id} edge={edge} graph={graph} dispatch={dispatch} />;
   return (
     <InspectorSection title="Graph">
-      <FieldDescription>Select a node or an edge to edit it. Drag from a node&apos;s right handle to another node to connect them. Press Backspace to delete the selection.</FieldDescription>
+      {locked ? (
+        <FieldDescription>
+          The graph is locked. Select a node or an edge to edit its properties. To add, delete, connect or move nodes, unlock it with the lock button in the canvas controls at the bottom left.
+        </FieldDescription>
+      ) : (
+        <FieldDescription>Select a node or an edge to edit it. Drag from a node&apos;s right handle to another node to connect them. Press Backspace to delete the selection.</FieldDescription>
+      )}
     </InspectorSection>
   );
 }
