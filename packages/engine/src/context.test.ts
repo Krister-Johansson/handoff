@@ -1,0 +1,28 @@
+import { expect, test } from "vitest";
+import { initialRunState, type CompiledNode, type NodeType, type RunState } from "@handoff/core";
+import type { NodeExecutionRow } from "@handoff/db";
+import { selectContext } from "./context.ts";
+
+const node = (key: string, type: NodeType): CompiledNode => ({
+  key,
+  type,
+  label: key,
+  config: {},
+  contract: { output: type === "coder" ? "coder_output" : "reviewer_output", checks: [] },
+  contextSelector: { stateKeys: [], repoPaths: [], includeFeedback: false, includePriorAttempt: true },
+  library: { skills: [], mcp: [], agents: [], groups: [] },
+  x: 0,
+  y: 0,
+});
+const execution = { attempt: 1, trigger: null, repairNote: null } as unknown as NodeExecutionRow;
+const plan = { plan: "Add a board.", steps: ["Add the route"], ownedPaths: ["src/board.ts"] };
+const withNodes = (nodes: RunState["nodes"]): RunState => ({ ...initialRunState("Add a board"), plan, nodes });
+const result = (output: unknown) => ({ output, executionId: "e1", attempt: 1 });
+
+test("a review's stage is plan until a coder has passed, then code", () => {
+  const review = node("review", "reviewer");
+  expect(selectContext(review, withNodes({ planner: result(plan) }), execution).stage).toBe("plan");
+  expect(selectContext(review, withNodes({ planner: result(plan), coder: result({ status: "needs_input", summary: "", question: { text: "Which?" } }) }), execution).stage).toBe("plan");
+  expect(selectContext(review, withNodes({ planner: result(plan), coder: result({ status: "done", summary: "Added the board." }) }), execution).stage).toBe("code");
+  expect(selectContext(node("coder", "coder"), withNodes({}), execution).stage).toBeUndefined();
+});

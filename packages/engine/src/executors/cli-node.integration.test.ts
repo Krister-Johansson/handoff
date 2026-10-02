@@ -185,6 +185,19 @@ test("a code review node asks for Claude Code's code-review skill on the run's b
   expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "coder")?.status).toBe("passed");
 });
 
+test("a review is asked for a severity per finding, with blocking defined, and a plan review is asked about the plan", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { verdict: "approve", comments: [] } }]);
+  const doc = structuredClone(linear) as { nodes: { key: string; attributes: Record<string, unknown> }[] };
+  doc.nodes.find((n) => n.key === "coder")!.attributes.type = "reviewer";
+  await startRun(db, doc);
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), reviewer: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr: stopAfterCoder } as unknown as ExecutorRegistry));
+  const prompt = cli.requests[1]!.prompt;
+  expect(prompt).toContain("Review the plan in the run state against the task.");
+  expect(prompt).toContain("blocking for a defect a user can hit on the main path of the change, a security hole, a broken accessibility requirement the project states, or a failing acceptance criterion");
+  expect(prompt).toContain("The verdict follows the findings: request_changes when one is blocking, approve otherwise.");
+  expect(cli.requests[1]!.systemPrompt).toContain("Stage: plan.");
+});
+
 test("the planner is asked for a short plan, and the coder for a PR title and description written for a reviewer", async () => {
   const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
   await startRun(db, linear);

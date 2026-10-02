@@ -38,11 +38,25 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
   demo:
     "Walk through the running app described in the system prompt with the playwright tools, as a person checking the acceptance criteria would. " +
     "Take a screenshot that shows each criterion, and report each one in shots. Do not edit files.",
-  reviewer:
-    "Review the work against the task: the changes on this branch, unless the step's instructions name something else, such as the plan. Do not edit files. " +
-    "Return request_changes with one comment per finding that leaves the work wrong or incomplete against the task. " +
-    "Approve only when you have no such finding; comments you add to an approval reach the later steps as suggestions.",
 };
+
+/**
+ * How a review grades its findings. The engine sets the verdict from them, so a reviewer that labels a
+ * finding blocking sends the work back whatever verdict it wrote.
+ */
+const SEVERITIES =
+  "Give every finding a severity: blocking for a defect a user can hit on the main path of the change, a security hole, a broken accessibility requirement the project states, or a failing acceptance criterion; " +
+  "should_fix for a problem worth fixing in this change that is not blocking; follow_up for what can wait for another issue. " +
+  "The verdict follows the findings: request_changes when one is blocking, approve otherwise. Findings that are not blocking reach the later steps and the pull request as suggestions.";
+
+/** A reviewer's role: the plan before any coder has passed in the run, the branch's changes after. */
+function reviewerPrompt(ctx: ExecutorContext): string {
+  const what =
+    ctx.packet.stage === "plan"
+      ? "Review the plan in the run state against the task. No code exists yet: never ask for an implementation."
+      : "Review the work against the task: the changes on this branch, unless the step's instructions name something else.";
+  return `${what} Do not edit files. Return one comment per finding. ${SEVERITIES}`;
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -68,13 +82,17 @@ function codeReviewPrompt(ctx: ExecutorContext): string {
   const level = typeof ctx.node.config.level === "string" ? ctx.node.config.level : DEFAULT_REVIEW_LEVEL;
   return [
     `Review this branch's changes against ${ctx.run.baseBranch} with the code-review skill: invoke it with the Skill tool, skill code-review, args "${level} ${ctx.run.branchName}".`,
-    "Do not edit files. Then return request_changes only for a finding that makes the change wrong, insecure, or misses the task, with one comment per such finding (path, line, body). " +
-      "Approve otherwise, and put every other finding as a comment on the approval: those reach the later steps and the pull request as suggestions.",
+    `Do not edit files. Then return one comment per finding (path, line, body, severity). ${SEVERITIES}`,
   ].join(" ");
 }
 
 function firstPrompt(ctx: ExecutorContext): string {
-  const role = ctx.node.type === "code_review" ? codeReviewPrompt(ctx) : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
+  const role =
+    ctx.node.type === "code_review"
+      ? codeReviewPrompt(ctx)
+      : ctx.node.type === "reviewer"
+        ? reviewerPrompt(ctx)
+        : (PROMPTS[ctx.node.type] ?? `Complete the ${ctx.node.type} step described in the system prompt.`);
   return [
     role,
     ...(ctx.packet.instructions ? ["Follow the instructions for this step in the system prompt."] : []),

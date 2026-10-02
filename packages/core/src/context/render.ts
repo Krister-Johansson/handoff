@@ -29,6 +29,8 @@ export type ContextPacket = {
   outputContract: string;
   /** The step's own instructions from the graph, on top of its built-in role. */
   instructions?: string;
+  /** For a review: whether any coder has passed in the run yet. Before one has, there is only a plan to review. */
+  stage?: "plan" | "code";
   /** What people decided at review gates earlier in the run: binding for every later step. */
   decisions?: { gate: string; note?: string | undefined; comments: ({ quote?: string | undefined; body: string } & Place)[] }[];
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
@@ -120,6 +122,8 @@ function renderWorktree(environment: ContextPacket["environment"]): string[] {
   ];
 }
 
+const PLAN_STAGE = "Stage: plan. No code exists for this run yet; review the plan in the run state and never ask for an implementation.";
+
 const LOG_TAIL_LINES = 80;
 const ISSUE_BODY_CHARS = 4000;
 
@@ -135,6 +139,7 @@ const list = (items: string[], empty: string) => (items.length ? items.map((i) =
 export function renderContextPacket(packet: ContextPacket): string {
   const out: string[] = [];
   out.push("# Task", "", packet.task, "");
+  if (packet.stage === "plan") out.push("# Stage", "", PLAN_STAGE, "");
   if (packet.instructions) out.push("# Instructions for this step", "", packet.instructions, "");
   if (packet.decisions?.length) {
     out.push(

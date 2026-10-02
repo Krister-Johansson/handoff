@@ -180,6 +180,12 @@ test("a reviewer's second look shows its earlier comments, the coder's reply, an
   expect(md).toContain("git diff 4ef4f22..HEAD");
 });
 
+test("a reviewer before any coder has passed is told it reviews a plan and must not ask for code", () => {
+  const md = renderContextPacket({ ...packet, nodeKey: "plan-review", outputContract: "reviewer_output", stage: "plan" });
+  expect(md).toContain("Stage: plan. No code exists for this run yet; review the plan in the run state and never ask for an implementation.");
+  expect(renderContextPacket({ ...packet, outputContract: "reviewer_output", stage: "code" })).not.toContain("Stage: plan.");
+});
+
 test("a conflict with main asks the coder to merge it in, keep both changes and leave lockfiles to the package manager", () => {
   const md = renderContextPacket({ ...packet, conflict: { base: "main", baseSha: "abc1234def", files: ["package.json", "pnpm-lock.yaml"] } });
   expect(md).toContain("# Merge conflict with main");

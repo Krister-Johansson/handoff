@@ -1,4 +1,4 @@
-import { acceptanceOf, ALL_TOOLS, memoryOf, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
+import { acceptanceOf, ALL_TOOLS, CoderOutputSchema, memoryOf, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
 import type { NodeExecutionRow } from "@handoff/db";
 
 export const DEFAULT_MAX_TURNS = 60;
@@ -117,6 +117,12 @@ function previousReviewOf(node: CompiledNode, state: RunState, sentBackTo: strin
   };
 }
 
+/**
+ * Whether a coder has passed in the run: a done coder output in run state, recognised by shape. Before
+ * one has, a review has only the plan to look at.
+ */
+const coderPassed = (state: RunState) => Object.values(state.nodes).some((r) => CoderOutputSchema.safeParse(r.output).data?.status === "done");
+
 /** `maxTurns: "auto"`: a turn budget that grows with the plan, 40 plus 4 per step, at most 150. */
 function autoTurns(state: RunState): number {
   return Math.min(150, 40 + 4 * (state.plan?.steps.length ?? 0));
@@ -145,6 +151,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     ...(suggestionsOf(state, node.key).length ? { suggestions: suggestionsOf(state, node.key) } : {}),
     ...(state.issues?.length ? { issues: state.issues } : {}),
     ...(acceptance ? { acceptance } : {}),
+    ...(REVIEW_TYPES.has(node.type) ? { stage: coderPassed(state) ? ("code" as const) : ("plan" as const) } : {}),
   };
   const previousReview = previousReviewOf(node, state, sentBackTo);
   if (previousReview) packet.previousReview = previousReview;
