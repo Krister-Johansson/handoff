@@ -41,6 +41,25 @@ test("FakeProjects shapes a plan in its Project and shares issue state with Fake
   expect(await projects.getStatus(repo, project.number, 50)).toBe("Shaping");
 });
 
+test("FakeProjects numbers items in the order they joined the Project and reads Priority when the Project has the field", async () => {
+  const github = new FakeGitHub();
+  const projects = new FakeProjects(github);
+  const project = await projects.createProject("octo", repo, "sample plan");
+  const first = await projects.createIssue(repo, { project: project.number, title: "First", body: "", labels: ["task"] });
+  const second = await projects.createIssue(repo, { project: project.number, title: "Second", body: "", labels: ["task"] });
+  expect(project.priorityOptions).toBeUndefined();
+
+  // A person adds a Priority field on GitHub and sets it on the second task.
+  projects.plans.get("octo/sample")!.project.priorityOptions = ["P0", "P1", "P2"];
+  projects.itemsOf(repo).get(second.number)!.priority = "P0";
+
+  expect((await projects.listItems("octo", project.number, repo)).map((i) => [i.number, i.position, i.priority])).toEqual([
+    [first.number, 1, undefined],
+    [second.number, 2, "P0"],
+  ]);
+  expect((await projects.getProject("octo", project.number))?.priorityOptions).toEqual(["P0", "P1", "P2"]);
+});
+
 test("FakeProjects keeps Start and Target on items, and a Project without the date fields refuses them until ensureDateFields adds them", async () => {
   const github = new FakeGitHub();
   const projects = new FakeProjects(github);

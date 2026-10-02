@@ -72,6 +72,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       subIssues: { total: 1, completed: 0 },
       blockedBy: [],
       blockers: [],
+      position: 1,
       prNumbers: [],
       updatedAt: "2026-10-01T10:00:00Z",
     },
@@ -88,6 +89,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       subIssues: { total: 2, completed: 1 },
       blockedBy: [],
       blockers: [],
+      position: 2,
       prNumbers: [],
       updatedAt: "2026-10-01T10:00:00Z",
     },
@@ -104,6 +106,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       subIssues: { total: 0, completed: 0 },
       blockedBy: [3],
       blockers: [3, 4],
+      position: 3,
       prNumbers: [40],
       updatedAt: "2026-10-02T09:00:00Z",
     },
@@ -120,6 +123,7 @@ test("listItems reads every page of a Project and returns the repository's issue
       subIssues: { total: 0, completed: 0 },
       blockedBy: [],
       blockers: [],
+      position: 4,
       prNumbers: [],
       updatedAt: "2026-10-01T10:00:00Z",
     },
@@ -141,6 +145,23 @@ test("listItems skips draft issues, pull requests and issues of other repositori
   const projects = port(fetch);
 
   expect((await projects.listItems("octo", 3, repo)).map((i) => i.number)).toEqual([7]);
+});
+
+test("listItems numbers items by their position across pages", async () => {
+  // GitHub returns items in Project order (POSITION ascending). A draft holds a place in that order too.
+  const draft = { status: null, content: { __typename: "DraftIssue" } };
+  const { fetch } = fakeGraphql({
+    PlanItems: (v) => (v.cursor ? page([issueItem(7), issueItem(3)], "c2", false) : page([issueItem(9), draft, issueItem(4)], "c1", true)),
+  });
+  const projects = port(fetch);
+
+  const items = await projects.listItems("octo", 3, repo);
+  expect(items.map((i) => [i.number, i.position])).toEqual([
+    [9, 1],
+    [4, 3],
+    [7, 4],
+    [3, 5],
+  ]);
 });
 
 test("listItems reads Start and Target as YYYY-MM-DD and an iteration's title, start and duration", async () => {
@@ -557,6 +578,46 @@ test("getProject reads a user's Project with its Status option ids and date fiel
   expect(await projects.getProject("octo", 99)).toBeUndefined();
 });
 
+test("listItems reads the Priority option and getProject returns the Priority options in field order", async () => {
+  const priority = (name: string) => ({ __typename: "ProjectV2ItemFieldSingleSelectValue", name });
+  const medium = { ...issueItem(30), priority: priority("Medium") };
+  const high = { ...issueItem(31), priority: priority("High") };
+  const none = { ...issueItem(32), priority: null };
+  // A field named Priority that is not a single select answers with another value type: handoff reads no priority from it.
+  const text = { ...issueItem(33), priority: { __typename: "ProjectV2ItemFieldTextValue" } };
+  const { fetch } = fakeGraphql({
+    PlanItems: () => page([medium, high, none, text], null, false),
+    // The options as Project #3 lists them live: the first is the highest.
+    PlanProject: () => ({
+      user: {
+        projectV2: {
+          ...planProject(3),
+          url: "https://github.com/users/octo/projects/3",
+          title: "sample plan",
+          priority: {
+            __typename: "ProjectV2SingleSelectField",
+            id: "F_priority",
+            options: [
+              { id: "o_high", name: "High" },
+              { id: "o_medium", name: "Medium" },
+              { id: "o_low", name: "Low" },
+            ],
+          },
+        },
+      },
+    }),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("octo", 3, repo)).map((i) => [i.number, i.priority])).toEqual([
+    [30, "Medium"],
+    [31, "High"],
+    [32, undefined],
+    [33, undefined],
+  ]);
+  expect((await projects.getProject("octo", 3))?.priorityOptions).toEqual(["High", "Medium", "Low"]);
+});
+
 /** How GitHub answers `field(name: "Start")` and `field(name: "Target")` on a Project without those fields: the data plus a NOT_FOUND per field. */
 const missingDateFields = (path: string[]) =>
   ["start", "target"].map((alias) => ({
@@ -575,6 +636,27 @@ test("a Project without Start and Target fields is still read, with no date fiel
 
   expect(await projects.getProject("octo", 5)).toMatchObject({ number: 5, title: "older plan", dateFields: { start: undefined, target: undefined } });
   expect((await projects.listProjects("octo", repo)).map((p) => p.number)).toEqual([5]);
+});
+
+test("a Project without a Priority field gives every item no priority", async () => {
+  // Project #5 live: no Start, Target or Priority field. Each `field(name:)` lookup answers NOT_FOUND next to the data; `fieldValueByName` answers null without an error.
+  const project = { ...planProject(5, "U_octo", false), url: "https://github.com/users/octo/projects/5", title: "older plan", priority: null };
+  const missingPriority = {
+    type: "NOT_FOUND",
+    path: ["user", "projectV2", "priority"],
+    message: "Could not resolve to a Unions::ProjectV2FieldConfiguration with the name Priority",
+  };
+  const { fetch } = fakeGraphql({
+    PlanProject: () => new GraphqlErrors({ user: { projectV2: project } }, [...missingDateFields(["user", "projectV2"]), missingPriority]),
+    PlanItems: () => page([{ ...issueItem(40), priority: null }, { ...issueItem(41), priority: null }], null, false),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getProject("octo", 5)).toMatchObject({ number: 5, title: "older plan", priorityOptions: undefined });
+  expect((await projects.listItems("octo", 5, repo)).map((i) => [i.number, i.priority])).toEqual([
+    [40, undefined],
+    [41, undefined],
+  ]);
 });
 
 test("getStatus reads the issue's Status in the Project, and is undefined when the issue is not an item", async () => {
