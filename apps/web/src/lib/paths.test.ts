@@ -10,4 +10,6 @@ test("the plan lives under its project, with the view, an epic and statuses in t
   expect(planPath("p1")).toBe("/projects/p1/plan");
   expect(planPath("p1", { view: "tree" })).toBe("/projects/p1/plan");
   expect(planPath("p1", { view: "board", epic: 12, status: ["Ready", "In review"] })).toBe("/projects/p1/plan?view=board&epic=12&status=Ready,In%20review");
+  expect(planPath("p1", { epic: "unplanned", run: "needs-you" })).toBe("/projects/p1/plan?epic=unplanned&run=needs-you");
+  expect(planPath("p1", { run: "any" })).toBe("/projects/p1/plan");
 });
