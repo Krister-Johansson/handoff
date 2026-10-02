@@ -277,7 +277,7 @@ export function RunLive({
   // How a tool's answer names a node: its label, then its key.
   const nodeName = (key: string) => `${labels[key] ?? key} (${key})`;
 
-  usePageTools<"run">(
+  usePageTools(
     "run",
     {
       page_show_view: ({ view }) => {
