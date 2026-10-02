@@ -31,6 +31,9 @@ function originsOf(url: string): string {
 
 const LISTED_FILES = 10;
 
+/** The variable names a Demo node passes from the worker's environment to the seed command and the app. */
+export const passEnvOf = (config: Record<string, unknown>): string[] => (Array.isArray(config.passEnv) ? config.passEnv.filter((n): n is string => typeof n === "string") : []);
+
 /**
  * Why a demo set to UI changes (`config.when: "ui_changes"`) has nothing to show, or undefined when it
  * runs: the change touches no file under the project's UI paths. A demo runs for every change by default.
@@ -74,6 +77,7 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
             signal: ctx.signal,
             note: (message) => ctx.emit("preview.note", { message }),
             seedCommand: ctx.project.demoSeedCommand,
+            passEnv: passEnvOf(ctx.node.config),
             ...(options.docker ? { docker: options.docker } : {}),
           },
         );

@@ -5,6 +5,7 @@ import { heldApproval, recordApproval } from "../approvals.ts";
 import { notifyFrom, type Told } from "../notify.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
+import { passEnvOf } from "./demo.ts";
 
 /** Answers the review page fills in when the person wrote no note; not decisions in themselves. */
 const DEFAULT_NOTES = new Set(["Approved.", "Changes requested.", "approve", "changes"]);
@@ -176,7 +177,16 @@ async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<Prev
   try {
     const row = await startPreview(
       { db: deps.db, workerId: deps.workerId ?? "worker" },
-      { runId: ctx.run.id, projectId: ctx.project.id, workdir: ctx.workdir, nodeExecutionId: ctx.execution.id, signal: ctx.signal, ...(deps.docker ? { docker: deps.docker } : {}) },
+      {
+        runId: ctx.run.id,
+        projectId: ctx.project.id,
+        workdir: ctx.workdir,
+        nodeExecutionId: ctx.execution.id,
+        signal: ctx.signal,
+        // The app gets what the run's demo gave it, so a feature that needs a key works for the person too.
+        passEnv: demoPassEnv(ctx),
+        ...(deps.docker ? { docker: deps.docker } : {}),
+      },
     );
     ctx.emit("preview.started", { id: row.id, url: row.url, configuration: row.configuration });
     return { id: row.id, url: row.url, status: "running" };
@@ -185,6 +195,12 @@ async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<Prev
     ctx.emit("preview.failed", { error: error.message });
     return { status: "failed", error: error.message };
   }
+}
+
+/** The variable names the graph's Demo nodes pass to the app. */
+function demoPassEnv(ctx: ExecutorContext): string[] {
+  const demos = ctx.graph.order.filter((key) => ctx.graph.node(key).type === "demo");
+  return [...new Set(demos.flatMap((key) => passEnvOf(ctx.graph.node(key).config)))];
 }
 
 /** The screenshots of the run's latest Demo step, for a person to see before trying the app. */

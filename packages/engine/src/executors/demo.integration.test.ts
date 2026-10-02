@@ -196,3 +196,18 @@ test("the seed command runs after services start and before the app", async () =
   expect(readFileSync(order, "utf8")).toBe("services\nseed\napp\n");
   expect(seen.page).toBe("services\nseed\napp\n");
 });
+
+test("a passEnv variable reaches the app", async () => {
+  process.env.HANDOFF_DEMO_TEST_KEY = "key-from-the-worker";
+  try {
+    const showsKey = `require("node:http").createServer((_, res) => res.end(process.env.HANDOFF_DEMO_TEST_KEY ?? "no key")).listen(Number(process.env.PORT));`;
+    const document = structuredClone(graph);
+    Object.assign(document.nodes.find((n) => n.key === "demo")!.attributes, { config: { passEnv: ["HANDOFF_DEMO_TEST_KEY"] } });
+    const seen: { page?: string } = {};
+    const { run } = await demoRun(readsTheApp(seen), { document, files: { ".claude/launch.json": launch, "app.js": showsKey } });
+    expect((await inspect(db, run.id)).run.status).toBe("succeeded");
+    expect(seen.page).toBe("key-from-the-worker");
+  } finally {
+    delete process.env.HANDOFF_DEMO_TEST_KEY;
+  }
+});
