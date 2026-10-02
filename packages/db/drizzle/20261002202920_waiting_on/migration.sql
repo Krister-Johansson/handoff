@@ -1,0 +1,1 @@
+ALTER TABLE "node_executions" ADD COLUMN "waiting_on" text;
