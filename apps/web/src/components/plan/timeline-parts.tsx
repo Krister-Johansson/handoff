@@ -65,7 +65,7 @@ const LEGEND: { label: string; swatch: string }[] = [
   { label: "Late", swatch: "h-0 border-t-[1.5px] border-danger-dot" },
 ];
 
-/** The timeline's legend in a popover, with the note that dates move on GitHub's roadmap. */
+/** The timeline's legend in a popover, with how bars move. */
 function Legend() {
   return (
     <Popover>
@@ -94,7 +94,7 @@ function Legend() {
         <Separator />
         <p className="flex gap-2 leading-snug text-muted-foreground">
           <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-          Drag dates on GitHub&apos;s roadmap. This timeline shows the Project; it does not move dates.
+          Drag a task&apos;s bar to move its Start, or its end to set a manual estimate. Each drop saves to GitHub with Undo.
         </p>
       </PopoverContent>
     </Popover>
