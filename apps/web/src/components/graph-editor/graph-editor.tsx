@@ -29,6 +29,7 @@ import { NODE_ICONS } from "./node-icons";
 import { EditLockButton } from "./edit-lock";
 import { VersionHistory, type VersionItem } from "./version-history";
 import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
+import { useGraphPageTools, type Selection } from "./use-graph-page-tools";
 
 const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
 const edgeTypes: EdgeTypes = { handoff: HandoffEdgeComponent };
@@ -61,7 +62,7 @@ function savedLine(version: number, versions: VersionItem[], restoring: number |
 function Editor({ projectId, graphName, version: initialVersion, document, library, versions: initialVersions, trail, runSlot }: Props) {
   const [graph, dispatch] = useReducer(editorReducer, document, flowOf);
   const colorMode = useFlowColorMode();
-  const [selection, setSelection] = useState<{ nodeId?: string; edgeId?: string }>({});
+  const [selection, setSelection] = useState<Selection>({});
   const [version, setVersion] = useState(initialVersion);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState<string | undefined>();
@@ -162,6 +163,8 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
         setSaveError(undefined);
       } else setSaveError(result.errors.map((e) => e.message).join("; "));
     });
+
+  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit });
 
   const nextVersion = Math.max(version, ...versions.map((v) => v.version)) + 1;
 

@@ -1,10 +1,19 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useEffect } from "react";
 import { expect, test, vi } from "vitest";
+import { AssistantProvider, useAssistant } from "@/components/assistant/assistant-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import type { AssistantPort } from "@/lib/assistant/port";
+import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { loadGraphVersionAction, saveGraphAction } from "@/app/projects/actions";
 import { GraphEditor } from "./graph-editor";
 
 vi.mock("@/app/projects/actions", () => ({ loadGraphVersionAction: vi.fn(), saveGraphAction: vi.fn() }));
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/projects/p1/graphs/plan-review",
+}));
 
 const document = {
   attributes: { startNode: "planner" },
@@ -173,4 +182,71 @@ test("unlocking lets you add a node and delete the selected one", async () => {
   fireEvent.click(canvasNode(container, "planner"));
   fireEvent.click(within(screen.getByRole("complementary", { name: "Inspector" })).getByRole("button", { name: "Delete node" }));
   expect(nodeCount(container)).toBe(1);
+});
+
+function Grab({ onPort }: { onPort: (port: AssistantPort) => void }) {
+  const port = useAssistant();
+  useEffect(() => {
+    onPort(port);
+  }, [onPort, port]);
+  return null;
+}
+
+/**
+ * The editor inside the assistant, with a turn running so the test can call the page's tools as the
+ * model would: `call` emits a ui_call and resolves with the page's answer.
+ */
+async function withAssistant(graph: unknown = twoNodes) {
+  const transport = new FakeAssistantTransport();
+  let port: AssistantPort | undefined;
+  const onPort = (p: AssistantPort) => (port = p);
+  const view = render(
+    <AssistantProvider transport={transport} available>
+      <Grab onPort={onPort} />
+      <TooltipProvider>
+        <GraphEditor
+          projectId="p1"
+          graphName="plan-review"
+          version={3}
+          document={graph}
+          library={{ skills: [], mcp: [], agents: [], groups: [] }}
+          versions={versions}
+        />
+      </TooltipProvider>
+    </AssistantProvider>,
+  );
+  act(() => void port!.send("what is on this page"));
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  let next = 1;
+  const call = async (name: string, args: unknown = {}) => {
+    const requestId = `u${next++}`;
+    act(() => transport.emit({ type: "ui_call", requestId, name, args }));
+    await waitFor(() => expect(transport.uiReplies.find((r) => r.requestId === requestId)).toBeDefined());
+    const { text, isError } = transport.uiReplies.find((r) => r.requestId === requestId)!;
+    return { text, isError };
+  };
+  const whereAmI = async () => JSON.parse((await call("where_am_i")).text) as { page?: { kind: string; tools: { name: string }[]; state: { data: Record<string, unknown> } } };
+  return { ...view, call, whereAmI, transport };
+}
+
+const inspector = () => screen.getByRole("complementary", { name: "Inspector" });
+
+test("page_select selects a node and the inspector shows it", async () => {
+  const { call, container, whereAmI } = await withAssistant();
+  expect(await call("page_select", { node: "coder" })).toEqual({ text: "Selected coder (Coder, coder).", isError: false });
+  expect(within(inspector()).getByLabelText("Label")).toHaveValue("Coder");
+  expect(within(inspector()).getByText("coder · runs on cli")).toBeInTheDocument();
+  expect(canvasNode(container, "coder")).toHaveClass("selected");
+  expect((await whereAmI()).page!.state.data).toMatchObject({ selection: { node: "coder" } });
+
+  expect(await call("page_select", { edge: "planner->coder" })).toEqual({ text: "Selected edge planner->coder (planner to coder).", isError: false });
+  expect(within(inspector()).queryByLabelText("Label")).not.toBeInTheDocument();
+  expect(canvasNode(container, "coder")).not.toHaveClass("selected");
+
+  expect(await call("page_select", { node: "tester" })).toEqual({ text: "There is no node tester. The nodes are: planner, coder.", isError: true });
+  expect(await call("page_select", { edge: "coder->planner" })).toEqual({ text: "There is no edge coder->planner. The edges are: planner->coder.", isError: true });
+
+  expect(await call("page_select", {})).toEqual({ text: "Cleared the selection.", isError: false });
+  expect(inspector()).toHaveTextContent("Select a node or an edge to edit it");
 });
