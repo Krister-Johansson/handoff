@@ -16,23 +16,14 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-test("V toggles listening outside text fields and does nothing inside a textarea", async () => {
+test("V no longer starts voice", async () => {
   render(<VoiceTestApp />);
-  fireEvent.keyDown(screen.getByLabelText("Note"), { key: "v" });
+  // V is a letter again, on the page and in a text field.
+  expect(fireEvent.keyDown(document.body, { key: "v", code: "KeyV" })).toBe(true);
+  expect(fireEvent.keyDown(screen.getByLabelText("Note"), { key: "v", code: "KeyV" })).toBe(true);
   await act(async () => {});
   expect(FakeSpeechRecognition.instances).toEqual([]);
-
-  fireEvent.keyDown(document.body, { key: "v" });
-  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
-  expect(latest()).toMatchObject({ continuous: false });
-  act(() => latest().emitStart());
-  fireEvent.keyDown(document.body, { key: "v" });
-  expect(latest().stopped).toBe(true);
-  // With a modifier V is someone else's shortcut.
-  act(() => latest().emitEnd());
-  fireEvent.keyDown(document.body, { key: "v", metaKey: true });
-  await act(async () => {});
-  expect(FakeSpeechRecognition.instances).toHaveLength(1);
+  expect(screen.queryByRole("region", { name: "Voice assistant" })).not.toBeInTheDocument();
 });
 
 /** Presses Ctrl+M on `target`; returns false when the page took the key (preventDefault). */
@@ -100,7 +91,7 @@ test("Escape stops listening and leaves an idle page alone", async () => {
   document.body.dispatchEvent(idle);
   expect(idle.defaultPrevented).toBe(false);
 
-  fireEvent.keyDown(document.body, { key: "v" });
+  ctrlM();
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
   act(() => latest().emitStart());
   act(() => latest().emitResult("cancel the", false));

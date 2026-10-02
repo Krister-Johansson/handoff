@@ -2,7 +2,6 @@
 
 import { useEffect, useEffectEvent } from "react";
 import { useOptionalAssistant } from "@/components/assistant/assistant-provider";
-import { isTyping } from "@/lib/voice/is-typing";
 import { useVoice } from "./voice-provider";
 
 /**
@@ -38,10 +37,6 @@ export function VoiceHotkeys() {
         return void voice.start("dictation");
       }
       return void voice.start("command");
-    }
-    if (e.key.toLowerCase() === "v" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
-      e.preventDefault();
-      voice.toggle();
     }
   });
   useEffect(() => {
