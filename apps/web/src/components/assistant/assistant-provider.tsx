@@ -4,12 +4,21 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { toolSpec } from "@/lib/assistant/catalog";
 import { runUiTool } from "@/lib/assistant/run-ui-tool";
+import { registerWebMcp } from "@/lib/assistant/webmcp";
+import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
 import type { AssistantPort, ChatMessage, PendingRequest, ReplyUpdate, ToolCallView } from "@/lib/assistant/port";
 import { httpTransport, type AssistantTransport, type ConversationSummary, type StoredMessage, type TurnStreamEvent } from "@/lib/assistant/transport";
+
+/** How long a browser agent's approval card waits for the person before the call is denied. */
+const AGENT_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 
 /** What the panel needs on top of the port: the messages, the conversations and switching between them. */
 type PanelState = {
   messages: ChatMessage[];
+  /** Approval cards for tools a browser agent called through WebMCP, outside any conversation. */
+  agentRequests: PendingRequest[];
+  /** What a browser agent is doing now, for the status line. */
+  agentActivity: string | undefined;
   conversationId: string | undefined;
   conversations: ConversationSummary[] | undefined;
   loadConversations(): Promise<void>;
@@ -105,6 +114,10 @@ export function AssistantProvider({ children, available, transport = httpTranspo
   const [conversations, setConversations] = useState<ConversationSummary[]>();
   const [streaming, setStreaming] = useState(false);
   const router = useRouter();
+  const [agentRequests, setAgentRequests] = useState<PendingRequest[]>([]);
+  const [agentActivity, setAgentActivity] = useState<string>();
+  const agentPending = useRef(new Map<string, (answer: { approved: boolean; note?: string }) => void>());
+  const webMcpEnabled = useWebMcpEnabled();
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const turnId = useRef<string | undefined>(undefined);
   const replyListeners = useRef(new Set<(reply: ReplyUpdate) => void>());
@@ -184,6 +197,8 @@ export function AssistantProvider({ children, available, transport = httpTranspo
 
   const respond = useCallback(
     async (requestId: string, decision: { approve: boolean; note?: string }) => {
+      const agentAnswer = agentPending.current.get(requestId);
+      if (agentAnswer) return agentAnswer({ approved: decision.approve, ...(decision.note ? { note: decision.note } : {}) });
       if (!turnId.current) return;
       await transport.reply(turnId.current, requestId, { approved: decision.approve, ...(decision.note ? { note: decision.note } : {}) });
     },
@@ -198,6 +213,46 @@ export function AssistantProvider({ children, available, transport = httpTranspo
     requestListeners.current.add(cb);
     return () => void requestListeners.current.delete(cb);
   }, []);
+
+  // Asks the person about a browser agent's call on an approval card in the panel; no answer in time denies it.
+  const approveForAgent = useEffectEvent((call: { name: string; title: string; summary: string; args: unknown }) => {
+    const requestId = `agent-${crypto.randomUUID()}`;
+    open();
+    return new Promise<{ approved: boolean; note?: string }>((resolve) => {
+      const settle = (answer: { approved: boolean; note?: string }) => {
+        clearTimeout(timer);
+        agentPending.current.delete(requestId);
+        setAgentRequests((list) => list.filter((r) => r.requestId !== requestId));
+        resolve(answer);
+      };
+      const timer = setTimeout(() => settle({ approved: false, note: "No one approved this in time." }), AGENT_APPROVAL_TIMEOUT_MS);
+      agentPending.current.set(requestId, settle);
+      setAgentRequests((list) => [...list, { requestId, ...call, status: "open" }]);
+    });
+  });
+
+  // WebMCP: while this browser allows it, every dashboard page offers the catalog to agents in the browser.
+  useEffect(() => {
+    if (!webMcpEnabled) return;
+    const controller = new AbortController();
+    const context = document.modelContext;
+    const onActivated = (e: Event) => setAgentActivity(`A browser agent is filling ${(e as Event & { toolName?: string }).toolName ?? "a form"}`);
+    const onCancel = () => setAgentActivity(undefined);
+    context?.addEventListener("toolactivated", onActivated, { signal: controller.signal });
+    context?.addEventListener("toolcancel", onCancel, { signal: controller.signal });
+    void registerWebMcp(
+      context,
+      {
+        approve: (call) => approveForAgent(call),
+        runUi: (call) => runUiTool(call, (href) => router.push(href)),
+        activity: setAgentActivity,
+      },
+      { available, signal: controller.signal },
+    ).catch(() => {
+      // A browser that refuses a registration keeps the dashboard working without WebMCP.
+    });
+    return () => controller.abort();
+  }, [available, webMcpEnabled, router]);
 
   const port = useMemo<AssistantPort>(
     () => ({ available, status: streaming ? "streaming" : "idle", send, stop, onReply, onRequest, respond, composerRef, open, close, isOpen }),
@@ -219,8 +274,8 @@ export function AssistantProvider({ children, available, transport = httpTranspo
     focusComposer();
   }, [focusComposer]);
   const panel = useMemo<PanelState>(
-    () => ({ messages, conversationId, conversations, loadConversations, openConversation, newConversation }),
-    [messages, conversationId, conversations, loadConversations, openConversation, newConversation],
+    () => ({ messages, agentRequests, agentActivity, conversationId, conversations, loadConversations, openConversation, newConversation }),
+    [messages, agentRequests, agentActivity, conversationId, conversations, loadConversations, openConversation, newConversation],
   );
 
   return (

@@ -58,6 +58,7 @@
     "react-doctor": "0.9.14",
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
-    "vitest": "5.0.2"
+    "vitest": "5.0.2",
+    "webmcp-types": "0.1.10"
   }
 }
