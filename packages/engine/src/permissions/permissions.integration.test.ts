@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import type { CliRunOptions, CliRunRequest, CliRunResult } from "@handoff/cli-adapter";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { eq, notifications, permissionRequests, projects } from "@handoff/db";
+import { eq, nodeExecutions, notifications, permissionRequests, projects, type Caps } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { decidePermission } from "../operations.ts";
@@ -37,7 +37,7 @@ const requestRow = () => until(async () => (await db.select().from(permissionReq
  * request file in the folder its MCP config names, then it waits for the answer handoff writes back.
  * `person` plays the person; without one, the step ends while the request still waits.
  */
-function asking(person?: () => Promise<void>) {
+function asking(person?: (dir: string) => Promise<void>) {
   const seen: { tool?: string | undefined; held?: boolean; response?: unknown } = {};
   const cli = new FakeCliExecutor([
     async (request: CliRunRequest, options: CliRunOptions): Promise<CliRunResult> => {
@@ -47,7 +47,7 @@ function asking(person?: () => Promise<void>) {
       await requestRow();
       seen.held = options.holdIdle?.() ?? false;
       if (person) {
-        await person();
+        await person(dir);
         const response = join(dir, `${ID}.response.json`);
         seen.response = await until(() => (existsSync(response) ? JSON.parse(readFileSync(response, "utf8")) : undefined));
       }
@@ -58,9 +58,9 @@ function asking(person?: () => Promise<void>) {
   return { cli, seen };
 }
 
-async function runPlanner(cli: FakeCliExecutor) {
+async function runPlanner(cli: FakeCliExecutor, caps?: Partial<Caps>) {
   const { run } = await startRun(db, linear);
-  const planner = cliNodeExecutor({ cli, maxTurns: 10, timeoutMs: 60_000, permissions: { db } });
+  const planner = cliNodeExecutor({ cli, maxTurns: 10, timeoutMs: 60_000, permissions: { db, ...(caps ? { caps } : {}) } });
   await drain(engineDeps(db, { planner, coder: scripted({ kind: "waiting", wait: { kind: "human", token: crypto.randomUUID() } }) }));
   return run;
 }
@@ -85,6 +85,25 @@ test("a denial goes back with the person's message, and an answered request cann
   await runPlanner(cli);
   expect(seen.response).toEqual({ behavior: "deny", message: "Read the file instead." });
   await expect(decidePermission(db, ID, { allow: true, decidedBy: "late" })).rejects.toThrow(/already/);
+});
+
+test("a step gives up the Claude slot while its prompt waits, and takes it back before Claude Code gets the answer", async () => {
+  let other: string | undefined;
+  const { cli, seen } = asking(async (dir) => {
+    const [asker] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.nodeKey, "planner"));
+    expect(asker?.waitingOn).toBe("permission");
+    // Another Claude step takes the slot meanwhile.
+    const [row] = await db.insert(nodeExecutions).values({ runId: asker!.runId, nodeKey: "other", nodeType: "coder", executorKind: "cli", attempt: 1, status: "running" }).returning();
+    other = row!.id;
+    await decidePermission(db, ID, { allow: true, decidedBy: "krister" });
+    await sleep(600);
+    expect(existsSync(join(dir, `${ID}.response.json`))).toBe(false);
+    await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, other));
+  });
+  const run = await runPlanner(cli, { cli: 1 });
+  expect(seen.response).toEqual({ behavior: "allow" });
+  const planner = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "planner")!;
+  expect(planner).toMatchObject({ status: "passed", waitingOn: null });
 });
 
 test("a request nobody answered expires when the step ends", async () => {

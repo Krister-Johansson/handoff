@@ -4,7 +4,7 @@ import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type PlanStatus, type ProjectsPort, type RepoRef } from "@handoff/github";
-import { and, asc, desc, eq, events, screenshots, type Db } from "@handoff/db";
+import { and, asc, desc, eq, events, screenshots, sql, webhookDeliveries, type Db } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
@@ -163,6 +163,22 @@ const routes = (ctx: ExecutorContext, port: string) => ctx.graph.outEdges(ctx.no
 const title = (task: string) => (task.length > 72 ? `${task.slice(0, 69)}...` : task);
 
 /**
+ * Whether a webhook delivery from the repository arrived since the step started. Without the database
+ * the executor cannot tell, and trusts webhooks to wake it.
+ */
+async function webhooksSince(db: Db | undefined, repoId: number, executionId: string): Promise<boolean> {
+  if (!db) return true;
+  // Compared in SQL: a JavaScript Date drops the microseconds Postgres keeps.
+  const started = sql`(select started_at from node_executions where id = ${executionId})`;
+  const [heard] = await db
+    .select({ id: webhookDeliveries.id })
+    .from(webhookDeliveries)
+    .where(and(eq(webhookDeliveries.repoId, repoId), sql`${webhookDeliveries.receivedAt} >= ${started}`))
+    .limit(1);
+  return heard !== undefined;
+}
+
+/**
  * Pushes the run branch, opens or reuses its pull request, then reports CI and review state as
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
@@ -174,6 +190,8 @@ export function prNodeExecutor(deps: {
   projects?: ProjectsPort | undefined;
   /** The first wait before a failed fetch or push is tried again; tests shorten it. */
   gitRetryMs?: number;
+  /** How soon a PR waiting on GitHub looks again while no webhook has come from its repository since the push. Default one minute. */
+  noWebhookPollMs?: number;
 }): NodeExecutor {
   return {
     needsWorkdir: true,
@@ -275,7 +293,11 @@ export function prNodeExecutor(deps: {
 
       if (checksPending || awaitingApproval || awaitingReviewers) {
         // Also wake when a PR without checks reaches its limit, so a repository without CI does not wait for the reconcile.
-        const reconcile = Math.min(Date.now() + (deps.reconcileMs ?? 10 * 60_000), noChecks ? Date.now() + Math.max(0, noChecksMs - sincePush) + 1_000 : Infinity);
+        // Without webhooks (the relay is not running, or the repository has none) the reconcile is the only wake: look sooner.
+        const heard = await webhooksSince(deps.db, repoId, ctx.execution.id);
+        const reconcileMs = heard ? (deps.reconcileMs ?? 10 * 60_000) : Math.min(deps.noWebhookPollMs ?? 60_000, deps.reconcileMs ?? Infinity);
+        if (!heard) ctx.emit("github.no_webhooks", { number, pollSeconds: Math.round(reconcileMs / 1000) });
+        const reconcile = Math.min(Date.now() + reconcileMs, noChecks ? Date.now() + Math.max(0, noChecksMs - sincePush) + 1_000 : Infinity);
         // Wake at the review time limit even without a webhook, so a reviewer who never comes cannot hold the run.
         const limit = awaitingReviewers ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
         return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit)) } };

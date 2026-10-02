@@ -187,19 +187,20 @@ test("get_run gives each step its start, end and duration, counting a running st
   expect(steps[1].duration_seconds).toBeGreaterThanOrEqual(90);
 });
 
-test("a finished run can be dismissed from what needs attention; other items cannot", async () => {
+test("a finished run can be dismissed from what needs attention; questions cannot", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.transaction((tx) => appendEvents(tx, run_id, [{ type: "run.finish", payload: { notify: true } }]));
   expect((await call("list_attention")).map((i: { id: string }) => i.id)).toEqual([`finished:${run_id}`]);
   expect(await call("dismiss_attention", { item_id: `finished:${run_id}` })).toEqual({ dismissed: true });
   expect(await call("list_attention")).toEqual([]);
-  expect(await call("dismiss_attention", { item_id: "question:abc" })).toEqual({ error: expect.stringMatching(/only finished runs/i) });
+  expect(await call("dismiss_attention", { item_id: "question:abc" })).toEqual({ error: expect.stringMatching(/only finished and failed runs/i) });
 });
 
 test("a run stopped by a loop that ran out says so, asks for a decision, and goes on when given one", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   const [planner] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, run_id));
-  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, planner!.id));
+  const review = { verdict: "request_changes", comments: [{ path: "src/a.ts", line: 4, body: "The empty list still crashes.", severity: "blocking" }] };
+  await db.update(nodeExecutions).set({ status: "passed", output: review }).where(eq(nodeExecutions.id, planner!.id));
   await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
   await db.transaction((tx) =>
     appendEvents(tx, run_id, [
@@ -210,7 +211,8 @@ test("a run stopped by a loop that ran out says so, asks for a decision, and goe
   expect(await call("list_attention")).toEqual([
     expect.objectContaining({ id: `stuck:${run_id}`, kind: "failed", title: "sandbox: planner ran out of rounds", url: expect.stringMatching(new RegExp(`^${BASE}/projects/[0-9a-f-]+/runs/${run_id}$`)) }),
   ]);
-  expect((await call("get_run", { run_id })).stuck).toEqual({ node: "planner", loop: "planner->planner", attempts: 3 });
+  // The last review that wanted another round says why.
+  expect((await call("get_run", { run_id })).stuck).toEqual({ node: "planner", loop: "planner->planner", attempts: 3, last_review: review });
   expect(await call("resolve_loop", { run_id, action: "continue" })).toMatchObject({ resolved: "continue" });
   const steps = (await call("get_run", { run_id })).steps.map((s: { node: string }) => s.node);
   expect(steps).toEqual(["planner", "coder"]);
@@ -271,6 +273,173 @@ test("answer_permission allows a pending request once and records who decided", 
   const [row] = await db.select().from(permissionRequests).where(eq(permissionRequests.id, "3f6b2a10-0000-4000-8000-000000000002"));
   expect(row).toMatchObject({ status: "allowed", decidedBy: "claude-code" });
   expect((await call("answer_permission", { request_id: "3f6b2a10-0000-4000-8000-000000000002", decision: "deny" })).error).toMatch(/already answered/);
+});
+
+test("get_run lists a pending permission prompt with the full command", async () => {
+  const runId = await startedRun();
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running", waitingOn: "permission" });
+  const command = `pnpm --filter @todo/web exec vitest run ${"src/components/very/long/path/to/a/test-file.test.tsx ".repeat(6)}--reporter verbose`;
+  const id = "3f6b2a10-0000-4000-8000-000000000003";
+  await db.insert(permissionRequests).values({ id, runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command } });
+  await db.insert(permissionRequests).values({ id: "3f6b2a10-0000-4000-8000-000000000004", runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "ls" }, status: "allowed" });
+  const { permissions } = await call("get_run", { run_id: runId });
+  expect(command.length).toBeGreaterThan(300);
+  expect(permissions).toEqual([{ id, node: "coder", attempt: 1, tool: "Bash", asks: "asks to run a command", detail: command, input: { command }, asked_at: expect.any(String) }]);
+});
+
+test("get_run on a Try it gate has the app URL, the criteria and the demo's notes", async () => {
+  const runId = await startedRun();
+  await seedExecution(db, runId, { nodeKey: "demo", nodeType: "demo", status: "passed", output: { summary: "Created a task and reloaded the page.", shots: [] } });
+  const gate = await seedExecution(db, runId, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const context = {
+    reason: "try",
+    acceptance: ["A user can create a task", "A task survives a reload"],
+    preview: { id: "p1", url: "http://localhost:4123", status: "running" },
+    shots: [
+      { id: "s1", caption: "The new task in the list", works: true, criterion: "A user can create a task" },
+      { id: "s2", caption: "The list is empty after a reload", works: false, criterion: "A task survives a reload" },
+    ],
+  };
+  const [question] = await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Try the app and check each acceptance criterion.", options: ["approve", "changes"], context }).returning();
+  const [asked] = (await call("get_run", { run_id: runId })).questions;
+  expect(asked).toMatchObject({ id: question!.id, node: "try", options: ["approve", "changes"] });
+  expect(asked.try).toEqual({
+    app_url: "http://localhost:4123",
+    app: "running",
+    demo_summary: "Created a task and reloaded the page.",
+    criteria: [
+      { criterion: "A user can create a task", demo: [{ note: "The new task in the list", works: true, screenshot_url: `${BASE}/api/screenshots/s1` }] },
+      { criterion: "A task survives a reload", demo: [{ note: "The list is empty after a reload", works: false, screenshot_url: `${BASE}/api/screenshots/s2` }] },
+    ],
+    url: `${BASE}${runPath(projectId, runId)}/try/${question!.id}`,
+  });
+});
+
+test("get_run has the cost, the failure code and the answered gates", async () => {
+  const runId = await startedRun();
+  await db.update(nodeExecutions).set({ status: "passed", costUsd: "0.250000" }).where(eq(nodeExecutions.runId, runId));
+  const gate = await seedExecution(db, runId, { nodeKey: "plan_gate", nodeType: "human_gate", executorKind: "human", status: "passed" });
+  const [answered] = await db
+    .insert(questions)
+    .values({ runId, nodeExecutionId: gate.id, question: "Review the plan from planner", options: ["approve", "changes", "fix"], answer: "Keep the API as it is.", option: "approve", answeredBy: "krister", answeredAt: new Date("2026-10-02T09:00:00Z") })
+    .returning();
+  await seedExecution(db, runId, {
+    nodeKey: "coder",
+    status: "failed",
+    costUsd: "1.500000",
+    finishedAt: new Date(),
+    error: { code: "cli_error_max_turns", message: "claude ended with error_max_turns", detail: { subtype: "error_max_turns", turns: 61, costUsd: 1.5, lastMessage: "Still wiring the form." } },
+  });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
+  const detail = await call("get_run", { run_id: runId });
+  expect(detail.cost_usd).toBe(1.75);
+  expect(detail.steps.map((s: { node: string; cost_usd: number | null }) => [s.node, s.cost_usd])).toEqual([["planner", 0.25], ["plan_gate", null], ["coder", 1.5]]);
+  expect(detail.failed).toEqual({ node: "coder", attempt: 1, code: "cli_error_max_turns", error: "claude ended with error_max_turns", subtype: "error_max_turns", turns: 61, cost_usd: 1.5, last_message: "Still wiring the form." });
+  expect(detail.answered).toEqual([
+    { id: answered!.id, node: "plan_gate", question: "Review the plan from planner", option: "approve", answer: "Keep the API as it is.", comments: [], answered_by: "krister", answered_at: "2026-10-02T09:00:00.000Z" },
+  ]);
+});
+
+test("a review gate lists approve, changes and fix, and answer_question refuses an option it does not list", async () => {
+  const runId = await startedRun();
+  const gate = await seedExecution(db, runId, { nodeKey: "code_gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const review = { from: "coder", kind: "code", markdown: "Adds the form." };
+  const [question] = await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Review the code from coder", options: ["approve", "changes", "fix"], context: { reason: "approval", review } }).returning();
+  expect((await call("get_run", { run_id: runId })).questions[0].options).toEqual(["approve", "changes", "fix"]);
+  expect(await call("answer_question", { question_id: question!.id, answer: "Ship it.", option: "merge" })).toEqual({ error: 'The question takes one of approve, changes, fix; "merge" is not one of them.' });
+  const [still] = await db.select().from(questions).where(eq(questions.id, question!.id));
+  expect(still?.answer).toBeNull();
+  expect(await call("answer_question", { question_id: question!.id, answer: "Rename the field, then it can go.", option: "fix" })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, question!.id)))[0]).toMatchObject({ option: "fix", answeredBy: "claude-code" });
+});
+
+test("answer_question takes a verdict per criterion at a Try it gate", async () => {
+  const runId = await startedRun();
+  const context = { reason: "try", acceptance: ["A user can create a task", "A task survives a reload"] };
+  let attempt = 0;
+  const ask = async () => {
+    const gate = await seedExecution(db, runId, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting", attempt: ++attempt });
+    return (await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Try the app.", options: ["approve", "changes"], context }).returning())[0]!;
+  };
+  const first = await ask();
+  const broken = [
+    { criterion: "A user can create a task", works: true },
+    { criterion: "A task survives a reload", works: false, note: "The list is empty after a reload." },
+  ];
+  expect(await call("answer_question", { question_id: first.id, criteria: broken })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, first.id)))[0]).toMatchObject({
+    option: "changes",
+    answer: "1 of 2 criteria does not work.",
+    comments: [{ quote: "A task survives a reload", body: "The list is empty after a reload." }],
+  });
+  const second = await ask();
+  expect(await call("answer_question", { question_id: second.id, criteria: broken.map((c) => ({ criterion: c.criterion, works: true })) })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, second.id)))[0]).toMatchObject({ option: "approve", answer: "Every criterion works.", comments: [] });
+  // Every criterion needs a verdict, and only the gate's criteria have one.
+  const third = await ask();
+  expect((await call("answer_question", { question_id: third.id, criteria: [{ criterion: "A user can create a task", works: true }] })).error).toMatch(/A task survives a reload/);
+  expect((await call("answer_question", { question_id: third.id, criteria: [...broken, { criterion: "It is fast", works: true }] })).error).toMatch(/It is fast/);
+});
+
+test("list_attention has permission prompts and a failed item can be dismissed", async () => {
+  const runId = await startedRun();
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running", waitingOn: "permission" });
+  const id = "3f6b2a10-0000-4000-8000-000000000005";
+  await db.insert(permissionRequests).values({ id, runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "pnpm list react" } });
+  expect(await call("list_attention")).toEqual([
+    { id: `permission:${id}`, kind: "permission", title: "sandbox: coder asks to run a command", body: "pnpm list react", projectId, url: `${BASE}${runPath(projectId, runId)}` },
+  ]);
+
+  await call("answer_permission", { request_id: id, decision: "deny" });
+  await db.update(nodeExecutions).set({ status: "failed", error: { code: "x", message: "boom" } }).where(eq(nodeExecutions.id, coder.id));
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
+  const [failed] = await call("list_attention");
+  expect(failed).toMatchObject({ id: `failed:${coder.id}`, kind: "failed" });
+  expect(await call("dismiss_attention", { item_id: failed.id })).toEqual({ dismissed: true });
+  expect(await call("list_attention")).toEqual([]);
+  // The run still waits for a repair in the inbox; only the notice is gone.
+  expect((await call("list_inbox", { project: "sandbox" })).failed_runs).toHaveLength(1);
+});
+
+test("get_project returns each graph's latest version", async () => {
+  await saveGraphVersion(db, { projectId, name: "linear", document: linear });
+  await saveGraphVersion(db, { projectId, name: "alt", document: linear });
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md", graph: "linear" });
+  const detail = await call("get_project", { project: "sandbox" });
+  expect(detail.graphs).toEqual([
+    { name: "alt", latest_version: 1 },
+    { name: "linear", latest_version: 2 },
+  ]);
+  // A run keeps the version it started on.
+  expect(detail.recent_runs).toEqual([expect.objectContaining({ id: run_id, graph: "linear", graph_version: 2 })]);
+});
+
+test("a pending step reports queued with its place", async () => {
+  await registerWorker(db, { id: "worker-1", hostname: "box", caps: { cli: 1 } });
+  const start = async (task: string) => (await call("start_run", { project: "sandbox", task })).run_id as string;
+  const busy = await start("Running now");
+  const asking = await start("Asks a person");
+  const first = await start("Next in line");
+  const second = await start("After that");
+  const at = (s: number) => new Date(Date.now() - s * 1000);
+  await db.update(nodeExecutions).set({ status: "running", startedAt: at(60) }).where(eq(nodeExecutions.runId, busy));
+  await db.update(nodeExecutions).set({ status: "running", waitingOn: "permission", startedAt: at(50) }).where(eq(nodeExecutions.runId, asking));
+  await db.update(nodeExecutions).set({ runnableAt: at(30) }).where(eq(nodeExecutions.runId, first));
+  await db.update(nodeExecutions).set({ runnableAt: at(20) }).where(eq(nodeExecutions.runId, second));
+  await seedExecution(db, busy, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting", waitKind: "human" });
+
+  const byTask = Object.fromEntries((await call("list_runs", { project: "sandbox" })).map((r: { task: string; current_step: unknown }) => [r.task, r.current_step]));
+  expect(byTask["Next in line"]).toMatchObject({ node: "planner", status: "pending", state: "queued", place: 1 });
+  expect(byTask["After that"]).toMatchObject({ state: "queued", place: 2 });
+  expect(byTask["Asks a person"]).toMatchObject({ status: "running", state: "waiting", waiting_on: "permission" });
+  expect((await call("get_run", { run_id: second })).steps).toEqual([expect.objectContaining({ node: "planner", state: "queued", place: 2 })]);
+  const steps = (await call("get_run", { run_id: busy })).steps;
+  expect(steps).toEqual([expect.objectContaining({ node: "planner", state: "running" }), expect.objectContaining({ node: "gate", state: "waiting", waiting_on: "question" })]);
+  expect(steps[0]).not.toHaveProperty("place");
+
+  // With no worker running, a pending step waits on the worker.
+  await db.update(workers).set({ stoppedAt: new Date() });
+  expect((await call("get_run", { run_id: first })).steps[0]).toMatchObject({ state: "waiting", waiting_on: "worker", place: 1 });
 });
 
 test("answer_permission cannot always allow", async () => {
