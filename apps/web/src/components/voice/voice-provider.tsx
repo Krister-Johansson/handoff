@@ -6,7 +6,7 @@ import { approvalAnswer } from "@/lib/voice/approval-answer";
 import { isTyping } from "@/lib/voice/is-typing";
 import { readVoicePrefs, useVoicePrefs } from "@/lib/voice/prefs";
 import { languageName } from "@/lib/voice/recognition";
-import { createSpeaker, type Speaker, type SpeakerState, type SpeechPriority } from "@/lib/voice/speaker";
+import { createSpeaker, spokenReply, type Speaker, type SpeakerState, type SpeechPriority } from "@/lib/voice/speaker";
 import { useVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
 import { useSpeechInput, type InputState, type ListenMode } from "@/lib/voice/use-speech-input";
 
@@ -128,11 +128,13 @@ export function VoiceProvider({ children, support: given, speaker: givenSpeaker 
   const { start: startInput, stop, abort, install, state } = input;
 
   const start = useCallback(async () => {
-    // Never listen while speaking: the microphone would hear the dashboard.
-    if (!supported || speaker?.isSpeaking()) return;
+    if (!supported) return;
+    // Never listen while speaking: asking to listen stops the speech first, so the microphone never hears the dashboard.
+    if (speaker?.isSpeaking()) speaker.stop();
     const listenMode = isTyping(document.activeElement) ? "dictation" : "command";
-    // A question is asked in the bubble; dictation stays in its text field.
-    if (listenMode === "command") setBubble((b) => ({ ...b, open: true, notice: undefined }));
+    // A question is asked in the bubble; dictation stays in its text field. A new question replaces the
+    // last one, unless an approval card waits for its spoken answer.
+    if (listenMode === "command") setBubble((b) => (b.approval ? { ...b, open: true, notice: undefined } : { open: true }));
     await startInput(listenMode);
   }, [speaker, startInput, supported]);
   const toggle = useCallback(() => {
@@ -156,7 +158,7 @@ export function VoiceProvider({ children, support: given, speaker: givenSpeaker 
     if (!onReply || !onRequest) return;
     const offReply = onReply((reply) => {
       const shown = latest.current.bubble;
-      if (reply.done && shown.open && shown.question && reply.text) say(reply.text);
+      if (reply.done && shown.open && shown.question && reply.text) say(spokenReply(reply.text));
     });
     const offRequest = onRequest((request) => {
       if (!latest.current.bubble.open) return;

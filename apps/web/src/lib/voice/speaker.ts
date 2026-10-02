@@ -65,6 +65,12 @@ export function splitSentences(text: string): string[] {
   return sentences.filter(Boolean);
 }
 
+/** A reply as it is spoken: at most `max` sentences, then a pointer to the rest on screen. */
+export function spokenReply(text: string, max = 3): string {
+  const sentences = splitSentences(text);
+  return sentences.length <= max ? sentences.join(" ") : `${sentences.slice(0, max).join(" ")} The rest is on screen.`;
+}
+
 /**
  * The voice to speak with: the stored one while it still exists (and is allowed), else a voice on
  * this machine for the language, else any voice on this machine. Remote voices only when allowed.

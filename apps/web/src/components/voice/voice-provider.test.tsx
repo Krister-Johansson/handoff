@@ -11,14 +11,14 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-test("start is refused while the speaker is active", async () => {
+test("starting to listen stops the speech first", async () => {
   const speaker = createSpeaker(new FakeSpeechSynthesis() as unknown as SpeechSynthesis, () => DEFAULT_VOICE_PREFS, (t) => new FakeUtterance(t) as unknown as SpeechSynthesisUtterance);
   speaker.speak("A run failed.", { priority: "notification" });
   render(<VoiceTestApp speaker={speaker} />);
+  expect(speaker.isSpeaking()).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Listen" }));
-  await act(async () => {});
-  expect(FakeSpeechRecognition.instances).toEqual([]);
-  expect(FakeSpeechRecognition.availableCalls).toEqual([]);
+  expect(speaker.isSpeaking()).toBe(false);
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
 });
 
 test("listening that starts in a text field dictates and keeps going until stopped", async () => {

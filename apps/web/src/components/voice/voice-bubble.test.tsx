@@ -170,3 +170,31 @@ test("Open in panel opens the conversation and closes the bubble", async () => {
   fireEvent.click(within(bubble()).getByRole("button", { name: "Open in panel" }));
   expect(screen.queryByRole("region", { name: "Voice assistant" })).not.toBeInTheDocument();
 });
+
+test("V while the reply is spoken stops it and listens", async () => {
+  render(<App />);
+  await ask("what needs me");
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "done", text: "Two runs wait. One failed." }));
+  expect(said()).toEqual(["Two runs wait."]);
+  fireEvent.keyDown(document.body, { key: "v" });
+  expect(synth.cancels).toBeGreaterThan(0);
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(2));
+  act(() => recognizer().emitStart());
+  expect(bubble()).toHaveTextContent("Listening");
+  // What was left of the reply is not spoken after the interruption.
+  act(() => synth.finishCurrent());
+  expect(said()).toEqual(["Two runs wait."]);
+});
+
+test("a long spoken reply stops after three sentences and says the rest is on screen", async () => {
+  render(<App />);
+  await ask("what failed today");
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "done", text: "One. Two. Three. Four. Five." }));
+  for (let i = 0; i < 6; i++) act(() => synth.finishCurrent());
+  expect(said()).toEqual(["One.", "Two.", "Three.", "The rest is on screen."]);
+  expect(bubble()).toHaveTextContent("One. Two. Three. Four. Five.");
+});
