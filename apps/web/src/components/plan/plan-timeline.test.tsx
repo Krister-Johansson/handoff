@@ -560,3 +560,78 @@ test("dragging a bar moves its Start a day at a time and the tooltip names the T
   fireEvent.pointerUp(bar, { pointerId: 1, clientX: 700 });
   expect(actions.moveItemAction).not.toHaveBeenCalled();
 });
+
+/** Drags a bar by its body from x 500 by `dx` pixels and lets go. */
+function dragBy(bar: HTMLElement, dx: number) {
+  fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 500 });
+  fireEvent.pointerMove(bar, { pointerId: 1, clientX: 500 + dx });
+  fireEvent.pointerUp(bar, { pointerId: 1, clientX: 500 + dx });
+}
+
+test("dropping saves Start and Target and the toast's Undo writes the old dates back", async () => {
+  renderSized();
+  dragBy(barOf(146), DAY);
+
+  expect(await screen.findByText("Saving #146 to GitHub")).toBeInTheDocument();
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 146, start: "2026-10-04", target: "2026-10-04" }));
+  expect(await screen.findByText("Moved #146 to Oct 4")).toBeInTheDocument();
+  expect(screen.getByText("Saved to GitHub.")).toBeInTheDocument();
+  expect(router.refresh).toHaveBeenCalled();
+  // The bar stays where it was dropped until the next read from GitHub.
+  expect(leftOf(barOf(146))).toBe(OCT_1 + 3 * DAY);
+  expect(barOf(146)).toHaveAccessibleName(/, Oct 4,/);
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 146, start: "2026-10-03", target: "2026-10-03" }));
+  expect(await screen.findByText("Put #146 back on Oct 3")).toBeInTheDocument();
+  expect(leftOf(barOf(146))).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  expect(actions.moveItemAction).toHaveBeenCalledTimes(2);
+});
+
+test("a refused write puts the bar back and offers Try again", async () => {
+  actions.moveItemAction.mockResolvedValueOnce({ ok: false, error: "GitHub API rate limit exceeded." });
+  renderSized();
+  dragBy(barOf(146), DAY);
+
+  expect(await screen.findByText("GitHub did not take the date")).toBeInTheDocument();
+  expect(screen.getByText("#146 is back on Oct 3. GitHub API rate limit exceeded.")).toBeInTheDocument();
+  expect(leftOf(barOf(146))).toBeCloseTo(OCT_1 + 2 * DAY + 13.33, 1);
+  expect(router.refresh).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Moved #146 to Oct 4")).toBeInTheDocument();
+  expect(actions.moveItemAction).toHaveBeenCalledTimes(2);
+  expect(actions.moveItemAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 146, start: "2026-10-04", target: "2026-10-04" });
+  expect(leftOf(barOf(146))).toBe(OCT_1 + 3 * DAY);
+});
+
+test("dragging the end of a sized task sets a manual estimate in hours and keeps the size", async () => {
+  const { container } = renderSized();
+  const bar = barOf(149);
+  expect(widthOf(bar)).toBe(32);
+  const end = bar.querySelector<HTMLElement>("[data-end]")!;
+
+  // 16 px an hour: two hours more than L's 2h default.
+  fireEvent.pointerDown(end, { pointerId: 1, button: 0, clientX: 500 });
+  fireEvent.pointerMove(end, { pointerId: 1, clientX: 530 });
+  expect(dragTip()).toHaveTextContent("Manual estimate 4hOverrides the L default of 2h. Target stays Oct 4.");
+  expect(widthOf(bar)).toBe(64);
+  expect(leftOf(bar)).toBe(OCT_1 + 3 * DAY);
+  expect(container.querySelector("[data-ghost]")).toHaveStyle({ width: "32px" });
+
+  // Four more hours run past the day's six.
+  fireEvent.pointerMove(end, { pointerId: 1, clientX: 594 });
+  expect(dragTip()).toHaveTextContent("Manual estimate 1d 2hOverrides the L default of 2h. Target moves to Oct 5.");
+  fireEvent.pointerMove(end, { pointerId: 1, clientX: 530 });
+  fireEvent.pointerUp(end, { pointerId: 1, clientX: 530 });
+
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 149, start: "2026-10-04", target: "2026-10-04", estimate: 4 }));
+  expect(await screen.findByText("#149 has a manual estimate of 4h")).toBeInTheDocument();
+  expect(screen.getByText("Saved to GitHub. Its size stays L.")).toBeInTheDocument();
+  expect(within(row(/^Task #149 /)).getByRole("button", { name: "Size L, manual estimate 4h. Change the size or estimate of #149" })).toBeInTheDocument();
+  expect(widthOf(barOf(149))).toBe(64);
+
+  // Undo clears the estimate again.
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 149, start: "2026-10-04", target: "2026-10-04", estimate: null }));
+});
