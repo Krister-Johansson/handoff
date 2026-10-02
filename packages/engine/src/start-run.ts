@@ -84,8 +84,10 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
     return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events });
   });
-  // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
-  await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");
+  // The run owns its tasks now: they move to Running on the plan, recording the Status the gate read for a
+  // cancel to put back. A failed write is recorded and the run goes on.
+  const before = new Map(items?.map((item) => [item.number, item.status]));
+  await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running", before);
   // The person who starts the work is the token's user: an issue nobody has yet is assigned to them.
   await assignStarter(db, run.id, github, repo, issues.map((i) => i.number));
   return run;

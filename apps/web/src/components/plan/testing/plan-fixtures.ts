@@ -1,9 +1,12 @@
-import type { PlanItem, PlanProject, PlanStatus } from "@handoff/github";
+import type { Assignee, PlanItem, PlanProject, PlanStatus } from "@handoff/github";
 import type { BacklogIssue, BacklogRun } from "@/server/backlog";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanStory, PlanTask, PlanView } from "@/server/plan";
 import { deriveSpans, type TimelineRun } from "@/lib/plan/schedule";
 
 export const REPO_URL = "https://github.com/o/r";
+
+/** A person on GitHub; the avatar defaults to one made from the login, and "" is none. */
+export const person = (login: string, avatarUrl = `https://avatars.githubusercontent.com/${login}`): Assignee => ({ login, avatarUrl });
 
 const item = (number: number, title: string, kind: PlanItem["kind"], over: Partial<PlanItem> = {}): PlanItem => ({
   number,

@@ -7,6 +7,7 @@ import { SetUpPlanDialog } from "@/components/plan/set-up-plan-dialog";
 import { AddProjectDialog } from "@/components/projects/add-project-dialog";
 import { DeleteProjectDialog, EditProjectDialog } from "@/components/projects/project-dialogs";
 import { ProjectTile } from "@/components/project-switcher";
+import { SchedulerRowTag } from "@/components/scheduler/scheduler-badge";
 import { SectionCard } from "@/components/section-card";
 import { Tag } from "@/components/tag";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
@@ -23,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import type { PlanLink } from "@/server/project-admin";
+import type { SchedulerBrief } from "@/server/scheduler-card";
 
 /** A project as Settings, Projects lists it. */
 export type ProjectRow = {
@@ -37,6 +39,8 @@ export type ProjectRow = {
   isDemo: boolean;
   runCount: number;
   plan: PlanLink | null;
+  /** The scheduler's state and active runs of max runs, while it is on. */
+  scheduler?: SchedulerBrief | undefined;
 };
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -202,6 +206,7 @@ export function ProjectsSettings({ projects, adding = false }: { projects: Proje
                   {project.repoOwner}/{project.repoName}
                 </span>
               </span>
+              {project.scheduler && <SchedulerRowTag brief={project.scheduler} />}
               <Tag>{plural(project.runCount, "run")}</Tag>
             </AccordionTrigger>
             <AccordionContent className="flex flex-col gap-4 pt-1 pr-5 pb-4 pl-16">

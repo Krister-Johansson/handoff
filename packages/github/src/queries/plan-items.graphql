@@ -75,9 +75,11 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
                   name
                 }
               }
+              # avatarUrl is a scalar on a node already fetched, so it adds no points.
               assignees(first: 10) {
                 nodes {
                   login
+                  avatarUrl
                 }
               }
               issueType {

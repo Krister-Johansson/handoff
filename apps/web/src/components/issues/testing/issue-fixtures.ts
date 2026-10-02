@@ -1,6 +1,6 @@
 import type { IssueDetail } from "@handoff/github";
 import type { FoundIssue, IssueRun, IssueTask } from "@/server/issue-page";
-import { epic, PROJECT, story, task } from "@/components/plan/testing/plan-fixtures";
+import { epic, person, PROJECT, story, task } from "@/components/plan/testing/plan-fixtures";
 
 export const NOW = new Date("2026-10-02T16:42:00Z");
 export const REPO = "Krister-Johansson/todoOverKill";
@@ -83,7 +83,7 @@ export function taskPage(over: Partial<FoundIssue> = {}): FoundIssue {
     issue: issueDetail(16, "F16 Drag and drop on the board", {
       body: "`@dnd-kit` with pointer and keyboard sensors.\nDepends on: #15 (F15), #8 (F08)",
       labels: ["projects-tasks", "task"],
-      assignees: ["Krister-Johansson"],
+      assignees: [person("Krister-Johansson")],
     }),
     place: {
       planned: true,

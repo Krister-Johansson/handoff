@@ -477,7 +477,7 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
       status: item.status?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? statusOf(item.status.name) : undefined,
       parent: issue.parent?.number,
       labels,
-      assignees: present(issue.assignees.nodes).map((a) => a.login),
+      assignees: present(issue.assignees.nodes).map((a) => ({ login: a.login, avatarUrl: a.avatarUrl })),
       subIssues: { total: issue.subIssuesSummary.total, completed: issue.subIssuesSummary.completed },
       blockedBy: present(issue.blockedBy.nodes)
         .filter((b) => b.state === "OPEN")

@@ -256,7 +256,7 @@ describe("the Ready gate", () => {
     const run = await start([ready, 90]);
     expect(await plan.getStatus(repo, 1, ready)).toBe("Running");
     expect(await planEvents(run.id)).toEqual([
-      ["plan.status", { issue: ready, status: "Running" }],
+      ["plan.status", { issue: ready, status: "Running", from: "Ready" }],
       ["plan.skipped", { issue: 90, status: "Running", reason: "not-in-project" }],
     ]);
   });

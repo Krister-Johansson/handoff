@@ -19,7 +19,8 @@ import type { Forecast } from "../lib/plan/forecast";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
-import { getScheduler, pauseScheduler, startScheduler } from "./scheduler";
+import { checkText } from "../lib/scheduler-text";
+import { getScheduler, pauseScheduler, startScheduler, stopScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
 
 /**
@@ -37,7 +38,7 @@ To work on issues: list_backlog, then start_run with the issue numbers (the task
 
 A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order. Each of these writes asks the person first.
 
-Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, and pause_scheduler stops new starts.
+Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, pause_scheduler stops new starts and stop_scheduler turns it off.
 
 A run may stop to ask a question (a Human gate) or fail. Tell the user what it asks or why it failed. Answer a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
 
@@ -199,7 +200,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     assign: async ({ project, issue, logins, me }: { project: string; issue: number; logins: string[]; me?: boolean }) => {
       const found = await findProject(db, project);
       const result = await setIssueAssignees(db, github, found.id, issue, { logins, me });
-      return { ...result, url: `https://github.com/${found.repoOwner}/${found.repoName}/issues/${issue}` };
+      return { issue: result.issue, assignees: result.assignees.map((a) => a.login), url: `https://github.com/${found.repoOwner}/${found.repoName}/issues/${issue}` };
     },
 
     list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {
@@ -415,9 +416,14 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     schedule: async ({ project, items }: { project: string; items: ScheduleItem[] }) => schedule(shaping, (await findProject(db, project)).id, items),
 
-    start_scheduler: async ({ project, max_runs, order, graph }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string }) => {
+    start_scheduler: async ({ project, max_runs, order, graph, skip_label }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string; skip_label?: string | null }) => {
       const { id } = await findProject(db, project);
-      return { ...(await startScheduler({ db, projects: plan }, id, { maxRuns: max_runs, order, graph }, actor)), url: url(planPath(id)) };
+      return { ...(await startScheduler({ db, projects: plan }, id, { maxRuns: max_runs, order, graph, skipLabel: skip_label }, actor)), url: url(planPath(id)) };
+    },
+
+    stop_scheduler: async ({ project }: { project: string }) => {
+      const { id } = await findProject(db, project);
+      return { ...(await stopScheduler(db, id, actor)), url: url(planPath(id)) };
     },
 
     pause_scheduler: async ({ project, reason }: { project: string; reason?: string }) => {
@@ -443,6 +449,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         next: s.next,
         skipped: s.skipped,
         checked_at: s.checkedAt?.toISOString() ?? null,
+        ...(s.state === "off" ? {} : { check: checkText(s, new Date()) }),
         next_check_at: s.nextCheckAt?.toISOString() ?? null,
         events: s.events.map((e) => ({ type: e.type, payload: e.payload, at: e.at.toISOString() })),
         url: url(planPath(id)),

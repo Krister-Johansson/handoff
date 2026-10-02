@@ -71,7 +71,7 @@ export function filterPlan(view: PlanView, filters: PlanFilters, needsYou: reado
     if (filters.assignee === "anyone") return true;
     if (filters.assignee === "none") return task.assignees.length === 0;
     const login = filters.assignee === "me" ? me : filters.assignee;
-    return login !== undefined && task.assignees.some((a) => a.toLowerCase() === login.toLowerCase());
+    return login !== undefined && task.assignees.some((a) => a.login.toLowerCase() === login.toLowerCase());
   };
   const keep = (task: PlanTask) => (filters.status.length === 0 || filters.status.some((s) => s === columnOf(task))) && keepRun(task.run) && keepAssignee(task);
   const narrowing = filters.status.length > 0 || filters.run !== "any" || filters.assignee !== "anyone";

@@ -9,13 +9,14 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import type { Assignee } from "@handoff/github";
+import { PersonAvatar } from "@/components/person-avatar";
 import type { AssignableUser } from "@/server/assignees";
-import { GitHubAvatar } from "./issue-text";
 
 type Props = {
   projectId: string;
   issue: number;
-  assignees: string[];
+  assignees: Assignee[];
   /** The token's user ("you"); undefined with a GitHub App. */
   viewer: string | undefined;
   /** Offer Assign me, "I will work on this", as on tasks and issues outside the plan. */
@@ -45,9 +46,10 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
   const load = (open: boolean) => {
     if (open && !people) startLoading(async () => setPeople(await assignableAction(projectId)));
   };
-  const assigned = new Set(assignees);
-  const toggle = (login: string) => write(assigned.has(login) ? assignees.filter((a) => a !== login) : [...assignees, login]);
-  const name = assignees.length ? `Assignee${assignees.length > 1 ? "s" : ""}: ${assignees.join(", ")}. Change assignees` : "No assignee. Change assignees";
+  const logins = assignees.map((a) => a.login);
+  const assigned = new Set(logins);
+  const toggle = (login: string) => write(assigned.has(login) ? logins.filter((a) => a !== login) : [...logins, login]);
+  const name = logins.length ? `Assignee${logins.length > 1 ? "s" : ""}: ${logins.join(", ")}. Change assignees` : "No assignee. Change assignees";
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <Popover onOpenChange={load}>
@@ -59,10 +61,10 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
                 No assignee
               </>
             ) : (
-              assignees.map((login) => (
-                <span key={login} className="inline-flex items-center gap-1.5">
-                  <GitHubAvatar login={login} size="sm" />
-                  {login}
+              assignees.map((person) => (
+                <span key={person.login} className="inline-flex items-center gap-1.5">
+                  <PersonAvatar person={person} />
+                  {person.login}
                 </span>
               ))
             )}
@@ -85,7 +87,7 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
                   <CommandGroup>
                     {people.users.map((user) => (
                       <CommandItem key={user.login} value={user.login} disabled={pending} onSelect={() => toggle(user.login)} data-checked={assigned.has(user.login) || undefined}>
-                        <GitHubAvatar login={user.login} size="sm" />
+                        <PersonAvatar person={user} />
                         <span className="min-w-0 flex-1 truncate">{user.login}</span>
                         {user.you && <span className="text-xs text-muted-foreground">you</span>}
                         {assigned.has(user.login) && <CheckIcon aria-label="Assigned" />}
@@ -111,7 +113,7 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
         </PopoverContent>
       </Popover>
       {assignMe && viewer && !assigned.has(viewer) && (
-        <Button variant="ghost" size="xs" disabled={pending} onClick={() => write(assignees, true)}>
+        <Button variant="ghost" size="xs" disabled={pending} onClick={() => write(logins, true)}>
           Assign me
         </Button>
       )}
