@@ -37,6 +37,17 @@ describe("updateProject", () => {
     await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", agentNotes: "x".repeat(4_001) })).rejects.toThrow(/4000/);
   });
 
+  test("saves the demo seed command and the UI paths, one glob a line, and clears them when empty", async () => {
+    const { project } = await projectWithRun();
+    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", demoSeedCommand: " pnpm db:seed ", uiPaths: "apps/web/**\n\n  packages/ui/** \n" });
+    const read = async () => (await db.select().from(projects).where(eq(projects.id, project.id)))[0];
+    expect(await read()).toMatchObject({ demoSeedCommand: "pnpm db:seed", uiPaths: ["apps/web/**", "packages/ui/**"] });
+    expect((await projectsForSettings(db, undefined))[0]).toMatchObject({ demoSeedCommand: "pnpm db:seed", uiPaths: ["apps/web/**", "packages/ui/**"] });
+    // No UI paths means the defaults.
+    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", demoSeedCommand: "", uiPaths: " \n" });
+    expect(await read()).toMatchObject({ demoSeedCommand: null, uiPaths: null });
+  });
+
   test("refuses an invalid or taken name", async () => {
     const { project } = await projectWithRun();
     await createProject(db, { name: "other", repo: "octo/other", defaultBranch: "main" });

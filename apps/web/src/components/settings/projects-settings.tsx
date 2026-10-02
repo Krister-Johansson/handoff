@@ -36,6 +36,8 @@ export type ProjectRow = {
   setupCommand: string | null;
   teardownCommand?: string | null;
   agentNotes?: string | null;
+  demoSeedCommand?: string | null;
+  uiPaths?: string[] | null;
   isDemo: boolean;
   runCount: number;
   plan: PlanLink | null;
@@ -137,7 +139,7 @@ function PlanOnGitHub({ project }: { project: ProjectRow }) {
   );
 }
 
-/** What Settings, Projects manages for one project: name, repository, default branch, setup and teardown commands, agent notes and plan. */
+/** What Settings, Projects manages for one project: name, repository, default branch, setup and teardown commands, agent notes, demo settings and plan. */
 function ProjectDetails({ project }: { project: ProjectRow }) {
   return (
     <dl className="grid grid-cols-[140px_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]">
@@ -155,6 +157,14 @@ function ProjectDetails({ project }: { project: ProjectRow }) {
       <Detail term="Setup command">{project.setupCommand ? <span className={`${MONO} break-all`}>{project.setupCommand}</span> : NONE}</Detail>
       <Detail term="Teardown command">{project.teardownCommand ? <span className={`${MONO} break-all`}>{project.teardownCommand}</span> : NONE}</Detail>
       <Detail term="Agent notes">{project.agentNotes ? <p className="whitespace-pre-wrap break-words">{project.agentNotes}</p> : NONE}</Detail>
+      <Detail term="Demo seed command">{project.demoSeedCommand ? <span className={`${MONO} break-all`}>{project.demoSeedCommand}</span> : NONE}</Detail>
+      <Detail term="UI paths">
+        {project.uiPaths?.length ? (
+          <span className={`${MONO} break-all`}>{project.uiPaths.join(" ")}</span>
+        ) : (
+          <span className="text-[13px] text-muted-foreground">the defaults: routes, pages, components and styles</span>
+        )}
+      </Detail>
       <Detail term="Plan on GitHub">
         <PlanOnGitHub project={project} />
       </Detail>
