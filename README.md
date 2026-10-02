@@ -281,9 +281,11 @@ handoff is meant for your own use with your own Claude login. Anthropic does not
 The project is built test-first. `CLAUDE.md` has the working rules and commands, `docs/plan.md` the design, `docs/adr/` the decisions, and `GLOSSARY.md` the vocabulary.
 
 ```bash
-pnpm test         # unit, integration (needs pnpm db:up) and web tests
+pnpm test         # unit, integration and web tests
 pnpm typecheck
 pnpm lint
 ```
+
+The integration tests need Docker running. They do not use the database from `pnpm db:up`: each run starts its own Postgres container with Testcontainers, migrates it and removes it afterwards, so several checkouts can run them at once. Set `TEST_DATABASE_URL` to run them against a database of your own instead.
 
 The Claude CLI version is pinned in `HANDOFF_CLAUDE_VERSION`. The worker refuses to start with a different version, because the CLI docs say `--bare` will become the default for `-p`, and bare mode ignores subscription logins. Check the changelog before bumping it.

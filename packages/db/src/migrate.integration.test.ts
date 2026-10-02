@@ -2,14 +2,13 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { createDb, type Db } from "./client.ts";
 import { runMigrations } from "./migrate.ts";
 import { dropAllTables } from "./testing/reset.ts";
-
-const url = process.env.TEST_DATABASE_URL ?? "postgres://handoff:handoff@localhost:5433/handoff_test";
+import { testDatabaseUrl } from "./testing/test-db.ts";
 
 describe("migrations", () => {
   let db: Db;
 
   beforeAll(async () => {
-    db = createDb(url);
+    db = createDb(testDatabaseUrl());
     await dropAllTables(db);
   });
 
