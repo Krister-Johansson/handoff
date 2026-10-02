@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { and, asc, eq, inArray, notifications, projects, projectSchedulers, runs, schedulerEvents, sql } from "@handoff/db";
+import { and, asc, eq, inArray, nodeExecutions, notifications, permissionRequests, projects, projectSchedulers, questions, runs, schedulerEvents, sql } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { startRun } from "../start-run.ts";
@@ -37,6 +37,16 @@ async function planned(settings: Partial<typeof projectSchedulers.$inferInsert> 
       .update(runs)
       .set({ state: sql`${runs.state} || ${JSON.stringify({ plan: { plan: "Do it", steps: [], ownedPaths: ["src"] } })}::jsonb` })
       .where(eq(runs.id, runId));
+  /** The run waits at a gate with an open question; returns the gate's step. */
+  const wait = async (runId: string, context: Record<string, unknown>) => {
+    await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, runId));
+    const [gate] = await db
+      .insert(nodeExecutions)
+      .values({ runId, nodeKey: "human_gate-1", nodeType: "human_gate", executorKind: "human", attempt: 1, status: "waiting", waitKind: "human" })
+      .returning();
+    await db.insert(questions).values({ runId, nodeExecutionId: gate!.id, question: "Go on?", context });
+    return gate!;
+  };
   const events = async (type?: string) =>
     db
       .select()
@@ -44,7 +54,7 @@ async function planned(settings: Partial<typeof projectSchedulers.$inferInsert> 
       .where(type ? and(eq(schedulerEvents.projectId, project.id), eq(schedulerEvents.type, type)) : eq(schedulerEvents.projectId, project.id))
       .orderBy(asc(schedulerEvents.id));
   const row = async () => (await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, project.id)))[0]!;
-  return { github, plan, number, project, task, check, started, planOf, events, row };
+  return { github, plan, number, project, task, check, started, planOf, wait, events, row };
 }
 
 test("a check starts runs in order until max_runs runs are active", async () => {
@@ -131,6 +141,51 @@ test("a check with a hold starts nothing and reads nothing from GitHub", async (
   expect(await p.started()).toHaveLength(1);
   for (const read of reads) expect(read).not.toHaveBeenCalled();
   expect((await p.row()).lastResult).toMatchObject({ state: "held", holds: [{ kind: "failed", runId: failed.id }] });
+});
+
+test("a run waiting on a review or a question does not hold: the next task starts while max_runs allows it, and a permission request holds", async () => {
+  const p = await planned({ maxRuns: 3 });
+  const reviewed = await p.task("Waits for its plan review");
+  const asked = await p.task("Asks a question");
+  await p.task("Next");
+
+  await p.check();
+  const [one] = await p.started();
+  await p.planOf(one!.id);
+  await p.wait(one!.id, { review: { from: "planner-1", kind: "plan" } });
+  await p.check();
+  const [, two] = await p.started();
+  expect(two).toMatchObject({ startedBy: "scheduler" });
+  expect((await p.started()).map((r) => r.issue)).toEqual([reviewed, asked]);
+  await p.planOf(two!.id);
+  const gate = await p.wait(two!.id, { reason: "question" });
+
+  // Both waiting runs count toward max_runs: one slot is left, and a permission request holds it.
+  await db.insert(permissionRequests).values({ id: crypto.randomUUID(), runId: two!.id, nodeExecutionId: gate.id, toolName: "Bash", input: { command: "rm -rf build" } });
+  await p.check();
+  expect(await p.started()).toHaveLength(2);
+  expect((await p.row()).lastResult).toMatchObject({ state: "held", active: 2, holds: [{ kind: "permission", runId: two!.id }] });
+
+  await db.update(permissionRequests).set({ status: "allowed" }).where(eq(permissionRequests.runId, two!.id));
+  await p.check();
+  expect(await p.started()).toHaveLength(3);
+  expect((await p.row()).lastResult).toMatchObject({ state: "running", holds: [], active: 2 });
+  expect(await p.events("scheduler.held")).toHaveLength(1);
+});
+
+test("with max_runs 1, a run waiting on a review fills the project", async () => {
+  const p = await planned({ maxRuns: 1 });
+  await p.task("Waits for its plan review");
+  await p.task("Next");
+  await p.check();
+  const [one] = await p.started();
+  await p.planOf(one!.id);
+  await p.wait(one!.id, { review: { from: "planner-1", kind: "plan" } });
+
+  await p.check();
+
+  expect(await p.started()).toHaveLength(1);
+  expect((await p.row()).lastResult).toMatchObject({ state: "full", holds: [], active: 1, maxRuns: 1 });
 });
 
 test("a check starts no run while a run the scheduler started has no plan", async () => {

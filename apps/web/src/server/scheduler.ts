@@ -1,4 +1,4 @@
-import { reviewPath, runPath, tryPath } from "@handoff/core/paths";
+import { runPath } from "@handoff/core/paths";
 import {
   and,
   asc,
@@ -10,7 +10,6 @@ import {
   nodeExecutions,
   projects,
   projectSchedulers,
-  questions,
   runs,
   schedulerEvents,
   sql,
@@ -187,7 +186,7 @@ export async function getScheduler(db: Db, projectId: string): Promise<Scheduler
     active: activeRuns.length,
     claudeSlots,
     activeRuns: activeRuns.map((r) => ({ id: r.id, status: r.status, startedBy: r.startedBy, issues: r.issues.map((i) => i.number), href: runPath(projectId, r.id) })),
-    holds: await holdViews(db, projectId, holds),
+    holds: holdViews(projectId, holds),
     overlapHeld: held.map((h) => {
       const paths = h.overlap?.paths ?? [];
       const waitsFor = h.overlap?.runId ?? null;
@@ -216,16 +215,8 @@ function idleOf(last: CheckResult): { reason: string; text: string } {
   return { reason: "no_ready", text: "No task is Ready. Move shaped tasks to Ready on the Plan." };
 }
 
-/** Each hold with its sentence and the page that clears it: a review or Try it page for those, else the run. */
-async function holdViews(db: Db, projectId: string, holds: Hold[]): Promise<HoldView[]> {
-  const reviewIds = holds.flatMap((h) => (h.kind === "review" ? [h.questionId] : []));
-  const tries = new Set(
-    reviewIds.length
-      ? (await db.select({ id: questions.id, context: questions.context }).from(questions).where(inArray(questions.id, reviewIds)))
-          .filter((q) => (q.context as { reason?: string }).reason === "try")
-          .map((q) => q.id)
-      : [],
-  );
+/** Each hold with its sentence and the run page that clears it. */
+function holdViews(projectId: string, holds: Hold[]): HoldView[] {
   return holds.map((hold): HoldView => {
     const run = `Run ${short(hold.runId)}`;
     const href = runPath(projectId, hold.runId);
@@ -234,14 +225,6 @@ async function holdViews(db: Db, projectId: string, holds: Hold[]): Promise<Hold
         return { ...hold, text: `${run} failed at ${hold.nodeKey}`, href };
       case "loop":
         return { ...hold, text: `${run} ran out of rounds at ${hold.nodeKey}`, href };
-      case "question":
-        return { ...hold, text: `${run} asks a question at ${hold.nodeKey}`, href };
-      case "review":
-        return tries.has(hold.questionId)
-          ? { ...hold, text: `${run} waits for you to try it at ${hold.nodeKey}`, href: tryPath(projectId, hold.runId, hold.questionId) }
-          : { ...hold, text: `${run} waits for your review at ${hold.nodeKey}`, href: reviewPath(projectId, hold.runId, hold.questionId) };
-      case "pull_request":
-        return { ...hold, text: `Pull request #${hold.prNumber} of run ${short(hold.runId)} waits for an approving review`, href };
       case "permission":
         return { ...hold, text: `${run} asks permission to use ${hold.toolName} at ${hold.nodeKey}`, href };
     }
