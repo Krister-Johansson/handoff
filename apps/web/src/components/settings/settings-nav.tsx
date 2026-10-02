@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BellIcon, CpuIcon, MessageSquareIcon, MicIcon, SunMoonIcon, TerminalIcon, type LucideIcon } from "lucide-react";
+import { BellIcon, CpuIcon, MessageSquareIcon, AudioLinesIcon, SunMoonIcon, TerminalIcon, type LucideIcon } from "lucide-react";
 import type { SettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
 
@@ -9,7 +9,7 @@ const GROUPS: { label: string; items: { tab: SettingsTab; label: string; icon: L
     items: [
       { tab: "appearance", label: "Appearance", icon: SunMoonIcon },
       { tab: "notifications", label: "Notifications", icon: BellIcon },
-      { tab: "voice", label: "Voice", icon: MicIcon },
+      { tab: "voice", label: "Voice", icon: AudioLinesIcon },
     ],
   },
   {

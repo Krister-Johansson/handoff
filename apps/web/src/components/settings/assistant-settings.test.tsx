@@ -12,7 +12,7 @@ afterEach(() => localStorage.clear());
 test("the Assistant tab shows the model that ran last, lets the person switch the assistant and WebMCP off, and explains what each needs", async () => {
   render(<AssistantSettings hasToken enabled model="sonnet" lastModel="claude-sonnet-5-5" />);
   expect(screen.getByText(/Last ran claude-sonnet-5-5/)).toBeInTheDocument();
-  expect(screen.getByText(/Claude Code on your subscription/)).toBeInTheDocument();
+  expect(screen.getByText("Opens with the Assistant button in the header or ⌘J.")).toBeInTheDocument();
 
   fireEvent.change(screen.getByLabelText("Model"), { target: { value: "haiku" } });
   await waitFor(() => expect(actions.setAssistantModelAction).toHaveBeenCalledWith("haiku"));
@@ -22,10 +22,22 @@ test("the Assistant tab shows the model that ran last, lets the person switch th
   fireEvent.click(assistant);
   await waitFor(() => expect(actions.setAssistantEnabledAction).toHaveBeenCalledWith(false));
 
-  const webmcp = screen.getByRole("switch", { name: "Expose tools to browser agents (WebMCP)" });
-  fireEvent.click(webmcp);
-  expect(localStorage.getItem("handoff.webmcp")).toBe("off");
-  expect(screen.getByText(/Your browser has no WebMCP/)).toBeInTheDocument();
+  // Without WebMCP in the browser the switch is off and says how to get it.
+  expect(screen.getByRole("switch", { name: "Expose tools to browser agents (WebMCP)" })).toBeDisabled();
+  expect(screen.getByText(/Your browser has no WebMCP/)).toHaveTextContent("chrome://flags/#enable-webmcp-testing");
+});
+
+test("with WebMCP in the browser the switch turns it off for this browser", () => {
+  Object.defineProperty(document, "modelContext", { value: new EventTarget(), configurable: true });
+  try {
+    render(<AssistantSettings hasToken enabled model="sonnet" />);
+    const webmcp = screen.getByRole("switch", { name: "Expose tools to browser agents (WebMCP)" });
+    expect(screen.getByText(/Browser agents on this page can use handoff's tools/)).toBeInTheDocument();
+    fireEvent.click(webmcp);
+    expect(localStorage.getItem("handoff.webmcp")).toBe("off");
+  } finally {
+    delete (document as { modelContext?: unknown }).modelContext;
+  }
 });
 
 test("without a token the switch is disabled and says what to set", () => {

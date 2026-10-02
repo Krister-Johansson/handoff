@@ -29,8 +29,11 @@ class OnDevice {
 
 test("the Voice tab says recognition is unavailable when no constructor exists and keeps the speaking switches", () => {
   render(<VoiceSettings support={{ synth: fakeSynth([]), onDeviceCheck: false }} />);
-  expect(screen.getByText("Speech recognition is not available in this browser. Chrome on Windows, macOS or Linux supports it.")).toBeInTheDocument();
+  expect(screen.getByRole("note")).toHaveTextContent("This browser has no speech recognition, so the microphone button is hidden. Replies and notifications can still be read aloud.");
   expect(screen.getByRole("switch", { name: "Server-based recognition" })).toBeDisabled();
+  expect(screen.getByLabelText("Language")).toBeDisabled();
+  expect(screen.getByText("Listening")).toBeInTheDocument();
+  expect(screen.getByText("Speaking")).toBeInTheDocument();
   expect(screen.getByRole("switch", { name: "Speak replies" })).toBeEnabled();
   expect(screen.getByRole("switch", { name: "Speak notifications" })).toBeEnabled();
 });
@@ -51,14 +54,20 @@ test("a browser without the on-device check says listening needs server recognit
   expect(screen.getByText(/cannot check for on-device recognition/)).toBeInTheDocument();
 });
 
-test("the voice list shows local voices for the language first and remote voices only when allowed, and Test voice speaks with the choice", () => {
+test("the voice list groups voices on this device before online ones, which show only when allowed, and Test voice speaks with the choice", () => {
   const synth = fakeSynth([voice("Google US English", "en-US", false), voice("Samantha", "en-US", true), voice("Alva", "sv-SE", true)]);
   render(<VoiceSettings support={{ synth, onDeviceCheck: false }} />);
   const select = screen.getByLabelText("Voice");
-  expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Automatic", "Samantha (en-US)", "Alva (sv-SE)"]);
+  const groups = () => within(select).getAllByRole("group").map((g) => [g.getAttribute("label"), within(g).getAllByRole("option").map((o) => o.textContent)]);
+  expect(within(select).getAllByRole("option")[0]).toHaveTextContent("Automatic");
+  expect(groups()).toEqual([["On this device", ["Samantha (en-US)", "Alva (sv-SE)"]]]);
 
-  fireEvent.click(screen.getByRole("switch", { name: "Remote voices" }));
-  expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Automatic", "Samantha (en-US)", "Alva (sv-SE)", "Google US English (en-US, remote)"]);
+  fireEvent.click(screen.getByRole("switch", { name: "Online voices" }));
+  expect(groups()).toEqual([
+    ["On this device", ["Samantha (en-US)", "Alva (sv-SE)"]],
+    ["Online", ["Google US English (en-US)"]],
+  ]);
+  expect(within(screen.getByLabelText("Rate")).getByRole("option", { name: "1x, normal" })).toBeInTheDocument();
 
   fireEvent.change(select, { target: { value: "Samantha" } });
   fireEvent.change(screen.getByLabelText("Rate"), { target: { value: "1.25" } });
@@ -70,12 +79,14 @@ test("the voice list shows local voices for the language first and remote voices
   expect(utterance.voice?.name).toBe("Samantha");
 });
 
-test("Also finished and merged runs is available only while notifications are spoken", () => {
+test("Also finished and merged runs is a checkbox available only while notifications are spoken", () => {
   render(<VoiceSettings support={{ synth: fakeSynth([]), onDeviceCheck: false }} />);
-  expect(screen.getByRole("switch", { name: "Also finished and merged runs" })).toBeDisabled();
+  expect(screen.getByRole("checkbox", { name: "Also finished and merged runs" })).toBeDisabled();
   fireEvent.click(screen.getByRole("switch", { name: "Speak notifications" }));
-  expect(screen.getByRole("switch", { name: "Also finished and merged runs" })).toBeEnabled();
-  expect(readVoicePrefs().speakNotifications).toBe(true);
+  const also = screen.getByRole("checkbox", { name: "Also finished and merged runs" });
+  expect(also).toBeEnabled();
+  fireEvent.click(also);
+  expect(readVoicePrefs()).toMatchObject({ speakNotifications: true, speakFinished: true });
 });
 
 test("voices that load after the first look still show, as Chrome fills the list late", async () => {

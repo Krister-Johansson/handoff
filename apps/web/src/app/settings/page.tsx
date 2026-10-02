@@ -86,7 +86,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </Section>
           )}
           {tab === "voice" && (
-            <Section title="Voice" description="How this browser listens and speaks. Audio stays on this machine unless you allow otherwise.">
+            <Section title="Voice" description="Push to talk: the dashboard listens only after you press the microphone or V, and stops on Escape.">
               <VoiceSettingsLoader />
             </Section>
           )}
@@ -96,7 +96,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             </Section>
           )}
           {assistant && (
-            <Section title="Assistant" description="The panel beside every page that answers about your runs and acts on them, and the same tools for agents in this browser.">
+            <Section title="Assistant" description="A chat panel beside every page. It answers with Claude Code on your subscription and asks before it changes anything.">
               <AssistantSettings hasToken={Boolean(assistant.state.config.oauthToken)} enabled={assistant.state.enabled} model={assistant.state.config.model} lastModel={assistant.lastModel} />
             </Section>
           )}
