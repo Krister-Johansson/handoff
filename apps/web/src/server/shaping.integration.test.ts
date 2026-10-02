@@ -1,11 +1,12 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, events, projectSchedulers, runs, sql } from "@handoff/db";
+import { eq, events, projects, projectSchedulers, runs, sql } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cancelRun } from "@handoff/engine/operations";
-import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { OctokitProjects } from "@handoff/github";
+import { fakeGraphql, FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
-import { addEstimateFields, moveToReady, planIssue, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
+import { addEstimateFields, moveToReady, planIssue, schedule, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -34,6 +35,50 @@ const runBeforePlan = (issues: number[]) => startRunFromGraph(db, { projectId, g
 const statusOf = (issue: number) => plan.itemsOf(repo).get(issue)?.status;
 const planEvents = async (runId: string) =>
   (await db.select({ type: events.type, payload: events.payload }).from(events).where(eq(events.runId, runId))).filter((e) => e.type.startsWith("plan."));
+
+/** A PlanItems node for an open task of octo/sample with nothing set. */
+const taskNode = (number: number) => ({
+  status: { __typename: "ProjectV2ItemFieldSingleSelectValue", name: "Shaping" },
+  content: {
+    __typename: "Issue",
+    number,
+    title: `Task ${number}`,
+    url: `https://github.com/octo/sample/issues/${number}`,
+    state: "OPEN",
+    updatedAt: "2026-10-01T10:00:00Z",
+    repository: { name: "sample", owner: { login: "octo" } },
+    labels: { nodes: [{ name: "task" }] },
+    assignees: { nodes: [] },
+    issueType: null,
+    parent: null,
+    subIssuesSummary: { total: 0, completed: 0 },
+    blockedBy: { nodes: [] },
+    closedByPullRequestsReferences: { nodes: [] },
+  },
+});
+
+test("schedule writes 60 items' dates to GitHub in a dozen requests at most", async () => {
+  const issues = Array.from({ length: 60 }, (_, i) => 100 + i);
+  const dateField = (id: string) => ({ __typename: "ProjectV2Field", id, dataType: "DATE" });
+  const { fetch, calls, operations } = fakeGraphql(
+    {
+      PlanProject: () => ({ user: { projectV2: { id: "PVT_3", number: 3, url: "u", title: "t", field: null, start: dateField("F_start"), target: dateField("F_target") } } }),
+      PlanItems: () => ({ user: { projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: issues.map(taskNode) } } } }),
+      PlanItemIds: () => ({ repository: Object.fromEntries(issues.map((n) => [`i${n}`, { projectItems: { nodes: [{ id: `PVTI_${n}`, project: { id: "PVT_3" } }] } }])) }),
+      SetManyPlanFields: () => ({}),
+    },
+    { "GET /user": () => ({ json: { login: "octo" }, headers: { "x-oauth-scopes": "repo, project" } }) },
+  );
+  await db.update(projects).set({ planProjectNumber: 3 }).where(eq(projects.id, projectId));
+  const items = issues.map((issue, i) => ({ issue, start: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}`, target: "2026-10-30" }));
+
+  const result = await schedule({ db, github, projects: OctokitProjects.withToken("t", { fetch, throttle: false }) }, projectId, items);
+
+  expect(result.scheduled).toHaveLength(60);
+  const written = operations.filter((o) => o.operation === "SetManyPlanFields").flatMap((o) => Object.keys(o.variables).filter((k) => k.endsWith("Value")));
+  expect(written).toHaveLength(120);
+  expect(calls.length).toBeLessThanOrEqual(12);
+});
 
 test("plan_issue puts an issue whose run is active in Running and records it on the run; one without a run stays in Shaping", async () => {
   const run = await runBeforePlan([11]);

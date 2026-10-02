@@ -19484,6 +19484,8 @@ function explain(url2, error2) {
   return `handoff is not reachable at ${url2}: ${message}. Is the dashboard running (pnpm dev:web)?`;
 }
 var runIdOf = (url2) => url2.match(/\/runs\/([^/?#]+)/)?.[1];
+var TOOL_CALL_TIMEOUT_MS = 4 * 6e4;
+var stillWorking = (name) => `handoff did not answer ${name} within ${TOOL_CALL_TIMEOUT_MS / 6e4} minutes. It may still be working, and writes it started can still land: check the result (list_plan, get_run or the dashboard) before calling ${name} again.`;
 function createBridge(options) {
   const url2 = options.url.replace(/\/$/, "");
   const server = new Server(
@@ -19554,8 +19556,9 @@ function createBridge(options) {
       if (request.params.name === CURRENT_PROJECT.name) return toolJson(await currentProject(client));
       const filled = await withSessionArguments(client, request.params.name, request.params.arguments ?? {});
       if ("error" in filled) return toolError(filled.error);
-      return await client.callTool({ ...request.params, arguments: filled.args });
+      return await client.callTool({ ...request.params, arguments: filled.args }, void 0, { timeout: TOOL_CALL_TIMEOUT_MS });
     } catch (error2) {
+      if (error2 instanceof McpError && error2.code === ErrorCode.RequestTimeout) return toolError(stillWorking(request.params.name));
       upstream = void 0;
       return toolError(explain(url2, error2));
     }

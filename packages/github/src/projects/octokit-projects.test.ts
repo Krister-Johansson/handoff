@@ -952,6 +952,68 @@ test("setPlanFields reports no-field and no-option and changes nothing", async (
   expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan"]);
 });
 
+/** The PlanItemIds answer: each issue variable `i<n>` as an issue whose items are in the given Projects, null for an issue GitHub lacks. */
+function planItemIds(variables: Record<string, unknown>, itemsOf: (issue: number) => { id: string; project: string }[] | null) {
+  const issues = Object.entries(variables).filter(([key]) => /^i\d+$/.test(key));
+  return {
+    repository: Object.fromEntries(
+      issues.map(([alias, issue]) => {
+        const items = itemsOf(issue as number);
+        return [alias, items && { projectItems: { nodes: items.map((i) => ({ id: i.id, project: { id: i.project } })) } }];
+      }),
+    ),
+  };
+}
+
+test("setManyPlanFields writes 60 items' Start and Target in a few requests, each valid against GitHub's schema", async () => {
+  const issues = Array.from({ length: 60 }, (_, i) => 100 + i);
+  const { fetch, operations, calls } = fakeGraphql({
+    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    PlanItemIds: (v) => planItemIds(v, (issue) => [{ id: "PVTI_other", project: "PVT_2" }, { id: `PVTI_${issue}`, project: "PVT_3" }]),
+    SetManyPlanFields: () => ({}),
+  });
+  const projects = port(fetch);
+
+  const results = await projects.setManyPlanFields(
+    repo,
+    3,
+    issues.map((issue) => ({ issue, fields: { start: "2026-10-06", target: issue % 2 ? null : "2026-10-09" } })),
+  );
+
+  expect(results).toEqual(issues.map((issue) => ({ issue, result: "set" })));
+  // One read of the Project, one of the items, then up to 20 mutations a request: 120 writes in 6.
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "PlanItemIds", ...Array(6).fill("SetManyPlanFields")]);
+  const writes = calls.filter((c) => /^\s*mutation/.test((c.body as { query: string }).query));
+  const mutations = writes.flatMap((c) => mutationsOf((c.body as { query: string }).query));
+  expect(mutations).toHaveLength(120);
+  expect(mutations).toContainEqual(["i101_target", "clearProjectV2ItemFieldValue"]);
+  expect(mutations).toContainEqual(["i100_target", "updateProjectV2ItemFieldValue"]);
+  // Every item's writes go to its own item in the plan's Project, never to the item in another Project.
+  const sent = operations.filter((o) => o.operation === "SetManyPlanFields").map((o) => o.variables);
+  expect(sent.every((v) => v.projectId === "PVT_3")).toBe(true);
+  expect(sent.flatMap((v) => Object.entries(v).filter(([k]) => k.endsWith("Item")).map(([, id]) => id))).toEqual(issues.map((i) => `PVTI_${i}`));
+  expect(sent[0]).toMatchObject({ i100Item: "PVTI_100", i100_startField: "F_start", i100_startValue: "2026-10-06", i100_targetField: "F_target", i100_targetValue: "2026-10-09" });
+  const lookup = calls.find((c) => /PlanItemIds/.test((c.body as { query: string }).query))!.body as { query: string };
+  expect(validate(githubSchema, parse(lookup.query))).toEqual([]);
+});
+
+test("setManyPlanFields writes nothing when an issue is outside the Project or the Project lacks a field, and names only those issues", async () => {
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    // #13 is only in another Project; GitHub has no #14.
+    PlanItemIds: (v) => planItemIds(v, (issue) => (issue === 12 ? [{ id: "PVTI_12", project: "PVT_3" }] : issue === 13 ? [{ id: "PVTI_13", project: "PVT_2" }] : null)),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.setManyPlanFields(repo, 3, [12, 13, 14].map((issue) => ({ issue, fields: { start: "2026-10-06" } })))).toEqual([
+    { issue: 13, result: "not-in-project" },
+    { issue: 14, result: "not-in-project" },
+  ]);
+  // The Project has no Estimate field.
+  expect(await projects.setManyPlanFields(repo, 3, [{ issue: 12, fields: { start: "2026-10-06", estimate: 3 } }])).toEqual([{ issue: 12, result: "no-field" }]);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "PlanItemIds", "PlanProject", "PlanItemIds"]);
+});
+
 /** How createProjectV2Field or updateProjectV2Field answers for a Size field with these options: the sent ids kept, new ones for the rest. */
 const sizeFieldFrom = (options: { id?: string; name: string }[]) => ({
   __typename: "ProjectV2SingleSelectField",

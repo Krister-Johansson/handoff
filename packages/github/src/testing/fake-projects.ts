@@ -7,6 +7,7 @@ import type {
   PlanDates,
   PlanEstimateFieldIds,
   PlanFields,
+  PlanFieldsChange,
   PlanItem,
   PlanIteration,
   PlanProject,
@@ -40,6 +41,16 @@ export type FakePlanItem = {
 type FakePlan = { login: string; project: PlanProject; items: Map<number, FakePlanItem> };
 
 const keyOf = (repo: RepoRef) => `${repo.owner}/${repo.name}`.toLowerCase();
+
+/** Why `fields` cannot be written on the issue's item of the plan, as setPlanFields answers; undefined when they can. */
+function fieldsProblem(plan: FakePlan | undefined, issue: number, fields: PlanFields): Exclude<SetFieldsResult, "set"> | undefined {
+  if (!plan?.items.has(issue)) return "not-in-project";
+  const { dateFields, estimateFields } = plan.project;
+  const has = { start: dateFields?.start, target: dateFields?.target, size: estimateFields?.size, estimate: estimateFields?.estimate };
+  if ((Object.keys(has) as (keyof typeof has)[]).some((key) => fields[key] !== undefined && !has[key])) return "no-field";
+  if (fields.size && !estimateFields?.size?.options[fields.size]) return "no-option";
+  return undefined;
+}
 
 /**
  * In-memory GitHub Projects for tests: one Project per repository. Issue titles, bodies, labels, state and
@@ -212,17 +223,23 @@ export class FakeProjects implements ProjectsPort {
 
   async setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult> {
     const plan = this.planOf(repo, project);
-    const item = plan?.items.get(issue);
-    if (!plan || !item) return "not-in-project";
-    const { dateFields, estimateFields } = plan.project;
-    const has = { start: dateFields?.start, target: dateFields?.target, size: estimateFields?.size, estimate: estimateFields?.estimate };
-    if ((Object.keys(has) as (keyof typeof has)[]).some((key) => fields[key] !== undefined && !has[key])) return "no-field";
-    if (fields.size && !estimateFields?.size?.options[fields.size]) return "no-option";
+    const problem = fieldsProblem(plan, issue, fields);
+    if (problem) return problem;
+    const item = plan!.items.get(issue)!;
     if (fields.start !== undefined) item.start = fields.start ?? undefined;
     if (fields.target !== undefined) item.target = fields.target ?? undefined;
     if (fields.size !== undefined) item.size = fields.size ?? undefined;
     if (fields.estimate !== undefined) item.estimate = fields.estimate ?? undefined;
     return "set";
+  }
+
+  async setManyPlanFields(repo: RepoRef, project: number, changes: PlanFieldsChange[]): Promise<{ issue: number; result: SetFieldsResult }[]> {
+    const plan = this.planOf(repo, project);
+    const checked = changes.map(({ issue, fields }) => ({ issue, result: fieldsProblem(plan, issue, fields) ?? ("set" as const) }));
+    const refused = checked.filter((c) => c.result !== "set");
+    if (refused.length) return refused;
+    for (const { issue, fields } of changes) await this.setPlanFields(repo, project, issue, fields);
+    return checked;
   }
 
   async ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds> {
