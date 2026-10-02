@@ -1,10 +1,12 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { asc, eq, graphVersions, projects, projectSchedulers, runs, schedulerEvents } from "@handoff/db";
-import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { asc, eq, graphVersions, projects, projectSchedulers, questions, runs, schedulerEvents } from "@handoff/db";
+import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { reviewPath, runPath } from "../lib/paths";
 import { createProject, saveGraphVersion } from "./graphs";
-import { releaseTask, startScheduler, stopScheduler } from "./scheduler";
+import { loadSchedulerCard } from "./scheduler-card";
+import { pauseScheduler, releaseTask, startScheduler, stopScheduler } from "./scheduler";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -99,6 +101,68 @@ test("letting the scheduler take a task records scheduler.released for its cance
 
   expect((await log()).at(-1)).toEqual({ type: "scheduler.released", payload: { issue, runId, by: "dashboard" } });
   expect((await row())!.nextCheckAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+});
+
+test("the card names each active run's task and current step, and links the review a run waits for", async () => {
+  await startScheduler(deps(), projectId, { maxRuns: 2 }, "dashboard");
+  const working = await taskWithRun("waiting");
+  await db.update(runs).set({ status: "running", startedBy: "scheduler" }).where(eq(runs.id, working.runId));
+  await seedExecution(db, working.runId, { nodeKey: "coder-1", status: "running" });
+  const reviewing = await taskWithRun("waiting");
+  const gate = await seedExecution(db, reviewing.runId, { nodeKey: "human_gate-1", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [review] = await db.insert(questions).values({ runId: reviewing.runId, nodeExecutionId: gate.id, question: "Review the plan", options: ["approve"], context: { review: { markdown: "# Plan" } } }).returning();
+
+  const card = await loadSchedulerCard(db, projectId);
+
+  expect(card.runs).toEqual([
+    {
+      id: working.runId,
+      href: runPath(projectId, working.runId),
+      startedBy: "scheduler",
+      issue: { number: working.issue, title: "Add the migration" },
+      node: "coder-1",
+      now: { tone: "active", text: "coder-1 is working" },
+    },
+    {
+      id: reviewing.runId,
+      href: runPath(projectId, reviewing.runId),
+      startedBy: null,
+      issue: { number: reviewing.issue, title: "Add the migration" },
+      node: "human_gate-1",
+      now: { tone: "attention", text: "human_gate-1 waits for your review" },
+      reviewHref: reviewPath(projectId, reviewing.runId, review!.id),
+    },
+  ]);
+});
+
+test("the card names the task of each hold's run", async () => {
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  const failed = await taskWithRun("failed");
+
+  const card = await loadSchedulerCard(db, projectId);
+
+  expect(card.status.holds.map((h) => h.runId)).toEqual([failed.runId]);
+  expect(card.holdIssues).toEqual({ [failed.runId]: { number: failed.issue, title: "Add the migration" } });
+});
+
+test("the card reads the last 50 events, newest first, each as a sentence", async () => {
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  for (let issue = 1; issue <= 60; issue++) await db.insert(schedulerEvents).values({ projectId, type: "scheduler.skipped", payload: { issue, reason: "labelled human" } });
+
+  const { events } = await loadSchedulerCard(db, projectId);
+
+  expect(events).toHaveLength(50);
+  expect(events[0]).toEqual({ id: expect.any(Number), type: "scheduler.skipped", text: "Skipped #60: labelled human", at: expect.any(Date) });
+  expect(events.at(-1)!.text).toBe("Skipped #11: labelled human");
+});
+
+test("a paused scheduler says where a person paused it from", async () => {
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  await pauseScheduler(db, projectId, "claude-code", "Lunch");
+
+  expect((await loadSchedulerCard(db, projectId)).pausedFrom).toBe("claude-code");
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  expect((await loadSchedulerCard(db, projectId)).pausedFrom).toBeNull();
 });
 
 test("only a task whose latest run was cancelled can be let to the scheduler", async () => {
