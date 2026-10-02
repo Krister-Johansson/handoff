@@ -10,6 +10,7 @@ import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
 import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph } from "./graphs";
 import { currentSteps, getRunDetail, listRuns } from "./queries";
+import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
 import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ScheduleItem } from "./shaping";
@@ -189,11 +190,12 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const [stuck, prompts, demoSummary, answered] = await Promise.all([
+  const [stuck, prompts, demoSummary, answered, states] = await Promise.all([
     stuckLoop(deps.db, run.id),
     pendingPermissions(deps.db, run.id),
     latestDemoSummary(deps.db, run.id),
     answeredGates(deps.db, run.id),
+    stepStates(deps.db, executions.map((e) => e.id)),
   ]);
   const costs = executions.map((e) => (e.costUsd === null ? null : Number(e.costUsd)));
   return {
@@ -213,6 +215,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
       node: e.nodeKey,
       attempt: e.attempt,
       status: e.status,
+      ...states.get(e.id),
       started_at: e.startedAt?.toISOString() ?? null,
       finished_at: e.finishedAt?.toISOString() ?? null,
       // A step still running counts up to now, which is what decides between waiting and repairing.
@@ -365,6 +368,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {
       const listed = await listRuns(db, { ...(project ? { project } : {}), ...(status ? { status } : {}) }, 30);
       const steps = await currentSteps(db, listed.map((r) => r.id));
+      const states = await stepStates(db, [...steps.values()].map((s) => s.id));
       return listed.map((r) => {
         const step = steps.get(r.id);
         return {
@@ -378,6 +382,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
                 node: step.nodeKey,
                 attempt: step.attempt,
                 status: step.status,
+                ...states.get(step.id),
                 since: step.since?.toISOString() ?? null,
                 for_seconds: step.since ? Math.round((Date.now() - step.since.getTime()) / 1000) : null,
               }

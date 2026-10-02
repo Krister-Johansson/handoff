@@ -414,6 +414,34 @@ test("get_project returns each graph's latest version", async () => {
   expect(detail.recent_runs).toEqual([expect.objectContaining({ id: run_id, graph: "linear", graph_version: 2 })]);
 });
 
+test("a pending step reports queued with its place", async () => {
+  await registerWorker(db, { id: "worker-1", hostname: "box", caps: { cli: 1 } });
+  const start = async (task: string) => (await call("start_run", { project: "sandbox", task })).run_id as string;
+  const busy = await start("Running now");
+  const asking = await start("Asks a person");
+  const first = await start("Next in line");
+  const second = await start("After that");
+  const at = (s: number) => new Date(Date.now() - s * 1000);
+  await db.update(nodeExecutions).set({ status: "running", startedAt: at(60) }).where(eq(nodeExecutions.runId, busy));
+  await db.update(nodeExecutions).set({ status: "running", waitingOn: "permission", startedAt: at(50) }).where(eq(nodeExecutions.runId, asking));
+  await db.update(nodeExecutions).set({ runnableAt: at(30) }).where(eq(nodeExecutions.runId, first));
+  await db.update(nodeExecutions).set({ runnableAt: at(20) }).where(eq(nodeExecutions.runId, second));
+  await seedExecution(db, busy, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting", waitKind: "human" });
+
+  const byTask = Object.fromEntries((await call("list_runs", { project: "sandbox" })).map((r: { task: string; current_step: unknown }) => [r.task, r.current_step]));
+  expect(byTask["Next in line"]).toMatchObject({ node: "planner", status: "pending", state: "queued", place: 1 });
+  expect(byTask["After that"]).toMatchObject({ state: "queued", place: 2 });
+  expect(byTask["Asks a person"]).toMatchObject({ status: "running", state: "waiting", waiting_on: "permission" });
+  expect((await call("get_run", { run_id: second })).steps).toEqual([expect.objectContaining({ node: "planner", state: "queued", place: 2 })]);
+  const steps = (await call("get_run", { run_id: busy })).steps;
+  expect(steps).toEqual([expect.objectContaining({ node: "planner", state: "running" }), expect.objectContaining({ node: "gate", state: "waiting", waiting_on: "question" })]);
+  expect(steps[0]).not.toHaveProperty("place");
+
+  // With no worker running, a pending step waits on the worker.
+  await db.update(workers).set({ stoppedAt: new Date() });
+  expect((await call("get_run", { run_id: first })).steps[0]).toMatchObject({ state: "waiting", waiting_on: "worker", place: 1 });
+});
+
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });

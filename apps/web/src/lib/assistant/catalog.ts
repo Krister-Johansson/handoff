@@ -157,7 +157,7 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "list_runs",
     title: "List runs",
-    description: "Runs, newest first, each with the step it is on and for how long. status active means queued, running or waiting.",
+    description: "Runs, newest first, each with the step it is on, for how long, and its state: queued with its place in line, running, or waiting with waiting_on (permission, question, ci, merge_queue, worker or overlap). status active means queued, running or waiting.",
     input: z.object({ project: z.string().optional().describe("Project name"), status: z.enum(["active", "succeeded", "failed", "cancelled"]).optional() }),
     kind: "data",
     confirm: false,
