@@ -196,3 +196,29 @@ test("an active run past its duration is over forecast and not overdue", () => {
   expect(of(3)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
   expect(of(4)).toMatchObject({ overForecastMinutes: undefined, overdueDays: 2 });
 });
+
+test("a Start before a blocker's end is flagged with that blocker", () => {
+  const items = [
+    // Nine hours from the 12th: it ends three hours into the 13th.
+    item(1, { start: "2026-10-12" }),
+    item(2, { start: "2026-10-13", blockedBy: [1] }),
+    item(3, { start: "2026-10-14", blockedBy: [1] }),
+    // Same day as its blocker, so it sits after it and starts as #1 ends.
+    item(8, { start: "2026-10-12", blockedBy: [1] }),
+    // A blocker without a duration ends with its Target day.
+    item(4, { start: "2026-10-12", target: "2026-10-15" }),
+    item(5, { start: "2026-10-15", blockedBy: [4], blockers: [4, 1] }),
+    // A done blocker has ended, whatever its dates say.
+    item(7, { state: "closed", start: "2026-10-12", target: "2026-10-20" }),
+    item(6, { start: "2026-10-14", blockers: [7] }),
+  ];
+  const timeline = deriveSpans(items, [], NOW, { durations: hours({ 1: 9, 2: 2, 3: 2, 8: 2 }), capacity: 6 });
+  const flagged = (n: number) => timeline.items.find((i) => i.number === n)!.startsBeforeBlocker;
+  expect([2, 3, 8, 5, 6].map((n) => [n, flagged(n)])).toEqual([
+    [2, [1]],
+    [3, []],
+    [8, []],
+    [5, [4]],
+    [6, []],
+  ]);
+});

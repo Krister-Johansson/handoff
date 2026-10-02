@@ -33,6 +33,8 @@ export type TimelineItem = {
   overdueDays: number | undefined;
   /** Minutes an active run has gone past the task's duration; undefined without an active run past it. */
   overForecastMinutes: number | undefined;
+  /** The blockers not done yet whose bar ends after this item's bar starts. */
+  startsBeforeBlocker: number[];
   /** Its own span leaves the own dates of its nearest ancestor that has both. */
   outsideParent: boolean;
   /** Neither its own dates nor a derived span place it on the chart. */
@@ -117,6 +119,14 @@ function sizedBars(items: PlanItem[], opts: SpanOptions): Map<number, PlannedSpa
   return bars;
 }
 
+/** Hours from the start of 1970-01-01 to `offsetHours` into a day, at the capacity per day. */
+const hourOf = (day: string, offsetHours: number, capacity: number) => daysBetween("1970-01-01", day) * capacity + offsetHours;
+/** Where a bar starts, in hours: a sized bar after its offset, a dated one at the start of its Start day. */
+const startHour = (span: PlannedSpan, capacity: number) => (span.openStart ? undefined : hourOf(span.start, span.offsetHours ?? 0, capacity));
+/** Where a bar ends, in hours: a sized bar after its hours, a dated one at the end of its Target day. */
+const endHour = (span: PlannedSpan, capacity: number) =>
+  span.hours !== undefined ? hourOf(span.start, (span.offsetHours ?? 0) + span.hours, capacity) : span.openEnd ? undefined : hourOf(addDays(span.end, 1), 0, capacity);
+
 /** Minutes the newest active run has worked past the duration; undefined while inside it or without either. */
 function overForecastOf(strips: ActualStrip[], duration: { hours: number } | undefined, now: Date): number | undefined {
   const active = strips.find((s) => s.active);
@@ -192,6 +202,14 @@ export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date, o
     const overForecastMinutes = overForecastOf(actual, opts?.durations.get(item.number), now);
     const overdueDays = !done && overForecastMinutes === undefined && item.target !== undefined && today > item.target ? daysBetween(item.target, today) : undefined;
     const window = own ? windowOf(item) : undefined;
+    const capacity = opts?.capacity ?? 1;
+    const starts = own && startHour(own, capacity);
+    const startsBeforeBlocker = blockersOf(item).filter((b) => {
+      const blocker = byNumber.get(b);
+      const span = planned.get(b);
+      const ends = span && endHour(span, capacity);
+      return blocker !== undefined && !isDone(blocker) && starts !== undefined && ends !== undefined && starts < ends - EPSILON;
+    });
     return {
       number: item.number,
       planned: own,
@@ -201,6 +219,7 @@ export function deriveSpans(items: PlanItem[], runs: TimelineRun[], now: Date, o
       late,
       overdueDays,
       overForecastMinutes,
+      startsBeforeBlocker,
       outsideParent: own !== undefined && window !== undefined && (own.start < window.start || own.end > window.end),
       unscheduled: !own && !derived,
     };
