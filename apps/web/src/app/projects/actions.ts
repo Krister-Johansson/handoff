@@ -9,11 +9,11 @@ import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
+import { addDateFields, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
-import { deleteProject, updateProject } from "@/server/project-admin";
+import { deleteProject, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { linkDependencies } from "@/server/link-dependencies";
-import { addDateFields, schedule } from "@/server/shaping";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphVersion, renameGraph, runAgain, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
@@ -31,7 +31,8 @@ export async function createProjectAction(_: ActionState, form: FormData): Promi
     const duplicate = message.includes("repo_id") ? "That repository already is a project." : "A project with that name exists.";
     return { ok: false, error: message.includes("duplicate") ? duplicate : message, values };
   }
-  revalidatePath("/projects");
+  // The sidebar in the root layout lists the projects; Settings, Projects shows them too.
+  revalidatePath("/", "layout");
   redirect(`/projects/${id}`);
 }
 
@@ -53,8 +54,8 @@ export async function updateProjectAction(_: ActionState, form: FormData): Promi
   } catch (error) {
     return { ok: false, error: (error as Error).message, values };
   }
-  revalidatePath("/projects");
-  revalidatePath(`/projects/${projectId}`);
+  // The sidebar in the root layout lists the projects; Settings, Projects shows them too.
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -64,7 +65,8 @@ export async function deleteProjectAction(_: ActionState, form: FormData): Promi
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
-  revalidatePath("/projects");
+  // The sidebar in the root layout lists the projects; Settings, Projects shows them too.
+  revalidatePath("/", "layout");
   return { ok: true };
 }
 
@@ -221,6 +223,83 @@ export async function linkDependenciesAction(input: { projectId: string }): Prom
   }
 }
 
+const PlanTaskSchema = z.object({ projectId: z.string().uuid(), issue: z.number().int().positive() });
+const shapingDeps = (): ShapingDeps => ({ db: getDb(), github: getGitHub(), projects: getProjects() });
+
+/** Runs one shaping call from the Plan page; its refusal is a sentence to show as it is, and a refused call changes nothing. */
+async function onPlan(projectId: string, write: (deps: ShapingDeps) => Promise<unknown>): Promise<ActionState> {
+  try {
+    await write(shapingDeps());
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(planPath(projectId));
+  return { ok: true };
+}
+
+/** A person moves a shaped task to Ready on the plan, so it joins the backlog. */
+export async function moveToReadyAction(input: z.input<typeof PlanTaskSchema>): Promise<ActionState> {
+  const parsed = PlanTaskSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That task cannot be moved from here." };
+  return onPlan(parsed.data.projectId, (deps) => moveToReady(deps, parsed.data.projectId, [parsed.data.issue]));
+}
+
+/** A person moves a Ready task back to Shaping, out of the backlog. */
+export async function moveToShapingAction(input: z.input<typeof PlanTaskSchema>): Promise<ActionState> {
+  const parsed = PlanTaskSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That task cannot be moved from here." };
+  return onPlan(parsed.data.projectId, (deps) => moveToShaping(deps, parsed.data.projectId, [parsed.data.issue]));
+}
+
+const PlanIssueSchema = PlanTaskSchema.extend({ story: z.number().int().positive().optional() });
+
+/** A person adds an open issue outside the plan to it as a task in Shaping, under a story when one is picked. */
+export async function planIssueAction(input: z.input<typeof PlanIssueSchema>): Promise<ActionState> {
+  const parsed = PlanIssueSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That issue cannot be planned from here." };
+  const { projectId, issue, story } = parsed.data;
+  return onPlan(projectId, (deps) => planIssue(deps, projectId, { issue, ...(story !== undefined ? { story } : {}) }));
+}
+
+/** A GitHub Project the plan can live in, as the Set up the plan dialog lists it. */
+export type GitHubProjectChoice = Awaited<ReturnType<typeof listGitHubProjects>>[number];
+
+/** The person's GitHub Projects for the Set up the plan dialog, those linked to the project's repository first. */
+export async function listGitHubProjectsAction(projectId: string): Promise<{ projects: GitHubProjectChoice[] } | { error: string }> {
+  if (!z.string().uuid().safeParse(projectId).success) return { error: "That project cannot get a plan from here." };
+  try {
+    return { projects: await listGitHubProjects(shapingDeps(), projectId) };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
+const SetupPlanSchema = z.object({ projectId: z.string().uuid(), use: z.number().int().positive().optional() });
+
+/** A person sets up the project's plan from the Plan page or Settings, Projects: an existing GitHub Project of theirs (use), or a new one. */
+export async function setupPlanAction(input: z.input<typeof SetupPlanSchema>): Promise<ActionState> {
+  const parsed = SetupPlanSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project cannot get a plan from here." };
+  const { projectId, use } = parsed.data;
+  const result = await onPlan(projectId, (deps) => setupPlan(deps, projectId, use !== undefined ? { use } : {}));
+  if (result.ok) revalidatePath("/settings");
+  return result;
+}
+
+/** A person unlinks the plan's GitHub Project in Settings, Projects; the Project stays on GitHub. */
+export async function unlinkPlanAction(input: { projectId: string }): Promise<ActionState> {
+  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project cannot be unlinked from here." };
+  try {
+    await unlinkPlan(getDb(), parsed.data.projectId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath("/settings");
+  revalidatePath(planPath(parsed.data.projectId));
+  return { ok: true };
+}
+
 const day = z.iso.date().nullable();
 const ScheduleSchema = z.object({ projectId: z.string().uuid(), issue: z.number().int().positive(), start: day, target: day });
 
@@ -229,24 +308,12 @@ export async function scheduleAction(input: z.input<typeof ScheduleSchema>): Pro
   const parsed = ScheduleSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Give the dates as YYYY-MM-DD, or clear them." };
   const { projectId, issue, start, target } = parsed.data;
-  try {
-    await schedule({ db: getDb(), github: getGitHub(), projects: getProjects() }, projectId, [{ issue, start, target }]);
-  } catch (error) {
-    return { ok: false, error: (error as Error).message };
-  }
-  revalidatePath(planPath(projectId));
-  return { ok: true };
+  return onPlan(projectId, (deps) => schedule(deps, projectId, [{ issue, start, target }]));
 }
 
 /** The timeline banner's Add date fields: creates the Start and Target fields on the plan's GitHub Project. */
 export async function addDateFieldsAction(input: { projectId: string }): Promise<ActionState> {
   const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
   if (!parsed.success) return { ok: false, error: "That project has no plan to add dates to." };
-  try {
-    await addDateFields({ db: getDb(), github: getGitHub(), projects: getProjects() }, parsed.data.projectId);
-  } catch (error) {
-    return { ok: false, error: (error as Error).message };
-  }
-  revalidatePath(planPath(parsed.data.projectId));
-  return { ok: true };
+  return onPlan(parsed.data.projectId, (deps) => addDateFields(deps, parsed.data.projectId));
 }

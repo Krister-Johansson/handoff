@@ -57,7 +57,7 @@ test("an issue with a run shows the run's status and links to it and its PR", ()
 test("the filters link to To do, Started and All with counts", () => {
   render(<Backlog projectId="p1" graphs={["loop"]} graphName="loop" filter="todo" counts={{ todo: 3, started: 2, all: 5 }} issues={[]} />);
   expect(screen.getByRole("link", { name: "To do 3" })).toHaveAttribute("aria-current", "page");
-  expect(screen.getByRole("link", { name: "Started 2" })).toHaveAttribute("href", "?tab=issues&issues=started");
+  expect(screen.getByRole("link", { name: "Started 2" })).toHaveAttribute("href", "?issues=started");
   expect(screen.getByText(/Nothing to do/)).toBeInTheDocument();
 });
 

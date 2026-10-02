@@ -28,6 +28,9 @@
         "y": 0,
         "contextSelector": {
           "includeFeedback": true
+        },
+        "config": {
+          "maxTurns": "auto"
         }
       }
     },

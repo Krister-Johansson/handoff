@@ -1,4 +1,6 @@
-import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, notifications, projects, questions, runs, sql, type Db } from "@handoff/db";
+import type { ProjectsPort } from "@handoff/github";
+import { projectsAccessProblem } from "./plan.ts";
 
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const ACTIVE = ["queued", "running", "waiting"] as const;
@@ -15,9 +17,47 @@ export async function updateProject(db: Db, projectId: string, input: { name: st
   await db.update(projects).set({ name, defaultBranch, ...(input.setupCommand !== undefined ? { setupCommand } : {}), updatedAt: new Date() }).where(eq(projects.id, projectId));
 }
 
+/** The GitHub Project that holds a project's plan; title and url are missing when GitHub cannot be read. */
+export type PlanLink = { number: number; title?: string; url?: string };
+
+/**
+ * Every project as Settings, Projects lists it, by name: repository, default branch, setup command,
+ * run count and the plan's GitHub Project. The Project's title and url are read from GitHub; without
+ * access, or when GitHub does not answer, the link keeps only its number.
+ */
+export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined) {
+  const rows = await db
+    .select({
+      id: projects.id,
+      name: projects.name,
+      repoOwner: projects.repoOwner,
+      repoName: projects.repoName,
+      defaultBranch: projects.defaultBranch,
+      setupCommand: projects.setupCommand,
+      isDemo: projects.isDemo,
+      planProjectNumber: projects.planProjectNumber,
+      runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,
+    })
+    .from(projects)
+    .orderBy(projects.name);
+  const readable = rows.some((r) => r.planProjectNumber !== null) && plan && !(await projectsAccessProblem(plan)) ? plan : undefined;
+  const linkOf = async (owner: string, number: number | null): Promise<PlanLink | null> => {
+    if (number === null) return null;
+    const found = await readable?.getProject(owner, number).catch(() => undefined);
+    return found ? { number, title: found.title, url: found.url } : { number };
+  };
+  return Promise.all(rows.map(async ({ planProjectNumber, ...row }) => ({ ...row, plan: await linkOf(row.repoOwner, planProjectNumber) })));
+}
+
+/** Forgets the GitHub Project that holds a project's plan. The Project, its items and the labels stay on GitHub. */
+export async function unlinkPlan(db: Db, projectId: string) {
+  const [row] = await db.update(projects).set({ planProjectNumber: null, updatedAt: new Date() }).where(eq(projects.id, projectId)).returning({ id: projects.id });
+  if (!row) throw new Error("The project no longer exists.");
+}
+
 /**
  * Deletes a project and everything recorded for it: graphs, versions, runs, node executions,
- * questions, edge traversals and events. Refused while any of its runs is active. The worker's
+ * questions, edge traversals, events and notifications. Refused while any of its runs is active. The worker's
  * clone and worktrees on disk are left to `handoff gc`.
  */
 export async function deleteProject(db: Db, projectId: string) {
@@ -26,7 +66,9 @@ export async function deleteProject(db: Db, projectId: string) {
     const active = projectRuns.filter((r) => (ACTIVE as readonly string[]).includes(r.status)).length;
     if (active > 0) throw new Error(`The project has ${active} active run${active === 1 ? "" : "s"}. Cancel ${active === 1 ? "it" : "them"} first.`);
     const runIds = projectRuns.map((r) => r.id);
+    await tx.delete(notifications).where(eq(notifications.projectId, projectId));
     if (runIds.length > 0) {
+      await tx.delete(notifications).where(inArray(notifications.runId, runIds));
       await tx.delete(events).where(inArray(events.runId, runIds));
       await tx.delete(questions).where(inArray(questions.runId, runIds));
       await tx.delete(edgeTraversals).where(inArray(edgeTraversals.runId, runIds));

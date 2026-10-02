@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import type { CliRunOptions, CliRunRequest, CliRunResult } from "@handoff/cli-adapter";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { eq, permissionRequests, projects } from "@handoff/db";
+import { eq, notifications, permissionRequests, projects } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { decidePermission } from "../operations.ts";
@@ -74,13 +74,10 @@ test("a tool call the rules do not cover waits for a person, who is told, and th
   const { events, executions } = await inspect(db, run.id);
   expect(executions.find((e) => e.nodeKey === "planner")!.status).toBe("passed");
   const [project] = await db.select().from(projects).where(eq(projects.id, run.projectId));
-  expect(events.find((e) => e.type === "notify")?.payload).toEqual({
-    kind: "permission",
-    nodeKey: "planner",
-    requestId: ID,
-    title: `${project!.name}: planner asks to run a command`,
-    body: "git -C /w log --oneline -8",
-  });
+  expect(events.map((e) => e.type)).not.toContain("notify");
+  expect(await db.select().from(notifications).where(eq(notifications.runId, run.id))).toMatchObject([
+    { tone: "attention", title: `${project!.name}: planner asks to run a command`, body: "git -C /w log --oneline -8", href: `/projects/${project!.id}/runs/${run.id}`, projectId: project!.id },
+  ]);
 });
 
 test("a denial goes back with the person's message, and an answered request cannot be answered again", async () => {

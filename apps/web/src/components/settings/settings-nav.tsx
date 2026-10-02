@@ -1,25 +1,26 @@
 import Link from "next/link";
-import { BellIcon, CpuIcon, MessageSquareIcon, AudioLinesIcon, SunMoonIcon, TerminalIcon, type LucideIcon } from "lucide-react";
-import type { SettingsTab } from "@/lib/settings-tab";
+import { BellIcon, CpuIcon, FolderGit2Icon, MessageSquareIcon, AudioLinesIcon, SunMoonIcon, TerminalIcon, type LucideIcon } from "lucide-react";
+import { SETTINGS_TAB_LABEL, type SettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
 
-const GROUPS: { label: string; items: { tab: SettingsTab; label: string; icon: LucideIcon }[] }[] = [
+const GROUPS: { label: string; items: { tab: SettingsTab; icon: LucideIcon }[] }[] = [
+  { label: "Projects", items: [{ tab: "projects", icon: FolderGit2Icon }] },
   {
     label: "Preferences",
     items: [
-      { tab: "appearance", label: "Appearance", icon: SunMoonIcon },
-      { tab: "notifications", label: "Notifications", icon: BellIcon },
-      { tab: "voice", label: "Voice", icon: AudioLinesIcon },
+      { tab: "appearance", icon: SunMoonIcon },
+      { tab: "notifications", icon: BellIcon },
+      { tab: "voice", icon: AudioLinesIcon },
     ],
   },
   {
     label: "Integrations",
     items: [
-      { tab: "agents", label: "Claude Code", icon: TerminalIcon },
-      { tab: "assistant", label: "Assistant", icon: MessageSquareIcon },
+      { tab: "agents", icon: TerminalIcon },
+      { tab: "assistant", icon: MessageSquareIcon },
     ],
   },
-  { label: "Worker", items: [{ tab: "worker", label: "Worker", icon: CpuIcon }] },
+  { label: "Worker", items: [{ tab: "worker", icon: CpuIcon }] },
 ];
 
 /** The settings sections as a side navigation. Each link sets ?tab=, so a refresh or a shared link opens the same section. */
@@ -29,7 +30,7 @@ export function SettingsNav({ active }: { active: SettingsTab }) {
       {GROUPS.map((group, i) => (
         <div key={group.label} className="flex shrink-0 gap-0.5 md:flex-col">
           <span className={cn("hidden px-2.5 pb-1 text-[11px] font-medium tracking-[0.05em] text-muted-foreground/70 uppercase md:block", i > 0 && "pt-3")}>{group.label}</span>
-          {group.items.map(({ tab, label, icon: Icon }) => (
+          {group.items.map(({ tab, icon: Icon }) => (
             <Link
               key={tab}
               href={`/settings?tab=${tab}`}
@@ -40,7 +41,7 @@ export function SettingsNav({ active }: { active: SettingsTab }) {
               )}
             >
               <Icon aria-hidden className="size-[15px]" />
-              {label}
+              {SETTINGS_TAB_LABEL[tab]}
             </Link>
           ))}
         </div>

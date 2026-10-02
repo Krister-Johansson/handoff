@@ -43,8 +43,11 @@ export const nodeExecutions = pgTable(
     usage: jsonb("usage").$type<unknown>(),
     repairedFromExecutionId: uuid("repaired_from_execution_id").references((): AnyPgColumn => nodeExecutions.id),
     repairNote: text("repair_note"),
-    /** Why this execution exists: the edge that created it, or a repair, or a loop exhaustion. */
-    trigger: jsonb("trigger").$type<{ kind: "start" | "edge" | "exhausted" | "repair"; edgeKey?: string; from?: string; fromExecutionId?: string }>(),
+    /**
+     * Why this execution exists: the edge that created it, or a repair, or a loop exhaustion. A repair the
+     * engine started itself has a reason: files outside the plan sent back, or a continuation after running out of turns.
+     */
+    trigger: jsonb("trigger").$type<{ kind: "start" | "edge" | "exhausted" | "repair"; edgeKey?: string; from?: string; fromExecutionId?: string; reason?: "paths" | "continue" }>(),
     claimedAt: tstz("claimed_at"),
     startedAt: tstz("started_at"),
     finishedAt: tstz("finished_at"),

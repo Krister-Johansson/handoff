@@ -106,7 +106,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
           required: true,
           status: "todo",
           detail: "The project has no graph.",
-          fix: "Create one on the project's Settings tab in the dashboard, or import one with `pnpm handoff graph import --project <name> --name <graph> <file.json>`.",
+          fix: "Create one on the project's Graphs page in the dashboard, or import one with `pnpm handoff graph import --project <name> --name <graph> <file.json>`.",
         }),
     workers.length
       ? check({ id: "worker", title: "A worker is running", required: true, status: "ok", detail: `${workers.length} worker${workers.length === 1 ? "" : "s"} online.` })
@@ -119,7 +119,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
           required: false,
           status: "todo",
           detail: "Runs start in a fresh worktree with no dependencies installed.",
-          fix: "Set the project's setup command on its Settings tab, such as `pnpm install`, so tests, Demo and Try it have dependencies.",
+          fix: "Set the project's setup command in Settings, Projects, such as `pnpm install`, so tests, Demo and Try it have dependencies.",
         }),
     claudeMd !== undefined
       ? check({ id: "claude_md", title: "CLAUDE.md for the agents", required: false, status: "ok", detail: "The agents read the repository's CLAUDE.md." })

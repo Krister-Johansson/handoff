@@ -13,7 +13,7 @@ export function PullFilters({ active, counts }: { active: PullFilter; counts: Pu
   return (
     <FilterLinks
       label="Pull request state"
-      links={PULL_FILTERS.map((f) => ({ href: `?tab=pulls&pr=${f.value}`, label: f.label, count: counts[f.value], current: f.value === active }))}
+      links={PULL_FILTERS.map((f) => ({ href: `?pr=${f.value}`, label: f.label, count: counts[f.value], current: f.value === active }))}
     />
   );
 }

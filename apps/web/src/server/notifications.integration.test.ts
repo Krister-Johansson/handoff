@@ -1,8 +1,7 @@
-import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, nodeExecutions, permissionRequests, projects, questions, runs, sql } from "@handoff/db";
-import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
-import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
+import { createNotification, eq, projects, sql, type NewNotification } from "@handoff/db";
+import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { createProject } from "./graphs";
 import type { NotificationFilter } from "../lib/notifications";
 import { listNotifications, markNotificationsRead } from "./notifications";
 
@@ -12,88 +11,56 @@ afterAll(() => db.$client.end());
 
 async function setUp() {
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
-  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
-  const start = (task: string) => startRunFromGraph(db, { projectId: project.id, graphName: "g", task });
-  const event = (runId: string, type: string, payload: Record<string, unknown> = {}) => db.transaction((tx) => appendEvents(tx, runId, [{ type, payload }]));
-  // A node's notification, as the engine emits it, with the text the node wrote. A run whose node failed it is failed, as the engine leaves it.
-  const notify = (runId: string, kind: string, payload: Record<string, unknown> = {}, nodeExecutionId?: string) =>
-    db.transaction(async (tx) => {
-      await appendEvents(tx, runId, [{ type: "notify", payload: { kind, title: `${kind} title`, body: `${kind} body`, ...payload }, nodeExecutionId: nodeExecutionId ?? null }]);
-      if (kind === "failed") await tx.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
-    });
-  // A gate's question and the notification it sends.
-  const ask = async (values: typeof questions.$inferInsert) => {
-    const [question] = await db.insert(questions).values(values).returning();
-    const [gate] = await db.select({ nodeKey: nodeExecutions.nodeKey }).from(nodeExecutions).where(eq(nodeExecutions.id, values.nodeExecutionId));
-    await notify(values.runId, "input", { nodeKey: gate!.nodeKey, questionId: question!.id }, values.nodeExecutionId);
-    return [question!] as const;
-  };
+  const run = `/projects/${project.id}/runs/r1`;
+  // A notification as a sender writes it: its own title, body and link.
+  const tell = (tone: NewNotification["tone"], title: string, extra: Partial<NewNotification> = {}) => createNotification(db, { tone, title, body: `${title}, in short`, href: run, projectId: project.id, ...extra });
   // Spread the rows out in time, oldest first, so the order does not depend on one transaction's clock.
-  const age = (minutes: number) => db.execute(sql`update events set created_at = now() - make_interval(mins => ${minutes}) where created_at > now() - interval '1 second'`);
-  return { project, start, event, notify, ask, age };
+  const age = (minutes: number) => db.execute(sql`update notifications set created_at = now() - make_interval(mins => ${minutes}) where created_at > now() - interval '1 second'`);
+  return { project, run, tell, age };
 }
 
-test("the feed lists what nodes said, newest first, with the title and body each node wrote", async () => {
-  const { project, start, event, notify, ask, age } = await setUp();
-  const done = await start("Add a CHANGELOG.md");
-  await notify(done.id, "started");
-  await age(50);
-  await notify(done.id, "finished", { title: "sandbox: run finished", body: "Add a CHANGELOG.md" });
-  await age(40);
-  const broken = await start("Add usage docs");
-  await notify(broken.id, "failed", { nodeKey: "coder", reason: "node_failed" });
+test("the feed lists notifications newest first, each with the tone, title, body and link its sender wrote", async () => {
+  const { run, tell, age } = await setUp();
+  await tell("neutral", "sandbox: run started");
   await age(30);
-  const stuck = await start("Review until done");
-  await notify(stuck.id, "failed", { nodeKey: "code_review", reason: "loop_exhausted" });
+  await tell("danger", "sandbox: run failed at coder");
   await age(20);
-  const asking = await start("Build a todo app");
-  const gate = await seedExecution(db, asking.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  const [review] = await ask({ runId: asking.id, nodeExecutionId: gate.id, question: "Review the plan from planner", context: { reason: "approval", review: { from: "planner", kind: "plan", markdown: "Plan" } } });
-  const gate2 = await seedExecution(db, asking.id, { nodeKey: "ask", nodeType: "human_gate", executorKind: "human", status: "waiting", attempt: 2 });
-  await ask({ runId: asking.id, nodeExecutionId: gate2.id, question: "Which license?" });
-  // Other events are not news, and neither are the run's own events: the nodes say what is.
-  await event(asking.id, "node.claimed");
-  await event(asking.id, "run.started");
+  await tell("attention", "sandbox: gate asks a question", { body: "Which license?", href: `${run}/review/q1` });
+  await age(10);
+  await tell("success", "sandbox: run finished");
 
   const { items, unread } = await listNotifications(db, { limit: 8 });
-  const run = (id: string) => `/projects/${project.id}/runs/${id}`;
-  expect(items.map(({ kind, title, body, href }) => ({ kind, title, body, href }))).toEqual([
-    { kind: "input", title: "input title", body: "input body", href: run(asking.id) },
-    { kind: "input", title: "input title", body: "input body", href: `${run(asking.id)}/review/${review!.id}` },
-    { kind: "failed", title: "failed title", body: "failed body", href: run(stuck.id) },
-    { kind: "failed", title: "failed title", body: "failed body", href: run(broken.id) },
-    { kind: "finished", title: "sandbox: run finished", body: "Add a CHANGELOG.md", href: run(done.id) },
-    { kind: "started", title: "started title", body: "started body", href: run(done.id) },
+  expect(items.map(({ tone, title, body, href }) => ({ tone, title, body, href }))).toEqual([
+    { tone: "success", title: "sandbox: run finished", body: "sandbox: run finished, in short", href: run },
+    { tone: "attention", title: "sandbox: gate asks a question", body: "Which license?", href: `${run}/review/q1` },
+    { tone: "danger", title: "sandbox: run failed at coder", body: "sandbox: run failed at coder, in short", href: run },
+    { tone: "neutral", title: "sandbox: run started", body: "sandbox: run started, in short", href: run },
   ]);
-  expect(items[0]!.id).toMatch(/^event:\d+$/);
+  expect(items[0]!.id).toMatch(/^[0-9a-f-]{36}$/);
   expect(items.every((i) => i.unread)).toBe(true);
-  expect(unread).toBe(6);
-  expect((await listNotifications(db, { limit: 2 })).items.map((i) => i.kind)).toEqual(["input", "input"]);
+  expect(unread).toBe(4);
+  expect((await listNotifications(db, { limit: 2 })).items.map((i) => i.tone)).toEqual(["success", "attention"]);
 });
 
-test("the feed shows a notification's text as the node wrote it, however long", async () => {
-  const { start, notify } = await setUp();
-  const run = await start("Pick a license");
-  const body = "The repository has no license file and the README names two. ".repeat(4);
-  await notify(run.id, "failed", { title: "A title the feed would not have written", body });
-  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ title: "A title the feed would not have written", body });
+test("a notification without a link, a project or a run is listed as it is", async () => {
+  await createNotification(db, { tone: "neutral", title: "The worker restarted", body: "" });
+  expect((await listNotifications(db, { limit: 8 })).items).toMatchObject([{ tone: "neutral", title: "The worker restarted", body: "", href: null, unread: true }]);
 });
 
 test("opening the feed marks what it showed as read, and later items are unread again", async () => {
-  const { start, notify, age } = await setUp();
-  const first = await start("Add a CHANGELOG.md");
-  await notify(first.id, "started");
+  const { tell, age } = await setUp();
+  await tell("neutral", "sandbox: run started");
   await age(10);
   const { items } = await listNotifications(db, { limit: 8 });
   await markNotificationsRead(db, items[0]!.createdAt);
   expect(await listNotifications(db, { limit: 8 })).toMatchObject({ unread: 0, items: [{ unread: false }] });
 
-  await notify(first.id, "finished");
+  await tell("success", "sandbox: run finished");
   const after = await listNotifications(db, { limit: 8 });
   expect(after.unread).toBe(1);
-  expect(after.items.map((i) => [i.kind, i.unread])).toEqual([
-    ["finished", true],
-    ["started", false],
+  expect(after.items.map((i) => [i.tone, i.unread])).toEqual([
+    ["success", true],
+    ["neutral", false],
   ]);
   // Marking read never moves the watermark back.
   await markNotificationsRead(db, after.items[0]!.createdAt);
@@ -101,149 +68,43 @@ test("opening the feed marks what it showed as read, and later items are unread 
   expect((await listNotifications(db, { limit: 8 })).unread).toBe(0);
 });
 
-test("the demo project's runs stay out of the feed", async () => {
-  const { project, start, notify } = await setUp();
-  const run = await start("Add a CHANGELOG.md");
-  await notify(run.id, "started");
+test("the demo project's notifications stay out of the feed", async () => {
+  const { project, tell } = await setUp();
+  await tell("neutral", "sandbox: run started");
   await db.update(projects).set({ isDemo: true }).where(eq(projects.id, project.id));
   expect(await listNotifications(db, { limit: 8 })).toEqual({ items: [], unread: 0 });
 });
 
 test("older notifications page back from a time", async () => {
-  const { start, notify, age } = await setUp();
-  const run = await start("Add a CHANGELOG.md");
-  await notify(run.id, "started");
+  const { tell, age } = await setUp();
+  await tell("neutral", "sandbox: run started");
   await age(30);
-  await notify(run.id, "failed", { nodeKey: "coder", reason: "node_failed" });
+  await tell("danger", "sandbox: run failed at coder");
   await age(20);
-  await notify(run.id, "finished");
+  await tell("success", "sandbox: run finished");
   const [newest] = (await listNotifications(db, { limit: 1 })).items;
   const older = await listNotifications(db, { limit: 8, before: newest!.createdAt });
-  expect(older.items.map((i) => i.kind)).toEqual(["failed", "started"]);
+  expect(older.items.map((i) => i.tone)).toEqual(["danger", "neutral"]);
 });
 
-test("the feed narrows to unread items, or to one kind", async () => {
-  const { start, notify, ask, age } = await setUp();
-  const run = await start("Add a CHANGELOG.md");
-  await notify(run.id, "started");
+test("the feed narrows to unread items, or to one tone", async () => {
+  const { tell, age } = await setUp();
+  await tell("neutral", "sandbox: run started");
   await age(30);
-  await notify(run.id, "failed", { nodeKey: "coder", reason: "node_failed" });
+  await tell("danger", "sandbox: run failed at coder");
   await age(20);
-  const asking = await start("Build a todo app");
-  const gate = await seedExecution(db, asking.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  await ask({ runId: asking.id, nodeExecutionId: gate.id, question: "Which license?" });
-  await db.execute(sql`update events set created_at = now() - interval '10 minutes' where payload->>'kind' = 'input'`);
+  await tell("attention", "sandbox: gate asks a question");
+  await age(10);
   const all = await listNotifications(db, { limit: 8 });
   await markNotificationsRead(db, all.items[0]!.createdAt);
-  await notify(run.id, "finished");
+  await tell("success", "sandbox: run finished");
 
-  const kinds = async (filter?: NotificationFilter) => (await listNotifications(db, { limit: 8, ...(filter ? { filter } : {}) })).items.map((i) => i.kind);
-  expect(await kinds()).toEqual(["finished", "input", "failed", "started"]);
-  expect(await kinds("unread")).toEqual(["finished"]);
-  expect(await kinds("input")).toEqual(["input"]);
-  expect(await kinds("failed")).toEqual(["failed"]);
-  expect(await kinds("finished")).toEqual(["finished"]);
+  const tones = async (filter?: NotificationFilter) => (await listNotifications(db, { limit: 8, ...(filter ? { filter } : {}) })).items.map((i) => i.tone);
+  expect(await tones()).toEqual(["success", "attention", "danger", "neutral"]);
+  expect(await tones("unread")).toEqual(["success"]);
+  expect(await tones("attention")).toEqual(["attention"]);
+  expect(await tones("danger")).toEqual(["danger"]);
+  expect(await tones("success")).toEqual(["success"]);
   // The unread count is for the whole feed, whatever it is narrowed to.
-  expect((await listNotifications(db, { limit: 8, filter: "failed" })).unread).toBe(1);
-});
-
-test("a pull request first in line and waiting for a person is a notification that needs you", async () => {
-  const { project, start, notify, age } = await setUp();
-  const run = await start("Add a CHANGELOG.md");
-  await notify(run.id, "started");
-  await age(5);
-  await notify(run.id, "ready", { number: 54 });
-  const { items } = await listNotifications(db, { limit: 8 });
-  expect(items[0]).toMatchObject({ kind: "ready", title: "ready title", body: "ready body", href: `/projects/${project.id}/runs/${run.id}` });
-  expect((await listNotifications(db, { limit: 8, filter: "input" })).items.map((i) => i.kind)).toEqual(["ready"]);
-});
-
-test("a notification whose action is done says so, stops counting as unread and leaves Needs you", async () => {
-  const { start, notify, ask, age } = await setUp();
-  const asking = await start("Build a todo app");
-  const gate = await seedExecution(db, asking.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  const [review] = await ask({ runId: asking.id, nodeExecutionId: gate.id, question: "Review the plan from planner", context: { reason: "approval", review: { from: "planner", kind: "plan", markdown: "Plan" } } });
-  const merging = await start("Add a CHANGELOG.md");
-  const merge = await seedExecution(db, merging.id, { nodeKey: "merge-1", nodeType: "merge", executorKind: "github", status: "waiting" });
-  await notify(merging.id, "ready", { number: 54 }, merge.id);
-  await age(10);
-  const broken = await start("Add usage docs");
-  await notify(broken.id, "failed", { nodeKey: "coder", reason: "node_failed" });
-
-  const before = await listNotifications(db, { limit: 8 });
-  expect(before.items.map((i) => [i.kind, i.done])).toEqual([
-    ["failed", false],
-    ["ready", false],
-    ["input", false],
-  ]);
-  expect(before.unread).toBe(3);
-
-  // The person answers the review, asks for the merge, and repairs the failed run.
-  await db.update(questions).set({ answer: "approve", answeredAt: new Date() }).where(eq(questions.id, review!.id));
-  await db.update(runs).set({ mergeQueuedAt: new Date(), mergeRequestedAt: new Date() }).where(eq(runs.id, merging.id));
-  await db.update(runs).set({ status: "running" }).where(eq(runs.id, broken.id));
-
-  const after = await listNotifications(db, { limit: 8 });
-  expect(after.items.map((i) => [i.kind, i.done, i.unread])).toEqual([
-    ["failed", true, false],
-    ["ready", true, false],
-    ["input", true, false],
-  ]);
-  expect(after.unread).toBe(0);
-  expect((await listNotifications(db, { limit: 8, filter: "input" })).items).toEqual([]);
-  expect((await listNotifications(db, { limit: 8, filter: "unread" })).items).toEqual([]);
-});
-
-test("a ready pull request is done once its merge step stops waiting, and a question once its run ends", async () => {
-  const { start, notify, ask } = await setUp();
-  const merging = await start("Add a CHANGELOG.md");
-  const merge = await seedExecution(db, merging.id, { nodeKey: "merge-1", nodeType: "merge", executorKind: "github", status: "waiting" });
-  await notify(merging.id, "ready", { number: 54 }, merge.id);
-  const asking = await start("Build a todo app");
-  const gate = await seedExecution(db, asking.id, { nodeKey: "ask", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  await ask({ runId: asking.id, nodeExecutionId: gate.id, question: "Which license?" });
-  expect((await listNotifications(db, { limit: 8 })).items.every((i) => !i.done)).toBe(true);
-
-  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, merge.id));
-  await db.update(runs).set({ status: "cancelled" }).where(eq(runs.id, asking.id));
-  expect((await listNotifications(db, { limit: 8 })).items.map((i) => [i.kind, i.done])).toEqual([
-    ["input", true],
-    ["ready", true],
-  ]);
-});
-
-test("a merge node that says its pull request merged is news that asks nothing", async () => {
-  const { project, start, notify } = await setUp();
-  const run = await start("Add a CHANGELOG.md");
-  await notify(run.id, "merged", { nodeKey: "merge", number: 54 });
-  const { items, unread } = await listNotifications(db, { limit: 8 });
-  expect(items).toMatchObject([{ kind: "merged", title: "merged title", body: "merged body", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true }]);
-  expect(unread).toBe(1);
-  expect((await listNotifications(db, { limit: 8, filter: "finished" })).items.map((i) => i.kind)).toEqual(["merged"]);
-});
-
-test("a step asking permission for a tool call needs you until someone answers", async () => {
-  const { project, start, notify } = await setUp();
-  const run = await start("Add tasks");
-  const coder = await seedExecution(db, run.id, { nodeKey: "coder-1", status: "running" });
-  const id = crypto.randomUUID();
-  await db.insert(permissionRequests).values({ id, runId: run.id, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "git -C /w log --oneline -8" } });
-  await notify(run.id, "permission", { nodeKey: "coder-1", requestId: id }, coder.id);
-  const { items, unread } = await listNotifications(db, { limit: 8 });
-  expect(items).toMatchObject([
-    { kind: "permission", title: "permission title", body: "permission body", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true },
-  ]);
-  expect(unread).toBe(1);
-  expect((await listNotifications(db, { limit: 8, filter: "input" })).items.map((i) => i.kind)).toEqual(["permission"]);
-
-  await db.update(permissionRequests).set({ status: "allowed" }).where(eq(permissionRequests.id, id));
-  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ done: true, unread: false });
-});
-
-test("a Try it gate's notification opens its own page", async () => {
-  const { project, start, ask } = await setUp();
-  const run = await start("Add projects");
-  const gate = await seedExecution(db, run.id, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  const [question] = await ask({ runId: run.id, nodeExecutionId: gate.id, question: "Try the app and check each acceptance criterion.", context: { reason: "try" } });
-  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ title: "input title", href: `/projects/${project.id}/runs/${run.id}/try/${question.id}` });
+  expect((await listNotifications(db, { limit: 8, filter: "danger" })).unread).toBe(1);
 });

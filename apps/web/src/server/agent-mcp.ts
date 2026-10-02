@@ -175,7 +175,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     start_run: async ({ project, issues, task, graph }: { project: string; issues?: number[]; task?: string; graph?: string }) => {
       const detail = await getProjectDetail(db, (await findProject(db, project)).id);
       const graphName = graph ?? detail?.defaultGraph;
-      if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Settings tab.`);
+      if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Graphs page.`);
       if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
       const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github, plan);
       return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };
@@ -254,7 +254,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     list_notifications: async ({ filter, limit }: { filter?: NotificationFilter; limit?: number }) => {
       const { items, unread } = await listNotifications(db, { limit: limit ?? 20, ...(filter ? { filter } : {}) });
-      return { unread, items: items.map((n) => ({ kind: n.kind, title: n.title, body: n.body, at: n.createdAt.toISOString(), unread: n.unread, done: n.done, url: url(n.href) })) };
+      return { unread, items: items.map((n) => ({ tone: n.tone, title: n.title, body: n.body, at: n.createdAt.toISOString(), unread: n.unread, url: n.href ? url(n.href) : null })) };
     },
 
     resolve_loop: async ({ run_id, action }: { run_id: string; action: "retry" | "continue" | "stop" }) => {
@@ -277,7 +277,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { decision: row.status, url: await urlOf(row.runId) };
     },
 
-    repair_run: async ({ run_id, node, note }: { run_id: string; node?: string; note?: string }) => {
+    repair_run: async ({ run_id, node, note, allow_paths }: { run_id: string; node?: string; note?: string; allow_paths?: string[] }) => {
       const [failed] = await db
         .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey })
         .from(nodeExecutions)
@@ -285,7 +285,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
         .limit(1);
       if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
-      const retry = await repairNodeExecution(db, failed.id, note ? { note } : {});
+      const retry = await repairNodeExecution(db, failed.id, { ...(note ? { note } : {}), ...(allow_paths?.length ? { allowPaths: allow_paths } : {}) });
       return { node: retry.nodeKey, attempt: retry.attempt, url: await urlOf(run_id) };
     },
 

@@ -1,7 +1,11 @@
+import type { PlanStatus } from "@handoff/github";
+import { planPath } from "../paths";
+import type { RunFilter } from "../plan/filters";
+import type { PlanViewName } from "../project-tab";
 import { toolSpec } from "./catalog";
 
 /** The catalog's tools that run in the person's browser instead of on the server. */
-export const UI_TOOL_NAMES = ["go_to", "go_to_inbox", "go_to_notifications", "set_project_tab", "go_to_run", "go_to_review", "go_to_try_it", "where_am_i"] as const;
+export const UI_TOOL_NAMES = ["go_to", "go_to_inbox", "go_to_notifications", "set_project_tab", "go_to_plan", "go_to_run", "go_to_review", "go_to_try_it", "where_am_i"] as const;
 
 /** What a UI tool does in the page: open a dashboard address, or describe the open page. */
 export type UiPlan = { kind: "navigate"; href: string } | { kind: "where" };
@@ -15,6 +19,7 @@ const PAGES = [
   "/",
   "/projects",
   `/projects/${S}`,
+  `/projects/${S}/(runs|plan|issues|pulls|graphs|settings)`,
   `/projects/${S}/graphs/${S}`,
   `/projects/${S}/runs/${S}`,
   `/projects/${S}/runs/${S}/(review|try)/${S}`,
@@ -72,14 +77,19 @@ export function planUiTool(name: string, args: unknown, origin: string): UiPlan 
     case "go_to_notifications":
       return navigate(a.filter ? `/notifications?${new URLSearchParams({ show: a.filter })}` : "/notifications");
     case "set_project_tab": {
-      const query = new URLSearchParams({ tab: a.tab! });
+      const query = new URLSearchParams();
       if (a.filter) {
         const filters = TAB_FILTERS[a.tab!];
         if (!filters) throw new UiToolError(`The ${a.tab} tab has no filter.`);
         if (!filters.values.includes(a.filter)) throw new UiToolError(`The ${a.tab} tab filters by ${filters.values.slice(0, -1).join(", ")} or ${filters.values.at(-1)}.`);
         query.set(filters.param, a.filter);
       }
-      return navigate(`/projects/${id(a.project_id!, "project")}?${query}`);
+      const search = query.toString();
+      return navigate(`/projects/${id(a.project_id!, "project")}/${a.tab}${search ? `?${search}` : ""}`);
+    }
+    case "go_to_plan": {
+      const p = parsed.data as { project_id: string; view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter };
+      return navigate(planPath(id(p.project_id, "project"), p));
     }
     case "go_to_run":
       return navigate(`/runs/${id(a.run_id!, "run")}`);

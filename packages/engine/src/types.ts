@@ -1,4 +1,5 @@
-import type { CompiledGraph, CompiledNode, ContextPacket, NodeType, RunState } from "@handoff/core";
+import type { Told } from "./notify.ts";
+import type { CompiledGraph, CompiledNode, ContextPacket, NodeMemory, NodeType, NotifyKind, RunState } from "@handoff/core";
 import type { NodeExecutionRow, projects, runs } from "@handoff/db";
 import type { MaterializedLibrary } from "./library/materialize.ts";
 
@@ -29,6 +30,8 @@ export type ExecutorContext = {
   library?: MaterializedLibrary;
   signal: AbortSignal;
   emit(type: string, payload: unknown): void;
+  /** Tells a person about `kind`, when this node's settings have it on. The executor writes the text and the link. */
+  notify(kind: NotifyKind, told: Told): Promise<void>;
   setSessionId(id: string): Promise<void>;
   /** Stores the GitHub repository id on the project so later lookups are free. */
   recordRepoId(repoId: number): Promise<void>;
@@ -43,9 +46,16 @@ export type ExecutorContext = {
 export type ExecutionError = { code: string; message: string; detail?: unknown };
 
 export type ExecutorOutcome =
-  | { kind: "completed"; output: unknown; statePatch?: Record<string, unknown>; cost?: { usd?: number | undefined; usage?: unknown } }
+  | {
+      kind: "completed";
+      output: unknown;
+      statePatch?: Record<string, unknown>;
+      /** Additions to nodes' memory by node key, appended to the run's current state when the step completes. */
+      memory?: Record<string, Partial<NodeMemory>>;
+      cost?: { usd?: number | undefined; usage?: unknown };
+    }
   | { kind: "waiting"; wait: { kind: "github_pr" | "human" | "timer" | "merge_queue"; key?: string; token?: string; deadlineAt?: Date } }
-  | { kind: "failed"; error: ExecutionError; retryable?: boolean; retryAfterMs?: number }
+  | { kind: "failed"; error: ExecutionError; retryable?: boolean; retryAfterMs?: number; cost?: { usd?: number | undefined; usage?: unknown } }
   | { kind: "interrupted" };
 
 export interface NodeExecutor {

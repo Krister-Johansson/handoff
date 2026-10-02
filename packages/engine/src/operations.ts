@@ -1,14 +1,17 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
-import type { RunState } from "@handoff/core";
+import { remember, RunStateSchema, type RunState } from "@handoff/core";
 import type { ProjectsPort } from "@handoff/github";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { recordPlanStatus } from "./plan-status.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
 import { createExecution } from "./scheduler/complete.ts";
 
-/** Re-runs a failed node execution as a new attempt, keeping every upstream result in run state. */
-export async function repairNodeExecution(db: Db, executionId: string, opts: { note?: string }) {
+/**
+ * Re-runs a failed node execution as a new attempt, keeping every upstream result in run state.
+ * `allowPaths` are files outside the plan a person allows for the node's later attempts in this run.
+ */
+export async function repairNodeExecution(db: Db, executionId: string, opts: { note?: string; allowPaths?: string[] }) {
   return db.transaction(async (tx) => {
     const [failed] = await tx.select().from(nodeExecutions).where(eq(nodeExecutions.id, executionId)).for("update");
     if (!failed) throw new Error(`execution ${executionId} not found`);
@@ -32,9 +35,15 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
         trigger: { kind: "repair", fromExecutionId: failed.id },
       })
       .returning();
-    await tx.update(runs).set({ status: "running", finishedAt: null }).where(eq(runs.id, failed.runId));
+    const allowPaths = [...new Set((opts.allowPaths ?? []).map((p) => p.trim()).filter(Boolean))];
+    // Written to the state read under the run's lock, so nothing another step wrote meanwhile is lost.
+    const reason = `Allowed when the step was repaired${opts.note ? `: ${opts.note}` : "."}`;
+    const state = allowPaths.length
+      ? { state: remember(RunStateSchema.parse(run!.state), failed.nodeKey, { extraPaths: allowPaths.map((path) => ({ path, reason, attempt: attempt + 1, by: "person" as const })) }), stateVersion: sql`${runs.stateVersion} + 1` }
+      : {};
+    await tx.update(runs).set({ status: "running", finishedAt: null, ...state }).where(eq(runs.id, failed.runId));
     await appendEvents(tx, failed.runId, [
-      { type: "node.repair_requested", payload: { nodeKey: failed.nodeKey, note: opts.note ?? null }, nodeExecutionId: failed.id },
+      { type: "node.repair_requested", payload: { nodeKey: failed.nodeKey, note: opts.note ?? null, ...(allowPaths.length ? { allowPaths } : {}) }, nodeExecutionId: failed.id },
       { type: "node.created", payload: { nodeKey: failed.nodeKey, attempt: attempt + 1, via: "repair" }, nodeExecutionId: created!.id },
     ]);
     return created!;

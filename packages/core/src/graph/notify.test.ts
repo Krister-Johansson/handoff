@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { compileGraph } from "./compile.ts";
-import { notifies, notifyKindsOf } from "./notify.ts";
+import { notifies, notifyKindsOf, NotifyKindSchema, toneOf } from "./notify.ts";
 
 test("each node type offers what it can notify about", () => {
   expect(notifyKindsOf("start")).toEqual(["started"]);
@@ -46,4 +46,16 @@ test("compiling keeps a node's notification settings", () => {
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   expect(result.graph.node("start").notify).toEqual({ started: true });
   expect(result.graph.node("finish").notify).toBeUndefined();
+});
+
+test("each kind a node can notify about has the tone its notification is shown with", () => {
+  expect(NotifyKindSchema.options.map((kind) => [kind, toneOf(kind)])).toEqual([
+    ["started", "neutral"],
+    ["finished", "success"],
+    ["failed", "danger"],
+    ["input", "attention"],
+    ["permission", "attention"],
+    ["ready", "attention"],
+    ["merged", "success"],
+  ]);
 });

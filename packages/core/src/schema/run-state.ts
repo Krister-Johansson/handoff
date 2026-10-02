@@ -31,7 +31,8 @@ export type LinkedIssue = z.infer<typeof LinkedIssueSchema>;
  * files outside the plan it declared, the operator's repair notes, and a person's answers to its questions.
  */
 export const NodeMemorySchema = z.object({
-  extraPaths: z.array(z.object({ path: z.string(), reason: z.string(), attempt: z.number().int() })).default([]),
+  /** `by: "person"` marks a path a person allowed when the path check asked; the others an attempt declared. */
+  extraPaths: z.array(z.object({ path: z.string(), reason: z.string(), attempt: z.number().int(), by: z.literal("person").optional() })).default([]),
   notes: z.array(z.object({ note: z.string(), attempt: z.number().int() })).default([]),
   answers: z
     .array(z.object({ question: z.string(), answer: z.string(), option: z.string().optional(), answeredBy: z.string().optional(), attempt: z.number().int().optional() }))

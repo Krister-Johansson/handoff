@@ -1,0 +1,77 @@
+import type { PlanItem, PlanProject, PlanStatus } from "@handoff/github";
+import type { BacklogIssue, BacklogRun } from "@/server/backlog";
+import type { PlanColumn, PlanEpic, PlanProgress, PlanStory, PlanTask, PlanView } from "@/server/plan";
+
+export const REPO_URL = "https://github.com/o/r";
+
+const item = (number: number, title: string, kind: PlanItem["kind"], over: Partial<PlanItem> = {}): PlanItem => ({
+  number,
+  title,
+  url: `${REPO_URL}/issues/${number}`,
+  state: "open",
+  kind,
+  status: "Shaping",
+  parent: undefined,
+  labels: kind ? [kind] : [],
+  assignees: [],
+  subIssues: { total: 0, completed: 0 },
+  blockedBy: [],
+  prNumbers: [],
+  updatedAt: "2026-10-01T08:00:00Z",
+  ...over,
+});
+
+export const task = (number: number, title: string, status: PlanStatus | undefined, over: Partial<PlanTask> = {}): PlanTask => ({
+  ...item(number, title, "task", { status }),
+  run: null,
+  ...over,
+});
+
+export const run = (id: string, status: string, prNumber: number | null = null): BacklogRun => ({ id, status, prNumber });
+
+const progress = (tasks: PlanTask[]): PlanProgress => {
+  const byStatus = { Shaping: 0, Ready: 0, Running: 0, "In review": 0, Done: 0, Other: 0 } as Record<PlanColumn, number>;
+  for (const t of tasks) byStatus[t.state === "closed" ? "Done" : (t.status ?? "Other")]++;
+  return { done: byStatus.Done, total: tasks.length, byStatus, subIssues: { total: tasks.length, completed: byStatus.Done } };
+};
+
+export const story = (number: number, title: string, parent: number, tasks: PlanTask[]): PlanStory => ({
+  ...item(number, title, "story", { parent }),
+  tasks: tasks.map((t) => ({ ...t, parent: t.parent ?? number })),
+  progress: progress(tasks),
+});
+
+export const epic = (number: number, title: string, stories: PlanStory[], tasks: PlanTask[] = []): PlanEpic => ({
+  ...item(number, title, "epic"),
+  stories,
+  tasks,
+  progress: progress([...stories.flatMap((s) => s.tasks), ...tasks]),
+});
+
+export const unplannedIssue = (number: number, title: string, over: Partial<BacklogIssue> = {}): BacklogIssue => ({
+  number,
+  title,
+  url: `${REPO_URL}/issues/${number}`,
+  labels: [],
+  author: "ann",
+  updatedAt: "2026-10-01T08:00:00Z",
+  blockedBy: [],
+  run: null,
+  plan: { kind: undefined, status: undefined, planned: false },
+  ...over,
+});
+
+export const PROJECT: PlanProject = {
+  number: 5,
+  url: "https://github.com/users/o/projects/5",
+  title: "handoff plan",
+  statusOptions: { Shaping: "s", Ready: "r", Running: "g", "In review": "i", Done: "d" },
+};
+
+/** A plan view from its epics, with the board built from every task the way loadPlan builds it. */
+export function planView(epics: PlanEpic[], extra: { unparented?: PlanTask[]; unplanned?: BacklogIssue[] } = {}): PlanView {
+  const tasks = [...epics.flatMap((e) => [...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...(extra.unparented ?? [])];
+  const board = { Shaping: [], Ready: [], Running: [], "In review": [], Done: [], Other: [] } as Record<PlanColumn, PlanTask[]>;
+  for (const t of [...tasks].sort((a, b) => a.number - b.number)) board[t.state === "closed" ? "Done" : (t.status ?? "Other")].push(t);
+  return { project: PROJECT, epics, unparented: extra.unparented ?? [], board, unplanned: extra.unplanned ?? [] };
+}
