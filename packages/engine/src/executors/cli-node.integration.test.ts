@@ -159,3 +159,10 @@ test("the planner is asked for a short plan, and the coder for a PR title and de
   expect(cli.requests[1]!.prompt).toContain("fill pr with a title and a description of the change for a reviewer");
   expect(cli.requests[1]!.prompt).toContain("Do not restate the plan.");
 });
+
+test("the planner is told ownedPaths is the whole list of files the change may touch", async () => {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: { status: "done", summary: "wrote it" } }]);
+  await startRun(db, linear);
+  await drain(engineDeps(db, registry(cli)));
+  expect(cli.requests[0]!.prompt).toContain("ownedPaths is the whole list of files and directories the change may touch");
+});

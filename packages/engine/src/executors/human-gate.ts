@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, notifies, questionBrief, type DiffFile, type Notification } from "@handoff/core";
+import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, notifies, questionBrief, remember, type DiffFile, type Notification } from "@handoff/core";
 import { previews, questions, type Db } from "@handoff/db";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
@@ -247,6 +247,17 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
       if ((question.context as { reason?: string }).reason === "approval" && decided) {
         const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
         statePatch.decisions = [...previous, { gate: ctx.node.key, ...(note ? { note } : {}), comments: question.comments }];
+      }
+      // An answer to a step's own question holds for every later attempt of that step, not only the one that resumes.
+      const { reason, from: asker } = question.context as { reason?: string; from?: string };
+      if (reason === "needs_input" && asker) {
+        const attempt = ctx.state.nodes[asker]?.attempt;
+        const answered = { question: question.question, answer: question.answer, ...(option ? { option } : {}), answeredBy: answer.answeredBy, ...(attempt !== undefined ? { attempt } : {}) };
+        statePatch.memory = remember(ctx.state, asker, { answers: [answered] }).memory;
+        // A person decided it, so every later step keeps to it too, the code reviewer included.
+        const given = option && option !== question.answer ? `${option}: ${question.answer}` : question.answer;
+        const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
+        statePatch.decisions = [...previous, { gate: ctx.node.key, note: `${asker} asked "${question.question}" The answer: ${given}`, comments: [] }];
       }
       const edgeKey = (question.context as { reason?: string; edgeKey?: string }).edgeKey;
       if ((question.context as { reason?: string }).reason === "loop_exhausted" && edgeKey && question.option !== "abort") {

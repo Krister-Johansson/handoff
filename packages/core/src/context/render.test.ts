@@ -200,3 +200,20 @@ test("the run's acceptance criteria follow the linked issues, saying where they 
   expect(md).toContain("The planner wrote these");
   expect(renderContextPacket({ ...packet, acceptance: { source: "issue", items: ["x"] } })).toContain("The linked issues list these");
 });
+
+test("Earlier in this run lists allowed paths, notes and answers", () => {
+  const md = renderContextPacket({
+    ...packet,
+    memory: {
+      extraPaths: [{ path: "pnpm-workspace.yaml", reason: "pnpm reads build approvals only from this file", attempt: 1 }],
+      notes: [{ note: "Use the date helper in src/dates.ts.", attempt: 2 }],
+      answers: [{ question: "ISO dates or US dates?", answer: "Use ISO 8601 dates.", option: "ISO", attempt: 1 }],
+    },
+  });
+  expect(md).toContain("# Earlier in this run");
+  const earlier = md.split("# Earlier in this run")[1]!;
+  expect(earlier).toContain("- `pnpm-workspace.yaml`: pnpm reads build approvals only from this file");
+  expect(earlier).toContain("- Use the date helper in src/dates.ts.");
+  expect(earlier).toContain('- "ISO dates or US dates?" ISO: Use ISO 8601 dates.');
+  expect(renderContextPacket(packet)).not.toContain("# Earlier in this run");
+});

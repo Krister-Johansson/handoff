@@ -125,7 +125,10 @@ test("the plan, review, approve, build graph compiles, and every way back is a f
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   const back = result.graph.graph.edges().map((e) => result.graph.graph.getEdgeAttributes(e)).filter((e) => e.loop);
   expect(back.map((e) => e.key).sort()).toEqual(["approval->planner", "ask->coder", "plan-review->planner", "pr->coder", "tester->coder"]);
-  expect(back.every((e) => e.input === "feedback" && e.maxAttempts === 3)).toBe(true);
+  expect(back.every((e) => e.input === "feedback")).toBe(true);
+  // A person decides every answer at the question gate, so its loop has no round limit.
+  expect(back.filter((e) => e.key !== "ask->coder").every((e) => e.maxAttempts === 3)).toBe(true);
+  expect(back.find((e) => e.key === "ask->coder")?.maxAttempts).toBeUndefined();
   expect(result.graph.order.slice(0, 5)).toEqual(["start", "planner", "plan-review", "approval", "coder"]);
   expect(result.graph.order.at(-1)).toBe("finish");
 });

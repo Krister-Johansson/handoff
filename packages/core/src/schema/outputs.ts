@@ -43,6 +43,16 @@ export const CoderOutputSchema = z
     path: ["question"],
   });
 
+/** The files outside the plan an output declared, each with its reason, as a coder's output lists them. */
+export function extraPathsOf(output: unknown): { path: string; reason: string }[] {
+  const extra = (output as { extraPaths?: unknown } | undefined)?.extraPaths;
+  if (!Array.isArray(extra)) return [];
+  return extra.flatMap((e) => {
+    const { path, reason } = (e ?? {}) as { path?: unknown; reason?: unknown };
+    return typeof path === "string" ? [{ path, reason: typeof reason === "string" ? reason : "" }] : [];
+  });
+}
+
 export const ReviewerOutputSchema = z.object({
   verdict: z.enum(["approve", "request_changes"]),
   comments: z.array(z.object({ path: z.string(), line: z.number().int().optional(), body: z.string() })),
