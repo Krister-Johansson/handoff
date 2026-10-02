@@ -111,3 +111,21 @@ test("startRun records the size of its single linked task from the items it read
   const [stored] = await db.select().from(runs).where(eq(runs.id, run.id));
   expect(stored?.size).toBe("M");
 });
+
+test("a run without a sized task, or with two tasks, records no size", async () => {
+  const { github, plan, number, project, task } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  const unsized = await task("No size");
+  const other = await task("Another Size option");
+  plan.itemsOf(repo).get(other)!.size = "🐋 X-Large";
+  const first = await task("Sized S");
+  const second = await task("Sized L");
+  plan.itemsOf(repo).get(first)!.size = "S";
+  plan.itemsOf(repo).get(second)!.size = "L";
+  const start = (issues: number[]) => startRun(db, { projectId: project.id, graphName: "g", task: "", issues, startedBy: "dashboard" }, { github, projects: plan });
+
+  expect((await start([unsized])).size).toBeNull();
+  expect((await start([other])).size).toBeNull();
+  expect((await start([first, second])).size).toBeNull();
+  expect((await startRun(db, { projectId: project.id, graphName: "g", task: "No issue at all" }, { github, projects: plan })).size).toBeNull();
+});
