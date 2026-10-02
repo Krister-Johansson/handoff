@@ -32,7 +32,7 @@ import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
-import { askAboutPaths, completeFailed, completePassed, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
+import { askAboutPaths, completeFailed, completePassed, failAndRetry, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
 export type EngineDeps = {
   db: Db;
@@ -379,6 +379,22 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
   await releaseIfFinished(deps, run.id, project);
 }
 
+const CONTINUE_NOTE =
+  "Continue: the previous attempt ran out of turns. Its work is committed on this branch; read what it did with git, then finish the task from there.";
+
+/**
+ * A coder that ran out of turns, even after its wrap-up turn, but committed work gets one new attempt
+ * that continues from the branch. An attempt that was itself such a continuation fails instead.
+ */
+async function continuesAfterMaxTurns(row: NodeExecutionRow, type: string, error: { code: string }, workdir: Workdir | undefined, baseBranch: string): Promise<boolean> {
+  if (error.code !== "cli_error_max_turns" || type !== "coder" || !workdir || row.trigger?.reason === "continue") return false;
+  const ahead = await run("git", ["rev-list", "--count", `origin/${baseBranch}..HEAD`], { cwd: workdir.path }).then(
+    (r) => Number(r.stdout.trim()),
+    () => 0,
+  );
+  return ahead > 0;
+}
+
 /** The answered paths question an execution waited on, if that is what woke it. */
 async function answeredPathsQuestion(db: Db, token: string) {
   const [question] = await db.select().from(questions).where(eq(questions.id, token));
@@ -475,6 +491,12 @@ async function applyOutcome(
       if (outcome.retryable && row.retryCount < maxRetries) {
         const delayMs = outcome.retryAfterMs ?? (deps.retryBackoffMs ?? 60_000) * 2 ** row.retryCount;
         await db.transaction((tx) => scheduleRetry(tx, { row, workerId, error: outcome.error, delayMs }));
+        return;
+      }
+      if (await continuesAfterMaxTurns(row, node.type, outcome.error, workdir, baseBranch)) {
+        const last = (outcome.error.detail as { lastMessage?: unknown } | undefined)?.lastMessage;
+        const note = [CONTINUE_NOTE, ...(typeof last === "string" && last ? [`Its last message: ${last}`] : [])].join("\n\n");
+        await db.transaction((tx) => failAndRetry(tx, { row, workerId, error: outcome.error, checks: [], note, reason: "continue", cost: outcome.cost }));
         return;
       }
       await db.transaction((tx) => completeFailed(tx, { row, workerId, graph, error: outcome.error, cost: outcome.cost }));
