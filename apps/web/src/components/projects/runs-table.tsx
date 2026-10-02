@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { IssueLinks, type IssueLink } from "@/components/runs/issue-links";
 import { StatusBadge } from "@/components/runs/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatAgo, formatCost } from "@/lib/format";
 import { runPath } from "@/lib/paths";
@@ -17,6 +18,8 @@ export type ProjectRun = {
   branchName: string;
   prNumber: number | null;
   createdAt: Date;
+  /** Who started the run; the scheduler's runs carry a tag. */
+  startedBy?: string | null;
 };
 
 // Columns that give way as the screen narrows; on a phone the task and its status remain.
@@ -50,6 +53,11 @@ export function RunsTable({ runs, lines, repoUrl, now = new Date() }: { runs: Pr
                     {run.task}
                   </Link>
                   <IssueLinks issues={run.issues} className="shrink-0" />
+                  {run.startedBy === "scheduler" && (
+                    <Badge variant="outline" className="shrink-0">
+                      Scheduler
+                    </Badge>
+                  )}
                 </div>
                 {line && <div className={cn("truncate text-xs", line.now.tone === "danger" ? "text-danger" : "text-muted-foreground")}>{line.now.text}</div>}
               </TableCell>
