@@ -107,9 +107,7 @@ function answeredChecks(acceptance: string[], answered: Answered | undefined): C
 }
 
 /** The run's app: open it while it runs, see why it did not start, or start it again. */
-function AppBar({ preview, readOnly, questionId, runId }: { preview: TryPreview; readOnly: boolean; questionId: string; runId: string }) {
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string>();
+function AppBar({ preview, readOnly, pending, error, onRestart }: { preview: TryPreview; readOnly: boolean; pending: boolean; error: string | undefined; onRestart: () => void }) {
   return (
     <section aria-label="The app" className={cn(CARD, "flex flex-col gap-3 px-5 py-4")}>
       <div className="flex flex-wrap items-center gap-2">
@@ -132,12 +130,7 @@ function AppBar({ preview, readOnly, questionId, runId }: { preview: TryPreview;
             size="sm"
             variant="outline"
             disabled={pending}
-            onClick={() =>
-              start(async () => {
-                const result = await restartTryItAction({ questionId, runId });
-                setError(result.ok ? undefined : result.error);
-              })
-            }
+            onClick={onRestart}
           >
             <RotateCwIcon data-icon="inline-start" />
             Start the app again
@@ -377,6 +370,16 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
     setSubmitError(error);
     return error;
   };
+  const [restartError, setRestartError] = useState<string>();
+  const [restarting, startRestart] = useTransition();
+  /** Starts the run's app again from its branch; resolves to why it could not. */
+  const restart = async () => {
+    const result = await restartTryItAction({ questionId, runId });
+    const error = result.ok ? undefined : result.error;
+    setRestartError(error);
+    return error;
+  };
+
   const submitOptions = {
     from,
     questionId,
@@ -437,7 +440,13 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
             const what = failed.length ? `${failed.length} ${failed.length === 1 ? "criterion does" : "criteria do"} not work` : "every criterion works";
             return `Sent back to ${from}: ${what}${overall.trim() ? ", with the note" : ""}. The run page opens.`;
           },
-      page_restart_app: undefined,
+      page_restart_app: readOnly
+        ? undefined
+        : async () => {
+            const error = await restart();
+            if (error) throw new Error(error);
+            return "Started the app again from the run's branch.";
+          },
       page_expand_criteria: undefined,
     },
     () => ({
@@ -454,7 +463,7 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
 
   return (
     <div className="flex flex-col gap-4">
-      <AppBar preview={preview} readOnly={readOnly} questionId={questionId} runId={runId} />
+      <AppBar preview={preview} readOnly={readOnly} pending={restarting} error={restartError} onRestart={() => startRestart(async () => void (await restart()))} />
       {acceptance.length > 0 && (
         <div className="sticky top-[60px] z-20 flex flex-wrap items-center gap-2 rounded-lg border bg-background/90 p-2 backdrop-blur-md">
           <CriterionMenu acceptance={acceptance} checks={checks} current={current} go={go} />

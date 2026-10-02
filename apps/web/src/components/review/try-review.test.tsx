@@ -259,3 +259,16 @@ test("page_submit changes sends the failing criteria as comments with the note",
   actions.answerReviewAction.mockResolvedValueOnce({ ok: false, error: "This question was already answered." });
   expect(await call("page_submit", { option: "changes" })).toEqual({ text: "This question was already answered.", isError: true });
 });
+
+test("page_restart_app calls restartTryItAction", async () => {
+  const { call, whereAmI } = await withAssistant({ preview: { status: "failed", error: "Port 41000 is in use" } });
+  expect((await whereAmI()).page?.state.data).toMatchObject({ app: { status: "failed", url: null, error: "Port 41000 is in use" } });
+
+  expect(await call("page_restart_app")).toEqual({ text: "Started the app again from the run's branch.", isError: false });
+  expect(actions.restartTryItAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN });
+
+  // A restart that fails says why, as the app bar does.
+  actions.restartTryItAction.mockResolvedValueOnce({ ok: false, error: "The run's workspace is gone." });
+  expect(await call("page_restart_app")).toEqual({ text: "The run's workspace is gone.", isError: true });
+  expect(within(screen.getByRole("region", { name: "The app" })).getByText("The run's workspace is gone.")).toBeInTheDocument();
+});
