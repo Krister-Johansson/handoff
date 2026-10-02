@@ -24,11 +24,12 @@ test("the button has aria-pressed true and the live region says Listening after 
   expect(screen.getByRole("button", { name: "Stop listening" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.getByTestId("voice-live")).toHaveTextContent("Listening");
   act(() => latest().emitResult("what needs me", false));
-  expect(screen.getByRole("status", { name: "Voice" })).toHaveTextContent("what needs me");
+  // A question said from the header shows in the voice bubble.
+  expect(screen.getByRole("region", { name: "Voice assistant" })).toHaveTextContent("what needs me");
   act(() => latest().emitResult("what needs me", true));
   act(() => latest().emitEnd());
-  // No command router yet: the final transcript lands in the strip.
-  expect(screen.getByRole("status", { name: "Voice" })).toHaveTextContent("Heard: what needs me");
+  // A question goes to the voice bubble, not the strip.
+  expect(screen.getByRole("status", { name: "Voice" })).not.toHaveTextContent("what needs me");
   expect(screen.getByTestId("voice-live")).toHaveTextContent("Stopped");
 });
 
@@ -59,6 +60,6 @@ test("a blocked microphone is explained in the strip and the button stays to ret
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
   act(() => latest().emitError("not-allowed"));
   act(() => latest().emitEnd());
-  expect(screen.getByRole("status", { name: "Voice" })).toHaveTextContent("Chrome blocked the microphone. Allow it in the site settings.");
+  expect(screen.getByRole("alert")).toHaveTextContent("Chrome blocked the microphone. Allow it in the site settings.");
   expect(screen.getByRole("button", { name: "Listen" })).toBeEnabled();
 });

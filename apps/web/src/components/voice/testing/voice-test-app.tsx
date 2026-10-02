@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Speaker } from "@/lib/voice/speaker";
 import type { RecognitionCtor, VoiceSupport } from "@/lib/voice/support";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
+import { VoiceBubble } from "../voice-bubble";
 import { VoiceButton } from "../voice-button";
 import { VoiceHotkeys } from "../voice-hotkeys";
 import { VoiceProvider } from "../voice-provider";
@@ -16,6 +17,7 @@ export function VoiceTestApp({ support = withRecognition, speaker, children }: {
       <VoiceButton />
       <VoiceTranscript />
       <VoiceHotkeys />
+      <VoiceBubble />
       <main>
         <h1>Inbox</h1>
         <label htmlFor="note">Note</label>

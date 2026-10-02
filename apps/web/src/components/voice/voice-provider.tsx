@@ -1,12 +1,31 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useOptionalAssistant, useOptionalAssistantPanel } from "@/components/assistant/assistant-provider";
+import { approvalAnswer } from "@/lib/voice/approval-answer";
 import { isTyping } from "@/lib/voice/is-typing";
 import { readVoicePrefs, useVoicePrefs } from "@/lib/voice/prefs";
 import { languageName } from "@/lib/voice/recognition";
 import { createSpeaker, type Speaker, type SpeakerState, type SpeechPriority } from "@/lib/voice/speaker";
 import { useVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
 import { useSpeechInput, type InputState, type ListenMode } from "@/lib/voice/use-speech-input";
+
+/**
+ * The voice bubble: a question said with V goes to the assistant, and its reply comes back here.
+ * `since` is where the question's messages start in the conversation; `approval` is a card waiting
+ * for a spoken yes or no.
+ */
+export type Bubble = {
+  open: boolean;
+  question?: string;
+  since?: number;
+  notice?: string;
+  approval?: { requestId: string };
+  /** What was heard when it was neither yes nor no. */
+  misheard?: string;
+  /** A card answered by voice, and the words that answered it. */
+  answered?: { requestId: string; said: string };
+};
 
 /** Content a page offers to read aloud: its run summary, plan or review, or acceptance criteria. */
 export type Readable = { title: string; text: string };
@@ -35,6 +54,8 @@ export type VoiceContextValue = {
   /** What the open page offers to read aloud, registered by useReadAloud. */
   readable: Readable | undefined;
   registerReadable(content: Readable): () => void;
+  bubble: Bubble;
+  closeBubble(): void;
 };
 
 const VoiceContext = createContext<VoiceContextValue | undefined>(undefined);
@@ -46,6 +67,7 @@ export function useVoice(): VoiceContextValue {
 }
 
 const SILENT: SpeakerState = { speaking: false, sentence: 0, total: 0 };
+const CLOSED: Bubble = { open: false };
 const noSubscribe = () => () => {};
 
 /**
@@ -61,7 +83,41 @@ export function VoiceProvider({ children, support: given, speaker: givenSpeaker 
   const [readable, setReadable] = useState<Readable>();
   const prefs = useVoicePrefs();
   const [heard, setHeard] = useState<{ text: string; at: number }>();
-  const onFinal = useCallback((text: string) => setHeard({ text, at: Date.now() }), []);
+  const assistant = useOptionalAssistant();
+  const panel = useOptionalAssistantPanel();
+  const [shownBubble, setBubble] = useState<Bubble>(CLOSED);
+  // A card answered with its buttons no longer waits for a spoken answer.
+  const waitingId = shownBubble.approval?.requestId;
+  const stillOpen = Boolean(
+    waitingId && panel?.messages.some((m) => m.role === "assistant" && m.requests.some((r) => r.requestId === waitingId && r.status === "open")),
+  );
+  const bubble = useMemo<Bubble>(() => (waitingId && !stillOpen ? { ...shownBubble, approval: undefined } : shownBubble), [shownBubble, stillOpen, waitingId]);
+  const latest = useRef({ assistant, panel, bubble, speaker });
+  useEffect(() => {
+    latest.current = { assistant, panel, bubble, speaker };
+  });
+
+  const say = useCallback((text: string) => latest.current.speaker?.speak(text, { priority: "reply" }), []);
+  const onFinal = useCallback(
+    (text: string, listenMode: ListenMode) => {
+      if (listenMode === "dictation") return setHeard({ text, at: Date.now() });
+      const { assistant: port, panel: conversation, bubble: shown } = latest.current;
+      if (shown.approval && port) {
+        const answer = approvalAnswer(text);
+        if (!answer) {
+          setBubble((b) => ({ ...b, misheard: text }));
+          return say("Say yes or no, or use the buttons.");
+        }
+        const requestId = shown.approval.requestId;
+        setBubble((b) => ({ ...b, approval: undefined, misheard: undefined, answered: { requestId, said: text } }));
+        return void port.respond(shown.approval.requestId, answer.approve ? { approve: true } : { approve: false, ...(answer.note ? { note: answer.note } : {}) });
+      }
+      if (!port?.available) return setBubble({ open: true, question: text, notice: "The assistant is off." });
+      setBubble({ open: true, question: text, since: conversation?.messages.length ?? 0 });
+      void port.send(text, { source: "voice" });
+    },
+    [say],
+  );
   const input = useSpeechInput({ ctor: support.recognition, lang: prefs.lang, allowServer: prefs.allowServerRecognition, onFinal });
   const supported = Boolean(support.recognition) && (support.onDeviceCheck || prefs.allowServerRecognition);
   const { start: startInput, stop, abort, install, state } = input;
@@ -69,7 +125,10 @@ export function VoiceProvider({ children, support: given, speaker: givenSpeaker 
   const start = useCallback(async () => {
     // Never listen while speaking: the microphone would hear the dashboard.
     if (!supported || speaker?.isSpeaking()) return;
-    await startInput(isTyping(document.activeElement) ? "dictation" : "command");
+    const listenMode = isTyping(document.activeElement) ? "dictation" : "command";
+    // A question is asked in the bubble; dictation stays in its text field.
+    if (listenMode === "command") setBubble((b) => ({ ...b, open: true, notice: undefined }));
+    await startInput(listenMode);
   }, [speaker, startInput, supported]);
   const toggle = useCallback(() => {
     if (state === "listening" || state === "starting") stop();
@@ -85,6 +144,44 @@ export function VoiceProvider({ children, support: given, speaker: givenSpeaker 
     [abort, speaker],
   );
   const stopSpeaking = useCallback(() => speaker?.stop(), [speaker]);
+  // The bubble's question gets its reply spoken, and an approval is read out with how to answer it.
+  const onReply = assistant?.onReply;
+  const onRequest = assistant?.onRequest;
+  useEffect(() => {
+    if (!onReply || !onRequest) return;
+    const offReply = onReply((reply) => {
+      const shown = latest.current.bubble;
+      if (reply.done && shown.open && shown.question && reply.text) say(reply.text);
+    });
+    const offRequest = onRequest((request) => {
+      if (!latest.current.bubble.open) return;
+      setBubble((b) => ({ ...b, approval: { requestId: request.requestId }, misheard: undefined }));
+      say(`${request.title}: ${request.summary}. Say yes or no.`);
+      // Once the card is read out, listen once for the answer; V listens again after that.
+      const listen = () => {
+        const shown = latest.current.bubble;
+        if (shown.open && shown.approval?.requestId === request.requestId) void startInput("command");
+      };
+      const speaking = latest.current.speaker;
+      if (!speaking?.isSpeaking()) return listen();
+      const off = speaking.subscribe(() => {
+        if (speaking.isSpeaking()) return;
+        off();
+        listen();
+      });
+    });
+    return () => {
+      offReply();
+      offRequest();
+    };
+  }, [onReply, onRequest, say, startInput]);
+
+  const closeBubble = useCallback(() => {
+    abort();
+    speaker?.stop();
+    setBubble(CLOSED);
+  }, [abort, speaker]);
+
   const registerReadable = useCallback((content: Readable) => {
     setReadable(content);
     return () => setReadable((shown) => (shown === content ? undefined : shown));
@@ -110,8 +207,10 @@ export function VoiceProvider({ children, support: given, speaker: givenSpeaker 
       stopSpeaking,
       readable,
       registerReadable,
+      bubble,
+      closeBubble,
     }),
-    [supported, state, input.mode, input.interim, input.error, heard, prefs.lang, start, stop, abort, toggle, install, speaker, speech, speak, stopSpeaking, readable, registerReadable],
+    [supported, state, input.mode, input.interim, input.error, heard, prefs.lang, start, stop, abort, toggle, install, speaker, speech, speak, stopSpeaking, readable, registerReadable, bubble, closeBubble],
   );
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;
 }

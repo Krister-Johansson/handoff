@@ -33,8 +33,12 @@ export function VoiceButton() {
       type="button"
       variant="ghost"
       size="icon-sm"
-      // A 44 px target around the header-sized icon.
-      className={cn("relative text-muted-foreground after:absolute after:-inset-1.5", active && "bg-attention-bg text-attention motion-safe:animate-pulse")}
+      // A 44 px target around the header-sized icon; while listening it fills and a ring pulses out.
+      className={cn(
+        "relative rounded-full text-muted-foreground after:absolute after:-inset-1.5 after:rounded-full",
+        active &&
+          "bg-primary text-primary-foreground before:absolute before:inset-0 before:-z-10 before:rounded-full before:bg-primary/35 before:motion-safe:animate-ping hover:bg-primary/90 hover:text-primary-foreground",
+      )}
       aria-label={active ? "Stop listening" : "Listen"}
       aria-pressed={active}
       title={active ? "Stop listening (V or Escape)" : "Listen (V)"}

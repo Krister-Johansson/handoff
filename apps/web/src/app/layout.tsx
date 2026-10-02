@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { AssistantProvider } from "@/components/assistant/assistant-provider";
 import { AssistantSheet } from "@/components/assistant/assistant-sheet";
 import { SiteHeader } from "@/components/site-header";
+import { VoiceBubble } from "@/components/voice/voice-bubble";
 import { VoiceHotkeys } from "@/components/voice/voice-hotkeys";
 import { VoiceProvider } from "@/components/voice/voice-provider";
 import { assistantState } from "@/server/assistant/settings";
@@ -37,6 +38,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
                 <VoiceHotkeys />
                 {children}
                 <AssistantSheet />
+                <VoiceBubble />
                 <Toaster position="bottom-right" closeButton />
               </VoiceProvider>
             </AssistantProvider>

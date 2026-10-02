@@ -38,6 +38,15 @@ export function useAssistant(): AssistantPort {
   return port;
 }
 
+/** The assistant where there may be none, as voice uses it. */
+export function useOptionalAssistant(): AssistantPort | undefined {
+  return useContext(PortContext);
+}
+
+export function useOptionalAssistantPanel(): PanelState | undefined {
+  return useContext(PanelContext);
+}
+
 export function useAssistantPanel(): PanelState {
   const panel = useContext(PanelContext);
   if (!panel) throw new Error("useAssistantPanel needs an AssistantProvider.");

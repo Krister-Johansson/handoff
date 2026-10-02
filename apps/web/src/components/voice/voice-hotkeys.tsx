@@ -5,8 +5,8 @@ import { isTyping } from "@/lib/voice/is-typing";
 import { useVoice } from "./voice-provider";
 
 /**
- * V toggles listening outside text fields; Escape stops speaking, or else stops listening and drops
- * what was half heard. When voice is idle Escape is left to whatever else uses it, such as dialogs.
+ * V toggles listening outside text fields; Escape stops speaking, else stops listening and drops what
+ * was half heard, else closes the voice bubble. When voice is idle Escape is left to dialogs.
  */
 export function VoiceHotkeys() {
   const voice = useVoice();
@@ -17,11 +17,15 @@ export function VoiceHotkeys() {
       voice.stopSpeaking();
       return;
     }
-    if (!voice.supported) return;
     if (e.key === "Escape" && (voice.state === "listening" || voice.state === "starting")) {
       voice.abort();
       return;
     }
+    if (e.key === "Escape" && voice.bubble.open) {
+      voice.closeBubble();
+      return;
+    }
+    if (!voice.supported) return;
     if (e.key.toLowerCase() === "v" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
       e.preventDefault();
       voice.toggle();

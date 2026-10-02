@@ -42,9 +42,9 @@ test("the strip folds away ten seconds after the last thing it showed", async ()
     await act(async () => {});
     const recognizer = FakeSpeechRecognition.instances[0]!;
     act(() => recognizer.emitStart());
-    act(() => recognizer.emitResult("hello", true));
+    act(() => recognizer.emitError("no-speech"));
     act(() => recognizer.emitEnd());
-    expect(screen.getByRole("status", { name: "Voice" })).toHaveTextContent("Heard: hello");
+    expect(screen.getByRole("status", { name: "Voice" })).toHaveTextContent("Heard nothing.");
     act(() => vi.advanceTimersByTime(10_000));
     expect(screen.getByRole("status", { name: "Voice" })).toBeEmptyDOMElement();
   } finally {
