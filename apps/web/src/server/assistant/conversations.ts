@@ -1,4 +1,4 @@
-import { asc, assistantConversations, assistantMessages, desc, eq, sql, type AssistantContent, type Db } from "@handoff/db";
+import { asc, assistantConversations, assistantMessages, desc, eq, isNotNull, sql, type AssistantContent, type Db } from "@handoff/db";
 
 const TITLE_CHARS = 80;
 
@@ -30,10 +30,19 @@ export async function storeMessage(db: Db, input: { conversationId: string; turn
   await db.update(assistantConversations).set({ updatedAt: sql`now()` }).where(eq(assistantConversations.id, input.conversationId));
 }
 
-/** Records the Claude Code session a conversation's first turn started, and the model it ran. */
-export async function setConversationSession(db: Db, id: string, session: { cliSessionId: string; model?: string | undefined }) {
-  await db
-    .update(assistantConversations)
-    .set({ cliSessionId: session.cliSessionId, ...(session.model ? { model: session.model } : {}) })
-    .where(eq(assistantConversations.id, id));
+/** Records the Claude Code session a conversation's turn ran in, and the model Claude Code reported. */
+export async function setConversationSession(db: Db, id: string, session: { cliSessionId?: string | undefined; model?: string | undefined }) {
+  const values = { ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}), ...(session.model ? { model: session.model } : {}) };
+  if (Object.keys(values).length) await db.update(assistantConversations).set(values).where(eq(assistantConversations.id, id));
+}
+
+/** The model the latest turn of any conversation ran, for the settings page. */
+export async function lastAssistantModel(db: Db): Promise<string | undefined> {
+  const [row] = await db
+    .select({ model: assistantConversations.model })
+    .from(assistantConversations)
+    .where(isNotNull(assistantConversations.model))
+    .orderBy(desc(assistantConversations.updatedAt))
+    .limit(1);
+  return row?.model ?? undefined;
 }

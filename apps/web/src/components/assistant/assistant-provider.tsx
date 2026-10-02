@@ -19,6 +19,8 @@ type PanelState = {
   agentRequests: PendingRequest[];
   /** What a browser agent is doing now, for the status line. */
   agentActivity: string | undefined;
+  /** Why the assistant is unavailable: no OAuth token, or switched off in Settings. */
+  offReason: "no-token" | "off";
   conversationId: string | undefined;
   conversations: ConversationSummary[] | undefined;
   loadConversations(): Promise<void>;
@@ -107,7 +109,17 @@ function applyEvent(message: Extract<ChatMessage, { role: "assistant" }>, event:
  * approval cards, and the panel's open state. It lives in the root layout, so a navigation the
  * assistant makes leaves the conversation on screen. Mod+J opens the panel from anywhere.
  */
-export function AssistantProvider({ children, available, transport = httpTransport }: { children: ReactNode; available: boolean; transport?: AssistantTransport }) {
+export function AssistantProvider({
+  children,
+  available,
+  offReason = "no-token",
+  transport = httpTransport,
+}: {
+  children: ReactNode;
+  available: boolean;
+  offReason?: "no-token" | "off";
+  transport?: AssistantTransport;
+}) {
   const [isOpen, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string>();
@@ -274,8 +286,8 @@ export function AssistantProvider({ children, available, transport = httpTranspo
     focusComposer();
   }, [focusComposer]);
   const panel = useMemo<PanelState>(
-    () => ({ messages, agentRequests, agentActivity, conversationId, conversations, loadConversations, openConversation, newConversation }),
-    [messages, agentRequests, agentActivity, conversationId, conversations, loadConversations, openConversation, newConversation],
+    () => ({ messages, agentRequests, agentActivity, offReason, conversationId, conversations, loadConversations, openConversation, newConversation }),
+    [messages, agentRequests, agentActivity, offReason, conversationId, conversations, loadConversations, openConversation, newConversation],
   );
 
   return (

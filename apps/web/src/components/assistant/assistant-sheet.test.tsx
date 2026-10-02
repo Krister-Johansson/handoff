@@ -16,9 +16,9 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/projects");
 });
 
-function App({ page = "Projects", available = true }: { page?: string; available?: boolean }) {
+function App({ page = "Projects", available = true, offReason }: { page?: string; available?: boolean; offReason?: "no-token" | "off" }) {
   return (
-    <AssistantProvider transport={transport} available={available}>
+    <AssistantProvider transport={transport} available={available} {...(offReason ? { offReason } : {})}>
       <AssistantButton />
       <main>
         <h1>{page}</h1>
@@ -247,4 +247,12 @@ test("with WebMCP switched off in this browser no tools register", async () => {
     localStorage.removeItem("handoff.webmcp");
     delete (document as { modelContext?: unknown }).modelContext;
   }
+});
+
+test("switched off in Settings, the panel says so and links to the setting", async () => {
+  render(<App available={false} offReason="off" />);
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  expect(await within(panel()).findByText((_, el) => el?.tagName === "P" && el.textContent === "It is switched off in Settings.")).toBeInTheDocument();
+  expect(within(panel()).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings?tab=assistant");
+  expect(within(panel()).queryByText(/CLAUDE_CODE_OAUTH_TOKEN/)).not.toBeInTheDocument();
 });

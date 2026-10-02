@@ -8,9 +8,11 @@ import { AgentConnection } from "@/components/settings/agent-connection";
 import { NotificationSettingsLoader } from "@/components/settings/notification-settings-loader";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { ThemeSetting } from "@/components/settings/theme-setting";
-import { WebMcpSetting } from "@/components/settings/webmcp-setting";
+import { AssistantSettings } from "@/components/settings/assistant-settings";
 import { WorkerSettings } from "@/components/settings/worker-settings";
 import { lastAgentConnection } from "@/server/agent-endpoint";
+import { lastAssistantModel } from "@/server/assistant/conversations";
+import { assistantState } from "@/server/assistant/settings";
 import { AgentTokenStore, defaultAgentTokenFile } from "@/server/agent-token";
 import { workerSummary } from "@/server/workers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -61,6 +63,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host") ?? "localhost:3000"}`;
   const token = tab === "agents" ? new AgentTokenStore(defaultAgentTokenFile()).read() : undefined;
   const worker = tab === "worker" ? await loadWorkers() : undefined;
+  const assistant = tab === "assistant" ? { state: assistantState(), lastModel: await lastAssistantModel(getDb()) } : undefined;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <PageHeader
@@ -86,9 +89,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <AgentConnection origin={origin} checkout={checkoutRoot()} initialToken={token} lastConnection={connectionLine()} />
             </Section>
           )}
-          {tab === "agents" && (
-            <Section title="Browser agents" description="Let an agent in this browser use handoff's tools on the dashboard's pages, through WebMCP.">
-              <WebMcpSetting />
+          {assistant && (
+            <Section title="Assistant" description="The panel beside every page that answers about your runs and acts on them, and the same tools for agents in this browser.">
+              <AssistantSettings hasToken={Boolean(assistant.state.config.oauthToken)} enabled={assistant.state.enabled} model={assistant.state.config.model} lastModel={assistant.lastModel} />
             </Section>
           )}
           {worker && (

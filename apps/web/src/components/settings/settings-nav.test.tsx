@@ -10,6 +10,7 @@ test("the side navigation links every section by ?tab= and marks the open one", 
     ["Appearance", "/settings?tab=appearance"],
     ["Notifications", "/settings?tab=notifications"],
     ["Claude Code", "/settings?tab=agents"],
+    ["Assistant", "/settings?tab=assistant"],
     ["Worker", "/settings?tab=worker"],
   ]);
   expect(within(nav).getByRole("link", { name: "Notifications" })).toHaveAttribute("aria-current", "page");

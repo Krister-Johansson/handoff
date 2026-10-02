@@ -6,7 +6,7 @@ import { importSkillRepository } from "@handoff/engine/library-import";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, type GitHubPort } from "@handoff/github";
-import { gcClaudeSessions } from "./gc.ts";
+import { dashboardAssistantHome, gcAssistantConversations, gcClaudeSessions } from "./gc.ts";
 
 /** github: undefined reads credentials from the environment; null skips GitHub (tests). */
 export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; github?: GitHubPort | null };
@@ -22,7 +22,7 @@ const USAGE = `usage:
   handoff library import-skill <dir-with-SKILL.md>
   handoff library import-repo <owner/name> [--group <name>]
   handoff library list
-  handoff gc [--days 7]`;
+  handoff gc [--days 7] [--assistant-days 30]`;
 
 function readSkillDir(dir: string) {
   const skill = parseSkillMarkdown(readFileSync(join(dir, "SKILL.md"), "utf8"));
@@ -205,9 +205,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
   }
 
   if (command === "gc") {
-    const { values } = parseArgs({ args: [sub ?? "", ...rest].filter(Boolean), options: { days: { type: "string" } } });
-    const removed = await gcClaudeSessions(db, { home: process.env.HANDOFF_HOME ?? "./.handoff", olderThanDays: Number(values.days ?? 7) });
+    const { values } = parseArgs({ args: [sub ?? "", ...rest].filter(Boolean), options: { days: { type: "string" }, "assistant-days": { type: "string" } } });
+    const home = process.env.HANDOFF_HOME ?? "./.handoff";
+    const removed = await gcClaudeSessions(db, { home, olderThanDays: Number(values.days ?? 7) });
     out(`removed ${removed.length} Claude session folders`);
+    const assistant = await gcAssistantConversations(db, { assistantHome: dashboardAssistantHome(process.env.HANDOFF_HOME), olderThanDays: Number(values["assistant-days"] ?? 30) });
+    out(`removed ${assistant.conversations} assistant conversations and ${assistant.transcripts.length} transcripts`);
     return;
   }
 

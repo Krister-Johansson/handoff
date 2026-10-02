@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { ChatMessage } from "@/lib/assistant/port";
 import { ApprovalCard } from "./approval-card";
@@ -74,7 +75,17 @@ export function AssistantSheet() {
         ) : (
           <div className="px-4 py-3 text-[13px]">
             <p className="font-medium">The assistant is off.</p>
-            <p className="mt-1 text-muted-foreground">It runs Claude Code on your subscription. Add CLAUDE_CODE_OAUTH_TOKEN to the dashboard&apos;s environment and restart it.</p>
+            {panel.offReason === "off" ? (
+              <p className="mt-1 text-muted-foreground">
+                It is switched off in{" "}
+                <Link href="/settings?tab=assistant" className="underline underline-offset-2" onClick={assistant.close}>
+                  Settings
+                </Link>
+                .
+              </p>
+            ) : (
+              <p className="mt-1 text-muted-foreground">It runs Claude Code on your subscription. Add CLAUDE_CODE_OAUTH_TOKEN to the dashboard&apos;s environment and restart it.</p>
+            )}
           </div>
         )}
       </SheetContent>

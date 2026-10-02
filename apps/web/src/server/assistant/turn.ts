@@ -121,7 +121,7 @@ export async function startTurn(deps: TurnDeps, conversationId: string, input: {
         ...(result.usage !== undefined ? { usage: result.usage } : {}),
       },
     });
-    if (session.mode === "new" && result.sessionId) await setConversationSession(deps.db, conversationId, { cliSessionId: result.sessionId, model: deps.config.model });
+    await setConversationSession(deps.db, conversationId, { cliSessionId: session.mode === "new" ? result.sessionId : undefined, model: result.model });
     if (outcome === "done") turn.emit({ type: "done", text: result.text, ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}) });
     else if (outcome === "interrupted") turn.emit({ type: "interrupted", text: result.text });
     else turn.emit({ type: "error", message: error! });
