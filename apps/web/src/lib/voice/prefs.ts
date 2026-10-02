@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /** How this browser listens and speaks. Kept in localStorage; audio stays on the machine unless a switch says otherwise. */
 export type VoicePrefs = {
   /** The recognition language, also used to pick a voice. */
@@ -54,10 +56,38 @@ export function readVoicePrefs(): VoicePrefs {
   };
 }
 
+const CHANGED = "handoff:voice";
+
 export function writeVoicePrefs(prefs: VoicePrefs) {
   try {
     localStorage.setItem(VOICE_PREFS_KEY, JSON.stringify(prefs));
   } catch {
     // Storage blocked; the setting lasts for this page only.
   }
+  window.dispatchEvent(new Event(CHANGED));
+}
+
+let cached: { raw: string | null; prefs: VoicePrefs } | undefined;
+function snapshot(): VoicePrefs {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(VOICE_PREFS_KEY);
+  } catch {
+    // Blocked storage reads as nothing stored.
+  }
+  if (!cached || cached.raw !== raw) cached = { raw, prefs: readVoicePrefs() };
+  return cached.prefs;
+}
+function subscribe(onChange: () => void) {
+  window.addEventListener(CHANGED, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(CHANGED, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/** The voice preferences, kept current when Settings changes them in this tab or another. */
+export function useVoicePrefs(): VoicePrefs {
+  return useSyncExternalStore(subscribe, snapshot, () => DEFAULT_VOICE_PREFS);
 }
