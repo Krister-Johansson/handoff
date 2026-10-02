@@ -502,6 +502,18 @@ export const CATALOG: ToolSpec[] = [
     summarize: (a) => `Plan #${a.issue} as a task${a.story ? ` under story #${a.story}` : ""} in ${a.project}`,
   }),
   spec({
+    name: "get_scheduler",
+    title: "Show the scheduler",
+    description:
+      "A project's scheduler: off, paused, held, idle or running; what holds it (failed runs, questions, reviews, pull requests waiting for review, permission requests), each with its link; active runs of max_runs and the worker's Claude slots; runs waiting before their coder because their plan shares paths with another run; the next tasks it will start and the Ready tasks it skips with the reason; and its recent events.",
+    input: z.object({ project }),
+    kind: "data",
+    confirm: false,
+    readOnly: true,
+    untrusted: true,
+    summarize: (a) => `Show the scheduler of ${a.project}`,
+  }),
+  spec({
     name: "start_scheduler",
     title: "Start the scheduler",
     description:

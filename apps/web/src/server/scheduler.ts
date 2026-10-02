@@ -1,5 +1,24 @@
-import { and, eq, graphs, projects, projectSchedulers, schedulerEvents, sql, type Db, type DbExecutor, type ProjectSchedulerRow } from "@handoff/db";
-import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
+import { reviewPath, runPath, tryPath } from "@handoff/core/paths";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  graphs,
+  inArray,
+  liveWorkers,
+  nodeExecutions,
+  projects,
+  projectSchedulers,
+  questions,
+  runs,
+  schedulerEvents,
+  sql,
+  type Db,
+  type DbExecutor,
+  type ProjectSchedulerRow,
+} from "@handoff/db";
+import { nudgeScheduler, overlapKey, projectHolds, type Candidate, type CheckResult, type Hold, type Skipped } from "@handoff/engine/backlog-scheduler";
 import type { ProjectsPort } from "@handoff/github";
 import { getProjectDetail } from "./graphs";
 import { projectsAccessProblem } from "./plan";
@@ -84,5 +103,147 @@ export async function pauseScheduler(db: Db, projectId: string, actor: string, r
       .where(eq(projectSchedulers.projectId, projectId));
     await record(tx, projectId, "scheduler.paused", { by: actor, ...(reason ? { reason } : {}) });
     return { state: "paused" as const, reason: reason ?? null };
+  });
+}
+
+export type SchedulerState = "off" | "paused" | "held" | "idle" | "running";
+
+/** A hold with the sentence and the page a person acts on. */
+export type HoldView = Hold & { text: string; href: string };
+
+/** A run the scheduler started that waits before its coder because its plan shares paths with another active run. */
+export type OverlapHeld = { runId: string; nodeKey: string; waitsFor: string | null; paths: string[]; text: string; href: string };
+
+/** Everything the scheduler card and get_scheduler show. */
+export type SchedulerStatus = {
+  state: SchedulerState;
+  /** Undefined until someone turns the scheduler on. */
+  settings: { maxRuns: number; order: "project" | "priority"; graphName: string; skipLabel: string | null } | undefined;
+  paused: { by: string | null; reason: string | null; at: Date } | undefined;
+  /** "2 of 3 runs active, 1 Claude slot". */
+  summary: string;
+  active: number;
+  /** HANDOFF_CAP_CLI of the newest live worker; null without one. */
+  claudeSlots: number | null;
+  activeRuns: { id: string; status: string; startedBy: string | null; issues: number[]; href: string }[];
+  holds: HoldView[];
+  overlapHeld: OverlapHeld[];
+  idle: { reason: string; text: string } | undefined;
+  /** Why the last check failed, when it did. */
+  error: string | undefined;
+  /** The first three candidates of the last check, in order. */
+  next: Candidate[];
+  skipped: Skipped[];
+  checkedAt: Date | null;
+  nextCheckAt: Date | null;
+  /** The last 20 scheduler events, oldest first. */
+  events: { type: string; payload: Record<string, unknown>; at: Date }[];
+};
+
+const ACTIVE = ["queued", "running", "waiting"] as const;
+const short = (id: string) => id.slice(0, 8);
+const plural = (n: number, word: string) => `${n} ${n === 1 ? word : `${word}s`}`;
+
+/** A live worker heartbeats every 15 seconds; one silent for a minute is gone. */
+const LIVE_WINDOW_MS = 60_000;
+
+/** The project's scheduler as a person needs it: its state, what holds it, its runs, the Claude slots and what starts next. */
+export async function getScheduler(db: Db, projectId: string): Promise<SchedulerStatus> {
+  const runOverlap = sql<{ runId?: string; paths?: string[] } | null>`(
+    select e.payload from events e
+    where e.node_execution_id = ${nodeExecutions.id} and e.type = 'run.overlap_held'
+    order by e.seq desc limit 1
+  )`;
+  const [[row], holds, activeRuns, held, live, eventRows] = await Promise.all([
+    db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId)),
+    projectHolds(db, projectId),
+    db
+      .select({ id: runs.id, status: runs.status, startedBy: runs.startedBy, issues: runs.issues })
+      .from(runs)
+      .where(and(eq(runs.projectId, projectId), inArray(runs.status, [...ACTIVE])))
+      .orderBy(asc(runs.createdAt)),
+    db
+      .select({ runId: nodeExecutions.runId, nodeKey: nodeExecutions.nodeKey, overlap: runOverlap })
+      .from(nodeExecutions)
+      .innerJoin(runs, eq(runs.id, nodeExecutions.runId))
+      .where(and(eq(runs.projectId, projectId), eq(nodeExecutions.status, "waiting"), eq(nodeExecutions.waitKey, overlapKey(projectId))))
+      .orderBy(asc(nodeExecutions.createdAt)),
+    liveWorkers(db, LIVE_WINDOW_MS),
+    db.select().from(schedulerEvents).where(eq(schedulerEvents.projectId, projectId)).orderBy(desc(schedulerEvents.id)).limit(20),
+  ]);
+
+  const worker = [...live].sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0];
+  const claudeSlots = worker ? (worker.caps.cli ?? null) : null;
+  const on = row?.enabled ? row : undefined;
+  const runsText = row ? `${activeRuns.length} of ${plural(row.maxRuns, "run")} active` : `${plural(activeRuns.length, "run")} active`;
+  const last = on?.lastResult as CheckResult | null | undefined;
+  const state: SchedulerState = !on ? "off" : on.pausedAt ? "paused" : holds.length ? "held" : last?.state === "idle" ? "idle" : "running";
+
+  return {
+    state,
+    settings: row ? { maxRuns: row.maxRuns, order: row.order, graphName: row.graphName, skipLabel: row.skipLabel } : undefined,
+    paused: on?.pausedAt ? { by: on.pausedBy, reason: on.pauseReason, at: on.pausedAt } : undefined,
+    summary: `${runsText}, ${claudeSlots === null ? "no worker running" : plural(claudeSlots, "Claude slot")}`,
+    active: activeRuns.length,
+    claudeSlots,
+    activeRuns: activeRuns.map((r) => ({ id: r.id, status: r.status, startedBy: r.startedBy, issues: r.issues.map((i) => i.number), href: runPath(projectId, r.id) })),
+    holds: await holdViews(db, projectId, holds),
+    overlapHeld: held.map((h) => {
+      const paths = h.overlap?.paths ?? [];
+      const waitsFor = h.overlap?.runId ?? null;
+      return {
+        runId: h.runId,
+        nodeKey: h.nodeKey,
+        waitsFor,
+        paths,
+        text: `Run ${short(h.runId)} waits before ${h.nodeKey}: shares ${paths.join(", ")} with run ${waitsFor ? short(waitsFor) : "another run"}`,
+        href: runPath(projectId, h.runId),
+      };
+    }),
+    idle: state === "idle" && last ? idleOf(last) : undefined,
+    error: on && last?.state === "failed" ? last.error : undefined,
+    next: on ? (last?.candidates ?? []).slice(0, 3) : [],
+    skipped: on ? (last?.skipped ?? []) : [],
+    checkedAt: row?.lastCheckAt ?? null,
+    nextCheckAt: on && !on.pausedAt ? on.nextCheckAt : null,
+    events: eventRows.reverse().map((e) => ({ type: e.type, payload: e.payload, at: e.createdAt })),
+  };
+}
+
+function idleOf(last: CheckResult): { reason: string; text: string } {
+  if (last.reason === "planning") return { reason: "planning", text: `Run ${short(last.runId ?? "")} is still planning; the next start waits for its plan.` };
+  if (last.reason === "all_skipped") return { reason: "all_skipped", text: "Every Ready task is skipped; skipped says why." };
+  return { reason: "no_ready", text: "No task is Ready. Move shaped tasks to Ready on the Plan." };
+}
+
+/** Each hold with its sentence and the page that clears it: a review or Try it page for those, else the run. */
+async function holdViews(db: Db, projectId: string, holds: Hold[]): Promise<HoldView[]> {
+  const reviewIds = holds.flatMap((h) => (h.kind === "review" ? [h.questionId] : []));
+  const tries = new Set(
+    reviewIds.length
+      ? (await db.select({ id: questions.id, context: questions.context }).from(questions).where(inArray(questions.id, reviewIds)))
+          .filter((q) => (q.context as { reason?: string }).reason === "try")
+          .map((q) => q.id)
+      : [],
+  );
+  return holds.map((hold): HoldView => {
+    const run = `Run ${short(hold.runId)}`;
+    const href = runPath(projectId, hold.runId);
+    switch (hold.kind) {
+      case "failed":
+        return { ...hold, text: `${run} failed at ${hold.nodeKey}`, href };
+      case "loop":
+        return { ...hold, text: `${run} ran out of rounds at ${hold.nodeKey}`, href };
+      case "question":
+        return { ...hold, text: `${run} asks a question at ${hold.nodeKey}`, href };
+      case "review":
+        return tries.has(hold.questionId)
+          ? { ...hold, text: `${run} waits for you to try it at ${hold.nodeKey}`, href: tryPath(projectId, hold.runId, hold.questionId) }
+          : { ...hold, text: `${run} waits for your review at ${hold.nodeKey}`, href: reviewPath(projectId, hold.runId, hold.questionId) };
+      case "pull_request":
+        return { ...hold, text: `Pull request #${hold.prNumber} of run ${short(hold.runId)} waits for an approving review`, href };
+      case "permission":
+        return { ...hold, text: `${run} asks permission to use ${hold.toolName} at ${hold.nodeKey}`, href };
+    }
   });
 }

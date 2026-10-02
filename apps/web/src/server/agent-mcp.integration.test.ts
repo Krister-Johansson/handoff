@@ -2,11 +2,12 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, projectSchedulers, questions, runs, schedulerEvents, sql } from "@handoff/db";
+import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, projectSchedulers, questions, registerWorker, runs, schedulerEvents, sql, workers } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { checkProject } from "@handoff/engine/backlog-scheduler";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG } from "../lib/assistant/catalog";
+import { reviewPath, runPath } from "../lib/paths";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createHandoffMcpServer, registerDataTools } from "./agent-mcp";
 import { createProject, saveGraphVersion } from "./graphs";
@@ -747,4 +748,55 @@ test("pause_scheduler stops new starts and leaves active runs alone", async () =
   // Resumed, the next check starts the waiting task.
   await call("start_scheduler", { project: "sandbox" });
   expect(await checkProject({ db, github, projects: plan, owner: "worker-1" }, projectId)).toMatchObject({ state: "running" });
+});
+
+test("get_scheduler reports holds with their links, active runs of max_runs, Claude slots and the next candidates with skip reasons", async () => {
+  const { task } = await withPlan();
+  const planUrl = `${BASE}/projects/${projectId}/plan`;
+  expect(await call("get_scheduler", { project: "sandbox" })).toMatchObject({ state: "off", url: planUrl });
+
+  const first = await task("Add the migration", "Ready");
+  const second = await task("Add the endpoint", "Ready");
+  const blocked = await task("Add the page", "Ready");
+  github.issues.get(blocked)!.blockedBy = [11];
+  const manual = (await call("start_run", { project: "sandbox", issues: [await task("Fix the header", "Ready")] })).run_id as string;
+  await registerWorker(db, { id: "worker-1", hostname: "box", caps: { cli: 2, shell: 4 } });
+  await call("start_scheduler", { project: "sandbox", max_runs: 3 });
+  const started = (await checkProject({ db, github, projects: plan, owner: "worker-1" }, projectId))!.started[0]!.runId;
+
+  // The run a person started failed; the scheduler's run waits for a plan review and holds its coder on overlap.
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, manual));
+  await db.transaction((tx) => appendEvents(tx, manual, [{ type: "run.failed", payload: { nodeKey: "coder-1" } }]));
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, started));
+  const gate = await seedExecution(db, started, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const [review] = await db.insert(questions).values({ runId: started, nodeExecutionId: gate.id, question: "Review the plan from planner", options: ["approve", "changes"], context: { review: { markdown: "# Plan" } } }).returning();
+  const coder = await seedExecution(db, started, { nodeKey: "coder", status: "waiting", waitKey: `overlap:${projectId}` });
+  await db.transaction((tx) => appendEvents(tx, started, [{ type: "run.overlap_held", payload: { nodeKey: "coder", runId: manual, paths: ["src/a.ts"] }, nodeExecutionId: coder.id }]));
+
+  const status = await call("get_scheduler", { project: "sandbox" });
+  const short = (id: string) => id.slice(0, 8);
+  expect(status).toMatchObject({
+    state: "held",
+    settings: { max_runs: 3, order: "project", graph: "linear", skip_label: "human" },
+    summary: "1 of 3 runs active, 2 Claude slots",
+    active: 1,
+    claude_slots: 2,
+    active_runs: [{ id: started, status: "waiting", started_by: "scheduler", issues: [first], url: `${BASE}${runPath(projectId, started)}` }],
+    holds: [
+      { kind: "failed", run_id: manual, text: `Run ${short(manual)} failed at coder-1`, url: `${BASE}${runPath(projectId, manual)}` },
+      { kind: "review", run_id: started, text: `Run ${short(started)} waits for your review at gate`, url: `${BASE}${reviewPath(projectId, started, review!.id)}` },
+    ],
+    overlap_held: [{ run_id: started, node: "coder", waits_for: manual, paths: ["src/a.ts"], text: `Run ${short(started)} waits before coder: shares src/a.ts with run ${short(manual)}`, url: `${BASE}${runPath(projectId, started)}` }],
+    next: [{ number: second, title: "Add the endpoint" }],
+    skipped: [{ number: blocked, title: "Add the page", reason: "blocked by #11" }],
+    checked_at: expect.any(String),
+    url: planUrl,
+  });
+  expect(status.events.map((e: { type: string }) => e.type)).toEqual(["scheduler.started", "scheduler.skipped", "scheduler.run_started"]);
+  expect(status.events[2]).toMatchObject({ payload: { runId: started, issue: first, place: 1 }, at: expect.any(String) });
+
+  // Without a live worker there is no Claude slot to report; paused, it says who paused it and why.
+  await db.update(workers).set({ stoppedAt: new Date() });
+  await call("pause_scheduler", { project: "sandbox", reason: "Lunch" });
+  expect(await call("get_scheduler", { project: "sandbox" })).toMatchObject({ state: "paused", paused: { by: "person", reason: "Lunch" }, summary: "1 of 3 runs active, no worker running", claude_slots: null });
 });

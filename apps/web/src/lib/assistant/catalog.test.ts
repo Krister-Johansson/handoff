@@ -58,6 +58,7 @@ test("results that carry text from runs or GitHub are marked untrusted", () => {
   expect(CATALOG.filter((t) => t.untrusted).map((t) => t.name).sort()).toEqual([
     "get_run",
     "get_run_events",
+    "get_scheduler",
     "list_attention",
     "list_backlog",
     "list_github_projects",

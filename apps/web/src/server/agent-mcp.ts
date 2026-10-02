@@ -17,7 +17,7 @@ import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
-import { pauseScheduler, startScheduler } from "./scheduler";
+import { getScheduler, pauseScheduler, startScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
 
 /**
@@ -397,6 +397,30 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     pause_scheduler: async ({ project, reason }: { project: string; reason?: string }) => {
       const { id } = await findProject(db, project);
       return { ...(await pauseScheduler(db, id, actor, reason)), url: url(planPath(id)) };
+    },
+
+    get_scheduler: async ({ project }: { project: string }) => {
+      const { id } = await findProject(db, project);
+      const s = await getScheduler(db, id);
+      return {
+        state: s.state,
+        settings: s.settings ? { max_runs: s.settings.maxRuns, order: s.settings.order, graph: s.settings.graphName, skip_label: s.settings.skipLabel } : null,
+        ...(s.paused ? { paused: { by: s.paused.by, reason: s.paused.reason, at: s.paused.at.toISOString() } } : {}),
+        summary: s.summary,
+        active: s.active,
+        claude_slots: s.claudeSlots,
+        active_runs: s.activeRuns.map((r) => ({ id: r.id, status: r.status, started_by: r.startedBy, issues: r.issues, url: url(r.href) })),
+        holds: s.holds.map((h) => ({ kind: h.kind, run_id: h.runId, text: h.text, url: url(h.href) })),
+        overlap_held: s.overlapHeld.map((h) => ({ run_id: h.runId, node: h.nodeKey, waits_for: h.waitsFor, paths: h.paths, text: h.text, url: url(h.href) })),
+        ...(s.idle ? { idle: s.idle } : {}),
+        ...(s.error ? { error: s.error } : {}),
+        next: s.next,
+        skipped: s.skipped,
+        checked_at: s.checkedAt?.toISOString() ?? null,
+        next_check_at: s.nextCheckAt?.toISOString() ?? null,
+        events: s.events.map((e) => ({ type: e.type, payload: e.payload, at: e.at.toISOString() })),
+        url: url(planPath(id)),
+      };
     },
 
     list_library: async () => {
