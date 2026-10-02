@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 /** A SpeechRecognition constructor, with Chrome's on-device check when the browser has it. */
 export type RecognitionCtor = (new () => unknown) & {
   available?: (options: { langs: string[]; processLocally: boolean; quality?: string }) => Promise<"available" | "downloadable" | "downloading" | "unavailable">;
@@ -22,4 +24,17 @@ export function detectVoiceSupport(win: VoiceWindow): VoiceSupport {
     ...(synth ? { synth } : {}),
     onDeviceCheck: typeof recognition?.available === "function",
   };
+}
+
+const NO_SUPPORT: VoiceSupport = { onDeviceCheck: false };
+let detected: VoiceSupport | undefined;
+const noSubscribe = () => () => {};
+
+/** This browser's voice support, detected once; nothing on the server, so the first render matches it. */
+export function useVoiceSupport(): VoiceSupport {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => (detected ??= detectVoiceSupport(globalThis as never)),
+    () => NO_SUPPORT,
+  );
 }

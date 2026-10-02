@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { AssistantProvider } from "@/components/assistant/assistant-provider";
 import { AssistantSheet } from "@/components/assistant/assistant-sheet";
 import { SiteHeader } from "@/components/site-header";
+import { VoiceHotkeys } from "@/components/voice/voice-hotkeys";
+import { VoiceProvider } from "@/components/voice/voice-provider";
 import { assistantState } from "@/server/assistant/settings";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
@@ -30,10 +32,13 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           <TooltipProvider>
             {/* The assistant lives in the root layout so its conversation stays on screen while pages change. */}
             <AssistantProvider available={assistant.available} offReason={assistant.reason ?? "no-token"}>
-              <SiteHeader />
-              {children}
-              <AssistantSheet />
-              <Toaster position="bottom-right" closeButton />
+              <VoiceProvider>
+                <SiteHeader />
+                <VoiceHotkeys />
+                {children}
+                <AssistantSheet />
+                <Toaster position="bottom-right" closeButton />
+              </VoiceProvider>
             </AssistantProvider>
           </TooltipProvider>
         </ThemeProvider>

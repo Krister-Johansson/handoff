@@ -6,6 +6,8 @@ vi.mock("@/components/inbox-link", () => ({ InboxLink: () => <a href="/inbox">In
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
 vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => <button type="button">Assistant</button> }));
 vi.mock("@/components/worker-status", () => ({ WorkerStatus: () => null }));
+vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => null }));
+vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1/runs/r1" }));
 
 test("the top bar leads to projects, the inbox and the library; runs are reached through their project", () => {

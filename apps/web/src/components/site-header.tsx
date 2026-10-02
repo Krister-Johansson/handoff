@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { InboxLink } from "@/components/inbox-link";
 import { NavLink } from "@/components/nav-link";
 import { NotificationBell } from "@/components/notification-bell";
+import { VoiceButton } from "@/components/voice/voice-button";
+import { VoiceTranscript } from "@/components/voice/voice-transcript";
 import { WorkerStatus } from "@/components/worker-status";
 
 export function SiteHeader() {
@@ -24,6 +26,7 @@ export function SiteHeader() {
           <NavLink href="/library">Library</NavLink>
         </nav>
         <div className="ml-auto flex items-center gap-1">
+          <VoiceButton />
           <AssistantButton />
           <NotificationBell />
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground" asChild>
@@ -36,6 +39,7 @@ export function SiteHeader() {
           </span>
         </div>
       </div>
+      <VoiceTranscript />
     </header>
   );
 }

@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { readVoicePrefs, writeVoicePrefs, type VoicePrefs } from "@/lib/voice/prefs";
-import { detectVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
+import { useVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
 
 const LANGUAGES = [
   { value: "en-US", label: "English (US)" },
@@ -61,23 +61,14 @@ function useVoices(synth: SpeechSynthesis | undefined) {
   return useSyncExternalStore(subscribe, snapshot, () => NO_VOICES);
 }
 
-const NO_SUPPORT: VoiceSupport = { onDeviceCheck: false };
-let detected: VoiceSupport | undefined;
-const noSubscribe = () => () => {};
-/** This browser's voice support, detected once; nothing on the server. */
-const useDetectedSupport = () =>
-  useSyncExternalStore(
-    noSubscribe,
-    () => (detected ??= detectVoiceSupport(globalThis as never)),
-    () => NO_SUPPORT,
-  );
+
 
 /**
  * How this browser listens and speaks: the language, whether audio may go to Google's recognition
  * service, which replies and notifications are spoken, and the voice. Kept in this browser.
  */
 export function VoiceSettings({ support: given }: { support?: VoiceSupport }) {
-  const browser = useDetectedSupport();
+  const browser = useVoiceSupport();
   const support = given ?? browser;
   const [prefs, setPrefs] = useState<VoicePrefs>(readVoicePrefs);
   const voices = useVoices(support.synth);

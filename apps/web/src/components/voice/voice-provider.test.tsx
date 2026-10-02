@@ -1,0 +1,48 @@
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
+import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
+import { VoiceTestApp } from "./testing/voice-test-app";
+
+beforeEach(() => {
+  FakeSpeechRecognition.reset();
+  localStorage.clear();
+});
+
+test("start is refused while the speaker is active", async () => {
+  render(<VoiceTestApp speaking />);
+  fireEvent.click(screen.getByRole("button", { name: "Listen" }));
+  await act(async () => {});
+  expect(FakeSpeechRecognition.instances).toEqual([]);
+  expect(FakeSpeechRecognition.availableCalls).toEqual([]);
+});
+
+test("listening that starts in a text field dictates and keeps going until stopped", async () => {
+  render(<VoiceTestApp />);
+  const note = screen.getByLabelText("Note");
+  note.focus();
+  // The header button keeps focus where it was, so a click from a text field dictates into it.
+  const button = screen.getByRole("button", { name: "Listen" });
+  expect(fireEvent.mouseDown(button)).toBe(false);
+  fireEvent.click(button);
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
+  expect(FakeSpeechRecognition.instances[0]).toMatchObject({ continuous: true });
+  expect(note).toHaveFocus();
+});
+
+test("the strip folds away ten seconds after the last thing it showed", async () => {
+  vi.useFakeTimers();
+  try {
+    render(<VoiceTestApp />);
+    fireEvent.click(screen.getByRole("button", { name: "Listen" }));
+    await act(async () => {});
+    const recognizer = FakeSpeechRecognition.instances[0]!;
+    act(() => recognizer.emitStart());
+    act(() => recognizer.emitResult("hello", true));
+    act(() => recognizer.emitEnd());
+    expect(screen.getByRole("status", { name: "Voice" })).toHaveTextContent("Heard: hello");
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(screen.getByRole("status", { name: "Voice" })).toBeEmptyDOMElement();
+  } finally {
+    vi.useRealTimers();
+  }
+});
