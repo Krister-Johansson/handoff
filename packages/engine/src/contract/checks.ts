@@ -2,19 +2,13 @@ import { execFile, spawn } from "node:child_process";
 import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
 import { trackDescendants } from "@handoff/cli-adapter";
-import { memoryOf, passEnvProblem, pickEnv, redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
+import { extraPathsOf, memoryOf, passEnvProblem, pickEnv, redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
 
 const execFileAsync = promisify(execFile);
 const TAIL_LINES = 200;
 
 /** What a check may look at; `output` is the node's own output being checked, `nodeKey` the node that wrote it. */
 export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined; container?: string | undefined; output?: unknown; nodeKey?: string | undefined };
-
-/** The files a coder declared it had to change outside the plan, with a reason for each. */
-const extraPathsOf = (output: unknown): string[] => {
-  const extra = (output as { extraPaths?: unknown } | undefined)?.extraPaths;
-  return Array.isArray(extra) ? extra.flatMap((e) => (e && typeof (e as { path?: unknown }).path === "string" ? [(e as { path: string }).path] : [])) : [];
-};
 
 const COMMAND_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TERM"];
 
@@ -143,8 +137,8 @@ export async function runCheck(check: DeterministicCheck, ctx: CheckContext): Pr
       const files = await changedFiles(needWorkdir(check, ctx), ctx.baseBranch);
       if (owned.length === 0) return done(true, `no owned paths declared; ${files.length} files changed`);
       // Paths an earlier attempt of this node declared stay allowed: the branch still has them.
-      const remembered = ctx.nodeKey ? memoryOf(ctx.state, ctx.nodeKey).extraPaths.map((e) => e.path) : [];
-      const allowed = [...owned, ...remembered, ...extraPathsOf(ctx.output)];
+      const remembered = ctx.nodeKey ? memoryOf(ctx.state, ctx.nodeKey).extraPaths : [];
+      const allowed = [...owned, ...[...remembered, ...extraPathsOf(ctx.output)].map((e) => e.path)];
       const outside = files.filter((f) => !isOwned(f, allowed));
       return outside.length === 0
         ? done(true, `${files.length} changed files within owned paths`)
