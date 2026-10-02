@@ -25,7 +25,13 @@ import { projectsAccessProblem } from "./plan";
 export type SchedulerDeps = { db: Db; projects: ProjectsPort | undefined };
 
 /** The settings start_scheduler may change; each left out keeps its stored value, or its default when first turned on. */
-export type SchedulerSettings = { maxRuns?: number | undefined; order?: "project" | "priority" | undefined; graph?: string | undefined };
+export type SchedulerSettings = {
+  maxRuns?: number | undefined;
+  order?: "project" | "priority" | undefined;
+  graph?: string | undefined;
+  /** Tasks with this label are left to a person; null skips none, and an empty label is null. */
+  skipLabel?: string | null | undefined;
+};
 
 type Stored = Pick<ProjectSchedulerRow, "maxRuns" | "order" | "graphName" | "skipLabel">;
 
@@ -47,9 +53,10 @@ async function record(db: DbExecutor, projectId: string, type: string, payload: 
  * Turns the project's scheduler on, or resumes it, with the settings given; the others keep their
  * stored values. Records scheduler.started the first time and after it was off, scheduler.resumed
  * after a pause and scheduler.changed when the settings change, and brings the next check forward.
- * Refuses a project without a plan and a graph the project does not have.
+ * Refuses a project without a plan and a graph the project does not have. With `resume: false` a
+ * paused scheduler takes the settings and stays paused.
  */
-export async function startScheduler(deps: SchedulerDeps, projectId: string, settings: SchedulerSettings, actor: string) {
+export async function startScheduler(deps: SchedulerDeps, projectId: string, settings: SchedulerSettings, actor: string, opts: { resume?: boolean } = {}) {
   const { db } = deps;
   const project = await projectOf(db, projectId);
   if (project.isDemo) throw new Error(`${project.name} is a demo project: its runs are simulated, so the scheduler cannot start any.`);
@@ -70,15 +77,19 @@ export async function startScheduler(deps: SchedulerDeps, projectId: string, set
       throw new Error(`GitHub Project #${project.planProjectNumber} has no Priority field, so the scheduler cannot order tasks by priority. Add a single select field named Priority to the Project, or use Project order.`);
     }
   }
-  const next: Stored = { maxRuns: settings.maxRuns ?? stored?.maxRuns ?? 1, order: settings.order ?? stored?.order ?? "project", graphName, skipLabel: stored?.skipLabel ?? "human" };
+  const skipLabel = settings.skipLabel === undefined ? (stored ? stored.skipLabel : "human") : settings.skipLabel?.trim() || null;
+  const next: Stored = { maxRuns: settings.maxRuns ?? stored?.maxRuns ?? 1, order: settings.order ?? stored?.order ?? "project", graphName, skipLabel };
 
   await db.transaction(async (tx) => {
     const [before] = await tx.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId)).for("update");
-    const on = { enabled: true, maxRuns: next.maxRuns, order: next.order, graphName: next.graphName, pausedAt: null, pausedBy: null, pauseReason: null, startFailures: 0 };
+    // Saving settings of a paused scheduler keeps the pause when asked to; only a resume resumes.
+    const keepPause = opts.resume === false && before?.enabled === true && before.pausedAt !== null;
+    const unpause = keepPause ? {} : { pausedAt: null, pausedBy: null, pauseReason: null, startFailures: 0 };
+    const on = { enabled: true, maxRuns: next.maxRuns, order: next.order, graphName: next.graphName, skipLabel: next.skipLabel, ...unpause };
     await tx.insert(projectSchedulers).values({ projectId, ...on }).onConflictDoUpdate({ target: projectSchedulers.projectId, set: on });
     if (!before?.enabled) await record(tx, projectId, "scheduler.started", { by: actor, settings: settingsOf(next) });
     else {
-      if (before.pausedAt) await record(tx, projectId, "scheduler.resumed", { by: actor });
+      if (before.pausedAt && !keepPause) await record(tx, projectId, "scheduler.resumed", { by: actor });
       if (!same(before, next)) await record(tx, projectId, "scheduler.changed", { by: actor, from: settingsOf(before), to: settingsOf(next) });
     }
     // Turned on, resumed or changed: the next check comes now, or 10 seconds after the last.
@@ -103,6 +114,24 @@ export async function pauseScheduler(db: Db, projectId: string, actor: string, r
     await record(tx, projectId, "scheduler.paused", { by: actor, ...(reason ? { reason } : {}) });
     return { state: "paused" as const, reason: reason ?? null };
   });
+}
+
+/**
+ * Turns the project's scheduler off: it starts nothing and forgets its pause and its last check, and
+ * keeps its settings for the next time someone turns it on, which starts it as the first time did.
+ * Active runs go on. Turning off a scheduler that is off changes nothing.
+ */
+export async function stopScheduler(db: Db, projectId: string, actor: string) {
+  await db.transaction(async (tx) => {
+    const [row] = await tx.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId)).for("update");
+    if (!row?.enabled) return;
+    await tx
+      .update(projectSchedulers)
+      .set({ enabled: false, pausedAt: null, pausedBy: null, pauseReason: null, startFailures: 0, lastResult: null })
+      .where(eq(projectSchedulers.projectId, projectId));
+    await record(tx, projectId, "scheduler.stopped", { by: actor });
+  });
+  return { state: "off" as const };
 }
 
 export type SchedulerState = "off" | "paused" | "held" | "idle" | "running";
