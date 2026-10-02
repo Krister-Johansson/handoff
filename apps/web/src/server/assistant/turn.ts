@@ -6,7 +6,7 @@ import type { AssistantCall, Db } from "@handoff/db";
 import type { GitHubPort } from "@handoff/github";
 import { CATALOG } from "../../lib/assistant/catalog";
 import { getConversation, setConversationSession, storeMessage } from "./conversations";
-import { systemPromptFor } from "./prompt";
+import { SYSTEM_PROMPT, turnPrompt } from "./prompt";
 import type { AssistantConfig } from "./env";
 import { closeTurn, openTurn, type LiveTurn } from "./relay";
 import { APPROVE_TOOL, TOOL_PREFIX } from "./turn-mcp";
@@ -77,8 +77,8 @@ export async function startTurn(deps: TurnDeps, conversationId: string, input: {
     try {
       result = await deps.runner.run(
         {
-          prompt: input.text.trimStart().startsWith("-") ? ` ${input.text}` : input.text,
-          systemPrompt: systemPromptFor(input.source),
+          prompt: turnPrompt(input.text, input.source),
+          systemPrompt: SYSTEM_PROMPT,
           cwd,
           stagingDir: staging,
           mcpConfigPath,
