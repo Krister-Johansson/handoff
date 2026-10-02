@@ -27,6 +27,24 @@ test("a run row shows its task, what it is doing, graph version, branch, cost, s
   expect(within(row).getByText("running")).toBeInTheDocument();
 });
 
+test("a run the scheduler started carries the Scheduler tag", () => {
+  const lines = new Map<string, never>();
+  render(
+    <RunsTable
+      runs={[
+        { ...base, id: "r3", task: "Scheduled task", status: "queued", prNumber: null, startedBy: "scheduler" },
+        { ...base, id: "r4", task: "Started by hand", status: "queued", prNumber: null, startedBy: "dashboard" },
+      ]}
+      lines={lines}
+      repoUrl="https://github.com/o/r"
+      now={now}
+    />,
+  );
+  const [, scheduled, byHand] = screen.getAllByRole("row");
+  expect(within(scheduled!).getByText("Scheduler")).toBeInTheDocument();
+  expect(within(byHand!).queryByText("Scheduler")).not.toBeInTheDocument();
+});
+
 test("a run with a pull request links to it on GitHub", () => {
   const lines = new Map([["r2", { graph: "linear", version: 3, costUsd: 0, now: { tone: "success" as const, text: "Done. PR #48 merged." } }]]);
   render(<RunsTable runs={[{ ...base, id: "r2", task: "Scaffold", status: "succeeded", prNumber: 48 }]} lines={lines} repoUrl="https://github.com/o/r" now={now} />);

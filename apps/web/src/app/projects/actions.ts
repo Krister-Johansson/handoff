@@ -104,7 +104,7 @@ export async function startRunAction(_: ActionState, form: FormData): Promise<Ac
   if (issues.length === 0 && task.length < 5) return { ok: false, error: "Describe the task in a sentence, or link an issue.", values: { task, graphName } };
   let id: string;
   try {
-    id = (await startRunFromGraph(getDb(), { projectId, graphName, task, issues }, getGitHub(), getProjects())).id;
+    id = (await startRunFromGraph(getDb(), { projectId, graphName, task, issues, startedBy: "dashboard" }, getGitHub(), getProjects())).id;
   } catch (error) {
     return { ok: false, error: (error as Error).message, values: { task, graphName } };
   }
@@ -142,7 +142,7 @@ export async function unarchivePullAction(_: ActionState, form: FormData): Promi
 export async function runAgainAction(_: ActionState, form: FormData): Promise<ActionState> {
   let again: { id: string; projectId: string };
   try {
-    again = await runAgain(getDb(), field(form, "runId"), { projects: getProjects() });
+    again = await runAgain(getDb(), field(form, "runId"), { projects: getProjects(), startedBy: "dashboard" });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

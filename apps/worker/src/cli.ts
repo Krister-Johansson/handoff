@@ -165,6 +165,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
       graphVersionId: version.id,
       task,
       issues: issues.map(({ number, title, url, body }) => ({ number, title, url, body })),
+      startedBy: "cli",
     });
     out(`run ${run.id} queued on branch ${run.branchName}`);
     out(`${io.webUrl ?? "http://localhost:3000"}/projects/${project.id}/runs/${run.id}`);

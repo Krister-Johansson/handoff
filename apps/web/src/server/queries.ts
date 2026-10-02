@@ -19,6 +19,7 @@ export async function listRuns(db: DbExecutor, filter: RunFilter = {}, limit = 5
       task: runs.task,
       issues: runs.issues,
       status: runs.status,
+      startedBy: runs.startedBy,
       branchName: runs.branchName,
       prNumber: runs.prNumber,
       createdAt: runs.createdAt,

@@ -88,7 +88,7 @@ test("handoff run inserts a queued run and prints its id", async () => {
   await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
   await runCli(["run", "--project", "scratch", "--graph", "linear", "--task", "Add a CHANGELOG.md"], { db, out, github: null });
   const [run] = await db.select().from(runs);
-  expect(run).toMatchObject({ status: "queued", task: "Add a CHANGELOG.md" });
+  expect(run).toMatchObject({ status: "queued", task: "Add a CHANGELOG.md", startedBy: "cli" });
   expect(lines.some((l) => l.includes(run!.id))).toBe(true);
   expect(await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, run!.id))).toHaveLength(1);
 });
