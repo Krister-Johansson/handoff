@@ -47,10 +47,12 @@ test("startRun records startedBy on the run and in run.created", async () => {
   expect(events.find((e) => e.type === "run.created")?.payload).toMatchObject({ issues: [11], startedBy: "scheduler" });
 });
 
-test("startRun with the Project items already read applies the Ready gate without reading the Project again", async () => {
+const repo = { owner: "octo", name: "sample" };
+
+/** A project whose plan is the repository's GitHub Project; `task` adds a task in Ready to it. */
+async function planned() {
   const github = new FakeGitHub();
   const plan = new FakeProjects(github);
-  const repo = { owner: "octo", name: "sample" };
   const { number } = await plan.createProject("octo", repo, "sample plan");
   const { project } = await seedGraph(db, linear);
   await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
@@ -59,6 +61,11 @@ test("startRun with the Project items already read applies the Ready gate withou
     plan.itemsOf(repo).get(created)!.status = "Ready";
     return created;
   };
+  return { github, plan, number, project, task };
+}
+
+test("startRun with the Project items already read applies the Ready gate without reading the Project again", async () => {
+  const { github, plan, number, project, task } = await planned();
   const first = await task("Ready on the Project, Shaping in the items read");
   const second = await task("Ready in the items read");
   // The caller's read is what counts, whatever the Project says now.
@@ -70,4 +77,12 @@ test("startRun with the Project items already read applies the Ready gate withou
   await expect(start(second)).resolves.toMatchObject({ status: "queued" });
   expect(listItems).not.toHaveBeenCalled();
   expect(await plan.getStatus(repo, number, second)).toBe("Running");
+});
+
+test("a second start on a planned task its run moved to Running names the run, not the status", async () => {
+  const { github, plan, project, task } = await planned();
+  const ready = await task("Ready to build");
+  const start = () => startRun(db, { projectId: project.id, graphName: "g", task: "", issues: [ready], startedBy: "claude-code" }, { github, projects: plan });
+  const first = await start();
+  await expect(start()).rejects.toThrow(`#${ready} is taken by run ${first.id}, which is queued.`);
 });

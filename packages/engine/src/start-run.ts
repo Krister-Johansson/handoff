@@ -42,6 +42,9 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
     .limit(1);
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
+  const numbers = (input.issues ?? []).map((i) => (typeof i === "number" ? i : i.number));
+  // Checked first so a taken task names its run rather than the Running status its run gave it; checked again under the lock.
+  await refuseTaken(db, input.projectId, numbers);
   const issues = await linkIssues(input.issues ?? [], repo, github, plan);
   if (plan && project.planProjectNumber !== null && issues.length > 0 && !input.again) {
     refuseUnready(input.items ?? (await plan.listItems(repo.owner, project.planProjectNumber, repo)), issues);
@@ -52,7 +55,7 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   // Starts on one project take turns, so two starts (a person's and the scheduler's) cannot both take an issue.
   const run = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
-    await refuseTaken(tx, input.projectId, issues);
+    await refuseTaken(tx, input.projectId, numbers);
     return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
@@ -61,16 +64,16 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
 }
 
 /** An issue an active run links is taken: a second run on it would build the same work twice. */
-async function refuseTaken(db: DbExecutor, projectId: string, issues: LinkedIssue[]) {
+async function refuseTaken(db: DbExecutor, projectId: string, issues: number[]) {
   if (issues.length === 0) return;
   const active = await db
     .select({ id: runs.id, status: runs.status, issues: runs.issues })
     .from(runs)
     .where(and(eq(runs.projectId, projectId), inArray(runs.status, ["queued", "running", "waiting"])))
     .orderBy(desc(runs.createdAt));
-  for (const issue of issues) {
-    const taken = active.find((run) => run.issues.some((i) => i.number === issue.number));
-    if (taken) throw new Error(`#${issue.number} is taken by run ${taken.id}, which is ${taken.status}. Wait for it to end or cancel it to start another run on #${issue.number}.`);
+  for (const number of issues) {
+    const taken = active.find((run) => run.issues.some((i) => i.number === number));
+    if (taken) throw new Error(`#${number} is taken by run ${taken.id}, which is ${taken.status}. Wait for it to end or cancel it to start another run on #${number}.`);
   }
 }
 
