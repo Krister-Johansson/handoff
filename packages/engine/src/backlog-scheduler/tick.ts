@@ -44,6 +44,7 @@ export type CheckResult = {
 const ACTIVE = ["queued", "running", "waiting"] as const;
 const isActive = (status: string) => (ACTIVE as readonly string[]).includes(status);
 const CHECK_EVERY = "60 seconds";
+const NUDGE_FLOOR = "10 seconds";
 const PAUSE_AFTER = 3;
 const LEASE_MS = 120_000;
 
@@ -73,7 +74,8 @@ export async function checkProject(deps: CheckDeps, projectId: string): Promise<
 async function claim(db: DbExecutor, projectId: string, owner: string, leaseMs: number): Promise<ProjectSchedulerRow | undefined> {
   const [row] = await db
     .update(projectSchedulers)
-    .set({ leaseOwner: owner, leaseExpiresAt: sql`now() + make_interval(secs => ${leaseMs / 1000})` })
+    // Until the check ends, the next one is due when the lease runs out, so a nudge during the check shows as an earlier time.
+    .set({ leaseOwner: owner, leaseExpiresAt: sql`now() + make_interval(secs => ${leaseMs / 1000})`, nextCheckAt: sql`now() + make_interval(secs => ${leaseMs / 1000})` })
     .where(
       and(
         eq(projectSchedulers.projectId, projectId),
@@ -107,7 +109,8 @@ async function check(deps: CheckDeps, row: ProjectSchedulerRow): Promise<CheckRe
     .set({
       lastResult: result,
       lastCheckAt: sql`now()`,
-      nextCheckAt: sql`now() + interval '${sql.raw(CHECK_EVERY)}'`,
+      // A nudge during this check (a run ended meanwhile) is kept, 10 seconds after this check at the soonest.
+      nextCheckAt: sql`case when ${projectSchedulers.nextCheckAt} < ${projectSchedulers.leaseExpiresAt} then greatest(${projectSchedulers.nextCheckAt}, now() + interval '${sql.raw(NUDGE_FLOOR)}') else now() + interval '${sql.raw(CHECK_EVERY)}' end`,
       startFailures: failures,
       ...(pause ? { pausedAt: sql`now()`, pausedBy: "scheduler", pauseReason: pause } : {}),
     })

@@ -63,3 +63,36 @@ test("a project is checked again 60 seconds after its last check", async () => {
   expect(await checkDueProjects(p.deps)).toEqual([p.project.id]);
   expect(p.reads).toHaveBeenCalledTimes(2);
 });
+
+test("a nudge brings the check forward but never closer than 10 seconds after the last", async () => {
+  const p = await planned();
+  expect(await checkDueProjects(p.deps)).toEqual([p.project.id]);
+
+  // Right after a check, a burst of nudges brings the next one to 10 seconds after it.
+  await nudgeScheduler(db, p.project.id);
+  await nudgeScheduler(db, p.project.id);
+  expect(await p.gap()).toBe(10);
+  await p.elapse(9);
+  expect(await checkDueProjects(p.deps)).toEqual([]);
+  await p.elapse(1);
+  expect(await checkDueProjects(p.deps)).toEqual([p.project.id]);
+
+  // Later than 10 seconds after a check, a nudge makes the next check due at once.
+  await p.elapse(30);
+  await nudgeScheduler(db, p.project.id);
+  expect(await checkDueProjects(p.deps)).toEqual([p.project.id]);
+  expect(p.reads).toHaveBeenCalledTimes(3);
+});
+
+test("a nudge that lands during a check brings the next check to 10 seconds after it", async () => {
+  const p = await planned();
+  const read = p.plan.listItems.bind(p.plan);
+  // A run ends while the check reads the plan.
+  p.reads.mockImplementationOnce(async (...args) => {
+    await nudgeScheduler(db, p.project.id);
+    return read(...args);
+  });
+
+  expect(await checkDueProjects(p.deps)).toEqual([p.project.id]);
+  expect(await p.gap()).toBe(10);
+});
