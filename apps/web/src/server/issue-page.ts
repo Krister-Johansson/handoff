@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, projects, questions, runs, sql, type Db } from "@handoff/db";
-import { GitHubReadError, type GitHubPort, type IssueComment, type IssueDetail, type IssueRef, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
+import { GitHubReadError, type GitHubPort, type IssueComment, type IssueDetail, type IssueRef, type PlanProject, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
 import { reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
 import { waitingRuns } from "./overview";
@@ -92,6 +92,8 @@ export type FoundIssue = {
   blockedBy: IssueLink[];
   blocking: IssueLink[];
   comments: IssueComment[];
+  /** The issue's pull requests, or a story's or an epic's tasks', up to MAX_PULLS. */
+  pulls: IssuePull[];
   /** The token's user, "you" on the dashboard; undefined with a GitHub App. */
   viewer: string | undefined;
 };
@@ -102,6 +104,9 @@ export type FoundIssue = {
  * the latest run linked stands in, when a run linked it).
  */
 export type IssuePage = FoundIssue | { state: "not-found" } | { state: "pull-request"; url: string } | { state: "unreachable"; error: string; title: string | null };
+
+/** Snapshots read per page: an epic with many tasks would otherwise cost a GraphQL call per pull request. */
+const MAX_PULLS = 20;
 
 const NO_GITHUB = "Set GITHUB_TOKEN or a GitHub App for the dashboard to read the repository's issues.";
 
@@ -146,7 +151,9 @@ export async function loadIssuePage(
       : (placeIn(planned, number, { waiting, order }) ?? { planned: false, reason: undefined, error: undefined, project: planned.project });
   const statusOf = new Map("reason" in planned ? [] : planItems(planned).map((i) => [i.number, i.status] as const));
   const link = (ref: IssueRef): IssueLink => ({ ...ref, status: statusOf.get(ref.number) });
+  const pulls = await Promise.all(pullNumbers(place, opts.runs ?? (await issueRuns(db, projectId, number))).slice(0, MAX_PULLS).map((n) => pullOf(github, repo, n)));
   return {
+    pulls,
     state: "found",
     section: place.planned ? "plan" : "issues",
     kind: place.planned ? place.kind : "issue",
@@ -157,6 +164,53 @@ export async function loadIssuePage(
     comments,
     viewer,
   };
+}
+
+const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
+
+/** A pull request of the issue as GitHub has it now; title null and state unknown when GitHub did not answer for it. */
+export type IssuePull = {
+  number: number;
+  title: string | null;
+  url: string;
+  state: PrSnapshot["state"] | "unknown";
+  draft: boolean;
+  /** The head commit's rollup and how many checks passed, failed or have not finished; null before any check reports. */
+  checks: { state: string; passed: number; failed: number; pending: number } | null;
+  reviewDecision: PrSnapshot["reviewDecision"];
+};
+
+async function pullOf(github: GitHubPort, repo: RepoRef, number: number): Promise<IssuePull> {
+  try {
+    const pr = await github.getPrSnapshot(repo, number);
+    const contexts = pr.checks?.contexts ?? [];
+    const failed = contexts.filter((c) => c.conclusion !== null && FAILED.has(c.conclusion)).length;
+    const pending = contexts.filter((c) => c.conclusion === null).length;
+    return {
+      number,
+      title: pr.title,
+      url: pr.url,
+      state: pr.state,
+      draft: pr.draft,
+      checks: pr.checks ? { state: pr.checks.state, passed: contexts.length - failed - pending, failed, pending } : null,
+      reviewDecision: pr.reviewDecision,
+    };
+  } catch {
+    return { number, title: null, url: `https://github.com/${repo.owner}/${repo.name}/pull/${number}`, state: "unknown", draft: false, checks: null, reviewDecision: null };
+  }
+}
+
+/** The pull requests of the issue: those its runs opened, newest run first, then those GitHub links to it; for a story or an epic, its tasks'. */
+function pullNumbers(place: IssuePlace, runsOf: IssueRun[]): number[] {
+  const ofTask = (task: PlanTask) => [...(task.run?.prNumber ? [task.run.prNumber] : []), ...task.prNumbers];
+  const numbers = !place.planned
+    ? runsOf.flatMap((r) => (r.prNumber ? [r.prNumber] : []))
+    : place.kind === "task"
+      ? [...runsOf.flatMap((r) => (r.prNumber ? [r.prNumber] : [])), ...place.item.prNumbers]
+      : place.kind === "story"
+        ? place.item.tasks.flatMap(ofTask)
+        : [...place.item.stories.flatMap((s) => s.tasks), ...place.item.tasks].flatMap(ofTask);
+  return [...new Set(numbers)];
 }
 
 /** Every item of a plan once: epics, their stories, and every task. */

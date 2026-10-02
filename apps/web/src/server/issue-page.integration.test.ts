@@ -169,6 +169,30 @@ test("an epic lists its stories in GitHub's order and what waits: the open block
   expect(page.place.timeline?.items.map((i) => i.number).sort()).toEqual([epic, story, other].sort());
 });
 
+test("the pull requests of an issue come from its runs and GitHub's links, each with its state, checks and review decision; a story's are its tasks'", async () => {
+  const { project: p, github, plan, story, task, status } = await planned();
+  status(task, "Ready");
+  github.issues.get(6)!.state = "closed";
+  const run = await startRunFromGraph(db, { projectId: p.id, graphName: "linear", task: "", issues: [task] }, github, plan);
+  const pr = await github.createPr(repo, { head: run.branchName, base: "main", title: "Drag and drop on the board", body: "" });
+  await db.update(runs).set({ prNumber: pr.number }).where(eq(runs.id, run.id));
+  github.setChecks(pr.number, "FAILURE", [{ name: "test", jobId: 5 }]);
+  github.prs.get(pr.number)!.checks!.contexts.push({ name: "lint", status: "COMPLETED", conclusion: "SUCCESS", url: "u" }, { name: "e2e", status: "IN_PROGRESS", conclusion: null, url: "u" });
+  github.review(pr.number, "CHANGES_REQUESTED");
+  const linked = await github.createPr(repo, { head: "by-hand", base: "main", title: "Fix by hand", body: "" });
+  github.prs.get(linked.number)!.draft = true;
+  plan.itemsOf(repo).get(task)!.prNumbers = [linked.number];
+
+  const pulls = { number: pr.number, title: "Drag and drop on the board", url: pr.url, state: "open", draft: false, checks: { state: "FAILURE", passed: 1, failed: 1, pending: 1 }, reviewDecision: "CHANGES_REQUESTED" };
+  const page = await loadIssuePage(db, github, plan, p.id, task);
+  if (page.state !== "found") throw new Error(page.state);
+  expect(page.pulls).toEqual([pulls, expect.objectContaining({ number: linked.number, draft: true, checks: { state: "PENDING", passed: 0, failed: 0, pending: 0 } })]);
+
+  const storyPage = await loadIssuePage(db, github, plan, p.id, story);
+  if (storyPage.state !== "found") throw new Error(storyPage.state);
+  expect(storyPage.pulls.map((x) => x.number)).toEqual([pr.number, linked.number]);
+});
+
 test("a number GitHub does not know is not found, a pull request's number says so, and an unreachable GitHub keeps the title the latest run linked", async () => {
   const { project: p, github, start } = await project();
   expect(await loadIssuePage(db, github, undefined, p.id, 999)).toEqual({ state: "not-found" });
