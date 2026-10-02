@@ -7,7 +7,7 @@ import { eq, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "./executors/cli-node.ts";
 import { humanGateExecutor } from "./executors/human-gate.ts";
-import { answerQuestion } from "./operations.ts";
+import { answerQuestion, repairNodeExecution } from "./operations.ts";
 import { createRun } from "./runs.ts";
 import { createOriginRepo, git } from "./testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "./testing/harness.ts";
@@ -147,6 +147,29 @@ test("a path failure with another failing check fails as before", async () => {
   expect(coder).toMatchObject({ status: "failed", error: { code: "contract_failed" } });
   expect(await openQuestions(run.id)).toHaveLength(0);
   expect((await inspect(db, run.id)).run.status).toBe("failed");
+});
+
+test("repair with allowPaths adds the paths", async () => {
+  const cli = new FakeCliExecutor([coderWrites({ "CHANGELOG.md": "# Changelog\n", "notes.txt": "scratch\n" })]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsPass)));
+  await answerOpen(run.id, "fail");
+  await drain(deps);
+  const [failed] = await coders(run.id);
+
+  cli.push(coderWrites({ "CHANGELOG.md": "# Changelog\n\n- one\n", "notes.txt": "kept\n" }), { output: outputs.approve });
+  await repairNodeExecution(db, failed!.id, { note: "The notes file documents the release.", allowPaths: ["notes.txt"] });
+  await drain(deps);
+
+  const attempts = await coders(run.id);
+  expect(attempts.map((e) => [e.attempt, e.status])).toEqual([
+    [1, "repaired"],
+    [2, "passed"],
+  ]);
+  expect(attempts[1]!.checks).toEqual([expect.objectContaining({ kind: "diff_within_paths", passed: true })]);
+  expect(cli.requests[1]!.systemPrompt).toContain("`notes.txt`");
+  const { run: row } = await inspect(db, run.id);
+  expect(row.status).toBe("succeeded");
+  expect(row.state).toMatchObject({ memory: { coder: { extraPaths: [expect.objectContaining({ path: "notes.txt", attempt: 2, by: "person" })] } } });
 });
 
 test("Fail the step fails the attempt with the files outside the plan", async () => {
