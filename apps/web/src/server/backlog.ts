@@ -10,6 +10,20 @@ export type BacklogCounts = Record<BacklogFilter, number>;
 /** An issue is to do until a run works on it; a cancelled run gives it back. */
 export const isTodo = (issue: BacklogIssue) => issue.run === null || issue.run.status === "cancelled";
 
+/** The latest run that links each issue of a project, by issue number. */
+export async function latestRuns(db: Db, projectId: string): Promise<Map<number, BacklogRun>> {
+  const projectRuns = await db
+    .select({ id: runs.id, status: runs.status, prNumber: runs.prNumber, issues: runs.issues })
+    .from(runs)
+    .where(eq(runs.projectId, projectId))
+    .orderBy(desc(runs.createdAt));
+  const latest = new Map<number, BacklogRun>();
+  for (const run of projectRuns) {
+    for (const issue of run.issues) if (!latest.has(issue.number)) latest.set(issue.number, { id: run.id, status: run.status, prNumber: run.prNumber });
+  }
+  return latest;
+}
+
 /**
  * The repository's open issues, newest activity first, each with the latest run that links it. This
  * is the project's backlog: write issues on GitHub (by hand or with Claude Code), start runs here.
@@ -26,18 +40,7 @@ export async function listBacklog(
   if (!project) return { error: "Project not found." };
   if (project.isDemo) return { error: "The demo project has no GitHub issues." };
   if (!github) return { error: "Set GITHUB_TOKEN or a GitHub App for the dashboard to list the repository's issues." };
-  const [open, projectRuns] = await Promise.all([
-    github.listIssues({ owner: project.repoOwner, name: project.repoName }),
-    db
-      .select({ id: runs.id, status: runs.status, prNumber: runs.prNumber, issues: runs.issues })
-      .from(runs)
-      .where(eq(runs.projectId, projectId))
-      .orderBy(desc(runs.createdAt)),
-  ]);
-  const latest = new Map<number, BacklogRun>();
-  for (const run of projectRuns) {
-    for (const issue of run.issues) if (!latest.has(issue.number)) latest.set(issue.number, { id: run.id, status: run.status, prNumber: run.prNumber });
-  }
+  const [open, latest] = await Promise.all([github.listIssues({ owner: project.repoOwner, name: project.repoName }), latestRuns(db, projectId)]);
   // Issues that can start come first; blocked ones follow. Each part keeps GitHub's order (most recently updated first).
   const startable = (i: IssueSummary) => i.blockedBy.length === 0;
   const issues = [...open.filter(startable), ...open.filter((i) => !startable(i))].map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null }));
