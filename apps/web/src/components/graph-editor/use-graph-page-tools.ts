@@ -5,7 +5,7 @@ import { parseNodePatch } from "@/lib/assistant/page-tools";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { canConnect } from "@/lib/connect-rules";
 import type { LibraryChoices, LibraryKind } from "@/lib/library-choices";
-import type { EditorAction } from "./state";
+import { NODE_LABELS, nextNodeId, type EditorAction } from "./state";
 
 export type Selection = { nodeId?: string; edgeId?: string };
 
@@ -23,6 +23,8 @@ type Editor = {
   library: LibraryChoices;
   /** Saves the graph as its next version, as the Save button does. */
   saveVersion: () => Promise<{ version: number } | { error: string }>;
+  /** The middle of the view in graph coordinates, where the palette adds a node. */
+  centre: () => { x: number; y: number };
 };
 
 /** What a structural page tool answers while the editor is locked. */
@@ -101,7 +103,7 @@ function nodeChanges(graph: FlowGraph, node: FlowNode, patch: NodePatch): Editor
  * The graph editor's page tools: what the assistant or a browser agent can do on the open graph, the
  * same things the canvas and the inspector do, under the same lock.
  */
-export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion }: Editor) {
+export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion, centre }: Editor) {
   /** Refuses a change to the graph's structure while the editor is locked, as the canvas does. */
   const unlocked = () => {
     if (locked) throw new Error(LOCKED);
@@ -153,7 +155,14 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
       },
       page_rename_node: undefined,
       page_update_edge: undefined,
-      page_add_node: undefined,
+      page_add_node: ({ type, position }) => {
+        unlocked();
+        const start = graph.nodes.find((n) => n.data.nodeType === "start");
+        if (type === "start" && start) throw new Error(`The graph already has a Start node, ${start.id}.`);
+        const id = nextNodeId(graph, type);
+        edit({ type: "addNode", nodeType: type, position: position ? { x: Math.round(position.x), y: Math.round(position.y) } : centre() });
+        return `Added ${id} (${NODE_LABELS[type]}). The graph is not saved yet.`;
+      },
       page_connect: ({ source, target, port }) => {
         unlocked();
         const from = nodeOf(graph, source);

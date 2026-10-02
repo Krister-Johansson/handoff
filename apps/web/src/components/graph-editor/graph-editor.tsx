@@ -146,10 +146,14 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
     setSelection({ ...(n[0] ? { nodeId: n[0].id } : {}), ...(!n[0] && e[0] ? { edgeId: e[0].id } : {}) });
   }, []);
 
+  /** The middle of the window in graph coordinates, where a new node goes. */
+  const centre = () => {
+    const at = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    return { x: Math.round(at.x), y: Math.round(at.y) };
+  };
   const addNode = (nodeType: NodeType) => {
     if (locked) return;
-    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-    edit({ type: "addNode", nodeType, position: { x: Math.round(center.x), y: Math.round(center.y) } });
+    edit({ type: "addNode", nodeType, position: centre() });
   };
 
   /** Saves the graph as its next version; the error when the server refuses it. */
@@ -172,7 +176,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
       await saveVersion();
     });
 
-  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion });
+  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion, centre });
 
   const nextVersion = Math.max(version, ...versions.map((v) => v.version)) + 1;
 

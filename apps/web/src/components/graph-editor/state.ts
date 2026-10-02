@@ -38,6 +38,13 @@ function uniqueId(taken: Set<string>, base: string, first: number): string {
   return id;
 }
 
+/** The key a node added of this type gets: the type and the next free number. */
+export function nextNodeId(state: FlowGraph, nodeType: NodeType): string {
+  const taken = new Set(state.nodes.map((n) => n.id));
+  const count = state.nodes.filter((n) => n.data.nodeType === nodeType).length;
+  return uniqueId(taken, nodeType, count + 1);
+}
+
 /** A human gate's output that stands for "go on" in each mode. */
 const GO_ON = { approval: "approve", question: "answered", try: "approve" } as const;
 
@@ -105,9 +112,7 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
     case "addNode": {
       // A graph has at most one Start.
       if (action.nodeType === "start" && state.nodes.some((n) => n.data.nodeType === "start")) return state;
-      const taken = new Set(state.nodes.map((n) => n.id));
-      const count = state.nodes.filter((n) => n.data.nodeType === action.nodeType).length;
-      const id = uniqueId(taken, action.nodeType, count + 1);
+      const id = nextNodeId(state, action.nodeType);
       const isStart = state.nodes.length === 0 || action.nodeType === "start";
       const config = action.nodeType === "start" ? { trigger: "run" } : {};
       const node: FlowNode = {

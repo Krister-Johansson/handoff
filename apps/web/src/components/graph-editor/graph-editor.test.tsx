@@ -379,6 +379,40 @@ test("page_remove removes nodes and their edges", async () => {
   expect(nodeCount(container)).toBe(2);
 });
 
+test("while the graph is locked, page_connect, page_remove and page_add_node are refused, and selecting, reading, changing and saving still work", async () => {
+  vi.mocked(saveGraphAction).mockReset().mockResolvedValue({ ok: true, version: 5 });
+  const { call, container, whereAmI } = await withAssistant(reviewed);
+  const locked = { text: "The graph is locked; unlock it to change its structure.", isError: true };
+  expect((await whereAmI()).page!.state.data).toMatchObject({ locked: true });
+
+  expect(await call("page_connect", { source: "reviewer", target: "planner", port: "approve" })).toEqual(locked);
+  expect(await call("page_remove", { ids: ["reviewer"] })).toEqual(locked);
+  expect(await call("page_add_node", { type: "tester" })).toEqual(locked);
+  expect(nodeCount(container)).toBe(3);
+  expect(await edgesOf(whereAmI)).toHaveLength(3);
+  expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+
+  expect(await call("page_select", { node: "coder" })).toMatchObject({ isError: false });
+  expect(await call("page_get_node", { key: "coder" })).toMatchObject({ isError: false });
+  expect(await call("page_update_node", { key: "coder", patch: { label: "Build it" } })).toMatchObject({ isError: false });
+  expect(await call("page_save_graph")).toEqual({ text: "Saved plan-review as v5.", isError: false });
+  // The tools leave the lock as it was.
+  expect(screen.getByRole("button", { name: "Unlock editing" })).toBeInTheDocument();
+});
+
+test("page_add_node adds a node of a type once the graph is unlocked, at a position or in the middle of the view", async () => {
+  const { call, container, whereAmI } = await withAssistant(reviewed);
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
+  expect(await call("page_add_node", { type: "tester", position: { x: 900, y: 120 } })).toEqual({ text: "Added tester-1 (Tester). The graph is not saved yet.", isError: false });
+  expect(canvasNode(container, "tester-1")).not.toBeNull();
+  expect(await call("page_add_node", { type: "coder" })).toEqual({ text: "Added coder-2 (Coder). The graph is not saved yet.", isError: false });
+  expect(nodeCount(container)).toBe(5);
+  expect((await whereAmI()).page!.state.data.nodes).toContainEqual({ key: "tester-1", type: "tester", label: "Tester", isStart: false });
+  // A graph has one Start, as the palette says.
+  await call("page_add_node", { type: "start" });
+  expect(await call("page_add_node", { type: "start" })).toEqual({ text: "The graph already has a Start node, start-1.", isError: true });
+});
+
 test("page_save_graph is refused with the issues while the graph is invalid, and otherwise saves as the next version", async () => {
   vi.mocked(saveGraphAction).mockReset().mockResolvedValue({ ok: true, version: 5 });
   const { call } = await withAssistant(unconnected);
