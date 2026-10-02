@@ -9,6 +9,13 @@ test("a Demo node is a Claude step that reads the repository and drives a browse
   expect(portsOf("demo", {}).outputs.map((p) => [p.id, p.kind])).toEqual([["done", "continue"]]);
 });
 
+test("a Demo node set to UI changes also has a skipped port", () => {
+  expect(portsOf("demo", { when: "ui_changes" }).outputs.map((p) => [p.id, p.kind])).toEqual([
+    ["done", "continue"],
+    ["skipped", "continue"],
+  ]);
+});
+
 test("a demo's output is its screenshots, each with a caption and whether its criterion works", () => {
   const parsed = contractRegistry.demo_output.parse({
     summary: "Created a task and reloaded.",

@@ -24,6 +24,10 @@ export const projects = pgTable(
     setupCommand: text("setup_command"),
     /** A command run in a run's worktree just before handoff removes it, to drop what the setup command made. */
     teardownCommand: text("teardown_command"),
+    /** A command run in a run's worktree after the app's compose services start and before the app, for a Demo step: seeds data to show. */
+    demoSeedCommand: text("demo_seed_command"),
+    /** Globs of the files a person sees in the app. A Demo step set to UI changes skips a change that touches none. Null: the defaults. */
+    uiPaths: text("ui_paths").array(),
     /** Free text every agent step reads under "About this project's environment". Never secrets. */
     agentNotes: text("agent_notes"),
     /** The number of the repository owner's GitHub Project (v2) that holds this project's plan; null without a plan. */

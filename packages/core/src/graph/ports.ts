@@ -29,7 +29,8 @@ const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, Outp
   coder: [out("done", "done", { eq: ["node.output.status", "done"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
   reviewer: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "feedback")],
   code_review: [out("approve", "approve", { eq: ["node.output.verdict", "approve"] }), out("changes", "changes", { eq: ["node.output.verdict", "request_changes"] }, "feedback")],
-  demo: [out("done", "done")],
+  // A demo set to run only for UI changes leaves through skipped when the change touches no UI path.
+  demo: [out("done", "done", { neq: ["node.output.skipped", true] }), out("skipped", "skipped", { eq: ["node.output.skipped", true] })],
   tester: [out("pass", "pass", { eq: ["node.output.passed", true] }), out("fail", "fail", { eq: ["node.output.passed", false] }, "feedback")],
   pr: [
     out("ready", "ready", { all: [{ eq: ["node.output.feedback.ci.status", "success"] }, { neq: ["node.output.feedback.review.decision", "changes_requested"] }] }),
@@ -72,6 +73,8 @@ export function portsOf(type: string, config: Record<string, unknown>): NodePort
   if (type === "start") return { inputs: [], outputs: [out("run", "run")] };
   if (type === "finish") return { inputs: [IN], outputs: [] };
   const outputs = OUTPUTS[type as keyof typeof OUTPUTS] ?? [];
+  // Only a demo that runs for UI changes alone can be skipped.
+  if (type === "demo" && config.when !== "ui_changes") return { inputs: [IN], outputs: outputs.filter((p) => p.id !== "skipped") };
   return { inputs: [IN], outputs };
 }
 
@@ -100,9 +103,11 @@ export function withPorts(document: GraphDocument): GraphDocument {
     const plannerDone = source.type === "planner" && !edge.attributes.condition ? candidates.find((p) => p.id === "done") : undefined;
     // Likewise a merge edge from before merges could be sent back is the merged edge.
     const merged = source.type === "merge" && !edge.attributes.condition ? candidates.find((p) => p.id === "merged") : undefined;
+    // And a demo edge from before demos could be skipped is the done edge.
+    const demoDone = source.type === "demo" && !edge.attributes.condition ? candidates.find((p) => p.id === "done") : undefined;
     const earlier = EARLIER_CONDITIONS.find((c) => c.type === source.type && same(c.condition, edge.attributes.condition));
     const renamed = earlier && edge.attributes.on === "passed" ? candidates.find((p) => p.id === earlier.port) : undefined;
-    const port = plannerDone ?? merged ?? renamed ?? candidates.find((p) => p.on === edge.attributes.on && same(p.condition, edge.attributes.condition));
+    const port = plannerDone ?? merged ?? demoDone ?? renamed ?? candidates.find((p) => p.on === edge.attributes.on && same(p.condition, edge.attributes.condition));
     if (!port) return edge;
     if (port.id === "answered") questionGates.add(edge.source);
     const feedback = port.kind === "feedback";

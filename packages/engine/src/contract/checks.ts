@@ -97,7 +97,8 @@ export async function shell(
   });
 }
 
-async function changedFiles(workdir: string, baseBranch: string): Promise<string[]> {
+/** The files the run changed against its base: committed, uncommitted and untracked. */
+export async function changedFiles(workdir: string, baseBranch: string): Promise<string[]> {
   const git = async (args: string[]) => (await execFileAsync("git", args, { cwd: workdir })).stdout;
   const committed = (await git(["diff", "--name-only", `origin/${baseBranch}...HEAD`])).split("\n");
   const status = (await git(["status", "--porcelain=v1", "-uall"]))

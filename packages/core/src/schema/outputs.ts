@@ -108,6 +108,10 @@ export const DemoOutputSchema = z.object({
       artifactId: z.string().optional(),
     }),
   ),
+  /** Set by handoff, never the agent: the demo did not run, since the change touches no UI path. */
+  skipped: z.literal(true).optional(),
+  /** Why the demo was skipped. */
+  reason: z.string().optional(),
 });
 export type DemoOutput = z.infer<typeof DemoOutputSchema>;
 

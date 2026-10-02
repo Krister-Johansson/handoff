@@ -1,10 +1,11 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { DemoOutputSchema } from "@handoff/core";
+import { DemoOutputSchema, uiPathsOf } from "@handoff/core";
 import { screenshots, type Db } from "@handoff/db";
+import { changedFiles, isOwned } from "../contract/checks.ts";
 import type { MaterializedLibrary } from "../library/materialize.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
-import type { ExecutorOutcome, NodeExecutor } from "../types.ts";
+import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { cliNodeExecutor, type CliNodeOptions } from "./cli-node.ts";
 
 /** The Playwright MCP server, pinned so a release does not change the demo under a running project. */
@@ -28,6 +29,22 @@ function originsOf(url: string): string {
   return [...new Set([origin, origin.replace("//localhost", "//127.0.0.1")])].join(";");
 }
 
+const LISTED_FILES = 10;
+
+/**
+ * Why a demo set to UI changes (`config.when: "ui_changes"`) has nothing to show, or undefined when it
+ * runs: the change touches no file under the project's UI paths. A demo runs for every change by default.
+ */
+async function skipReason(ctx: ExecutorContext, workdir: string): Promise<string | undefined> {
+  if (ctx.node.config.when !== "ui_changes") return undefined;
+  const paths = uiPathsOf(ctx.project.uiPaths);
+  const files = await changedFiles(workdir, ctx.run.baseBranch);
+  if (files.some((file) => isOwned(file, paths))) return undefined;
+  if (!files.length) return "The change has no files, so there is nothing new to show in the app.";
+  const listed = files.slice(0, LISTED_FILES).join(", ") + (files.length > LISTED_FILES ? ` and ${files.length - LISTED_FILES} more` : "");
+  return `The change touches no file under the project's UI paths (${paths.join(", ")}), so there is nothing new to show in the app. It changes ${listed}.`;
+}
+
 /**
  * A Demo node: starts the run's app, then has Claude walk through each acceptance criterion in a
  * headless browser (the Playwright MCP server, which can only reach the app) and take screenshots.
@@ -40,6 +57,11 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
     needsWorkdir: true,
     async execute(ctx): Promise<ExecutorOutcome> {
       if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "a demo needs the run's worktree" } };
+      const reason = await skipReason(ctx, ctx.workdir.path);
+      if (reason) {
+        ctx.emit("demo.skipped", { reason });
+        return { kind: "completed", output: { summary: reason, shots: [], skipped: true, reason } };
+      }
       let preview;
       try {
         preview = await startPreview(
@@ -76,7 +98,8 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
         });
         if (outcome.kind !== "completed") return outcome;
 
-        const output = DemoOutputSchema.parse(outcome.output);
+        // Only handoff skips a demo: whatever the agent says, it walked through the app.
+        const { skipped: _skipped, reason: _reason, ...output } = DemoOutputSchema.parse(outcome.output);
         const dir = join(options.artifactsRoot, ctx.run.id, ctx.execution.id);
         mkdirSync(dir, { recursive: true });
         const kept: typeof output.shots = [];

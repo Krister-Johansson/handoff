@@ -1,15 +1,16 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { eq, previews, screenshots } from "@handoff/db";
+import { eq, previews, projects, screenshots } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import { stopWorkerPreviews } from "../preview/preview.ts";
+import { stopWorkerPreviews, type DockerExec } from "../preview/preview.ts";
 import { createRun } from "../runs.ts";
 import { createOriginRepo } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
-import { done, scripted } from "../testing/scripted.ts";
+import { done } from "../testing/scripted.ts";
+import type { NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { demoExecutor } from "./demo.ts";
 import { finishExecutor, startExecutor } from "./flow.ts";
@@ -40,9 +41,33 @@ const issue = { number: 5, title: "Tasks", url: "https://github.com/octo/sample/
 
 type McpConfig = { mcpServers: Record<string, { command: string; args: string[] }> };
 
-async function demoRun(cli: FakeCliExecutor, files: Record<string, string> = { ".claude/launch.json": launch, "app.js": app }) {
-  const origin = createOriginRepo(files);
-  const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+type DemoRunOptions = {
+  files?: Record<string, string>;
+  document?: unknown;
+  /** Files the coder writes in the worktree: the run's change. */
+  writes?: Record<string, string>;
+  project?: Partial<typeof projects.$inferInsert>;
+  docker?: DockerExec;
+};
+
+/** A coder that writes `writes` into the run's worktree, as the run's change. */
+function coderWriting(writes: Record<string, string>): NodeExecutor {
+  return {
+    needsWorkdir: true,
+    async execute(ctx) {
+      for (const [file, text] of Object.entries(writes)) {
+        mkdirSync(dirname(join(ctx.workdir!.path, file)), { recursive: true });
+        writeFileSync(join(ctx.workdir!.path, file), text);
+      }
+      return done({ status: "done", summary: "Built it" });
+    },
+  };
+}
+
+async function demoRun(cli: FakeCliExecutor, opts: DemoRunOptions = {}) {
+  const origin = createOriginRepo(opts.files ?? { ".claude/launch.json": launch, "app.js": app });
+  const { project, graphVersion } = await seedGraph(db, opts.document ?? graph, { localClonePath: origin });
+  if (opts.project) await db.update(projects).set(opts.project).where(eq(projects.id, project.id));
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Tasks", issues: [issue] });
   const artifactsRoot = mkdtempSync(join(tmpdir(), "handoff-artifacts-"));
   const deps = engineDeps(
@@ -50,13 +75,13 @@ async function demoRun(cli: FakeCliExecutor, files: Record<string, string> = { "
     {
       start: startExecutor(),
       finish: finishExecutor(),
-      coder: scripted(done({ status: "done", summary: "Built it" })),
-      demo: demoExecutor({ cli, maxTurns: 30, timeoutMs: 60_000, db, workerId: "test-worker", artifactsRoot }),
+      coder: coderWriting(opts.writes ?? {}),
+      demo: demoExecutor({ cli, maxTurns: 30, timeoutMs: 60_000, db, workerId: "test-worker", artifactsRoot, ...(opts.docker ? { docker: opts.docker } : {}) }),
     },
     { workerId: "test-worker", workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) },
   );
   await drain(deps);
-  return { run, artifactsRoot };
+  return { run, project, artifactsRoot };
 }
 
 test("a Demo step walks through the running app in a browser that can only reach it, and keeps its screenshots", async () => {
@@ -104,8 +129,40 @@ test("a Demo step walks through the running app in a browser that can only reach
 
 test("a Demo step fails, saying why, when the app does not start", async () => {
   const cli = new FakeCliExecutor([]);
-  const { run } = await demoRun(cli, { "README.md": "no launch file" });
+  const { run } = await demoRun(cli, { files: { "README.md": "no launch file" } });
   const demo = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "demo")!;
   expect(demo).toMatchObject({ status: "failed", error: { code: "preview_failed", message: expect.stringContaining(".claude/launch.json") } });
   expect(cli.requests).toHaveLength(0);
+});
+
+/** A demo that runs only for changes to the UI: a change with none leaves through skipped, to the end. */
+const uiGraph = {
+  attributes: { startNode: "start" },
+  nodes: [
+    { key: "start", attributes: { type: "start", config: { trigger: "run" } } },
+    { key: "coder", attributes: { type: "coder" } },
+    { key: "demo", attributes: { type: "demo", config: { when: "ui_changes" } } },
+    { key: "finish", attributes: { type: "finish" } },
+    { key: "shipped", attributes: { type: "finish" } },
+  ],
+  edges: [
+    { key: "start->coder", source: "start", target: "coder", attributes: { port: "run" } },
+    { key: "coder->demo", source: "coder", target: "demo", attributes: { port: "done" } },
+    { key: "demo->finish", source: "demo", target: "finish", attributes: { port: "done" } },
+    { key: "demo->shipped", source: "demo", target: "shipped", attributes: { port: "skipped" } },
+  ],
+};
+
+test("a change with no file under the UI paths leaves through skipped with the reason", async () => {
+  const cli = new FakeCliExecutor([]);
+  const { run } = await demoRun(cli, { document: uiGraph, writes: { "server/tasks.ts": "export const tasks = [];\n" } });
+  const { run: row, executions, events } = await inspect(db, run.id);
+  expect(row.status).toBe("succeeded");
+  expect(executions.map((e) => e.nodeKey)).toEqual(["start", "coder", "demo", "shipped"]);
+  const demo = executions.find((e) => e.nodeKey === "demo")!;
+  expect(demo.output).toMatchObject({ skipped: true, reason: expect.stringContaining("server/tasks.ts"), shots: [] });
+  expect(events.find((e) => e.type === "demo.skipped")?.payload).toEqual({ reason: (demo.output as { reason: string }).reason });
+  // Nothing started: no app, no agent.
+  expect(cli.requests).toHaveLength(0);
+  expect(await db.select().from(previews).where(eq(previews.runId, run.id))).toEqual([]);
 });
