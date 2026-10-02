@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
 import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type PlanStatus, type ProjectsPort, type RepoRef } from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, type Db } from "@handoff/db";
+import { nudgeScheduler } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
@@ -390,8 +391,11 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
         await closeLinkedIssues(deps.github, ctx, repo, number);
         // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless.
         await movePlan(deps.projects, ctx, "Done");
-        // Closed issues may unblock other runs of the project waiting at their Start.
-        if (db) await wakeDependents(db, ctx.project.id);
+        // Closed issues may unblock other runs of the project waiting at their Start, and tasks the scheduler may start.
+        if (db) {
+          await wakeDependents(db, ctx.project.id);
+          await nudgeScheduler(db, ctx.project.id);
+        }
         return done({ kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } });
       } catch (error) {
         return done({ kind: "failed", error: { code: "merge_failed", message: (error as Error).message } });

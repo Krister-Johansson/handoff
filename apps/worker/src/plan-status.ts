@@ -1,7 +1,8 @@
 import type { ProjectsPort } from "@handoff/github";
 
-const FIX = "Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).";
-const off = (why: string) => `The plan on GitHub Projects is off: ${why}. Runs record plan.skipped instead of moving their tasks. ${FIX}`;
+/** How a person gives the worker Projects access. */
+export const PROJECTS_FIX = "Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).";
+const off = (why: string) => `The plan on GitHub Projects is off: ${why}. Runs record plan.skipped instead of moving their tasks. ${PROJECTS_FIX}`;
 
 /**
  * The Projects port the worker writes task status with, checked once at start. Without GITHUB_TOKEN,

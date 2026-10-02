@@ -1,5 +1,6 @@
 import { eq, projects, type Db } from "@handoff/db";
 import { STATUS_OPTIONS, type GitHubPort, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
+import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import { recordPlanStatus } from "@handoff/engine/plan-status";
 import { latestRuns, type BacklogRun } from "./backlog.ts";
 import { projectsAccessProblem } from "./plan.ts";
@@ -254,6 +255,7 @@ export async function moveToReady(deps: ShapingDeps, projectId: string, issues: 
   const empty = bodies.find((b) => !b.body.trim());
   if (empty) throw new Error(`#${empty.issue} has no body. Write its brief first: the agents read it.`);
   await setStatuses(planned, issues, "Ready");
+  await nudgeScheduler(deps.db, projectId);
   return { moved: issues, status: "Ready" as const };
 }
 
