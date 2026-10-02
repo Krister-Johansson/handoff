@@ -933,6 +933,28 @@ test("setPlanFields writes Start, Target, Size and Estimate in one request after
   ]);
 });
 
+test("setPlanFields reports no-field and no-option and changes nothing", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssuePlan: (v) =>
+      v.number === 12
+        ? // Project #5 live: Status, Start and Target, no Size and no Estimate.
+          new GraphqlErrors(issuePlan(12, [{ id: "PVTI_5", project: planProject(5) }]), missingEstimateFields(itemProjectPath(0)))
+        : v.number === 13
+          ? // Project #1 live: a Size field with its own options and no S, M or L yet, and an Estimate that is text.
+            issuePlan(13, [{ id: "PVTI_1", project: { ...planProject(5), size: sizeField("🐋 X-Large", "🦑 Large", "🐂 Medium", "🐇 Small", "🦔 Tiny"), estimate: projectField("F_estimate", "TEXT") } }])
+          : issuePlan(14, [{ id: "PVTI_2", project: planProject(2) }]),
+  });
+  const projects = port(fetch);
+
+  // Start could be written, but Size cannot, so neither is.
+  expect(await projects.setPlanFields(repo, 5, 12, { start: "2026-10-06", size: "M" })).toBe("no-field");
+  expect(await projects.setPlanFields(repo, 5, 12, { estimate: null })).toBe("no-field");
+  expect(await projects.setPlanFields(repo, 5, 13, { target: "2026-10-07", size: "L" })).toBe("no-option");
+  expect(await projects.setPlanFields(repo, 5, 13, { estimate: 3 })).toBe("no-field");
+  expect(await projects.setPlanFields(repo, 5, 14, { size: "S" })).toBe("not-in-project");
+  expect(operations.map((o) => o.operation)).toEqual(["IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan", "IssuePlan"]);
+});
+
 test("setStatus still fails for an issue GitHub cannot resolve", async () => {
   const { fetch } = fakeGraphql({
     IssuePlan: (v) =>
