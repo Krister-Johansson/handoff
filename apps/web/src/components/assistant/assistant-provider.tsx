@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useEffectEvent, useM
 import { toolSpec } from "@/lib/assistant/catalog";
 import { isPageToolName } from "@/lib/assistant/page-tools";
 import { runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
-import { runUiTool } from "@/lib/assistant/run-ui-tool";
+import { pageDescriptor, runUiTool } from "@/lib/assistant/run-ui-tool";
 import { registerWebMcp } from "@/lib/assistant/webmcp";
 import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
 import type { AssistantPort, ChatMessage, PendingRequest, ReplyUpdate, ToolCallView } from "@/lib/assistant/port";
@@ -212,7 +212,8 @@ export function AssistantProvider({
         const id = conversationId ?? (await transport.create(message)).id;
         if (!conversationId) setConversationId(id);
         let text = "";
-        await transport.turn(id, message, opts?.source ?? "typed", (event) => {
+        // The page the person asks on goes with the message, so the turn offers that page's tools.
+        await transport.turn(id, message, source, pageDescriptor(openPage()), (event) => {
           if (event.type === "turn") {
             turnId.current = event.turnId;
             return;

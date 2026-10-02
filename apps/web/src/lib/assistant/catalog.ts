@@ -407,7 +407,7 @@ export function toolSpec(name: string): ToolSpec | PageToolSpec {
 }
 
 /** The MCP annotations a tool's spec implies. */
-export function annotationsOf(spec: ToolSpec) {
+export function annotationsOf(spec: ToolSpec | PageToolSpec) {
   return {
     title: spec.title,
     readOnlyHint: spec.readOnly,

@@ -1,4 +1,5 @@
 import type { AssistantContent } from "@handoff/db";
+import type { PageDescriptor } from "./page-tools";
 import type { TurnEvent } from "@/server/assistant/relay";
 
 /** What a turn's stream carries: the turn's id first, then its events. */
@@ -13,8 +14,11 @@ export type AssistantTransport = {
   list(): Promise<ConversationSummary[]>;
   create(text: string): Promise<ConversationSummary>;
   load(id: string): Promise<StoredConversation>;
-  /** Starts a turn and calls `onEvent` for each event of its stream; settles when the stream ends. */
-  turn(conversationId: string, text: string, source: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void>;
+  /**
+   * Starts a turn, with the page the person asks on when it has tools of its own, and calls `onEvent`
+   * for each event of its stream; settles when the stream ends.
+   */
+  turn(conversationId: string, text: string, source: string, page: PageDescriptor | undefined, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void>;
   reply(turnId: string, requestId: string, decision: { approved: boolean; note?: string }): Promise<void>;
   /** The page's answer to a UI tool call. */
   uiReply(turnId: string, requestId: string, result: { text: string; isError: boolean }): Promise<void>;
@@ -53,8 +57,8 @@ export const httpTransport: AssistantTransport = {
   list: async () => json(await fetch("/api/assistant/conversations")),
   create: async (text) => json(await post("/api/assistant/conversations", { text })),
   load: async (id) => json(await fetch(`/api/assistant/conversations/${id}`)),
-  async turn(conversationId, text, source, onEvent, signal) {
-    const response = await post(`/api/assistant/conversations/${conversationId}/turns`, { text, source }, signal);
+  async turn(conversationId, text, source, page, onEvent, signal) {
+    const response = await post(`/api/assistant/conversations/${conversationId}/turns`, { text, source, ...(page ? { page } : {}) }, signal);
     if (!response.ok || !response.body) {
       const error = ((await response.json().catch(() => ({}))) as { error?: string }).error;
       onEvent({ type: "error", message: error ?? `The dashboard answered ${response.status}.` });

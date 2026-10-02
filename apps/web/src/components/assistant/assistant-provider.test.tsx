@@ -150,6 +150,28 @@ test("where_am_i lists the page's tools and its state as data", async () => {
   });
 });
 
+test("a message sent on a page carries the page's kind, path, heading and bound tools to the turn", async () => {
+  window.history.replaceState(null, "", "/projects/p1/runs/r1?tab=steps");
+  const { transport, port, leavePage } = setupWithPage();
+  act(() => void port().send("open graph view"));
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  expect(transport.turns[0]).toEqual({
+    conversationId: "c1",
+    text: "open graph view",
+    source: "typed",
+    page: { kind: "run", path: "/projects/p1/runs/r1?tab=steps", heading: "Add a CHANGELOG.md", tools: ["page_show_view"] },
+  });
+  act(() => transport.emit({ type: "done", text: "Done." }));
+
+  // On a page without tools the turn carries no page.
+  leavePage();
+  await waitFor(() => expect(port().status).toBe("idle"));
+  act(() => void port().send("what needs me"));
+  await waitFor(() => expect(transport.turns).toHaveLength(2));
+  expect(transport.turns[1]).toEqual({ conversationId: "c1", text: "what needs me", source: "typed" });
+  window.history.replaceState(null, "", "/");
+});
+
 test("onRequest delivers approval requests and respond answers them", async () => {
   const { transport, port } = setup();
   const requests: PendingRequest[] = [];

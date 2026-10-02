@@ -199,6 +199,83 @@ test("a UI tool the model calls is sent to the browser and its answer returned t
   expect(argv[argv.indexOf("--allowedTools") + 1]).toContain("mcp__handoff__go_to_inbox");
 });
 
+const runPage = { kind: "run" as const, path: "/projects/p1/runs/r1", heading: "Add a CHANGELOG.md", tools: ["page_show_view", "page_open_step"] };
+const tryPage = { kind: "try" as const, path: "/projects/p1/runs/r1/try/q1", heading: "Try it", tools: ["page_mark_criterion", "page_submit", "page_restart_app"] };
+
+test("a page tool the model calls is sent to the browser as a ui_call and its answer returned", async () => {
+  const d = deps({ lines: [lines.init(), { $mcp: { tool: "page_show_view", arguments: { view: "graph" } } }, lines.result()] });
+  const conversation = await createConversation(db, "Open graph view");
+  const turn = await startTurn(d, conversation.id, { text: "Open graph view", source: "typed", page: runPage });
+  const events: TurnEvent[] = [];
+  turn.subscribe((e) => {
+    events.push(e);
+    if (e.type === "ui_call") setTimeout(() => turn.answerUi(e.requestId, { text: "Showing the graph view.", isError: false }), 20);
+  });
+  await turn.done;
+  expect(events.filter((e) => e.type === "ui_call")).toEqual([{ type: "ui_call", requestId: expect.any(String), name: "page_show_view", args: { view: "graph" } }]);
+  expect(events.find((e) => e.type === "tool_call")).toMatchObject({ name: "page_show_view", title: "Show a view", summary: "Show the graph view" });
+  expect(events.find((e) => e.type === "tool_result")).toMatchObject({ isError: false, result: "Showing the graph view." });
+  // The model was told which page it is on, in the person's message.
+  const argv = d.fake.invocations()[0]!.argv;
+  expect(argv[argv.indexOf("-p") + 1]).toBe(
+    '<page path="/projects/p1/runs/r1" kind="run" heading="Add a CHANGELOG.md">\nTools of this page: page_show_view, page_open_step. Call where_am_i for its state.\n</page>\nOpen graph view',
+  );
+});
+
+test("a confirm page tool waits for the person's approval and runs only after it", async () => {
+  const step = { $mcp: { tool: "page_submit", arguments: { option: "approve" }, approve: true } };
+  const d = deps({ lines: [lines.init(), step, step, lines.result()] });
+  const conversation = await createConversation(db, "Approve it");
+  const turn = await startTurn(d, conversation.id, { text: "Approve it", source: "typed", page: tryPage });
+  const events: TurnEvent[] = [];
+  let cards = 0;
+  turn.subscribe((e) => {
+    events.push(e);
+    // The person approves the first card and denies the second.
+    if (e.type === "confirm") {
+      const approved = ++cards === 1;
+      setTimeout(() => turn.answer(e.requestId, approved ? { approved } : { approved, note: "Not yet." }), 20);
+    }
+    if (e.type === "ui_call") setTimeout(() => turn.answerUi(e.requestId, { text: "Approved. The run goes on.", isError: false }), 20);
+  });
+  await turn.done;
+  expect(events.find((e) => e.type === "confirm")).toMatchObject({ name: "page_submit", title: "Submit Try it", summary: "Approve the app", args: { option: "approve" } });
+  // The page runs the tool once, after the approval, and never after the denial.
+  expect(events.map((e) => e.type).filter((t) => ["confirm", "confirmed", "ui_call"].includes(t))).toEqual(["confirm", "confirmed", "ui_call", "confirm", "confirmed"]);
+  const results = events.filter((e) => e.type === "tool_result");
+  expect(results[0]).toMatchObject({ isError: false, result: "Approved. The run goes on." });
+  expect(results[1]).toMatchObject({ isError: true, result: expect.stringContaining("Not yet.") });
+});
+
+test("the page's non-confirm tools are in --allowedTools and its confirm tools are not", async () => {
+  const d = deps({ lines: [lines.init(), lines.result()] });
+  const conversation = await createConversation(db, "Hi");
+  const turn = await startTurn(d, conversation.id, { text: "Hi", source: "typed", page: tryPage });
+  await turn.done;
+  const argv = d.fake.invocations()[0]!.argv;
+  const allowed = argv[argv.indexOf("--allowedTools") + 1]!.split(",");
+  expect(allowed).toEqual(expect.arrayContaining(["mcp__handoff__list_runs", "mcp__handoff__where_am_i", "mcp__handoff__page_mark_criterion"]));
+  expect(allowed).not.toContain("mcp__handoff__page_submit");
+  expect(allowed).not.toContain("mcp__handoff__page_restart_app");
+  // Tools the page did not bind are not allowed either.
+  expect(allowed).not.toContain("mcp__handoff__page_go_to_criterion");
+  expect(allowed.filter((t) => t.includes("page_"))).toEqual(["mcp__handoff__page_mark_criterion"]);
+});
+
+test("the person's message is stored with the page it was asked on", async () => {
+  const conversation = await createConversation(db, "Open graph view");
+  const onPage = await startTurn(deps({ lines: [lines.init(), lines.result()] }), conversation.id, { text: "Open graph view", source: "voice", page: runPage });
+  await onPage.done;
+  const elsewhere = await startTurn(deps({ lines: [lines.init(), lines.result()] }), conversation.id, { text: "What failed?", source: "typed" });
+  await elsewhere.done;
+  const asked = (await conversationMessages(db, conversation.id)).filter((m) => m.role === "user").map((m) => m.content);
+  // The stored message is the person's own text; the page is kept as its kind and path only.
+  expect(asked).toEqual([
+    { text: "Open graph view", source: "voice", page: { kind: "run", path: "/projects/p1/runs/r1" } },
+    { text: "What failed?", source: "typed" },
+  ]);
+});
+
 test("stopping a turn denies its open approvals and stores the turn as interrupted", async () => {
   const run = await sandboxRun();
   const d = deps({ lines: [lines.init(), delta("On it. "), { $mcp: { tool: "cancel_run", arguments: { run_id: run.id }, approve: true } }], hangAfterLine: 3 });
