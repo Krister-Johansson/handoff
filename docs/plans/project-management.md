@@ -428,13 +428,13 @@ Each PR is one GitHub issue, one branch, CI green, `pnpm doctor:react` clean aft
 
 ## Open questions
 
-Each with a recommended answer. Unanswered, the implementation takes the recommendation. Questions 1, 3 and 7 were answered by the user on 2026-10-02.
+Each with a recommended answer. Unanswered, the implementation takes the recommendation. Questions 1, 3, 5 and 7 were answered by the user on 2026-10-02.
 
 1. Should handoff create the GitHub Project (`setup_plan`) or should the person create it on GitHub and give handoff its number? Decided: setup asks first. It lists the person's existing Projects (those linked to the repository first) to use one, and creates a new Project when none exists or the person chooses "Create a new Project". Either way runs behind one approval card.
 2. Kind marker: the labels `epic`, `story`, `task`, or depth only? Recommended: labels, with depth as the fallback (Decision 1).
 3. Where do failed runs show on the board? Decided (to try): in Running with a red "failed" badge and the repair link, not a sixth column.
 4. Should unplanned issues stay startable with a plan in place? Recommended: yes, marked unplanned, so bug fixes do not need shaping; "Plan it" moves them into the plan when wanted.
-5. Should a person dragging a Running task to Ready on GitHub cancel its run? Recommended: no; a board move never changes a run. The card shows the run and the next transition writes the status back.
+5. Should a person dragging a Running task to Ready on GitHub cancel its run? Decided by the user on 2026-10-02: no; a running task keeps running. A board move never changes a run. The card shows the run and the next transition writes the status back.
 6. Should handoff set a story's and an epic's Status to Done when all their tasks are done? Recommended: not in v1; progress is derived and shown; a later PR can add it once the shape of stories in practice is known.
 7. Should the Plan be a project tab or a top-level page across projects? Decided: its own page per project at `/projects/<id>/plan`, linked from a "Plan" entry in the project page's tab bar; a cross-project view can be added later.
 8. Should Ready tasks of a story be released one at a time (the story's tasks run in order through blocked-by) or all at once? Recommended: all at once by default; `create_task` takes `blocked_by` so the shaping conversation decides the order, and the backlog already respects it.
