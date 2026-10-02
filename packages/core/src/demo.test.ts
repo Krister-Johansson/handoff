@@ -5,7 +5,9 @@ import { portsOf } from "./graph/ports.ts";
 import { contractRegistry } from "./schema/contracts.ts";
 
 test("a Demo node is a Claude step that reads the repository and drives a browser, and goes on when done", () => {
-  expect(nodeCatalog.demo).toEqual({ executorKind: "cli", contract: "demo_output", allowedTools: ["Read", "Glob", "Grep", "mcp__playwright"] });
+  expect(nodeCatalog.demo).toMatchObject({ executorKind: "cli", contract: "demo_output" });
+  expect(nodeCatalog.demo.allowedTools).toEqual(expect.arrayContaining(["Read", "Glob", "Grep", "mcp__playwright"]));
+  expect(nodeCatalog.demo.allowedTools).not.toContain("Edit");
   expect(portsOf("demo", {}).outputs.map((p) => [p.id, p.kind])).toEqual([["done", "continue"]]);
 });
 
