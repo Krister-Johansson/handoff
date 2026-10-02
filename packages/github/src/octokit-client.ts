@@ -1,6 +1,7 @@
 import { App, Octokit } from "octokit";
 import { z } from "zod";
-import { PullRequestSnapshotDocument, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
+import { IssueParentsDocument, PullRequestSnapshotDocument, type IssueParentsQuery, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
+import { ancestorsOf } from "./projects/lineage.ts";
 import type { CheckContext, GitHubPort, IssueDetail, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
@@ -143,10 +144,20 @@ export class OctokitGitHub implements GitHubPort {
     await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by", { owner: repo.owner, repo: repo.name, issue_number: issue, issue_id: data.id });
   }
 
-  async getIssue(repo: RepoRef, number: number): Promise<IssueDetail> {
+  async getIssue(repo: RepoRef, number: number, opts: { parents?: boolean } = {}): Promise<IssueDetail> {
     const octokit = await this.clientFor(repo);
-    const { data } = await octokit.rest.issues.get({ owner: repo.owner, repo: repo.name, issue_number: number });
-    return { number: data.number, title: data.title, url: data.html_url, body: data.body ?? "", state: data.state === "closed" ? "closed" : "open" };
+    const [{ data }, parents] = await Promise.all([
+      octokit.rest.issues.get({ owner: repo.owner, repo: repo.name, issue_number: number }),
+      opts.parents ? this.parentsOf(octokit, repo, number) : undefined,
+    ]);
+    const issue: IssueDetail = { number: data.number, title: data.title, url: data.html_url, body: data.body ?? "", state: data.state === "closed" ? "closed" : "open" };
+    return parents ? { ...issue, parents } : issue;
+  }
+
+  /** An issue's parent and grandparent through GraphQL: the sub-issue relation needs no Project access. */
+  private async parentsOf(octokit: Octokit, repo: RepoRef, number: number) {
+    const { repository } = await octokit.graphql<IssueParentsQuery>(IssueParentsDocument.toString(), { owner: repo.owner, name: repo.name, number });
+    return repository?.issue ? ancestorsOf(repository.issue) : [];
   }
 
   async closeIssue(repo: RepoRef, number: number, comment: string): Promise<void> {

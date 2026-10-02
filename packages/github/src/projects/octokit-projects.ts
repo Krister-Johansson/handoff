@@ -28,20 +28,12 @@ import {
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
 import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "./kinds.ts";
+import { ancestorsOf, depthOf, present } from "./lineage.ts";
 import type { PlanAncestor, PlanItem, PlanKind, PlanProject, PlanStatus, ProjectsPort, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
 type GqlItem = NonNullable<NonNullable<NonNullable<PlanItemsQuery["user"]>["projectV2"]>["items"]["nodes"]>[number];
-
-const present = <T>(items: readonly (T | null | undefined)[] | null | undefined): T[] => (items ?? []).filter((x): x is T => x != null);
-
-/** How many ancestors a parent chain has, counted up to three. */
-function depthOf(parent: { parent?: { parent?: unknown } | null } | null | undefined): number {
-  let depth = 0;
-  for (let p: { parent?: unknown } | null | undefined = parent; p && depth < 3; p = p.parent as typeof p) depth++;
-  return depth;
-}
 
 /** ProjectsPort over Octokit with a classic personal token: GitHub Apps cannot reach user-owned Projects. */
 export class OctokitProjects implements ProjectsPort {
@@ -171,11 +163,7 @@ export class OctokitProjects implements ProjectsPort {
 
   async lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
     const { issue: found } = await this.issuePlan(repo, undefined, issue);
-    const parent = found.parent;
-    const grandparent = parent?.parent;
-    return [parent, grandparent].flatMap((p) =>
-      p ? [{ number: p.number, title: p.title, body: p.body, kind: kindOf(present(p.labels?.nodes).map((l) => l.name), p.issueType?.name, depthOf(p.parent)) }] : [],
-    );
+    return ancestorsOf(found);
   }
 
   private async issueNodeId(repo: RepoRef, number: number): Promise<string> {

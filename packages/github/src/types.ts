@@ -1,3 +1,5 @@
+import type { PlanAncestor } from "./projects/types.ts";
+
 export type RepoRef = { owner: string; name: string; installationId?: number | null | undefined };
 
 export type PrInfo = { number: number; url: string; headSha: string };
@@ -49,12 +51,21 @@ export type RepoSummary = {
 
 /** An open issue; `blockedBy` lists the open issues GitHub records as blocking it. */
 export type IssueSummary = { number: number; title: string; url: string; labels: string[]; author: string | null; updatedAt: string; blockedBy: number[] };
-export type IssueDetail = { number: number; title: string; url: string; body: string; state: "open" | "closed" };
+export type IssueDetail = {
+  number: number;
+  title: string;
+  url: string;
+  body: string;
+  state: "open" | "closed";
+  /** The parent and the grandparent, nearest first; read only when `getIssue` is asked for them. */
+  parents?: PlanAncestor[];
+};
 
 export interface GitHubPort {
   /** Open issues of a repository (not pull requests), most recently updated first, up to 100. */
   listIssues(repo: RepoRef): Promise<IssueSummary[]>;
-  getIssue(repo: RepoRef, number: number): Promise<IssueDetail>;
+  /** An issue; with `parents`, also its parent chain from GitHub's sub-issues, which needs no Project access. */
+  getIssue(repo: RepoRef, number: number, opts?: { parents?: boolean }): Promise<IssueDetail>;
   /** A file's text on a branch, or undefined when there is no such file. */
   getFile(repo: RepoRef, path: string, ref: string): Promise<string | undefined>;
   /** The open issues GitHub records as blocking this one (its "blocked by" dependencies). */
