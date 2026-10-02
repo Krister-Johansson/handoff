@@ -379,6 +379,25 @@ test("a review gate lists approve, changes and fix, and answer_question refuses 
   expect((await db.select().from(questions).where(eq(questions.id, question!.id)))[0]).toMatchObject({ option: "fix", answeredBy: "claude-code" });
 });
 
+test("answer_question with split accepts a planner's split: the later parts' issues open and the run narrows to the first", async () => {
+  const runId = await startedRun();
+  const gate = await seedExecution(db, runId, { nodeKey: "plan_gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const parts = [
+    { title: "Show todos as a board", body: "A board with a column per status.", ownedPaths: ["src/board.tsx"] },
+    { title: "Drag todos between columns", body: "Drag a card to change its status.", ownedPaths: ["src/drag.ts"] },
+  ];
+  const [question] = await db
+    .insert(questions)
+    .values({ runId, nodeExecutionId: gate.id, question: "Review the split from planner", options: ["split", "changes"], context: { reason: "approval", review: { from: "planner", kind: "split", markdown: "" }, split: { parts } } })
+    .returning();
+  expect(await call("answer_question", { question_id: question!.id, answer: "Split it.", option: "split" })).toMatchObject({ answered: true, run_id: runId });
+  const opened = [...github.issues.values()].find((i) => i.title === "Drag todos between columns");
+  expect(opened?.body).toContain("Drag a card to change its status.");
+  const [run] = await db.select({ task: runs.task }).from(runs).where(eq(runs.id, runId));
+  expect(run?.task).toBe("Show todos as a board\n\nA board with a column per status.");
+  expect((await db.select().from(questions).where(eq(questions.id, question!.id)))[0]).toMatchObject({ option: "split", answeredBy: "claude-code" });
+});
+
 test("answer_question takes a verdict per criterion at a Try it gate", async () => {
   const runId = await startedRun();
   const context = { reason: "try", acceptance: ["A user can create a task", "A task survives a reload"] };

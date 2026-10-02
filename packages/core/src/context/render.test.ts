@@ -259,3 +259,51 @@ test("the packet names the run's branch, whether setup ran, and the project's ag
   expect(bare).toContain("The project has no setup command, so nothing was installed in this worktree");
   expect(bare).not.toContain("# About this project's environment");
 });
+
+test("the planner's packet has the size budget, the other active runs' owned paths, the open handoff PRs' files and the issue comments", () => {
+  const long = "x".repeat(3_970);
+  const md = renderContextPacket({
+    ...packet,
+    nodeKey: "planner",
+    outputContract: "planner_output",
+    budget: { files: 15, steps: 12, canSplit: true },
+    otherWork: {
+      runs: [{ runId: "r2", task: "Add tags", branch: "handoff/add-tags-1234abcd", issues: [{ number: 7, title: "Add tags" }], ownedPaths: ["src/tags.ts", "src/db/schema.ts"] }],
+      pulls: [{ runId: "r3", task: "Dark mode", issues: [], number: 41, url: "https://github.com/octo/sample/pull/41", branch: "handoff/dark-mode-9f8e7d6c", files: ["src/theme.css", "src/app.tsx"] }],
+    },
+    issues: [
+      {
+        number: 12,
+        title: "Add a board",
+        url: "https://github.com/octo/sample/issues/12",
+        body: "Show the todos as a board.",
+        comments: [
+          { author: "krister", createdAt: "2026-10-02T10:00:00Z", body: "Keep the list view too." },
+          { author: "ann", createdAt: "2026-10-01T10:00:00Z", body: long },
+          { author: "bob", createdAt: "2026-09-30T10:00:00Z", body: "The oldest comment." },
+        ],
+      },
+    ],
+  });
+
+  const budget = md.split("# Size budget")[1]!.split("\n# ")[0]!;
+  expect(budget).toContain("at most 15 files in ownedPaths and 12 steps");
+  expect(budget).toContain("return status `split` with parts");
+
+  const other = md.split("# Other work on this project")[1]!.split("\n# ")[0]!;
+  expect(other).toContain("`handoff/add-tags-1234abcd` (#7 Add tags) owns `src/tags.ts`, `src/db/schema.ts`");
+  expect(other).toContain("#41 on `handoff/dark-mode-9f8e7d6c` changes `src/theme.css`, `src/app.tsx`");
+
+  const issue = md.split("## #12 Add a board")[1]!.split("\n# ")[0]!;
+  expect(issue).toContain("### Comments, newest first");
+  expect(issue.indexOf("Keep the list view too.")).toBeLessThan(issue.indexOf(long));
+  // The comments have the same 4,000-character budget as a body: the oldest one no longer fits.
+  expect(issue).not.toContain("The oldest comment.");
+  expect(issue).toContain("(1 older comment cut at 4000 characters)");
+
+  const unsplittable = renderContextPacket({ ...packet, budget: { files: 15, steps: 12, canSplit: false } });
+  expect(unsplittable).toContain("# Size budget");
+  expect(unsplittable).not.toContain("`split`");
+  expect(renderContextPacket(packet)).not.toContain("# Size budget");
+  expect(renderContextPacket(packet)).not.toContain("# Other work on this project");
+});

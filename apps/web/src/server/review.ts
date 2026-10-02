@@ -1,4 +1,4 @@
-import { ReviewerOutputSchema, type DiffFile } from "@handoff/core";
+import { ReviewerOutputSchema, runPath, type DiffFile, type PlanOverlap } from "@handoff/core";
 import { and, asc, desc, eq, events, isNotNull, lt, nodeExecutions, projects, questions, reviewViews, runs, sql, type Db } from "@handoff/db";
 
 /** What the gate showed for review; a code review also carries the branch's changed files. */
@@ -62,9 +62,12 @@ export async function getReview(db: Db, runId: string, questionId: string) {
     findingsOf(db, q, review),
     review.kind === "code" ? followUpOf(db, q) : undefined,
   ]);
+  const overlaps = ((q.context as { overlaps?: PlanOverlap[] }).overlaps ?? []).map((o) => ({ ...o, href: runPath(row.projectId, o.runId) }));
   return {
     id: q.id,
     question: q.question,
+    options: q.options ?? [],
+    overlaps,
     review,
     task: row.task,
     runStatus: row.runStatus,

@@ -8,7 +8,7 @@ import { projectReadiness } from "./readiness";
 import { assignmentOf, setIssueAssignees } from "./assignees";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
-import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGraph, type RunAgainFrom } from "./graphs";
+import { createProject, getProjectDetail, listProjects, runAgain, splitPlan, startRunFromGraph, type RunAgainFrom } from "./graphs";
 import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
@@ -472,6 +472,12 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       if (!answer?.trim()) throw new Error("Give the answer.");
       if (option !== undefined && !(question.options ?? []).includes(option)) {
         throw new Error(question.options?.length ? `The question takes one of ${question.options.join(", ")}; "${option}" is not one of them.` : `The question has no options; answer it in words without "${option}".`);
+      }
+      if (option === "split") {
+        // Split as proposed opens the later parts' issues, then narrows the run to the first part.
+        const [asked] = await db.select({ runId: questions.runId }).from(questions).where(eq(questions.id, question_id));
+        await splitPlan({ db, github, projects: plan }, { runId: asked!.runId, questionId: question_id, answeredBy: actor, note: answer });
+        return { answered: true, run_id: asked!.runId, url: await urlOf(asked!.runId) };
       }
       const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: actor });
       return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };

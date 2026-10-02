@@ -16,6 +16,15 @@ export type ReviewComment = {
 
 type Place = { path?: string | undefined; line?: number | undefined; endLine?: number | undefined };
 
+/** Another run's work a plan's owned paths meet, as a plan gate lists it: the run, its branch and issues, the shared paths, and its open pull request. */
+export type PlanOverlap = { runId: string; task: string; branch: string; issues: { number: number; title: string }[]; paths: string[]; pr?: number };
+
+/** The project's other work a planner plans around: active runs and the open pull requests handoff opened. */
+export type OtherWork = {
+  runs: { runId: string; task: string; branch: string; issues: { number: number; title: string }[]; ownedPaths: string[] }[];
+  pulls: { runId: string; task: string; issues: { number: number; title: string }[]; number: number; url: string; branch: string; files: string[] }[];
+};
+
 /** Where a comment points: `src/a.ts:3-4`, `src/a.ts:3`, `src/a.ts`, or nothing. */
 const placeOf = (c: Place) => (c.path ? `${c.path}${c.line !== undefined ? `:${c.line}${c.endLine !== undefined && c.endLine !== c.line ? `-${c.endLine}` : ""}` : ""}` : "");
 const quoted = (q: string) => `"${q.replace(/\s+/g, " ").trim()}"`;
@@ -35,14 +44,22 @@ export type ContextPacket = {
   decisions?: { gate: string; note?: string | undefined; comments: ({ quote?: string | undefined; body: string } & Place)[] }[];
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
   suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
-  /** The linked issues; `lineage` holds each one's parent and grandparent, nearest first. */
+  /** The linked issues; `lineage` holds each one's parent and grandparent, nearest first, and `comments` are newest first. */
   issues?: {
     number: number;
     title: string;
     url: string;
     body: string;
     lineage?: { kind?: string | undefined; number: number; title: string; body: string }[] | undefined;
+    comments?: { author: string; createdAt: string; body: string }[] | undefined;
   }[];
+  /**
+   * For a planner: the most files and steps a plan may have, and whether it may propose a split into
+   * parts instead, which needs a plan gate after it for a person to accept.
+   */
+  budget?: { files: number; steps: number; canSplit: boolean };
+  /** For a planner: the project's other active runs with what their plans own, and handoff's open pull requests with the files they change. */
+  otherWork?: OtherWork;
   /** The run's app, started from its worktree for this step to walk through in a browser. */
   app?: { url: string };
   /** What a person will check in the running app to see the task is done. */
@@ -159,7 +176,69 @@ function renderWorktree(environment: ContextPacket["environment"]): string[] {
   ];
 }
 
-const PLAN_STAGE = "Stage: plan. No code exists for this run yet; review the plan in the run state and never ask for an implementation.";
+/**
+ * An issue's comments, newest first, as many whole comments as fit in ISSUE_BODY_CHARS, the budget a
+ * body has. A newest comment longer than that is cut; the older ones that do not fit are counted.
+ */
+function renderComments(comments: { author: string; createdAt: string; body: string }[]): string[] {
+  if (!comments.length) return [];
+  const out = ["### Comments, newest first", ""];
+  let used = 0;
+  let shown = 0;
+  for (const c of comments) {
+    const body = c.body.trim();
+    if (used + body.length > ISSUE_BODY_CHARS && shown > 0) break;
+    const text = body.length > ISSUE_BODY_CHARS ? body.slice(0, ISSUE_BODY_CHARS) : body;
+    out.push(`**${c.author}** (${c.createdAt.slice(0, 10)}):`, "", text, "");
+    used += text.length;
+    shown++;
+  }
+  const cut = comments.length - shown;
+  if (cut) out.push(`(${cut} older ${cut === 1 ? "comment" : "comments"} cut at ${ISSUE_BODY_CHARS} characters)`, "");
+  return out;
+}
+
+/** How big a plan may be, and what to do when the task needs more. */
+function renderBudget({ files, steps, canSplit }: NonNullable<ContextPacket["budget"]>): string[] {
+  return [
+    "# Size budget",
+    "",
+    `Keep the plan to at most ${files} files in ownedPaths and ${steps} steps. A small plan is reviewed, built and merged faster, and conflicts less with other runs.`,
+    "",
+    canSplit
+      ? "When the task needs more than that, do not plan all of it: return status `split` with parts, in the order they should be built. Give each part a title, a body that says what it builds and how a person checks it, and its ownedPaths. Say in plan why the task is split. The first part stays in this run; when a person accepts the split, handoff opens an issue for each later part, and you plan the first part again on its own."
+      : "When the task needs more than that, plan all of it and say in plan why it is larger.",
+    "",
+  ];
+}
+
+const pathList = (paths: string[]) => (paths.length ? paths.map((p) => `\`${p}\``).join(", ") : "(nothing yet)");
+
+/** The project's other active runs and handoff's open pull requests, with the files they own or change. */
+function renderOtherWork({ runs, pulls }: OtherWork): string[] {
+  if (!runs.length && !pulls.length) return [];
+  const out = [
+    "# Other work on this project",
+    "",
+    "Other runs change this repository at the same time. Plan around their files where the task allows: a file two runs change conflicts when the second one merges. When this task needs one of these files, say so in plan.",
+    "",
+  ];
+  if (runs.length) {
+    out.push("## Active runs", "");
+    for (const r of runs) {
+      const issues = r.issues.length ? r.issues.map((i) => `#${i.number} ${i.title}`).join(", ") : r.task.split("\n")[0]!.trim();
+      out.push(`- \`${r.branch}\` (${issues}) owns ${pathList(r.ownedPaths)}`);
+    }
+    out.push("");
+  }
+  if (pulls.length) {
+    out.push("## Open pull requests from handoff", "");
+    out.push(...pulls.map((p) => `- #${p.number} on \`${p.branch}\` changes ${pathList(p.files)}`), "");
+  }
+  return out;
+}
+
+const PLAN_STAGE ="Stage: plan. No code exists for this run yet; review the plan in the run state and never ask for an implementation.";
 
 const LOG_TAIL_LINES = 80;
 const ISSUE_BODY_CHARS = 4000;
@@ -223,6 +302,7 @@ export function renderContextPacket(packet: ContextPacket): string {
         if (body) out.push("### This issue", "");
       }
       if (body) out.push(cutBody(body, "issue"), "");
+      out.push(...renderComments(issue.comments ?? []));
     }
   }
   if (packet.acceptance?.items.length) {
@@ -262,6 +342,8 @@ export function renderContextPacket(packet: ContextPacket): string {
   out.push("# Repository context", "", ...renderWorktree(packet.environment), "Relevant paths:", list(packet.repoPaths, "- (none specified)"), "");
   const notes = packet.environment?.agentNotes?.trim();
   if (notes) out.push("# About this project's environment", "", notes, "");
+  if (packet.otherWork) out.push(...renderOtherWork(packet.otherWork));
+  if (packet.budget) out.push(...renderBudget(packet.budget));
   out.push(
     "# Constraints",
     "",

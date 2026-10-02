@@ -103,6 +103,35 @@ test("approve after fixes sends the comments back with fix", async () => {
   await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "fix", note: "", comments: [{ quote: "add a CLI", body: "A web page." }] }));
 });
 
+test("overlapping owned paths are listed with the run that owns them", () => {
+  const overlaps = [
+    { runId: "r2", href: "/projects/p1/runs/r2", task: "Add tags", branch: "handoff/add-tags-1234abcd", issues: [{ number: 7, title: "Add tags" }], paths: ["src/board.tsx"] },
+    { runId: "r3", href: "/projects/p1/runs/r3", task: "Dark mode", branch: "handoff/dark-mode-9f8e7d6c", issues: [], paths: ["src/list.tsx", "src/app.tsx"], pr: 41 },
+  ];
+  render(<PlanReview {...props} overlaps={overlaps} />);
+  const list = screen.getByRole("list", { name: "Overlaps with other runs" });
+  const [tags, dark] = within(list).getAllByRole("listitem");
+  expect(within(tags!).getByRole("link", { name: "#7 Add tags" })).toHaveAttribute("href", "/projects/p1/runs/r2");
+  expect(tags).toHaveTextContent("src/board.tsx");
+  expect(within(dark!).getByRole("link", { name: "Dark mode" })).toHaveAttribute("href", "/projects/p1/runs/r3");
+  expect(dark).toHaveTextContent("pull request #41");
+  expect(dark).toHaveTextContent("src/list.tsx");
+  expect(dark).toHaveTextContent("src/app.tsx");
+});
+
+test("without overlaps the plan review lists none", () => {
+  render(<PlanReview {...props} />);
+  expect(screen.queryByRole("list", { name: "Overlaps with other runs" })).not.toBeInTheDocument();
+});
+
+test("a split offers Split as proposed instead of approve, and sends it without a comment", async () => {
+  render(<PlanReview {...props} options={["split", "changes"]} />);
+  expect(screen.queryByRole("radio", { name: /^Approve/ })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", { name: /Split as proposed/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "split", note: "", comments: [] }));
+});
+
 function Grab({ onPort }: { onPort: (port: AssistantPort) => void }) {
   const port = useAssistant();
   useEffect(() => {

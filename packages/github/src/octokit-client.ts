@@ -289,6 +289,12 @@ export class OctokitGitHub implements GitHubPort {
     }
   }
 
+  async listPrFiles(repo: RepoRef, number: number): Promise<string[]> {
+    const octokit = await this.clientFor(repo);
+    const files = await octokit.paginate(octokit.rest.pulls.listFiles, { owner: repo.owner, repo: repo.name, pull_number: number, per_page: 100 });
+    return files.map((f) => f.filename);
+  }
+
   async getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot> {
     const octokit = await this.clientFor(repo);
     const { repository } = await octokit.graphql<PullRequestSnapshotQuery>(PullRequestSnapshotDocument.toString(), {

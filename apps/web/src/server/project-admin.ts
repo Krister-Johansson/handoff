@@ -1,4 +1,5 @@
 import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, notifications, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { planBudgetOf, type PlanBudget } from "@handoff/core";
 import type { ProjectsPort } from "@handoff/github";
 import { projectsAccessProblem } from "./plan.ts";
 
@@ -14,7 +15,32 @@ type ProjectEdit = {
   demoSeedCommand?: string;
   /** Globs, one a line. */
   uiPaths?: string;
+  /** The plan budget's files and steps as typed; empty keeps the default. */
+  planBudgetFiles?: string;
+  planBudgetSteps?: string;
 };
+
+const MAX_BUDGET = 500;
+
+/** A budget number as typed: undefined when empty, refused unless a whole number from 1 to MAX_BUDGET. */
+function budgetNumber(value: string | undefined): number | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_BUDGET) throw new Error(`The plan budget's files and steps are each a whole number from 1 to ${MAX_BUDGET}.`);
+  return n;
+}
+
+/**
+ * The plan budget to store: null when both numbers are empty, so the defaults apply; a number left empty
+ * takes its default. Undefined leaves the column as it is.
+ */
+function planBudget(input: ProjectEdit): PlanBudget | null | undefined {
+  if (input.planBudgetFiles === undefined && input.planBudgetSteps === undefined) return undefined;
+  const files = budgetNumber(input.planBudgetFiles);
+  const steps = budgetNumber(input.planBudgetSteps);
+  return files === undefined && steps === undefined ? null : planBudgetOf({ ...(files ? { files } : {}), ...(steps ? { steps } : {}) });
+}
 
 const MAX_UI_PATHS = 50;
 
@@ -52,6 +78,7 @@ export async function updateProject(db: Db, projectId: string, input: ProjectEdi
     agentNotes: optionalText(input.agentNotes, 4_000, "agent notes"),
     demoSeedCommand: optionalText(input.demoSeedCommand, 2_000, "demo seed command"),
     uiPaths: globLines(input.uiPaths),
+    planBudget: planBudget(input),
   };
   const changed = Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined));
   await db.update(projects).set({ name, defaultBranch, ...changed, updatedAt: new Date() }).where(eq(projects.id, projectId));
@@ -78,6 +105,7 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
       agentNotes: projects.agentNotes,
       demoSeedCommand: projects.demoSeedCommand,
       uiPaths: projects.uiPaths,
+      planBudget: projects.planBudget,
       isDemo: projects.isDemo,
       planProjectNumber: projects.planProjectNumber,
       runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,

@@ -1,7 +1,8 @@
 import { unstable_rethrow } from "next/navigation";
 import { answerReviewAction } from "@/app/inbox/actions";
 
-export type ReviewOption = "changes" | "approve" | "fix";
+/** "split" accepts the split a planner proposed: handoff opens the later parts' issues and the run builds the first. */
+export type ReviewOption = "changes" | "approve" | "fix" | "split";
 
 export type SentComment = {
   quote: string;
@@ -41,7 +42,7 @@ type Review = {
  * once sent, the action redirects to the run page, which reaches the caller as Next's redirect error.
  */
 export async function sendReview({ questionId, runId, option, note, comments, onSending, onFailed }: Review): Promise<string | undefined> {
-  if (option !== "approve" && !note.trim() && comments.length === 0) return NOTHING_TO_FIX;
+  if (option !== "approve" && option !== "split" && !note.trim() && comments.length === 0) return NOTHING_TO_FIX;
   // A sent review redirects to the run, so the draft goes first and comes back if the send fails.
   onSending?.();
   const result = await answerReviewAction({ questionId, runId, option, note: note.trim(), comments });
@@ -57,6 +58,7 @@ function sentText(option: ReviewOption, target: string, comments: number, note: 
   const parts = [comments > 0 ? `${comments} ${comments === 1 ? "comment" : "comments"}` : undefined, note.trim() ? "the overall comment" : undefined].filter(Boolean).join(" and ");
   if (option === "approve") return `Approved${parts ? ` with ${parts}` : ""}. The run page opens.`;
   if (option === "changes") return `Requested changes from ${target} with ${parts}. The run page opens.`;
+  if (option === "split") return "Split as proposed: handoff opened an issue for each later part, and the run builds the first. The run page opens.";
   return `Approved after fixes: sent ${parts} back to ${target}. The run page opens.`;
 }
 
