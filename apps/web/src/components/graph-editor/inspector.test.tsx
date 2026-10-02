@@ -234,3 +234,10 @@ test("a locked graph's edge and node cannot be deleted from the inspector", () =
   render(<Inspector graph={graph} selection={{ nodeId: "reviewer" }} locked library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
   expect(screen.getByRole("button", { name: "Delete node" })).toBeDisabled();
 });
+
+test("with nothing selected the inspector draws nothing, locked or unlocked", () => {
+  const { container, rerender } = render(<Inspector graph={graph} selection={{}} locked library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  expect(container).toBeEmptyDOMElement();
+  rerender(<Inspector graph={graph} selection={{}} library={library} dispatch={vi.fn()} onSelect={vi.fn()} />);
+  expect(container).toBeEmptyDOMElement();
+});
