@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState, useEffect } from "react";
+import { DEFAULT_UI_PATHS } from "@handoff/core";
 import { deleteProjectAction, updateProjectAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -28,6 +29,8 @@ export type ProjectSummary = {
   setupCommand?: string | null;
   teardownCommand?: string | null;
   agentNotes?: string | null;
+  demoSeedCommand?: string | null;
+  uiPaths?: string[] | null;
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -100,6 +103,32 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 defaultValue={state.values?.agentNotes ?? project.agentNotes ?? ""}
               />
               <FieldDescription>Every agent step reads these facts about the project&apos;s environment. Do not put secrets here: the notes are stored as plain text.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`edit-seed-${project.id}`}>Demo seed command</FieldLabel>
+              <Input
+                id={`edit-seed-${project.id}`}
+                name="demoSeedCommand"
+                className="font-mono"
+                placeholder="pnpm db:seed"
+                defaultValue={state.values?.demoSeedCommand ?? project.demoSeedCommand ?? ""}
+              />
+              <FieldDescription>Runs in the worktree before a demo starts the app, after the services in the compose file are up, so the demo has data to show.</FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`edit-ui-paths-${project.id}`}>UI paths</FieldLabel>
+              <Textarea
+                id={`edit-ui-paths-${project.id}`}
+                name="uiPaths"
+                rows={3}
+                className="font-mono"
+                placeholder="apps/web/**"
+                defaultValue={state.values?.uiPaths ?? project.uiPaths?.join("\n") ?? ""}
+              />
+              <FieldDescription>
+                Globs, one a line, of the files a person sees in the app. A demo set to UI changes skips a change that touches none of them. Empty means{" "}
+                <span className="font-mono">{DEFAULT_UI_PATHS.join(" ")}</span>.
+              </FieldDescription>
             </Field>
             {state.error && <FieldError>{state.error}</FieldError>}
           </FieldGroup>

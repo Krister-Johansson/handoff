@@ -1,6 +1,6 @@
-import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
-import planReview from "@handoff/core/fixtures/plan-review.graph.json" with { type: "json" };
+import linear from "@handoff/core/templates/linear.graph.json" with { type: "json" };
+import loop from "@handoff/core/templates/loop.graph.json" with { type: "json" };
+import planReview from "@handoff/core/templates/plan-review.graph.json" with { type: "json" };
 import { compileGraph, RunStateSchema, suggestProjectName, type CompileError } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
 import { cancelRun, statusesBeforeRun } from "@handoff/engine/operations";
@@ -9,9 +9,9 @@ import { startRun, type StartRunInput } from "@handoff/engine/start-run";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 
 export const TEMPLATES = {
-  plan: { label: "Plan, review, approve, build: a reviewer and you approve the plan before any code", document: planReview },
+  plan: { label: "Plan, review, approve, build: a reviewer and you approve the plan before any code, and you try UI changes before the PR", document: planReview },
   linear: { label: "Plan, code, PR, merge", document: linear },
-  loop: { label: "Plan, code, test, review, PR, merge with retry loops", document: loop },
+  loop: { label: "Plan, code, test, review, PR, merge with retry loops, and a demo and Try it for UI changes", document: loop },
   empty: {
     label: "Empty: a Start node to build from",
     document: { attributes: { startNode: "start" }, nodes: [{ key: "start", attributes: { type: "start", label: "Start", config: { trigger: "run" }, x: 0, y: 0 } }], edges: [] },

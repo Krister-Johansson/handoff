@@ -54,6 +54,8 @@ export async function updateProjectAction(_: ActionState, form: FormData): Promi
     setupCommand: field(form, "setupCommand"),
     teardownCommand: field(form, "teardownCommand"),
     agentNotes: field(form, "agentNotes"),
+    demoSeedCommand: field(form, "demoSeedCommand"),
+    uiPaths: field(form, "uiPaths"),
   };
   try {
     await updateProject(getDb(), projectId, values);

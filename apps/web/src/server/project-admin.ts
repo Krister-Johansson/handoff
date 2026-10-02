@@ -5,7 +5,27 @@ import { projectsAccessProblem } from "./plan.ts";
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const ACTIVE = ["queued", "running", "waiting"] as const;
 
-type ProjectEdit = { name: string; defaultBranch: string; setupCommand?: string; teardownCommand?: string; agentNotes?: string };
+type ProjectEdit = {
+  name: string;
+  defaultBranch: string;
+  setupCommand?: string;
+  teardownCommand?: string;
+  agentNotes?: string;
+  demoSeedCommand?: string;
+  /** Globs, one a line. */
+  uiPaths?: string;
+};
+
+const MAX_UI_PATHS = 50;
+
+/** Globs one a line, without blank lines; null when there are none, so the defaults apply; undefined leaves the column as it is. */
+function globLines(value: string | undefined): string[] | null | undefined {
+  if (value === undefined) return undefined;
+  const globs = value.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (globs.length > MAX_UI_PATHS) throw new Error(`List at most ${MAX_UI_PATHS} UI paths.`);
+  if (globs.some((g) => g.length > 200)) throw new Error("Keep each UI path under 200 characters.");
+  return globs.length ? globs : null;
+}
 
 /** A trimmed text, null when empty, refused over `max` characters; undefined leaves the column as it is. */
 function optionalText(value: string | undefined, max: number, what: string): string | null | undefined {
@@ -16,8 +36,8 @@ function optionalText(value: string | undefined, max: number, what: string): str
 }
 
 /**
- * Renames a project and changes its default branch, setup and teardown commands and agent notes. Agent
- * notes are free text every agent step reads, so they must never hold secrets.
+ * Renames a project and changes its default branch, setup and teardown commands, agent notes, demo
+ * seed command and UI paths. Agent notes are free text every agent step reads, so they must never hold secrets.
  */
 export async function updateProject(db: Db, projectId: string, input: ProjectEdit) {
   const name = input.name.trim();
@@ -30,6 +50,8 @@ export async function updateProject(db: Db, projectId: string, input: ProjectEdi
     setupCommand: optionalText(input.setupCommand, 2_000, "setup command"),
     teardownCommand: optionalText(input.teardownCommand, 2_000, "teardown command"),
     agentNotes: optionalText(input.agentNotes, 4_000, "agent notes"),
+    demoSeedCommand: optionalText(input.demoSeedCommand, 2_000, "demo seed command"),
+    uiPaths: globLines(input.uiPaths),
   };
   const changed = Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined));
   await db.update(projects).set({ name, defaultBranch, ...changed, updatedAt: new Date() }).where(eq(projects.id, projectId));
@@ -40,7 +62,7 @@ export type PlanLink = { number: number; title?: string; url?: string };
 
 /**
  * Every project as Settings, Projects lists it, by name: repository, default branch, setup and
- * teardown commands, agent notes, run count and the plan's GitHub Project. The Project's title and url are read from GitHub; without
+ * teardown commands, agent notes, demo seed command, UI paths, run count and the plan's GitHub Project. The Project's title and url are read from GitHub; without
  * access, or when GitHub does not answer, the link keeps only its number.
  */
 export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined) {
@@ -54,6 +76,8 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
       setupCommand: projects.setupCommand,
       teardownCommand: projects.teardownCommand,
       agentNotes: projects.agentNotes,
+      demoSeedCommand: projects.demoSeedCommand,
+      uiPaths: projects.uiPaths,
       isDemo: projects.isDemo,
       planProjectNumber: projects.planProjectNumber,
       runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,

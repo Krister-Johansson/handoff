@@ -5,6 +5,7 @@ import { heldApproval, recordApproval } from "../approvals.ts";
 import { notifyFrom, type Told } from "../notify.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
+import { passEnvOf } from "./demo.ts";
 
 /** Answers the review page fills in when the person wrote no note; not decisions in themselves. */
 const DEFAULT_NOTES = new Set(["Approved.", "Changes requested.", "approve", "changes"]);
@@ -177,7 +178,16 @@ async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<Prev
   try {
     const row = await startPreview(
       { db: deps.db, workerId: deps.workerId ?? "worker" },
-      { runId: ctx.run.id, projectId: ctx.project.id, workdir: ctx.workdir, nodeExecutionId: ctx.execution.id, signal: ctx.signal, ...(deps.docker ? { docker: deps.docker } : {}) },
+      {
+        runId: ctx.run.id,
+        projectId: ctx.project.id,
+        workdir: ctx.workdir,
+        nodeExecutionId: ctx.execution.id,
+        signal: ctx.signal,
+        // The app gets what the run's demo gave it, so a feature that needs a key works for the person too.
+        passEnv: demoPassEnv(ctx),
+        ...(deps.docker ? { docker: deps.docker } : {}),
+      },
     );
     ctx.emit("preview.started", { id: row.id, url: row.url, configuration: row.configuration });
     return { id: row.id, url: row.url, status: "running" };
@@ -188,23 +198,33 @@ async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<Prev
   }
 }
 
-/** The screenshots of the run's latest Demo step, for a person to see before trying the app. */
-function demoShotsOf(ctx: ExecutorContext) {
+/** The variable names the graph's Demo nodes pass to the app. */
+function demoPassEnv(ctx: ExecutorContext): string[] {
+  const demos = ctx.graph.order.filter((key) => ctx.graph.node(key).type === "demo");
+  return [...new Set(demos.flatMap((key) => passEnvOf(ctx.graph.node(key).config)))];
+}
+
+/**
+ * What the run's latest Demo step left for a person to see before trying the app: its screenshots, and
+ * the warnings and errors of the browser console and the server log.
+ */
+function demoOf(ctx: ExecutorContext) {
   const demos = Object.entries(ctx.state.nodes).filter(([key]) => ctx.graph.graph.hasNode(key) && ctx.graph.node(key).type === "demo");
   const latest = demos.sort(([, a], [, b]) => b.attempt - a.attempt).at(0)?.[1].output;
   const parsed = DemoOutputSchema.safeParse(latest);
-  if (!parsed.success) return [];
-  return parsed.data.shots.flatMap((s) => (s.artifactId ? [{ id: s.artifactId, caption: s.caption, works: s.works, ...(s.criterion ? { criterion: s.criterion } : {}) }] : []));
+  if (!parsed.success) return { shots: [], warnings: [] };
+  const shots = parsed.data.shots.flatMap((s) => (s.artifactId ? [{ id: s.artifactId, caption: s.caption, works: s.works, ...(s.criterion ? { criterion: s.criterion } : {}) }] : []));
+  return { shots, warnings: parsed.data.warnings ?? [] };
 }
 
-/** A Try it gate's question: try the running app against the run's acceptance criteria, with the demo's screenshots. */
+/** A Try it gate's question: try the running app against the run's acceptance criteria, with the demo's screenshots and warnings. */
 async function composeTry(ctx: ExecutorContext, deps: GateDeps): Promise<Ask> {
   const acceptance = acceptanceOf(ctx.state)?.items ?? [];
-  const shots = demoShotsOf(ctx);
+  const { shots, warnings } = demoOf(ctx);
   return {
     question: acceptance.length ? "Try the app and check each acceptance criterion." : "Try the app, then approve it or send it back with what is wrong.",
     options: ["approve", "changes"],
-    context: { reason: "try", acceptance, preview: await ensurePreview(ctx, deps), ...(shots.length ? { shots } : {}) },
+    context: { reason: "try", acceptance, preview: await ensurePreview(ctx, deps), ...(shots.length ? { shots } : {}), ...(warnings.length ? { warnings } : {}) },
   };
 }
 

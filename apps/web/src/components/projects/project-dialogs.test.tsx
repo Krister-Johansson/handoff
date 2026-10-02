@@ -23,7 +23,7 @@ test("editing submits the new name, default branch and setup command", async () 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(actions.updateProjectAction).toHaveBeenCalledTimes(1));
   const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
-  expect(Object.fromEntries(form)).toEqual({ projectId: "p1", name: "renamed", defaultBranch: "trunk", setupCommand: "pnpm install --frozen-lockfile", teardownCommand: "", agentNotes: "" });
+  expect(Object.fromEntries(form)).toEqual({ projectId: "p1", name: "renamed", defaultBranch: "trunk", setupCommand: "pnpm install --frozen-lockfile", teardownCommand: "", agentNotes: "", demoSeedCommand: "", uiPaths: "" });
 });
 
 test("editing submits the teardown command and the agent notes, and says to keep secrets out of the notes", async () => {
@@ -38,6 +38,19 @@ test("editing submits the teardown command and the agent notes, and says to keep
   const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
   expect(form.get("teardownCommand")).toBe("dropdb --if-exists app_test_$HANDOFF_RUN_SHORT");
   expect(form.get("agentNotes")).toBe("The database container is shared and already running.");
+});
+
+test("editing submits the demo seed command and the UI paths, one glob a line, and names the defaults", async () => {
+  render(<EditProjectDialog project={{ ...project, demoSeedCommand: "pnpm db:seed", uiPaths: ["apps/web/**", "packages/ui/**"] }} open onOpenChange={() => {}} />);
+  expect(screen.getByLabelText("Demo seed command")).toHaveValue("pnpm db:seed");
+  expect(screen.getByLabelText("UI paths")).toHaveValue("apps/web/**\npackages/ui/**");
+  expect(screen.getByText(/\*\*\/components\/\*\*/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("UI paths"), { target: { value: "apps/web/**" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(actions.updateProjectAction).toHaveBeenCalledTimes(1));
+  const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
+  expect(form.get("demoSeedCommand")).toBe("pnpm db:seed");
+  expect(form.get("uiPaths")).toBe("apps/web/**");
 });
 
 test("deleting asks first, says what goes, and shows a refusal", async () => {

@@ -54,6 +54,20 @@ test("a human gate can start the run's app for a person to try", () => {
   expect(screen.getByText(/starts the run's app from .claude\/launch.json/)).toBeInTheDocument();
 });
 
+test("a demo runs for every change by default, or only for UI changes, and passes variables to the app", () => {
+  const dispatch = vi.fn();
+  const withDemo: FlowGraph = {
+    ...graph,
+    nodes: [...graph.nodes, { id: "demo", type: "handoff", position: { x: 900, y: 0 }, data: { nodeType: "demo", label: "Demo", isStart: false, config: {} } }],
+  };
+  render(<Inspector graph={withDemo} selection={{ nodeId: "demo" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("When to demo")).toHaveValue("always");
+  fireEvent.change(screen.getByLabelText("When to demo"), { target: { value: "ui_changes" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "demo", patch: { config: { when: "ui_changes" } } });
+  expect(screen.getByLabelText("Environment variables")).toBeInTheDocument();
+  expect(screen.getByText(/the seed command and the app/)).toBeInTheDocument();
+});
+
 test("a merge node waits for a person to merge by default, or merges on its own in turn", () => {
   const dispatch = vi.fn();
   const withMerge: FlowGraph = {

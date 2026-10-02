@@ -45,6 +45,7 @@ export default async function TryPage({ params }: { params: Promise<{ projectId:
         acceptance={review.acceptance}
         preview={review.preview}
         shots={review.shots}
+        warnings={review.warnings}
         {...(review.answered ? { answered: review.answered } : {})}
       />
     </main>

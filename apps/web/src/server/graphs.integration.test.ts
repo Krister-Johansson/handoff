@@ -46,7 +46,7 @@ describe("projects and graphs", () => {
     await createGraphFromTemplate(db, project.id, "main", "loop");
     const graph = await getGraphForEdit(db, project.id, "main");
     expect(graph?.version).toBe(1);
-    expect((graph?.document as { nodes: unknown[] }).nodes).toHaveLength(7);
+    expect((graph?.document as { nodes: unknown[] }).nodes).toHaveLength(9);
   });
 
   test("the plan, review, approve, build template is saved as a graph that compiles", async () => {
@@ -54,7 +54,7 @@ describe("projects and graphs", () => {
     const saved = await createGraphFromTemplate(db, project.id, "plan-first", "plan");
     expect(saved).toMatchObject({ ok: true });
     const graph = await getGraphForEdit(db, project.id, "plan-first");
-    expect((graph?.document as { nodes: { key: string }[] }).nodes.map((n) => n.key)).toEqual(["start", "planner", "plan-review", "approval", "coder", "tester", "ask", "pr", "merge", "finish"]);
+    expect((graph?.document as { nodes: { key: string }[] }).nodes.map((n) => n.key)).toEqual(["start", "planner", "plan-review", "approval", "coder", "tester", "ask", "demo", "try", "pr", "merge", "finish"]);
   });
 
   test("an empty graph starts with a Start node", async () => {

@@ -9,6 +9,8 @@ export * from "./graph/routing.ts";
 export * from "./graph/ports.ts";
 export * from "./graph/notify.ts";
 export * from "./preview/launch.ts";
+export * from "./preview/ui-paths.ts";
+export * from "./preview/warnings.ts";
 export * from "./graph/models.ts";
 export * from "./schema/run-state.ts";
 export * from "./context/render.ts";

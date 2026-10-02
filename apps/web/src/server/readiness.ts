@@ -1,4 +1,4 @@
-import { criteriaInIssue, LAUNCH_FILE, parseLaunchFile } from "@handoff/core";
+import { criteriaInIssue, demoConfiguration, LAUNCH_FILE, parseLaunchFile } from "@handoff/core";
 import { and, desc, eq, graphs, gt, liveWorkers, projects, sql, webhookDeliveries, type Db } from "@handoff/db";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 import { projectsAccessProblem, SCOPE_FIX } from "./plan";
@@ -22,7 +22,7 @@ function launchCheck(text: string | undefined): ReadinessCheck {
   if (text === undefined) return check({ ...base, status: "todo", detail: `No ${LAUNCH_FILE} on the default branch.`, fix });
   try {
     const launch = parseLaunchFile(text);
-    const first = launch.configurations[0]!;
+    const first = demoConfiguration(launch);
     const portNote = first.autoPort === false ? ` It must have port ${first.port} (autoPort is false), so two runs cannot preview at once.` : " The app gets a free port in PORT.";
     return check({ ...base, status: "ok", detail: `Starts configuration ${first.name} with ${first.runtimeExecutable ?? `node ${first.program}`}.${portNote}` });
   } catch (error) {
