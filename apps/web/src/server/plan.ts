@@ -113,6 +113,6 @@ export async function loadPlan(db: Db, github: GitHubPort | undefined, plan: Pro
     });
   const board = columns<PlanTask[]>(() => []);
   for (const item of [...items].sort((a, b) => a.number - b.number)) if (isTask(item.kind)) board[columnOf(item)].push(task(item));
-  const unplanned = open.filter((i) => !byNumber.has(i.number)).map((issue) => ({ ...issue, run: runs.get(issue.number) ?? null }));
+  const unplanned = open.filter((i) => !byNumber.has(i.number)).map((issue) => ({ ...issue, run: runs.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
   return { project: planProject, epics, unparented, board, unplanned };
 }
