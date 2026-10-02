@@ -717,3 +717,35 @@ test("arrows move a focused bar a day and Shift with an arrow changes its estima
   await new Promise((r) => setTimeout(r, 900));
   expect(actions.moveItemAction).toHaveBeenCalledTimes(1);
 });
+
+test("an unscheduled task with a size drags onto the chart and one without has its grip off with the reason", async () => {
+  renderSized();
+  const block = screen.getByRole("region", { name: "Unscheduled" });
+  const off = within(block).getByRole("button", { name: "Set a size or an estimate to drag #152 onto the chart" });
+  expect(off).toHaveAttribute("aria-disabled", "true");
+  fireEvent.pointerDown(off, { pointerId: 1, button: 0, clientX: 20, clientY: 700 });
+  expect(within(block).queryByText("Placing")).not.toBeInTheDocument();
+
+  // The chart's rows end 600 px down; the label column is 280 px wide.
+  const grid = screen.getByRole("grid", { name: "Timeline" });
+  vi.spyOn(grid, "getBoundingClientRect").mockReturnValue(DOMRect.fromRect({ x: 0, y: 0, width: 280 + 60 * DAY, height: 600 }));
+  const grip = within(block).getByRole("button", { name: "Drag #153 onto the chart" });
+  fireEvent.pointerDown(grip, { pointerId: 1, button: 0, clientX: 20, clientY: 700 });
+  expect(within(block).getByText("Placing")).toBeInTheDocument();
+
+  // Over Sunday Oct 4 its bar shows in its own row, after #149's two hours.
+  fireEvent.pointerMove(document, { pointerId: 1, clientX: 280 + OCT_1 + 3 * DAY + 10, clientY: 300 });
+  expect(dragTip()).toHaveTextContent("Sun Oct 4S, forecast ~25m. Target Oct 4");
+  expect(leftOf(barOf(153))).toBe(OCT_1 + 3 * DAY + 32);
+  // Off the chart there is nowhere to drop.
+  fireEvent.pointerMove(document, { pointerId: 1, clientX: 280 + OCT_1 + 3 * DAY + 10, clientY: 650 });
+  expect(dragTip()).not.toBeInTheDocument();
+  expect(within(row(/^Task #153 /)).queryByRole("link", { name: /^Task #153 / })).not.toBeInTheDocument();
+
+  fireEvent.pointerMove(document, { pointerId: 1, clientX: 280 + OCT_1 + 3 * DAY + 10, clientY: 300 });
+  fireEvent.pointerUp(document, { pointerId: 1, clientX: 280 + OCT_1 + 3 * DAY + 10, clientY: 300 });
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 153, start: "2026-10-04", target: "2026-10-04" }));
+  expect(await screen.findByText("Moved #153 to Oct 4")).toBeInTheDocument();
+  expect(within(block).queryByText(/#153/)).not.toBeInTheDocument();
+  expect(barOf(153)).toBeInTheDocument();
+});

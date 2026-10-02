@@ -15,6 +15,7 @@ import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDuration } from "@/lib/plan/duration";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
@@ -484,7 +485,39 @@ function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, s
 type UnscheduledGroup = { title: string; items: PlanItem[] };
 
 /** Items with neither dates nor a derived span, grouped by epic, each with a Schedule button. */
-function Unscheduled({ groups, undated, onSchedule }: { groups: UnscheduledGroup[]; undated: boolean; onSchedule: (item: PlanItem) => void }) {
+/** What the Unscheduled block needs to drag a task onto the chart: its grip's handlers, and the task on the move. */
+type Placing = { grip: (task: PlanTask) => ReturnType<ReturnType<typeof useBarDrag>["gripProps"]> | undefined; issue: number | undefined; enabled: boolean };
+
+/**
+ * An unscheduled task's grip: with a duration it drags the task onto the chart; without one it is off and
+ * says why. Done and Running tasks have none, and nothing has one without the Plan page's sizes.
+ */
+function Grip({ task, placing }: { task: PlanTask; placing: Placing }) {
+  const column = taskColumn(task);
+  if (!placing.enabled || column === "Done" || column === "Running" || hasActiveRun(task)) return null;
+  const props = placing.grip(task);
+  const GRIP = "-ml-6 grid h-[22px] w-[18px] shrink-0 place-items-center rounded-sm text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5";
+  if (!props) {
+    const why = `Set a size or an estimate to drag #${task.number} onto the chart`;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" aria-disabled="true" aria-label={why} className={cn(GRIP, "cursor-not-allowed opacity-45")}>
+            <GripVerticalIcon aria-hidden />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{why}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return (
+    <button type="button" aria-label={`Drag #${task.number} onto the chart`} title="Drag onto the chart" className={cn(GRIP, "cursor-grab touch-none hover:bg-muted hover:text-foreground")} {...props}>
+      <GripVerticalIcon aria-hidden />
+    </button>
+  );
+}
+
+function Unscheduled({ groups, undated, onSchedule, placing }: { groups: UnscheduledGroup[]; undated: boolean; onSchedule: (item: PlanItem) => void; placing: Placing }) {
   const [open, setOpen] = useState(true);
   const count = groups.reduce((n, g) => n + g.items.length, 0);
   if (count === 0) return null;
@@ -506,10 +539,16 @@ function Unscheduled({ groups, undated, onSchedule }: { groups: UnscheduledGroup
                 {group.items.map((item) => {
                   const kind = item.kind ?? "task";
                   return (
-                    <li key={item.number} className="flex min-w-0 items-center gap-2 border-t px-3.5 py-1.5 pl-[38px]">
+                    <li
+                      key={item.number}
+                      data-placing={placing.issue === item.number || undefined}
+                      className="flex min-w-0 items-center gap-2 border-t px-3.5 py-1.5 pl-[38px] data-placing:bg-[repeating-linear-gradient(135deg,color-mix(in_oklab,var(--foreground)_4%,transparent)_0_6px,transparent_6px_12px)]"
+                    >
+                      {kind === "task" && <Grip task={item as PlanTask} placing={placing} />}
                       <KindBadge kind={kind} />
                       <IssueTitle item={item} className="text-xs" />
                       {kind === "task" && <StatusPill column={item.state === "closed" ? "Done" : (item.status ?? "Other")} />}
+                      {placing.issue === item.number && <Tag tone="outline">Placing</Tag>}
                       <span className="ml-auto flex shrink-0 items-center gap-2">
                         {kind === "task" && <SizeChip task={item as PlanTask} />}
                         <Button size="xs" variant="outline" aria-label={`Schedule #${item.number} ${item.title}`} onClick={() => onSchedule(item)}>
@@ -737,6 +776,19 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
     };
   };
 
+  /** The day under a point of the screen when it is over the chart's time pane. */
+  const dayUnder = (x: number, y: number) => {
+    const box = grid.current?.getBoundingClientRect();
+    if (!box || y < box.top || y > box.bottom) return undefined;
+    return dayAt(scale, x - box.left - LABEL_WIDTH);
+  };
+  const placing: Placing = {
+    enabled: sizing !== undefined,
+    // Only an unscheduled task moves without a bar.
+    issue: drag && !saved.get(drag.issue)?.planned ? drag.issue : undefined,
+    grip: (task) => (durationIn(move, task) ? gripProps(task.number, dayUnder) : undefined),
+  };
+
   const { rows, height, anchor } = timelineRows(epics, unparented, rowsOpen.isOpen, (n) => entries.get(n)?.actual.length ?? 0);
 
   const measure = () => {
@@ -803,6 +855,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
       <div className="relative">
         <div ref={scroller} className="overflow-x-auto overscroll-x-contain" onScroll={measure}>
           <div
+            ref={grid}
             role="grid"
             aria-label="Timeline"
             aria-rowcount={rows.length + 1}
@@ -914,7 +967,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
         )}
       </div>
       {focused !== undefined && <KeyHint issue={focused} sized={!!sizing && saved.get(focused)?.planned?.hours !== undefined} />}
-      <Unscheduled groups={unscheduled} undated={timeline.items.every((i) => !i.planned)} onSchedule={setScheduling} />
+      <Unscheduled groups={unscheduled} undated={timeline.items.every((i) => !i.planned)} onSchedule={setScheduling} placing={placing} />
       <ScheduleDialog projectId={projectId} item={scheduling} notes={scheduling ? scheduleNotes(scheduling, items, entries) : []} onOpenChange={(open) => !open && setScheduling(undefined)} />
     </div>
   );
