@@ -29,6 +29,7 @@ import { NODE_ICONS } from "./node-icons";
 import { EditLockButton } from "./edit-lock";
 import { VersionHistory, type VersionItem } from "./version-history";
 import { changesEdit, documentOf, editorReducer, issuesOf, NODE_LABELS } from "./state";
+import { useGraphPageTools, type Selection } from "./use-graph-page-tools";
 
 const nodeTypes: NodeTypes = { handoff: HandoffNodeComponent };
 const edgeTypes: EdgeTypes = { handoff: HandoffEdgeComponent };
@@ -61,7 +62,7 @@ function savedLine(version: number, versions: VersionItem[], restoring: number |
 function Editor({ projectId, graphName, version: initialVersion, document, library, versions: initialVersions, trail, runSlot }: Props) {
   const [graph, dispatch] = useReducer(editorReducer, document, flowOf);
   const colorMode = useFlowColorMode();
-  const [selection, setSelection] = useState<{ nodeId?: string; edgeId?: string }>({});
+  const [selection, setSelection] = useState<Selection>({});
   const [version, setVersion] = useState(initialVersion);
   const [saved, setSaved] = useState(true);
   const [saveError, setSaveError] = useState<string | undefined>();
@@ -134,7 +135,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   }, []);
 
   const tidy = () =>
-    void runLayout().then(({ positions, routes: next }) => {
+    runLayout().then(({ positions, routes: next }) => {
       const rounded = Object.fromEntries(Object.entries(positions).map(([id, p]) => [id, { x: Math.round(p.x), y: Math.round(p.y) }]));
       edit({ type: "applyLayout", positions: rounded });
       setRoutes(next);
@@ -145,23 +146,37 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
     setSelection({ ...(n[0] ? { nodeId: n[0].id } : {}), ...(!n[0] && e[0] ? { edgeId: e[0].id } : {}) });
   }, []);
 
+  /** The middle of the window in graph coordinates, where a new node goes. */
+  const centre = () => {
+    const at = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
+    return { x: Math.round(at.x), y: Math.round(at.y) };
+  };
   const addNode = (nodeType: NodeType) => {
     if (locked) return;
-    const center = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
-    edit({ type: "addNode", nodeType, position: { x: Math.round(center.x), y: Math.round(center.y) } });
+    edit({ type: "addNode", nodeType, position: centre() });
   };
 
+  /** Saves the graph as its next version; the error when the server refuses it. */
+  const saveVersion = async (): Promise<{ version: number } | { error: string }> => {
+    const result = await saveGraphAction(projectId, graphName, documentOf(graph));
+    if (!result.ok) {
+      const error = result.errors.map((e) => e.message).join("; ");
+      setSaveError(error);
+      return { error };
+    }
+    setVersion(result.version);
+    setVersions((current) => [{ version: result.version, createdAt: new Date().toISOString(), createdBy: "dashboard" }, ...current]);
+    setRestoring(undefined);
+    setSaved(true);
+    setSaveError(undefined);
+    return { version: result.version };
+  };
   const save = () =>
     startTransition(async () => {
-      const result = await saveGraphAction(projectId, graphName, documentOf(graph));
-      if (result.ok) {
-        setVersion(result.version);
-        setVersions((current) => [{ version: result.version, createdAt: new Date().toISOString(), createdBy: "dashboard" }, ...current]);
-        setRestoring(undefined);
-        setSaved(true);
-        setSaveError(undefined);
-      } else setSaveError(result.errors.map((e) => e.message).join("; "));
+      await saveVersion();
     });
+
+  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion, centre, tidy });
 
   const nextVersion = Math.max(version, ...versions.map((v) => v.version)) + 1;
 
@@ -253,7 +268,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                   <Separator orientation="vertical" className="mx-0.5 h-[18px] self-center" />
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button size="icon-sm" variant="ghost" aria-label="Tidy layout" onClick={tidy}>
+                      <Button size="icon-sm" variant="ghost" aria-label="Tidy layout" onClick={() => void tidy()}>
                         <LayoutGridIcon />
                       </Button>
                     </TooltipTrigger>
