@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useTransition, type ComponentType } from "react";
+import { useState, useTransition, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowRightIcon, CalendarIcon, ExternalLinkIcon, ListTreeIcon, PlayIcon, Undo2Icon } from "lucide-react";
+import { ArrowRightIcon, CalendarIcon, ListTreeIcon, PlayIcon, Undo2Icon } from "lucide-react";
 import { moveToReadyAction, moveToShapingAction, planIssueAction } from "@/app/projects/actions";
 import { startIssueRunAction } from "@/app/projects/issue-actions";
 import type { StoryChoice } from "@/components/plan/plan-actions";
@@ -102,21 +102,28 @@ export function ScheduleButton({ item, projectId }: { item: ScheduleTarget; proj
   );
 }
 
-/** Plan it: adds an issue outside the plan to it as a task in Shaping, under a story when one is picked. */
-export function PlanItButton({ issue, projectId, stories }: { issue: Issue; projectId: string; stories: StoryChoice[] }) {
-  const router = useRouter();
+/**
+ * A dialog that asks before an action: the trigger, a title and a line, the fields of a form, and the
+ * action's button. `onSubmit` gets the form's values and returns GitHub's refusal, or nothing when done.
+ */
+function FormDialog({
+  trigger,
+  title,
+  description,
+  submit,
+  onSubmit,
+  children,
+}: {
+  trigger: ReactNode;
+  title: string;
+  description: string;
+  submit: string;
+  onSubmit: (form: FormData) => Promise<string | undefined>;
+  children?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
-  const [story, setStory] = useState("");
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
-  const epics = [...new Set(stories.map((s) => s.epic))];
-  const confirm = () =>
-    startTransition(async () => {
-      const result = await planIssueAction({ projectId, issue: issue.number, ...(story ? { story: Number(story) } : {}) });
-      if (result.error) return setError(result.error);
-      setOpen(false);
-      router.refresh();
-    });
   return (
     <Dialog
       open={open}
@@ -125,48 +132,85 @@ export function PlanItButton({ issue, projectId, stories }: { issue: Issue; proj
         setError(undefined);
       }}
     >
-      <DialogTrigger asChild>
+      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <form
+          className="contents"
+          action={(form) =>
+            startTransition(async () => {
+              const refused = await onSubmit(form);
+              if (refused) setError(refused);
+              else setOpen(false);
+            })
+          }
+        >
+          <DialogHeader>
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            {children}
+            {error && <FieldError>{error}</FieldError>}
+          </FieldGroup>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="submit" disabled={pending}>
+              {submit}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Plan it: adds an issue outside the plan to it as a task in Shaping, under a story when one is picked. */
+export function PlanItButton({ issue, projectId, stories }: { issue: Issue; projectId: string; stories: StoryChoice[] }) {
+  const router = useRouter();
+  const epics = [...new Set(stories.map((s) => s.epic))];
+  const plan = async (form: FormData) => {
+    const story = Number(form.get("story"));
+    const result = await planIssueAction({ projectId, issue: issue.number, ...(story ? { story } : {}) });
+    if (result.error) return result.error;
+    router.refresh();
+    return undefined;
+  };
+  return (
+    <FormDialog
+      trigger={
         <Button variant="outline">
           <ListTreeIcon data-icon="inline-start" />
           Plan it
         </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            Plan #{issue.number} {issue.title}
-          </DialogTitle>
-          <DialogDescription>Adds it to the plan as a task in Shaping.</DialogDescription>
-        </DialogHeader>
-        <Field>
-          <FieldLabel htmlFor={`plan-it-${issue.number}`}>Story (optional)</FieldLabel>
-          <NativeSelect id={`plan-it-${issue.number}`} value={story} onChange={(e) => setStory(e.target.value)}>
-            <NativeSelectOption value="">No story</NativeSelectOption>
-            {epics.map((epic) => (
-              <NativeSelectOptGroup key={epic} label={epic}>
-                {stories
-                  .filter((s) => s.epic === epic)
-                  .map((s) => (
-                    <NativeSelectOption key={s.number} value={String(s.number)}>
-                      #{s.number} {s.title}
-                    </NativeSelectOption>
-                  ))}
-              </NativeSelectOptGroup>
-            ))}
-          </NativeSelect>
-          <FieldDescription>Put it under a story now, or later on GitHub.</FieldDescription>
-          {error && <FieldError>{error}</FieldError>}
-        </Field>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline">Cancel</Button>
-          </DialogClose>
-          <Button disabled={pending} onClick={confirm}>
-            Plan it
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      }
+      title={`Plan #${issue.number} ${issue.title}`}
+      description="Adds it to the plan as a task in Shaping."
+      submit="Plan it"
+      onSubmit={plan}
+    >
+      <Field>
+        <FieldLabel htmlFor={`plan-it-${issue.number}`}>Story (optional)</FieldLabel>
+        <NativeSelect id={`plan-it-${issue.number}`} name="story" defaultValue="">
+          <NativeSelectOption value="">No story</NativeSelectOption>
+          {epics.map((epic) => (
+            <NativeSelectOptGroup key={epic} label={epic}>
+              {stories
+                .filter((s) => s.epic === epic)
+                .map((s) => (
+                  <NativeSelectOption key={s.number} value={String(s.number)}>
+                    #{s.number} {s.title}
+                  </NativeSelectOption>
+                ))}
+            </NativeSelectOptGroup>
+          ))}
+        </NativeSelect>
+        <FieldDescription>Put it under a story now, or later on GitHub.</FieldDescription>
+      </Field>
+    </FormDialog>
   );
 }
 
@@ -176,79 +220,44 @@ export function PlanItButton({ issue, projectId, stories }: { issue: Issue; proj
  */
 export function StartRunButton({ issue, projectId, graphs, graphName }: { issue: Issue; projectId: string; graphs: string[]; graphName: string }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [graph, setGraph] = useState(graphName);
-  const [error, setError] = useState<string>();
-  const [pending, startTransition] = useTransition();
-  const start = () =>
-    startTransition(async () => {
-      const result = await startIssueRunAction({ projectId, issue: issue.number, graphName: graph });
-      if (!result.ok) return setError(result.error);
-      setOpen(false);
-      toast.success("Run started", {
-        ...(result.assigned ? { description: `#${issue.number} had no assignee, so it is assigned to you.` } : {}),
-        action: { label: "Open run", onClick: () => router.push(runPath(projectId, result.runId)) },
-      });
-      router.refresh();
+  const start = async (form: FormData) => {
+    const result = await startIssueRunAction({ projectId, issue: issue.number, graphName: String(form.get("graph") ?? graphName) });
+    if (!result.ok) return result.error;
+    toast.success("Run started", {
+      ...(result.assigned ? { description: `#${issue.number} had no assignee, so it is assigned to you.` } : {}),
+      action: { label: "Open run", onClick: () => router.push(runPath(projectId, result.runId)) },
     });
+    router.refresh();
+    return undefined;
+  };
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        setError(undefined);
-      }}
-    >
-      <DialogTrigger asChild>
+    <FormDialog
+      trigger={
         <Button>
           <PlayIcon data-icon="inline-start" />
           Start run
         </Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            Start a run on #{issue.number} {issue.title}
-          </DialogTitle>
-          <DialogDescription>Runs the latest saved version of the graph with this issue linked. If nobody is assigned the issue, it is assigned to you.</DialogDescription>
-        </DialogHeader>
-        <FieldGroup>
-          {graphs.length > 1 && (
-            <Field>
-              <FieldLabel htmlFor={`start-graph-${issue.number}`}>Graph</FieldLabel>
-              <NativeSelect id={`start-graph-${issue.number}`} value={graph} onChange={(e) => setGraph(e.target.value)}>
-                {graphs.map((g) => (
-                  <NativeSelectOption key={g} value={g}>
-                    {g}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Field>
-          )}
-          {error && <FieldError>{error}</FieldError>}
-        </FieldGroup>
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline">Cancel</Button>
-          </DialogClose>
-          <Button disabled={pending} onClick={start}>
-            Start run
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/** Open on GitHub, first of the header's actions. */
-export function OpenOnGitHub({ url }: { url: string }) {
-  return (
-    <Button variant="ghost" asChild>
-      <a href={url}>
-        <ExternalLinkIcon data-icon="inline-start" />
-        Open on GitHub
-      </a>
-    </Button>
+      }
+      title={`Start a run on #${issue.number} ${issue.title}`}
+      description="Runs the latest saved version of the graph with this issue linked. If nobody is assigned the issue, it is assigned to you."
+      submit="Start run"
+      onSubmit={start}
+    >
+      {graphs.length > 1 ? (
+        <Field>
+          <FieldLabel htmlFor={`start-graph-${issue.number}`}>Graph</FieldLabel>
+          <NativeSelect id={`start-graph-${issue.number}`} name="graph" defaultValue={graphName}>
+            {graphs.map((g) => (
+              <NativeSelectOption key={g} value={g}>
+                {g}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </Field>
+      ) : (
+        <input type="hidden" name="graph" value={graphName} />
+      )}
+    </FormDialog>
   );
 }
 

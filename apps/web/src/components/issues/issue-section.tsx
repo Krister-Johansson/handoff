@@ -1,4 +1,6 @@
 import { useId, type ReactNode } from "react";
+import { ExternalLinkIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
@@ -67,4 +69,16 @@ export function RailSection({ title, aside, children }: { title: string; aside?:
 /** A muted line where a section has nothing to list. */
 export function Quiet({ children }: { children: ReactNode }) {
   return <p className="text-[13px] text-muted-foreground">{children}</p>;
+}
+
+/** Open on GitHub, first of the header's actions. */
+export function OpenOnGitHub({ url }: { url: string }) {
+  return (
+    <Button variant="ghost" asChild>
+      <a href={url}>
+        <ExternalLinkIcon data-icon="inline-start" />
+        Open on GitHub
+      </a>
+    </Button>
+  );
 }

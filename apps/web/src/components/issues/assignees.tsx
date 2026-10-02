@@ -33,6 +33,7 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
   const [people, setPeople] = useState<{ repo: string; users: AssignableUser[] } | { error: string }>();
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
+  const [, startLoading] = useTransition();
   const write = (logins: string[], me = false) =>
     startTransition(async () => {
       setError(undefined);
@@ -42,9 +43,10 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
       router.refresh();
     });
   const load = (open: boolean) => {
-    if (open && !people) startTransition(async () => setPeople(await assignableAction(projectId)));
+    if (open && !people) startLoading(async () => setPeople(await assignableAction(projectId)));
   };
-  const toggle = (login: string) => write(assignees.includes(login) ? assignees.filter((a) => a !== login) : [...assignees, login]);
+  const assigned = new Set(assignees);
+  const toggle = (login: string) => write(assigned.has(login) ? assignees.filter((a) => a !== login) : [...assignees, login]);
   const name = assignees.length ? `Assignee${assignees.length > 1 ? "s" : ""}: ${assignees.join(", ")}. Change assignees` : "No assignee. Change assignees";
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
@@ -73,7 +75,7 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
             <CommandList>
               {!people ? (
                 <div className="flex items-center gap-2 px-3 py-3 text-[13px] text-muted-foreground">
-                  <Spinner /> Reading who can be assigned
+                  <Spinner role="presentation" aria-label={undefined} aria-hidden /> Reading who can be assigned
                 </div>
               ) : "error" in people ? (
                 <p className="px-3 py-3 text-[13px] text-muted-foreground">{people.error}</p>
@@ -82,11 +84,11 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
                   <CommandEmpty>Nobody matches.</CommandEmpty>
                   <CommandGroup>
                     {people.users.map((user) => (
-                      <CommandItem key={user.login} value={user.login} disabled={pending} onSelect={() => toggle(user.login)} data-checked={assignees.includes(user.login) || undefined}>
+                      <CommandItem key={user.login} value={user.login} disabled={pending} onSelect={() => toggle(user.login)} data-checked={assigned.has(user.login) || undefined}>
                         <GitHubAvatar login={user.login} size="sm" />
                         <span className="min-w-0 flex-1 truncate">{user.login}</span>
                         {user.you && <span className="text-xs text-muted-foreground">you</span>}
-                        {assignees.includes(user.login) && <CheckIcon aria-label="Assigned" />}
+                        {assigned.has(user.login) && <CheckIcon aria-label="Assigned" />}
                       </CommandItem>
                     ))}
                   </CommandGroup>
@@ -108,7 +110,7 @@ export function Assignees({ projectId, issue, assignees: initial, viewer, assign
           </Command>
         </PopoverContent>
       </Popover>
-      {assignMe && viewer && !assignees.includes(viewer) && (
+      {assignMe && viewer && !assigned.has(viewer) && (
         <Button variant="ghost" size="xs" disabled={pending} onClick={() => write(assignees, true)}>
           Assign me
         </Button>

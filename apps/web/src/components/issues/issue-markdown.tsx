@@ -19,23 +19,23 @@ const BODY = cn(PROSE, "prose-img:my-2 prose-img:max-h-[480px] prose-img:rounded
 export function IssueMarkdown({ children, projectId, repoUrl, className }: { children: string; projectId: string; repoUrl: string; className?: string }) {
   const issueUrl = new RegExp(`^${repoUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/issues/(\\d+)/?$`, "i");
   const components: Components = {
-    a: ({ node: _node, href = "", children: text, ...rest }) => {
+    a: ({ href = "", children: text, title, id }) => {
       const number = issueUrl.exec(href)?.[1];
       const internal = number ? issuePath(projectId, Number(number)) : href.startsWith("/") ? href : undefined;
       return internal ? (
-        <Link href={internal} {...rest}>
+        <Link href={internal} title={title} id={id}>
           {text}
         </Link>
       ) : (
-        <a href={href} {...rest}>
+        <a href={href} title={title} id={id}>
           {text}
         </a>
       );
     },
     // GitHub's images can be large screenshots; they load when they come into view.
-    img: ({ node: _node, alt = "", ...rest }) => (
+    img: ({ src, alt = "", title, width, height }) => (
       // eslint-disable-next-line @next/next/no-img-element -- the source is GitHub's, at any size and host
-      <img alt={alt} loading="lazy" {...rest} />
+      <img src={src} alt={alt} title={title} width={width} height={height} loading="lazy" />
     ),
   };
   return (

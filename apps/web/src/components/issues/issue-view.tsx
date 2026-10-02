@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
 import type { StartRunContext } from "@/components/plan/plan-actions";
 import { PlanRefresher } from "@/components/plan/plan-refresher";
 import { SidebarSection } from "@/components/sidebar-section";
 import type { FoundIssue, IssueRun } from "@/server/issue-page";
+import { IssueColumns } from "./issue-columns";
 import { IssueHeader } from "./issue-header";
 import type { ProjectRef } from "./issue-crumbs";
 import { IssuePages } from "./issue-pages";
@@ -10,21 +10,6 @@ import { IssueRail } from "./issue-rail";
 import { IssueRuns } from "./issue-runs";
 import { Comments, Description } from "./issue-text";
 import { EpicStories, EpicTimeline, StoryTasks } from "./plan-items";
-
-/**
- * The page's two columns. In the DOM the first section comes first, then the rail, then the rest, so
- * below 1024 px the order reads: header, the first section, where the issue sits, the description and
- * the comments. From 1024 px the rail moves to the right of all of them.
- */
-export function IssueColumns({ first, rail, rest }: { first: ReactNode; rail: ReactNode; rest: ReactNode }) {
-  return (
-    <div className="grid min-w-0 gap-4 [grid-template-areas:'first'_'rail'_'rest'] lg:grid-cols-[minmax(0,1fr)_320px] lg:grid-rows-[auto_1fr] lg:[grid-template-areas:'first_rail'_'rest_rail']">
-      <div className="flex min-w-0 flex-col gap-4 [grid-area:first]">{first}</div>
-      {rail}
-      <div className="flex min-w-0 flex-col gap-4 [grid-area:rest] lg:self-start">{rest}</div>
-    </div>
-  );
-}
 
 /**
  * One task, story, epic or issue outside the plan, read inside handoff: what GitHub holds next to the

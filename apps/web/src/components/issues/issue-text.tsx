@@ -3,7 +3,8 @@ import type { IssueComment } from "@handoff/github";
 import { Tag } from "@/components/tag";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { utcStamp } from "@/lib/issue-dates";
-import { Foldable, isLong } from "./foldable";
+import { isLong } from "@/lib/fold";
+import { Foldable } from "./foldable";
 import { IssueMarkdown } from "./issue-markdown";
 import { IssueSection, Quiet } from "./issue-section";
 

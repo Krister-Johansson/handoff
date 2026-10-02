@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CheckIcon, ClipboardCheckIcon, GitBranchIcon, HandIcon, InfoIcon, MessageCircleQuestionIcon } from "lucide-react";
-import { StepTrail, TONE_TEXT } from "@/components/runs/step-trail";
+import { StepTrail } from "@/components/runs/step-trail";
+import { TONE_TEXT } from "@/lib/status";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Button } from "@/components/ui/button";
 import { formatSince } from "@/lib/format";

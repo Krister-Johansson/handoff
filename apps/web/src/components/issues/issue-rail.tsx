@@ -295,7 +295,7 @@ export function IssueRail({ page, projectId, today }: { page: FoundIssue; projec
   return (
     <aside aria-label={`Where #${page.issue.number} sits`} className="min-w-0 [grid-area:rail] lg:self-start">
       <Card className="gap-0 py-0">
-        {sections.flatMap((section, i) => (i === 0 ? [section] : [<Separator key={`sep-${i}`} />, section]))}
+        {sections.flatMap((section, i) => (i === 0 ? [section] : [<Separator key={`sep-${String(section.key)}`} />, section]))}
       </Card>
     </aside>
   );

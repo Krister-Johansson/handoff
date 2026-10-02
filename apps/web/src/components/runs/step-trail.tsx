@@ -3,17 +3,6 @@ import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import type { RunStep } from "@/server/run-lines";
 
-/** The text colour of each tone, for a run's "what it does now" line. */
-export const TONE_TEXT: Record<StatusTone, string> = {
-  success: "text-success",
-  active: "text-active",
-  attention: "text-attention",
-  danger: "text-danger",
-  repaired: "text-repaired",
-  neutral: "text-muted-foreground",
-  muted: "text-muted-foreground",
-};
-
 const DOT: Record<StatusTone, string> = {
   success: "bg-success-dot",
   active: "bg-active-dot",

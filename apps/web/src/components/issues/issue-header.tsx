@@ -11,10 +11,11 @@ import { issuePath, planPath } from "@/lib/paths";
 import { hasActiveRun, movesOf, taskColumn } from "@/lib/plan/task";
 import type { FoundIssue, IssueKind, IssueRun } from "@/server/issue-page";
 import { Assignees } from "./assignees";
-import { MoveButton, OpenOnGitHub, PlanItButton, ScheduleButton, ShowInPlan, StartRunButton } from "./issue-actions";
+import { MoveButton, PlanItButton, ScheduleButton, ShowInPlan, StartRunButton } from "./issue-actions";
+import { OpenOnGitHub } from "./issue-section";
 import { issueCrumbs, type ProjectRef } from "./issue-crumbs";
 
-export const KIND_LABEL: Record<IssueKind, string> = { task: "Task", story: "Story", epic: "Epic", issue: "Issue" };
+const KIND_LABEL: Record<IssueKind, string> = { task: "Task", story: "Story", epic: "Epic", issue: "Issue" };
 
 const ACTIVE = new Set(["queued", "running", "waiting"]);
 
@@ -93,19 +94,70 @@ function Actions({ page, project, start, runs }: { page: FoundIssue; project: Pr
   );
 }
 
+/** Where the issue stands in the plan: a task's status, a story's progress, an epic's size, or unplanned. */
+function Standing({ page, projectId }: { page: FoundIssue; projectId: string }) {
+  const { place } = page;
+  if (!place.planned) return <Tag>unplanned</Tag>;
+  if (place.kind === "story") return <ProgressBar progress={place.item.progress} />;
+  if (place.kind === "epic") {
+    const stories = place.item.stories.length;
+    const tasks = place.item.progress.total;
+    return (
+      <Fact icon={LayersIcon}>
+        {stories} {stories === 1 ? "story" : "stories"}, {tasks} {tasks === 1 ? "task" : "tasks"}
+      </Fact>
+    );
+  }
+  const column = taskColumn(place.item);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <StatusPill column={column} spinning={column === "Running" && hasActiveRun(place.item)} />
+      <TaskTags task={place.item} />
+      <BlockedBy numbers={page.blockedBy.filter((b) => b.state === "open").map((b) => b.number)} projectId={projectId} />
+    </span>
+  );
+}
+
+function Labels({ labels }: { labels: string[] }) {
+  return (
+    <Fact icon={TagIcon}>
+      {labels.length === 0 ? (
+        "No labels"
+      ) : (
+        <span className="inline-flex flex-wrap gap-1">
+          {labels.map((l) => (
+            <Tag key={l}>{l}</Tag>
+          ))}
+        </span>
+      )}
+    </Fact>
+  );
+}
+
+/** The issue's open or closed mark, as GitHub shows it. */
+function State({ state }: { state: "open" | "closed" }) {
+  return (
+    <Tag tone={state === "open" ? "outline" : "fill"} className={state === "open" ? "text-success" : "text-repaired"}>
+      {state === "open" ? <CircleDotIcon aria-hidden /> : <CircleCheckIcon aria-hidden />}
+      {state}
+    </Tag>
+  );
+}
+
 /**
  * Who and what: kind, number and title, then one wrapping line with its status, open or closed, its
  * open blockers, labels, assignees, dates and who opened it. Actions sit on the right.
  */
 export function IssueHeader({ page, project, start, runs }: { page: FoundIssue; project: ProjectRef; start: StartRunContext; runs: IssueRun[] }) {
-  const { issue, place, kind } = page;
+  const { issue, kind } = page;
   const label = KIND_LABEL[kind];
-  const assignedAtStart = runs.find((r) => r.assigned && issue.assignees.includes(r.assigned));
-  const openBlockers = page.blockedBy.filter((b) => b.state === "open").map((b) => b.number);
+  const assignees = new Set(issue.assignees);
+  const assignedAtStart = runs.some((r) => r.assigned !== null && assignees.has(r.assigned));
   const dates = datesOf(page);
+  const crumb = kind === "story" || kind === "epic" ? `${label} #${issue.number}` : `#${issue.number} ${issue.title}`;
   return (
     <header aria-label={`${label} #${issue.number}`} className="flex flex-col gap-3">
-      <TopBarCrumbs crumbs={issueCrumbs(project, page.section, kind === "story" || kind === "epic" ? `${label} #${issue.number}` : `#${issue.number} ${issue.title}`)} />
+      <TopBarCrumbs crumbs={issueCrumbs(project, page.section, crumb)} />
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
         <div className="flex min-w-0 flex-1 basis-96 flex-col gap-1.5">
           <span className="flex items-center gap-2">
@@ -120,35 +172,9 @@ export function IssueHeader({ page, project, start, runs }: { page: FoundIssue; 
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-x-3.5 gap-y-2">
-        {place.planned && place.kind === "task" && (
-          <span className="inline-flex flex-wrap items-center gap-1.5">
-            <StatusPill column={taskColumn(place.item)} spinning={taskColumn(place.item) === "Running" && hasActiveRun(place.item)} />
-            <TaskTags task={place.item} />
-          </span>
-        )}
-        {!place.planned && <Tag>unplanned</Tag>}
-        <Tag tone={issue.state === "open" ? "outline" : "fill"} className={issue.state === "open" ? "text-success" : "text-repaired"}>
-          {issue.state === "open" ? <CircleDotIcon aria-hidden /> : <CircleCheckIcon aria-hidden />}
-          {issue.state}
-        </Tag>
-        {place.planned && place.kind === "story" && <ProgressBar progress={place.item.progress} />}
-        {place.planned && place.kind === "epic" && (
-          <Fact icon={LayersIcon}>
-            {place.item.stories.length} {place.item.stories.length === 1 ? "story" : "stories"}, {place.item.progress.total} {place.item.progress.total === 1 ? "task" : "tasks"}
-          </Fact>
-        )}
-        {place.planned && place.kind === "task" && <BlockedBy numbers={openBlockers} projectId={project.id} />}
-        <Fact icon={TagIcon}>
-          {issue.labels.length === 0 ? (
-            "No labels"
-          ) : (
-            <span className="inline-flex flex-wrap gap-1">
-              {issue.labels.map((l) => (
-                <Tag key={l}>{l}</Tag>
-              ))}
-            </span>
-          )}
-        </Fact>
+        <Standing page={page} projectId={project.id} />
+        <State state={issue.state} />
+        <Labels labels={issue.labels} />
         <span className="inline-flex flex-wrap items-center gap-2">
           <Assignees key={issue.assignees.join(",")} projectId={project.id} issue={issue.number} assignees={issue.assignees} viewer={page.viewer} assignMe={kind === "task" || kind === "issue"} />
           {assignedAtStart && <span className="text-xs text-muted-foreground">assigned at Start run</span>}
