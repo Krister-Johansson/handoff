@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { AgentConnection } from "@/components/settings/agent-connection";
 import { NotificationSettingsLoader } from "@/components/settings/notification-settings-loader";
 import { SettingsNav } from "@/components/settings/settings-nav";
+import { VoiceSettingsLoader } from "@/components/settings/voice-settings-loader";
 import { ThemeSetting } from "@/components/settings/theme-setting";
 import { AssistantSettings } from "@/components/settings/assistant-settings";
 import { WorkerSettings } from "@/components/settings/worker-settings";
@@ -82,6 +83,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           {tab === "notifications" && (
             <Section title="Notifications" description="How this browser tells you that a run needs you.">
               <NotificationSettingsLoader />
+            </Section>
+          )}
+          {tab === "voice" && (
+            <Section title="Voice" description="How this browser listens and speaks. Audio stays on this machine unless you allow otherwise.">
+              <VoiceSettingsLoader />
             </Section>
           )}
           {tab === "agents" && (

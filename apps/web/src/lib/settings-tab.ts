@@ -1,4 +1,4 @@
-export const SETTINGS_TABS = ["appearance", "notifications", "agents", "assistant", "worker"] as const;
+export const SETTINGS_TABS = ["appearance", "notifications", "voice", "agents", "assistant", "worker"] as const;
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
 /** The settings page tab from its search params; appearance unless another known tab is asked for. */
