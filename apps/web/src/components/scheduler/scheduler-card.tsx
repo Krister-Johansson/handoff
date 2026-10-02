@@ -12,19 +12,16 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { planPath, projectPath } from "@/lib/paths";
+import { approvalSentence, initialValues, settingsLine, type SchedulerFormContext, type SchedulerValues } from "@/lib/scheduler-form";
 import { checkText } from "@/lib/scheduler-text";
 import { cn } from "@/lib/utils";
 import type { SchedulerCard as CardData } from "@/server/scheduler-card";
 import { SchedulerBadge } from "./scheduler-badge";
 import { SchedulerBody } from "./scheduler-body";
-import { approvalSentence, initialValues, SchedulerFields, type SchedulerFormContext, type SchedulerValues } from "./scheduler-fields";
+import { SchedulerFields } from "./scheduler-fields";
 import { useFolded } from "./use-folded";
 
 export type SchedulerProject = { id: string; name: string };
-
-/** "Up to 2 runs, Project order, master": the settings as one line. */
-export const settingsLine = (s: { maxRuns: number; order: string; graphName: string }) =>
-  `Up to ${s.maxRuns} ${s.maxRuns === 1 ? "run" : "runs"}, ${s.order === "priority" ? "Priority order" : "Project order"}, ${s.graphName}`;
 
 /** Runs a scheduler action and keeps its refusal to show. */
 function useAction() {

@@ -12,7 +12,8 @@ import { cn } from "@/lib/utils";
 import type { SchedulerCard } from "@/server/scheduler-card";
 import { SchedulerBadge } from "./scheduler-badge";
 import { PauseButton, ResumeButton, type SchedulerProject } from "./scheduler-card";
-import { approvalSentence, initialValues, SchedulerFields, type SchedulerFormContext, type SchedulerValues } from "./scheduler-fields";
+import { approvalSentence, initialValues, type SchedulerFormContext, type SchedulerValues } from "@/lib/scheduler-form";
+import { SchedulerFields } from "./scheduler-fields";
 
 const DESCRIPTION = "Starts runs on the plan's Ready tasks on its own, up to a limit, while nothing waits on someone.";
 
@@ -55,12 +56,33 @@ function NoPlan({ project }: { project: SchedulerProject & { repo?: string } }) 
   );
 }
 
-/**
- * Project settings' Scheduler section: the state with its action, the runs at a time, the order, the
- * graph, the skip label and the worker's Claude cap. Off, its button turns the scheduler on with these
- * fields; on, Save changes them and keeps a pause, since only Resume resumes.
- */
-export function SchedulerSettings({ project, card, form }: { project: SchedulerProject & { repo?: string }; card: SchedulerCard; form: SchedulerFormContext }) {
+/** The worker's Claude cap, which the scheduler leaves alone. */
+function ClaudeCap({ slots }: { slots: number | null }) {
+  return (
+    <p className="flex items-start gap-2 rounded-md border bg-muted/50 px-3 py-2 text-[13px] text-muted-foreground">
+      <CpuIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+      {slots === null
+        ? "No worker is running, so nothing starts until one is."
+        : `The worker runs ${slots} Claude ${slots === 1 ? "process" : "processes"} at a time for all projects (HANDOFF_CAP_CLI). Runs above that take turns at their Claude steps.`}
+    </p>
+  );
+}
+
+/** The state and what it allows: Pause or Resume, and Turn off while it is on. */
+function StateActions({ project, card }: { project: SchedulerProject; card: SchedulerCard }) {
+  const { state, paused } = card.status;
+  return (
+    <>
+      <SchedulerBadge state={state} selfPaused={paused?.by === "scheduler"} />
+      {state === "paused" && <ResumeButton project={project} />}
+      {state !== "paused" && state !== "off" && <PauseButton project={project} />}
+      {state !== "off" && <TurnOffButton project={project} />}
+    </>
+  );
+}
+
+/** The fields and their button: Turn on while off, else Save, which keeps a pause. */
+function SettingsForm({ project, card, form }: { project: SchedulerProject; card: SchedulerCard; form: SchedulerFormContext }) {
   const id = useId();
   const { status } = card;
   const off = status.state === "off";
@@ -73,48 +95,40 @@ export function SchedulerSettings({ project, card, form }: { project: SchedulerP
       const result = await saveSchedulerAction({ projectId: project.id, ...values, skipLabel });
       setError(result.ok ? undefined : result.error);
     });
-  const slots = status.claudeSlots;
-  const action =
-    form.planNumber === null ? (
-      <SchedulerBadge state="off" />
-    ) : (
-      <>
-        <SchedulerBadge state={status.state} selfPaused={status.paused?.by === "scheduler"} />
-        {status.state === "paused" ? <ResumeButton project={project} /> : !off && <PauseButton project={project} />}
-        {!off && <TurnOffButton project={project} />}
-      </>
-    );
+  return (
+    <div className={cn(CARD_BODY, "flex flex-col gap-4")}>
+      <SchedulerFields values={values} onChange={setValues} form={form} wide hints={{ maxRuns: "1 to 10. Runs a person starts count too.", noPriority: "Add a single select field named Priority to order by it." }} />
+      <Field orientation="horizontal" className="items-center">
+        <FieldLabel htmlFor={`${id}-skip`} className="w-40 shrink-0">
+          Skips tasks labelled
+        </FieldLabel>
+        <Input id={`${id}-skip`} value={skipLabel} maxLength={50} onChange={(e) => setSkipLabel(e.target.value)} className="h-8 w-40 font-mono text-xs" />
+        <FieldDescription className="text-xs">Empty skips no label.</FieldDescription>
+      </Field>
+      <ClaudeCap slots={status.claudeSlots} />
+      {off && <p className="text-[13px]">{approvalSentence(project.name, values)}</p>}
+      {error && <FieldError>{error}</FieldError>}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button size="sm" disabled={saving || !values.graph} onClick={save}>
+          {off ? "Turn on" : "Save"}
+        </Button>
+        {status.state === "paused" && <span className="text-xs text-muted-foreground">Saving keeps the scheduler paused. Resume starts it again.</span>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Project settings' Scheduler section: the state with its action, the runs at a time, the order, the
+ * graph, the skip label and the worker's Claude cap. Off, its button turns the scheduler on with these
+ * fields; on, Save changes them and keeps a pause, since only Resume resumes.
+ */
+export function SchedulerSettings({ project, card, form }: { project: SchedulerProject & { repo?: string }; card: SchedulerCard; form: SchedulerFormContext }) {
+  const planned = form.planNumber !== null;
   return (
     <section aria-label="Scheduler">
-      <SectionCard title="Scheduler" description={DESCRIPTION} action={action}>
-        {form.planNumber === null ? (
-          <NoPlan project={project} />
-        ) : (
-          <div className={cn(CARD_BODY, "flex flex-col gap-4")}>
-            <SchedulerFields values={values} onChange={setValues} form={form} wide hints={{ maxRuns: "1 to 10. Runs a person starts count too.", noPriority: "Add a single select field named Priority to order by it." }} />
-            <Field orientation="horizontal" className="items-center">
-              <FieldLabel htmlFor={`${id}-skip`} className="w-40 shrink-0">
-                Skips tasks labelled
-              </FieldLabel>
-              <Input id={`${id}-skip`} value={skipLabel} maxLength={50} onChange={(e) => setSkipLabel(e.target.value)} className="h-8 w-40 font-mono text-xs" />
-              <FieldDescription className="text-xs">Empty skips no label.</FieldDescription>
-            </Field>
-            <p className="flex items-start gap-2 rounded-md border bg-muted/50 px-3 py-2 text-[13px] text-muted-foreground">
-              <CpuIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-              {slots === null
-                ? "No worker is running, so nothing starts until one is."
-                : `The worker runs ${slots} Claude ${slots === 1 ? "process" : "processes"} at a time for all projects (HANDOFF_CAP_CLI). Runs above that take turns at their Claude steps.`}
-            </p>
-            {off && <p className="text-[13px]">{approvalSentence(project.name, values)}</p>}
-            {error && <FieldError>{error}</FieldError>}
-            <div className="flex flex-wrap items-center gap-3">
-              <Button size="sm" disabled={saving || !values.graph} onClick={save}>
-                {off ? "Turn on" : "Save"}
-              </Button>
-              {status.state === "paused" && <span className="text-xs text-muted-foreground">Saving keeps the scheduler paused. Resume starts it again.</span>}
-            </div>
-          </div>
-        )}
+      <SectionCard title="Scheduler" description={DESCRIPTION} action={planned ? <StateActions project={project} card={card} /> : <SchedulerBadge state="off" />}>
+        {planned ? <SettingsForm project={project} card={card} form={form} /> : <NoPlan project={project} />}
       </SectionCard>
     </section>
   );

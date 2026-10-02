@@ -6,26 +6,11 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-
-/** What the scheduler's form needs from the page: the project's graphs, its default, and whether its GitHub Project has a Priority field. */
-export type SchedulerFormContext = { graphs: string[]; defaultGraph: string | undefined; planNumber: number | null; priority: boolean };
-
-export type SchedulerValues = { maxRuns: number; order: "project" | "priority"; graph: string };
+import type { SchedulerFormContext, SchedulerValues } from "@/lib/scheduler-form";
 
 const MIN = 1;
 const MAX = 10;
 const clamp = (n: number) => Math.min(MAX, Math.max(MIN, Math.round(n)));
-
-/** start_scheduler's approval sentence, from the fields as they stand. */
-export function approvalSentence(project: string, v: SchedulerValues) {
-  const order = v.order === "priority" ? "by the Priority field" : "in Project order";
-  return `Let handoff start up to ${v.maxRuns} ${v.maxRuns === 1 ? "run" : "runs"} at a time on Ready tasks in ${project}, ${order}, with graph ${v.graph}.`;
-}
-
-/** The values a form starts from: the stored settings, or the defaults the first time. */
-export function initialValues(settings: { maxRuns: number; order: "project" | "priority"; graphName: string } | undefined, form: SchedulerFormContext): SchedulerValues {
-  return { maxRuns: settings?.maxRuns ?? 1, order: settings?.order ?? "project", graph: settings?.graphName ?? form.defaultGraph ?? form.graphs[0] ?? "" };
-}
 
 /**
  * Runs at a time (1 to 10, with one fewer and one more), the order (Priority disabled with the reason
