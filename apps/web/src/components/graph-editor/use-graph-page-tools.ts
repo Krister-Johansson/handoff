@@ -21,6 +21,8 @@ type Editor = {
   issues: CompileError[];
   edit: (action: EditorAction) => void;
   library: LibraryChoices;
+  /** Saves the graph as its next version, as the Save button does. */
+  saveVersion: () => Promise<{ version: number } | { error: string }>;
 };
 
 /** What a structural page tool answers while the editor is locked. */
@@ -99,7 +101,7 @@ function nodeChanges(graph: FlowGraph, node: FlowNode, patch: NodePatch): Editor
  * The graph editor's page tools: what the assistant or a browser agent can do on the open graph, the
  * same things the canvas and the inspector do, under the same lock.
  */
-export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library }: Editor) {
+export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion }: Editor) {
   /** Refuses a change to the graph's structure while the editor is locked, as the canvas does. */
   const unlocked = () => {
     if (locked) throw new Error(LOCKED);
@@ -167,10 +169,31 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
         edit({ type: "connect", source, target, sourceHandle: output.id, targetHandle: "in" });
         return `Connected ${source} (${output.id}) to ${target}${output.kind === "feedback" ? ", as feedback" : ""}. The graph is not saved yet.`;
       },
-      page_remove: undefined,
+      page_remove: ({ ids }) => {
+        unlocked();
+        const nodes = new Set(graph.nodes.map((n) => n.id));
+        const edges = new Set(graph.edges.map((e) => e.id));
+        const unknown = ids.filter((id) => !nodes.has(id) && !edges.has(id));
+        if (unknown.length) throw new Error(`There is no node or edge ${unknown.join(", ")}. The nodes are: ${keysOf(graph)}. The edges are: ${edgeIdsOf(graph)}.`);
+        const gone = new Set(ids);
+        // A node's edges go with it.
+        const along = graph.edges.filter((e) => !gone.has(e.id) && (gone.has(e.source) || gone.has(e.target))).map((e) => e.id);
+        edit({ type: "remove", ids });
+        if ((selection.nodeId && gone.has(selection.nodeId)) || (selection.edgeId && (gone.has(selection.edgeId) || along.includes(selection.edgeId)))) setSelection({});
+        return `Removed ${ids.join(", ")}${along.length ? `, and ${along.length === 1 ? "its edge" : "its edges"} ${along.join(", ")}` : ""}. The graph is not saved yet.`;
+      },
       page_tidy_layout: undefined,
       page_issues: undefined,
-      page_save_graph: undefined,
+      // Saving is allowed while locked, as the Save button is: the lock guards the structure, not the settings.
+      page_save_graph: async () => {
+        if (saved) throw new Error(`The graph has no unsaved changes; it is v${version}.`);
+        if (issues.length) {
+          throw new Error(`The graph has ${issues.length} ${issues.length === 1 ? "issue" : "issues"}, so it cannot be saved: ${issues.map((i) => i.message).join("; ")}`);
+        }
+        const result = await saveVersion();
+        if ("error" in result) throw new Error(`The graph was not saved: ${result.error}`);
+        return `Saved ${graphName} as v${result.version}.`;
+      },
     },
     () => ({
       projectId,

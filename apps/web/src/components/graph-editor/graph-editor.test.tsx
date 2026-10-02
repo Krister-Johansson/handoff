@@ -359,3 +359,54 @@ test("page_connect adds an edge the rules allow and refuses one they do not", as
   expect(await call("page_connect", { source: "coder", target: "tester", port: "done" })).toEqual({ text: "There is no node tester. The nodes are: planner, coder, reviewer, finish.", isError: true });
   expect(await edgesOf(whereAmI)).toHaveLength(3);
 });
+
+test("page_remove removes nodes and their edges", async () => {
+  const { call, container, whereAmI } = await withAssistant(reviewed);
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
+  await call("page_select", { node: "reviewer" });
+
+  expect(await call("page_remove", { ids: ["reviewer"] })).toEqual({ text: "Removed reviewer, and its edges coder->reviewer, reviewer->coder. The graph is not saved yet.", isError: false });
+  expect(canvasNode(container, "reviewer")).toBeNull();
+  expect(nodeCount(container)).toBe(2);
+  expect(await edgesOf(whereAmI)).toEqual([{ id: "planner->coder", source: "planner", target: "coder", port: "done", loop: false }]);
+  // The inspector let go of the removed node.
+  expect(inspector()).toHaveTextContent("Select a node or an edge to edit it");
+
+  expect(await call("page_remove", { ids: ["planner->coder"] })).toEqual({ text: "Removed planner->coder. The graph is not saved yet.", isError: false });
+  expect(await edgesOf(whereAmI)).toEqual([]);
+
+  expect(await call("page_remove", { ids: ["coder", "tester"] })).toEqual({ text: "There is no node or edge tester. The nodes are: planner, coder. The edges are: none.", isError: true });
+  expect(nodeCount(container)).toBe(2);
+});
+
+test("page_save_graph is refused with the issues while the graph is invalid, and otherwise saves as the next version", async () => {
+  vi.mocked(saveGraphAction).mockReset().mockResolvedValue({ ok: true, version: 5 });
+  const { call } = await withAssistant(unconnected);
+  // Nothing edited yet: there is nothing to save.
+  expect(await call("page_save_graph")).toEqual({ text: "The graph has no unsaved changes; it is v3.", isError: true });
+
+  await call("page_update_node", { key: "planner", patch: { label: "Plan the work" } });
+  const refused = await call("page_save_graph");
+  expect(refused.isError).toBe(true);
+  expect(refused.text).toMatch(/^The graph has \d+ issues?, so it cannot be saved: /);
+  expect(refused.text).toContain("reviewer");
+  expect(saveGraphAction).not.toHaveBeenCalled();
+
+  // The locked editor still saves: removing what does not fit makes the graph valid.
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
+  await call("page_remove", { ids: ["reviewer", "finish"] });
+  fireEvent.click(screen.getByRole("button", { name: "Lock editing" }));
+  expect(await call("page_save_graph")).toEqual({ text: "Saved plan-review as v5.", isError: false });
+  expect(saveGraphAction).toHaveBeenCalledWith(
+    "p1",
+    "plan-review",
+    expect.objectContaining({ nodes: [expect.objectContaining({ key: "planner", attributes: expect.objectContaining({ label: "Plan the work" }) }), expect.objectContaining({ key: "coder" })] }),
+  );
+  expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+  expect(screen.getByText(/^v5 saved/)).toBeInTheDocument();
+
+  // A save the server refuses says why.
+  vi.mocked(saveGraphAction).mockResolvedValue({ ok: false, errors: [{ code: "invalid_document", message: "The graph changed on the server." }] });
+  await call("page_update_node", { key: "planner", patch: { label: "Plan" } });
+  expect(await call("page_save_graph")).toEqual({ text: "The graph was not saved: The graph changed on the server.", isError: true });
+});

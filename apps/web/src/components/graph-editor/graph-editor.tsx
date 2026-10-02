@@ -152,19 +152,27 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
     edit({ type: "addNode", nodeType, position: { x: Math.round(center.x), y: Math.round(center.y) } });
   };
 
+  /** Saves the graph as its next version; the error when the server refuses it. */
+  const saveVersion = async (): Promise<{ version: number } | { error: string }> => {
+    const result = await saveGraphAction(projectId, graphName, documentOf(graph));
+    if (!result.ok) {
+      const error = result.errors.map((e) => e.message).join("; ");
+      setSaveError(error);
+      return { error };
+    }
+    setVersion(result.version);
+    setVersions((current) => [{ version: result.version, createdAt: new Date().toISOString(), createdBy: "dashboard" }, ...current]);
+    setRestoring(undefined);
+    setSaved(true);
+    setSaveError(undefined);
+    return { version: result.version };
+  };
   const save = () =>
     startTransition(async () => {
-      const result = await saveGraphAction(projectId, graphName, documentOf(graph));
-      if (result.ok) {
-        setVersion(result.version);
-        setVersions((current) => [{ version: result.version, createdAt: new Date().toISOString(), createdBy: "dashboard" }, ...current]);
-        setRestoring(undefined);
-        setSaved(true);
-        setSaveError(undefined);
-      } else setSaveError(result.errors.map((e) => e.message).join("; "));
+      await saveVersion();
     });
 
-  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library });
+  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion });
 
   const nextVersion = Math.max(version, ...versions.map((v) => v.version)) + 1;
 
