@@ -47,6 +47,25 @@ export function initialRunState(task: string, issues: LinkedIssue[] = []): RunSt
   return { task, ...(issues.length ? { issues } : {}), loops: {}, nodes: {}, human: {} };
 }
 
+/** A node's memory in the run, empty when nothing was recorded for it yet. */
+export function memoryOf(state: RunState, nodeKey: string): NodeMemory {
+  return NodeMemorySchema.parse(state.memory?.[nodeKey] ?? {});
+}
+
+/** Appends to a node's memory. A path already remembered keeps its first reason. */
+export function remember(state: RunState, nodeKey: string, add: Partial<NodeMemory>): RunState {
+  const current = memoryOf(state, nodeKey);
+  const known = new Set(current.extraPaths.map((e) => e.path));
+  const extraPaths = [...current.extraPaths];
+  for (const entry of add.extraPaths ?? []) {
+    if (known.has(entry.path)) continue;
+    known.add(entry.path);
+    extraPaths.push(entry);
+  }
+  const next: NodeMemory = { extraPaths, notes: [...current.notes, ...(add.notes ?? [])], answers: [...current.answers, ...(add.answers ?? [])] };
+  return { ...state, memory: { ...state.memory, [nodeKey]: next } };
+}
+
 /** Shallow-merges a node's state patch and records its result under nodes[key]. */
 export function mergeState(state: RunState, nodeKey: string, result: NodeResult, patch: Record<string, unknown> = {}): RunState {
   return { ...state, ...patch, nodes: { ...state.nodes, [nodeKey]: result } };

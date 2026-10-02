@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { brief, matchingEdges, mergeState, notifies, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type Notification, type RunState } from "@handoff/core";
+import { brief, matchingEdges, mergeState, notifies, remember, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type Notification, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import type { ExecutionError } from "../types.ts";
 
@@ -138,6 +138,22 @@ async function route(
   return { events, created, arrived, exhausted, state: next };
 }
 
+/** The files outside the plan an output declared, each with its reason, as a coder's output lists them. */
+function declaredPaths(output: unknown): { path: string; reason: string }[] {
+  const extra = (output as { extraPaths?: unknown } | undefined)?.extraPaths;
+  if (!Array.isArray(extra)) return [];
+  return extra.flatMap((e) => {
+    const { path, reason } = (e ?? {}) as { path?: unknown; reason?: unknown };
+    return typeof path === "string" ? [{ path, reason: typeof reason === "string" ? reason : "" }] : [];
+  });
+}
+
+/** Records what this attempt adds to its node's memory, so later attempts of the node are told it too. */
+function rememberAttempt(state: RunState, row: NodeExecutionRow, output: unknown): RunState {
+  const extraPaths = declaredPaths(output).map((e) => ({ ...e, attempt: row.attempt }));
+  return extraPaths.length ? remember(state, row.nodeKey, { extraPaths }) : state;
+}
+
 /** The run's project and task, which a notification about how the run ended names. */
 async function runText(tx: DbTx, runId: string) {
   const [row] = await tx.select({ project: projects.name, task: runs.task }).from(runs).innerJoin(projects, eq(projects.id, runs.projectId)).where(eq(runs.id, runId));
@@ -236,7 +252,7 @@ export async function completePassed(
     attempt: row.attempt,
     ...(updated.executorSessionId ? { sessionId: updated.executorSessionId } : {}),
   };
-  const merged = mergeState(state, row.nodeKey, result, input.statePatch);
+  const merged = rememberAttempt(mergeState(state, row.nodeKey, result, input.statePatch), row, input.output);
   const routed = await route(tx, input.graph, row, "passed", input.output, merged);
   lead.push(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
@@ -294,7 +310,7 @@ export async function completeFailed(
     attempt: row.attempt,
     lastFailure: { checks: input.checks ?? [], error: input.error },
   };
-  const merged = mergeState(state, row.nodeKey, failed);
+  const merged = rememberAttempt(mergeState(state, row.nodeKey, failed), row, input.output);
   const routed = await route(tx, input.graph, row, "failed", input.output, merged);
   const lead: NewEvent[] = [
     ...(input.checks ?? []).map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
