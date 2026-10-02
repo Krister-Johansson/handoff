@@ -424,7 +424,7 @@ async function applyOutcome(
       });
       if (contract.passed) {
         await db.transaction((tx) =>
-          completePassed(tx, { row, workerId, graph, output: contract.output, statePatch: outcome.statePatch, checks: contract.checks, cost: outcome.cost }),
+          completePassed(tx, { row, workerId, graph, output: contract.output, statePatch: outcome.statePatch, memory: outcome.memory, checks: contract.checks, cost: outcome.cost }),
         );
       } else if (contract.pathsOutside) {
         // Only files outside the plan are wrong: a person decides whether they belong to the change.

@@ -1,5 +1,5 @@
 import type { Told } from "./notify.ts";
-import type { CompiledGraph, CompiledNode, ContextPacket, NodeType, NotifyKind, RunState } from "@handoff/core";
+import type { CompiledGraph, CompiledNode, ContextPacket, NodeMemory, NodeType, NotifyKind, RunState } from "@handoff/core";
 import type { NodeExecutionRow, projects, runs } from "@handoff/db";
 import type { MaterializedLibrary } from "./library/materialize.ts";
 
@@ -46,7 +46,14 @@ export type ExecutorContext = {
 export type ExecutionError = { code: string; message: string; detail?: unknown };
 
 export type ExecutorOutcome =
-  | { kind: "completed"; output: unknown; statePatch?: Record<string, unknown>; cost?: { usd?: number | undefined; usage?: unknown } }
+  | {
+      kind: "completed";
+      output: unknown;
+      statePatch?: Record<string, unknown>;
+      /** Additions to nodes' memory by node key, appended to the run's current state when the step completes. */
+      memory?: Record<string, Partial<NodeMemory>>;
+      cost?: { usd?: number | undefined; usage?: unknown };
+    }
   | { kind: "waiting"; wait: { kind: "github_pr" | "human" | "timer" | "merge_queue"; key?: string; token?: string; deadlineAt?: Date } }
   | { kind: "failed"; error: ExecutionError; retryable?: boolean; retryAfterMs?: number }
   | { kind: "interrupted" };

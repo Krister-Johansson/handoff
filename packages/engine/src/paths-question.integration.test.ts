@@ -9,6 +9,7 @@ import { cliNodeExecutor } from "./executors/cli-node.ts";
 import { humanGateExecutor } from "./executors/human-gate.ts";
 import { answerQuestion, repairNodeExecution } from "./operations.ts";
 import { createRun } from "./runs.ts";
+import { runOnce } from "./scheduler/worker.ts";
 import { createOriginRepo, git } from "./testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "./testing/harness.ts";
 import { done, outputs, scripted } from "./testing/scripted.ts";
@@ -170,6 +171,66 @@ test("repair with allowPaths adds the paths", async () => {
   const { run: row } = await inspect(db, run.id);
   expect(row.status).toBe("succeeded");
   expect(row.state).toMatchObject({ memory: { coder: { extraPaths: [expect.objectContaining({ path: "notes.txt", attempt: 2, by: "person" })] } } });
+});
+
+test("an answer and a concurrent step completion both keep their memory entries", async () => {
+  // Two coders at once: one waits on a paths question, the other asks a question at a gate.
+  const parallel = {
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner" } },
+      { key: "coderA", attributes: { type: "coder", contract: { output: "coder_output", checks: [{ kind: "diff_within_paths" }] } } },
+      { key: "coderB", attributes: { type: "coder" } },
+      { key: "ask", attributes: { type: "human_gate", config: { mode: "question" } } },
+    ],
+    edges: [
+      { key: "planner->coderA", source: "planner", target: "coderA", attributes: { port: "done" } },
+      { key: "planner->coderB", source: "planner", target: "coderB", attributes: { port: "done" } },
+      { key: "coderB->ask", source: "coderB", target: "ask", attributes: { port: "needs_input" } },
+      { key: "ask->coderB", source: "ask", target: "coderB", attributes: { port: "answered" } },
+    ],
+  };
+  const origin = createOriginRepo();
+  const { project, graphVersion } = await seedGraph(db, parallel, { localClonePath: origin });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+  const cli = new FakeCliExecutor([coderWrites({ "CHANGELOG.md": "# Changelog\n", "notes.txt": "scratch\n" }), { output: outputs.coderAsks }, { output: outputs.coderDone }]);
+  const agent = cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 });
+  const gate = humanGateExecutor({ db });
+  const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
+  const executors: ExecutorRegistry = { planner: scripted(done(outputs.planner, { plan: outputs.planner })), coder: agent };
+  // Another worker carries out the paths answer while the gate is between reading the run and completing.
+  let meanwhile: (() => Promise<void>) | undefined;
+  executors.human_gate = {
+    needsWorkdir: gate.needsWorkdir,
+    async execute(ctx) {
+      const outcome = await gate.execute(ctx);
+      const step = meanwhile;
+      meanwhile = undefined;
+      if (outcome.kind === "completed") await step?.();
+      return outcome;
+    },
+  };
+  const deps = engineDeps(db, executors, { workdirs });
+  await drain(deps);
+
+  const open = await openQuestions(run.id);
+  const paths = open.find((q) => q.context.reason === "paths")!;
+  const asked = open.find((q) => q.context.reason === "needs_input")!;
+  meanwhile = async () => {
+    await answerQuestion(db, paths.id, { answer: "allow", option: "allow", answeredBy: "krister" });
+    expect(await runOnce(engineDeps(db, executors, { workdirs, workerId: "other-worker" }))).toBe(true);
+  };
+  await answerQuestion(db, asked.id, { answer: "Use ISO 8601 dates.", option: "ISO", answeredBy: "krister" });
+  await drain(deps);
+
+  expect(meanwhile).toBeUndefined();
+  const { run: row } = await inspect(db, run.id);
+  expect(row.state).toMatchObject({
+    memory: {
+      coderA: { extraPaths: [expect.objectContaining({ path: "notes.txt", by: "person" })] },
+      coderB: { answers: [expect.objectContaining({ question: "ISO dates or US dates?", answer: "Use ISO 8601 dates." })] },
+    },
+  });
 });
 
 test("Fail the step fails the attempt with the files outside the plan", async () => {

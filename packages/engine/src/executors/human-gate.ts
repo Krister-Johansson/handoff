@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, questionBrief, remember, reviewPath, runPath, tryPath, type DiffFile } from "@handoff/core";
+import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, questionBrief, reviewPath, runPath, tryPath, type DiffFile, type NodeMemory } from "@handoff/core";
 import { previews, questions, type Db } from "@handoff/db";
 import { notifyFrom, type Told } from "../notify.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
@@ -252,10 +252,12 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
       }
       // An answer to a step's own question holds for every later attempt of that step, not only the one that resumes.
       const { reason, from: asker } = question.context as { reason?: string; from?: string };
+      let memory: Record<string, Partial<NodeMemory>> | undefined;
       if (reason === "needs_input" && asker) {
         const attempt = ctx.state.nodes[asker]?.attempt;
         const answered = { question: question.question, answer: question.answer, ...(option ? { option } : {}), answeredBy: answer.answeredBy, ...(attempt !== undefined ? { attempt } : {}) };
-        statePatch.memory = remember(ctx.state, asker, { answers: [answered] }).memory;
+        // Added to the run's state when the gate completes, not copied from this snapshot, so a step that completed meanwhile keeps its memory.
+        memory = { [asker]: { answers: [answered] } };
         // A person decided it, so every later step keeps to it too, the code reviewer included.
         const given = option && option !== question.answer ? `${option}: ${question.answer}` : question.answer;
         const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
@@ -265,7 +267,7 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
       if ((question.context as { reason?: string }).reason === "loop_exhausted" && edgeKey && question.option !== "abort") {
         statePatch.loops = { ...ctx.state.loops, [edgeKey]: { attempts: 0 } };
       }
-      return { kind: "completed", output: answer, statePatch };
+      return { kind: "completed", output: answer, statePatch, ...(memory ? { memory } : {}) };
     },
   };
 }
