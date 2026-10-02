@@ -281,9 +281,28 @@ Local delivery during development: ngrok with a free static domain (installed an
 
 ## Event stream
 
-Event types: `run.created|started|finished|failed|cancelled`, `node.created|claimed|waiting|woken|passed|failed|repaired|interrupted|reclaimed`, `edge.taken|exhausted`, `join.arrived|fired`, `contract.checked` (one per check), `github.webhook`, `human.asked|answered`, `plan.status|skipped`, and the `cli.*` family.
+Event types: `run.created|started|finished|failed|cancelled`, `node.created|claimed|waiting|woken|passed|failed|repaired|interrupted|reclaimed`, `edge.taken|exhausted`, `join.arrived|fired`, `contract.checked` (one per check), `github.webhook`, `human.asked|answered`, `approval.held`, `plan.status|skipped`, `run.scheduled`, `run.overlap_held`, and the `cli.*` family.
+
+`run.created` carries `startedBy` when the starter is known: `dashboard`, `claude-code`, `assistant`, `webmcp`, `cli` or `scheduler`. The same value is in `runs.started_by`.
+
+`approval.held { message, approvedAt, approvedBy?, base, fingerprint }` records that a code review, or a gate that approves code, kept its last approval instead of reviewing or asking again, because the run's own change is the same as when it was approved and at most the base branch was merged in since.
+
+`run.scheduled { place, settings }` is the first event after `run.created` on a run the scheduler started. `place` is the task's place in the scheduler's order at that check (1 for the first candidate), and `settings` holds `maxRuns`, `order`, `graphName` and `skipLabel` as they were then. `run.overlap_held { nodeKey, runId, paths }` records that a run the scheduler started waits before its coder's first attempt, because its plan's owned paths overlap those of the active run `runId`; `paths` are the shared paths.
 
 `plan.status { issue, status }` records a Status written on the project's GitHub Project for a linked task: Running when the run starts, In review when the PR node opens the pull request, Done after the merge closes the issue, Ready when the task's latest run is cancelled. `plan.skipped { issue, status, reason }` records a write that did not happen; the run carries on. `reason` is `not-in-project` (the issue is not an item of the Project), `no-option` (the Project's Status field has no option with that name), `no-access` (no classic `GITHUB_TOKEN` with the `project` scope), or the message of the error GitHub returned. A project without a plan gets neither event.
+
+Scheduler events belong to a project, not a run, so they live in their own table, `scheduler_events` (project id, type, payload, time), and never reach a run's event stream. `by` is who acted (`dashboard`, `claude-code`, `assistant` or the like, or `scheduler` for the scheduler itself).
+
+- `scheduler.started { by, settings }` when a person turns the scheduler on, the first time or after it was off.
+- `scheduler.resumed { by }` after a pause, and `scheduler.changed { by, from, to }` when the settings change.
+- `scheduler.paused { by, reason? }` when a person pauses it, or `{ by: "scheduler", reason }` when it pauses itself after three failed checks in a row; that pause also sends a notification.
+- `scheduler.stopped { by }` when a person turns it off.
+- `scheduler.held { holds }` when the project becomes held or the set of holds changes. Each hold is `{ kind, runId, nodeKey }` with `kind` `failed` or `loop`, or a `permission` hold that adds `permissionId` and `toolName`.
+- `scheduler.idle { reason, runId? }` when the scheduler becomes idle or the reason changes: `planning` (the run `runId` it started has no plan yet), `no_ready` or `all_skipped`.
+- `scheduler.run_started { runId, issue, place }` for each run it starts.
+- `scheduler.skipped { issue, reason }` for a Ready task it passes over, written when the reason differs from the last one recorded for that issue.
+- `scheduler.start_failed { error }` for each check that failed for a reason other than one task's refusal.
+- `scheduler.released { issue, runId, by }` when a person lets the scheduler take a task whose run `runId` they cancelled.
 
 SSE route (`api/runs/[runId]/events/route.ts`, `runtime = 'nodejs'`, `dynamic = 'force-dynamic'`): cursor from `Last-Event-ID`, else `?after=`, else 0; loop while the request signal is open: `select ... where run_id = $1 and seq > $cursor order by seq limit 500`, write `id: <seq>\nevent: <type>\ndata: <json>\n\n`, sleep 750 ms when empty, `: ping` every 15 s, stop when the run is terminal and drained. Browsers resend `Last-Event-ID` on reconnect.
 

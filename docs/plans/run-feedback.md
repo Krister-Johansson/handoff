@@ -23,7 +23,7 @@ The plan follows `docs/plan.md`: verified facts first, then decisions, design, a
 
 ## Non-goals
 
-- A scheduler that starts runs on its own ("run the unblocked backlog with at most N at a time"). The project management plan covers the backlog; starting runs automatically is a separate decision.
+- A scheduler that starts runs on its own ("run the unblocked backlog with at most N at a time"). The project management plan covers the backlog; starting runs automatically is a separate decision. Reversed on 2026-10-02 at the user's request: `docs/plans/scheduler.md` plans the scheduler, and ADR 0008 records the decision.
 - Moving the MCP endpoint out of the dashboard into the worker. The report names the dashboard as a single point of failure; this plan adds a startup check and leaves the process layout as it is.
 - Rebasing branches. Updating a branch stays a merge of the base branch, as `syncWithBase` does today.
 - A database per run created by handoff itself. handoff does not know a project's database; it gives the project's setup command what it needs to create one (see Decision 3).
