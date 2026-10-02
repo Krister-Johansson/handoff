@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { CalendarClockIcon, ChevronDownIcon, PauseIcon, PlayIcon, SlidersHorizontalIcon } from "lucide-react";
+import { CalendarClockIcon, ChevronDownIcon, ListTreeIcon, PauseIcon, PlayIcon, SlidersHorizontalIcon } from "lucide-react";
 import { pauseSchedulerAction, resumeSchedulerAction, turnOnSchedulerAction, type SchedulerActionState } from "@/app/projects/scheduler-actions";
 import type { StartRunContext } from "@/components/plan/plan-actions";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { projectPath } from "@/lib/paths";
+import { planPath, projectPath } from "@/lib/paths";
 import { checkText } from "@/lib/scheduler-text";
 import { cn } from "@/lib/utils";
 import type { SchedulerCard as CardData } from "@/server/scheduler-card";
@@ -173,6 +173,43 @@ function Header({ project, card, form, now, fold, extra }: { project: SchedulerP
         {fold}
       </span>
     </div>
+  );
+}
+
+/** What the line on Home says: the holds point to Needs you, which lists them with their buttons. */
+function lineText(card: CardData) {
+  const { status } = card;
+  const n = status.holds.length;
+  if (status.state === "held") return `${n} ${n === 1 ? "item" : "items"} in Needs you ${n === 1 ? "holds" : "hold"} new starts. ${status.summary}.`;
+  if (status.state === "paused") return status.paused?.by === "scheduler" ? "Paused itself after three failed starts." : "Paused by a person.";
+  if (status.state === "idle" && status.idle) return status.idle.text;
+  return `${status.summary}.`;
+}
+
+/**
+ * The scheduler on Home: one line with its state and its action, and the way to the card on the Plan.
+ * Nothing until someone has turned the scheduler on.
+ */
+export function SchedulerLine({ project, card, form }: { project: SchedulerProject; card: CardData; form: SchedulerFormContext }) {
+  if (card.status.state === "off") return null;
+  return (
+    <Card className="gap-0 py-0" aria-label={`Scheduler of ${project.name}`} role="region">
+      <div className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 py-2">
+        <span className="flex items-center gap-2">
+          <CalendarClockIcon aria-hidden className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Scheduler</h2>
+          <SchedulerBadge state={card.status.state} selfPaused={card.status.paused?.by === "scheduler"} />
+        </span>
+        <span className="min-w-0 text-[13px] text-muted-foreground">{lineText(card)}</span>
+        <span className="ml-auto flex items-center gap-3">
+          <Link href={planPath(project.id)} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline hover:underline-offset-3">
+            <ListTreeIcon aria-hidden className="size-3.5" />
+            Open on the Plan
+          </Link>
+          <SchedulerAction project={project} card={card} form={form} />
+        </span>
+      </div>
+    </Card>
   );
 }
 

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { SchedulerCard } from "./scheduler-card";
+import { SchedulerCard, SchedulerLine } from "./scheduler-card";
 import { ago, cardOf, FORM, NOW, OFF, OTHER, PROJECT, RUN } from "./testing/fixtures";
 
 const actions = vi.hoisted(() => ({
@@ -167,6 +167,28 @@ test("the card starts open and remembers its fold per project", () => {
   again.unmount();
   show(running, { project: { id: "other", name: "sandbox" } });
   expect(screen.getByRole("list", { name: "Active runs" })).toBeInTheDocument();
+});
+
+test("on Home the scheduler is one line that points to the Plan, shown only once it has been turned on", () => {
+  const held = cardOf({
+    status: {
+      state: "held",
+      summary: "1 of 2 runs active, 1 Claude slot",
+      holds: [{ kind: "failed", runId: OTHER, nodeKey: "coder-1", text: "Run 64fde8ef failed at coder-1", href: "/x" }],
+    },
+    runs: running.runs,
+  });
+  const home = render(<SchedulerLine project={PROJECT} card={held} form={FORM} />, { wrapper });
+  expect(screen.getByText("Held")).toBeInTheDocument();
+  expect(screen.getByText("1 item in Needs you holds new starts. 1 of 2 runs active, 1 Claude slot.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Open on the Plan" })).toHaveAttribute("href", `/projects/${PROJECT.id}/plan`);
+  expect(screen.getByRole("button", { name: "Pause the scheduler of todooverkill" })).toBeInTheDocument();
+  // One line: the holds and the runs stay in Needs you and Running now.
+  expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  home.unmount();
+
+  const { container } = render(<SchedulerLine project={PROJECT} card={OFF} form={FORM} />, { wrapper });
+  expect(container).toBeEmptyDOMElement();
 });
 
 test("running shows active runs of max_runs and the Claude slots, with Pause", async () => {
