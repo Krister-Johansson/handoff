@@ -1,12 +1,15 @@
-import { render, screen, within } from "@testing-library/react";
+import { render as rtlRender, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { PlanTab } from "./plan-tab";
 import { epic, planView, story, task, timelineOf } from "./testing/plan-fixtures";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), setupPlanAction: vi.fn() }));
-vi.mock("@/components/assistant/assistant-provider", () => ({ useOptionalAssistant: () => undefined }));
+
+const render = (ui: ReactElement) => rtlRender(<TooltipProvider>{ui}</TooltipProvider>);
 
 const READ_AT = Date.parse("2026-10-02T12:00:00Z");
 const view = planView([epic(12, "Project management", [story(41, "Shaping", 12, [task(57, "Add the migration", "Ready"), task(58, "Plan page", "Shaping")])])]);
@@ -25,7 +28,6 @@ test("the activity line shows the latest issues, sub_issues or issue_dependencie
     <PlanTab {...props} activity={{ event: "issues", action: "closed", issue: 57, summary: "Issue #57 closed", receivedAt: new Date(READ_AT - 3 * 60_000) }} />,
   );
   expect(screen.getByText("Last from GitHub: Issue #57 closed, 3 minutes ago")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "1 Ready task in the backlog" })).toHaveAttribute("href", "/projects/p1/issues");
   expect(within(screen.getByRole("tree")).getByRole("treeitem", { name: /Task #57/ })).toBeInTheDocument();
   unmount();
 

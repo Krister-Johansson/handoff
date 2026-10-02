@@ -1,5 +1,5 @@
 import type { PlanStatus } from "@handoff/github";
-import type { RunFilter } from "./plan/filters";
+import type { AssigneeFilter, RunFilter } from "./plan/filters";
 import type { Zoom } from "./plan/timeline-scale";
 import { PROJECT_SECTIONS, type PlanViewName, type ProjectSection } from "./project-tab";
 
@@ -26,12 +26,17 @@ export function projectAt(pathname: string): { projectId: string; section?: Proj
  * A project's Plan page, with the view (the tree unless given), an epic (or the unplanned issues),
  * statuses and a run filter to narrow it to, and the timeline's zoom.
  */
-export function planPath(projectId: string, opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; zoom?: Zoom } = {}) {
+export function planPath(
+  projectId: string,
+  opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; assignee?: AssigneeFilter; q?: string; zoom?: Zoom } = {},
+) {
   const query = [
     opts.view && opts.view !== "tree" ? `view=${opts.view}` : undefined,
     opts.epic !== undefined ? `epic=${opts.epic}` : undefined,
     opts.status?.length ? `status=${opts.status.map(encodeURIComponent).join(",")}` : undefined,
     opts.run && opts.run !== "any" ? `run=${opts.run}` : undefined,
+    opts.assignee && opts.assignee !== "anyone" ? `assignee=${encodeURIComponent(opts.assignee)}` : undefined,
+    opts.q ? `q=${encodeURIComponent(opts.q)}` : undefined,
     opts.view === "timeline" && opts.zoom ? `zoom=${opts.zoom}` : undefined,
   ].filter(Boolean);
   return `/projects/${projectId}/plan${query.length ? `?${query.join("&")}` : ""}`;

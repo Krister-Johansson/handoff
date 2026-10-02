@@ -15,8 +15,12 @@ import { cn } from "@/lib/utils";
 import { PlanItDialog, TaskActions, type StartRunContext, type StoryChoice } from "./plan-actions";
 import { KindBadge, ProgressBar, StatusPill } from "./plan-status";
 import { taskColumn } from "@/lib/plan/task";
+import { AssigneeButton } from "./assignee-button";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
-import { useCollapsed } from "./use-collapsed";
+
+import { matchesQuery } from "@/lib/plan/search";
+import { useSearchQuery } from "./plan-context";
+import { useRowsOpen } from "./use-collapsed";
 
 type Props = StartRunContext & {
   projectId: string;
@@ -28,8 +32,12 @@ type Props = StartRunContext & {
   needsYou: string[];
   /** Why the latest status write for an issue was skipped, by issue number, as summarizeEvent words it. */
   skipped?: Record<number, string>;
-  /** Per epic, how many of its tasks the filters hide. */
+  /** Per epic, how many of its tasks the filters or the search hide. */
   hidden?: Record<number, number>;
+  /** What hides them, for the line under the epic. */
+  hiddenBy?: "filters" | "search" | "filters and search";
+  /** During a search, the rows it opens; the collapse store's rows otherwise. */
+  searchOpen?: Set<string> | undefined;
 };
 
 type RowContext = StartRunContext & Pick<Props, "projectId" | "repoUrl" | "needsYou" | "skipped">;
@@ -49,6 +57,7 @@ function TreeRow({
   label,
   expanded,
   head,
+  match,
   children,
   group,
 }: {
@@ -57,6 +66,8 @@ function TreeRow({
   label: string;
   expanded?: boolean;
   head?: boolean;
+  /** Whether the search found this row. */
+  match?: boolean;
   children: ReactNode;
   group?: ReactNode;
 }) {
@@ -71,6 +82,7 @@ function TreeRow({
       aria-level={level}
       aria-label={label}
       aria-expanded={expanded}
+      data-match={match || undefined}
       className="outline-none [&:focus-visible>[data-row]]:ring-2 [&:focus-visible>[data-row]]:ring-ring [&:focus-visible>[data-row]]:ring-inset"
     >
       <div
@@ -99,15 +111,21 @@ function Chevron({ expanded, onToggle, label }: { expanded: boolean; onToggle: (
 }
 
 const LEFT = "flex min-w-0 flex-1 basis-64 items-center gap-2.5";
+/** A task row's left side wraps its chips under the title when they leave the title no room. */
+const TASK_LEFT = "flex min-w-0 flex-1 basis-64 flex-wrap items-center gap-x-2.5 gap-y-1";
 const RIGHT = "ml-auto flex shrink-0 items-center gap-3";
 
 function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean } & RowContext) {
   const column = taskColumn(task);
+  const q = useSearchQuery();
   return (
-    <TreeRow id={`t${task.number}`} level={outside ? 2 : 3} label={`Task #${task.number} ${task.title}, ${column}`}>
-      <span className={LEFT}>
-        <StatusPill column={column} spinning={column === "Running" && task.run?.status === "running"} />
-        <IssueTitle item={task} />
+    <TreeRow id={`t${task.number}`} level={outside ? 2 : 3} label={`Task #${task.number} ${task.title}, ${column}`} match={matchesQuery(task, q)}>
+      <span className={TASK_LEFT}>
+        <span className="flex max-w-full min-w-0 items-center gap-2.5">
+          <StatusPill column={column} spinning={column === "Running" && task.run?.status === "running"} />
+          <IssueTitle item={task} />
+        </span>
+
         <TaskTags task={task} skipped={ctx.skipped?.[task.number]} />
         {outside && task.parent !== undefined && <Tag>parent #{task.parent} is not in the plan</Tag>}
         {column !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={ctx.repoUrl} />}
@@ -115,6 +133,9 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
       <span className={RIGHT}>
         <RunCell task={task} projectId={ctx.projectId} needsYou={ctx.needsYou} />
         <PrLink task={task} repoUrl={ctx.repoUrl} />
+        <span className="flex min-w-6 justify-center empty:hidden">
+          <AssigneeButton task={task} />
+        </span>
         <TaskActions task={task} projectId={ctx.projectId} start={ctx} />
       </span>
     </TreeRow>
@@ -123,12 +144,14 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
 
 function StoryRow({ story, expanded, onToggle, ...ctx }: { story: PlanStory; expanded: boolean; onToggle: () => void } & RowContext) {
   const label = `Story #${story.number} ${story.title}`;
+  const q = useSearchQuery();
   return (
     <TreeRow
       id={`s${story.number}`}
       level={2}
       label={label}
       expanded={expanded}
+      match={matchesQuery(story, q)}
       group={story.tasks.map((t) => (
         <TaskRow key={t.number} task={t} {...ctx} />
       ))}
@@ -187,8 +210,9 @@ function Block({ children }: { children: ReactNode }) {
 
 function UnplannedRow({ issue, projectId, start, stories }: { issue: BacklogIssue; projectId: string; start: StartRunContext; stories: StoryChoice[] }) {
   const run = issue.run && issue.run.status !== "cancelled" ? issue.run : undefined;
+  const q = useSearchQuery();
   return (
-    <TreeRow id={`u${issue.number}`} level={2} label={`Issue #${issue.number} ${issue.title}`}>
+    <TreeRow id={`u${issue.number}`} level={2} label={`Issue #${issue.number} ${issue.title}`} match={matchesQuery(issue, q)}>
       <span className={LEFT}>
         <CircleDotIcon aria-hidden className="size-3.5 shrink-0 text-success-dot" />
         <span className="w-10 shrink-0 text-xs text-muted-foreground">issue</span>
@@ -248,10 +272,12 @@ function useTreeKeys(toggle: (key: string, open?: boolean) => void) {
  * pull request and the moves handoff owns. Unparented items and unplanned issues follow in blocks of
  * their own. Collapsed epics and stories are remembered in this browser.
  */
-export function PlanTree({ epics, unparented, unplanned, hidden, ...ctx }: Props) {
-  const collapsed = useCollapsed(ctx.projectId);
-  const { active, onKeyDown, onFocus } = useTreeKeys(collapsed.toggle);
-  const open = (key: string) => !collapsed.has(key);
+export function PlanTree({ epics, unparented, unplanned, hidden, hiddenBy = "filters", searchOpen, ...ctx }: Props) {
+  const rows = useRowsOpen(ctx.projectId, searchOpen);
+  const { collapsed } = rows;
+  const q = useSearchQuery();
+  const { active, onKeyDown, onFocus } = useTreeKeys(rows.toggle);
+  const open = rows.isOpen;
   const stories = epics.flatMap((e) => e.stories.map((s) => ({ number: s.number, title: s.title, epic: e.title })));
   const first = epics[0] ? `e${epics[0].number}` : unparented.length ? "unparented" : "unplanned";
   return (
@@ -269,24 +295,25 @@ export function PlanTree({ epics, unparented, unplanned, hidden, ...ctx }: Props
                 head
                 label={label}
                 expanded={open(key)}
+                match={matchesQuery(epic, q)}
                 group={
                   <>
                     {epic.stories.map((s) => (
-                      <StoryRow key={s.number} story={s} expanded={open(`s${s.number}`)} onToggle={() => collapsed.toggle(`s${s.number}`)} {...ctx} />
+                      <StoryRow key={s.number} story={s} expanded={open(`s${s.number}`)} onToggle={() => rows.toggle(`s${s.number}`)} {...ctx} />
                     ))}
                     {epic.tasks.map((t) => (
                       <TaskRow key={t.number} task={t} {...ctx} />
                     ))}
                     {more > 0 && (
                       <li role="none" className="px-3 py-2 text-xs text-muted-foreground">
-                        {more === 1 ? "1 more task in this epic does not match the filters." : `${more} more tasks in this epic do not match the filters.`}
+                        {more === 1 ? `1 more task in this epic does not match the ${hiddenBy}.` : `${more} more tasks in this epic do not match the ${hiddenBy}.`}
                       </li>
                     )}
                   </>
                 }
               >
                 <span className={LEFT}>
-                  <Chevron expanded={open(key)} onToggle={() => collapsed.toggle(key)} label={label} />
+                  <Chevron expanded={open(key)} onToggle={() => rows.toggle(key)} label={label} />
                   <KindBadge kind="epic" />
                   <IssueTitle item={epic} className="text-sm font-semibold" />
                 </span>
@@ -311,7 +338,7 @@ export function PlanTree({ epics, unparented, unplanned, hidden, ...ctx }: Props
               ))}
             >
               <span className={LEFT}>
-                <Chevron expanded={open("unparented")} onToggle={() => collapsed.toggle("unparented")} label="Unparented" />
+                <Chevron expanded={open("unparented")} onToggle={() => rows.toggle("unparented")} label="Unparented" />
                 <span className="text-sm font-semibold">Unparented</span>
                 <Tag tone="fill">{unparented.length}</Tag>
                 <span className="text-xs text-muted-foreground">In the plan, with no epic or story of the plan above it.</span>
@@ -332,7 +359,8 @@ export function PlanTree({ epics, unparented, unplanned, hidden, ...ctx }: Props
               ))}
             >
               <span className={LEFT}>
-                <Chevron expanded={open("unplanned")} onToggle={() => collapsed.toggle("unplanned")} label="Unplanned" />
+                <Chevron expanded={open("unplanned")} onToggle={() => rows.toggle("unplanned")}
+ label="Unplanned" />
                 <span className="text-sm font-semibold">Unplanned</span>
                 <Tag tone="fill">{unplanned.length}</Tag>
                 <span className="text-xs text-muted-foreground">Open issues outside the plan. They stay startable.</span>

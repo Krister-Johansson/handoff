@@ -33,6 +33,20 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
               name
             }
           }
+          # handoff's sizes are the options S, M and L; another option reads as no size. Measured live: these two lookups add no points.
+          size: fieldValueByName(name: "Size") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+          # Hours; 0 or less reads as no estimate.
+          estimate: fieldValueByName(name: "Estimate") {
+            __typename
+            ... on ProjectV2ItemFieldNumberValue {
+              number
+            }
+          }
           # GitHub names a new iteration field "Iteration"; a renamed one is not read.
           iteration: fieldValueByName(name: "Iteration") {
             __typename

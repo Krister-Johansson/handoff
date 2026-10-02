@@ -104,26 +104,52 @@ mutation CreatePlanDateField($projectId: ID!, $name: String!) {
   }
 }
 
-mutation SetPlanDate($projectId: ID!, $itemId: ID!, $fieldId: ID!, $date: Date!) {
-  updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { date: $date } }) {
-    projectV2Item {
-      id
-    }
-  }
-}
-
-mutation ClearPlanField($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
-  clearProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId }) {
-    projectV2Item {
-      id
-    }
-  }
-}
-
 mutation SetPlanStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
   updateProjectV2ItemFieldValue(input: { projectId: $projectId, itemId: $itemId, fieldId: $fieldId, value: { singleSelectOptionId: $optionId } }) {
     projectV2Item {
       id
+    }
+  }
+}
+
+mutation CreatePlanSizeField($projectId: ID!, $name: String!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+  createProjectV2Field(input: { projectId: $projectId, dataType: SINGLE_SELECT, name: $name, singleSelectOptions: $options }) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2SingleSelectField {
+        id
+        options {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+
+mutation CreatePlanEstimateField($projectId: ID!, $name: String!) {
+  createProjectV2Field(input: { projectId: $projectId, dataType: NUMBER, name: $name }) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2Field {
+        id
+        dataType
+      }
+    }
+  }
+}
+
+mutation SetPlanSizeOptions($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+  updateProjectV2Field(input: { fieldId: $fieldId, singleSelectOptions: $options }) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2SingleSelectField {
+        id
+        options {
+          id
+          name
+        }
+      }
     }
   }
 }

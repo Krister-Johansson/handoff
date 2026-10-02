@@ -33,6 +33,7 @@
     --font-sans: var(--font-sans);
     --font-mono: var(--font-geist-mono);
     --color-subtle: var(--subtle);
+    --color-highlight: var(--highlight);
     --color-terminal: var(--terminal);
     --color-terminal-foreground: var(--terminal-foreground);
     --color-success: var(--success);
@@ -142,6 +143,8 @@
     --repaired-bg: oklch(0.75 0.16 300 / 12%);
     --terminal: oklch(0.17 0.004 260);
     --terminal-foreground: oklch(0.88 0.004 260);
+    /* Text a search found: a yellow no status uses. */
+    --highlight: oklch(0.9 0.15 95 / 75%);
 }
 
 .dark {
@@ -194,6 +197,7 @@
     --repaired-bg: oklch(0.75 0.16 300 / 14%);
     --terminal: oklch(0.12 0.004 260);
     --terminal-foreground: oklch(0.86 0.004 260);
+    --highlight: oklch(0.82 0.15 95 / 42%);
 }
 
 @layer base {

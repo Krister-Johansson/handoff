@@ -67,6 +67,7 @@ export function PlanBoard({
   needsYou,
   skipped,
   now,
+  searching = false,
   ...start
 }: StartRunContext & {
   board: Record<PlanColumn, PlanTask[]>;
@@ -78,6 +79,8 @@ export function PlanBoard({
   skipped?: Record<number, string>;
   /** The time the page was read, for the Done column's 30 days. */
   now: number;
+  /** Whether a search narrows the cards; an empty column then says No match. */
+  searching?: boolean;
 }) {
   const [showAllDone, setShowAllDone] = useState(false);
   const eyebrowOf = eyebrows(epics);
@@ -100,8 +103,9 @@ export function PlanBoard({
                   <ColumnMenu column={column} project={project} />
                 </span>
               </header>
-              {tasks.length === 0 && EMPTY[column] ? (
-                <p className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">{EMPTY[column]}</p>
+              {tasks.length === 0 && (searching || EMPTY[column]) ? (
+                <p className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">{searching ? "No match" : EMPTY[column]}</p>
+
               ) : (
                 <ul className="flex flex-col gap-2">
                   {tasks.map((task) => (
