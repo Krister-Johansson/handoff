@@ -41,6 +41,13 @@ export async function startScheduler(deps: SchedulerDeps, projectId: string, set
   if (!graphName) throw new Error(`${project.name} has no graph yet. Create one on its Graphs page.`);
   const [graph] = await db.select({ id: graphs.id }).from(graphs).where(and(eq(graphs.projectId, projectId), eq(graphs.name, graphName)));
   if (!graph) throw new Error(`${project.name} has no graph ${graphName}.`);
+  if (settings.order === "priority") {
+    // The check reads the Project the way tick.ts does: the repository owner's Project by number.
+    const plan = await deps.projects?.getProject(project.repoOwner, project.planProjectNumber);
+    if (plan?.priorityOptions === undefined) {
+      throw new Error(`GitHub Project #${project.planProjectNumber} has no Priority field, so the scheduler cannot order tasks by priority. Add a single select field named Priority to the Project, or use Project order.`);
+    }
+  }
   const next: Stored = { maxRuns: settings.maxRuns ?? stored?.maxRuns ?? 1, order: settings.order ?? stored?.order ?? "project", graphName, skipLabel: stored?.skipLabel ?? "human" };
 
   await db.transaction(async (tx) => {

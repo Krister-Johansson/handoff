@@ -705,3 +705,11 @@ test("start_scheduler stores max_runs, order and graph, and resumes a paused sch
     { type: "scheduler.resumed", payload: { by: "claude-code" } },
   ]);
 });
+
+test("start_scheduler refuses priority order on a Project without a Priority field", async () => {
+  await withPlan();
+  const refused = await call("start_scheduler", { project: "sandbox", order: "priority" });
+  expect(refused.error).toBe(`GitHub Project #${sandboxProject().number} has no Priority field, so the scheduler cannot order tasks by priority. Add a single select field named Priority to the Project, or use Project order.`);
+  expect(await schedulerRow()).toBeUndefined();
+  expect(await call("start_scheduler", { project: "sandbox", order: "project" })).toMatchObject({ state: "on", order: "project" });
+});
