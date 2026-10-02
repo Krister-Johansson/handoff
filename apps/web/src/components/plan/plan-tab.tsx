@@ -3,6 +3,7 @@ import { ArrowRightIcon } from "lucide-react";
 import type { PlanColumn, PlanView } from "@/server/plan";
 import type { PlanSignals } from "@/server/plan-signals";
 import type { GitHubActivity } from "@/server/plan-activity";
+import { IssuePages } from "@/components/issues/issue-pages";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { formatAgo } from "@/lib/format";
@@ -111,7 +112,9 @@ export function PlanTab({ activity, ...props }: PlanTabProps) {
           </Button>
         }
       />
-      <PlanBody {...props} />
+      <IssuePages projectId={project.id}>
+        <PlanBody {...props} />
+      </IssuePages>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>{activity && `Last from GitHub: ${activity.summary}, ${formatAgo(activity.receivedAt, new Date(readAt))}`}</span>
         <PlanRefresher readAt={readAt} />

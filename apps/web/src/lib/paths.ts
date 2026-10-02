@@ -9,6 +9,9 @@ export const PROJECTS_SETTINGS_PATH = "/settings?tab=projects";
 /** A project's page: its Home page without a section, else the section's route. */
 export const projectPath = (projectId: string, section?: ProjectSection) => `/projects/${projectId}${section ? `/${section}` : ""}`;
 
+/** An issue's page in handoff: a task, a story, an epic or an issue outside the plan. */
+export const issuePath = (projectId: string, number: number) => `/projects/${projectId}/issues/${number}`;
+
 /**
  * The project and its section a dashboard path is under, such as p1 and runs for /projects/p1/runs/r1;
  * undefined outside a project. The section is undefined on the project's Home page.

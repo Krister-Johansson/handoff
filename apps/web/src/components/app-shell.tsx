@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useOptionalAssistant } from "@/components/assistant/assistant-provider";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarSectionProvider } from "@/components/sidebar-section";
 import { TopBar, TopBarCrumbsProvider } from "@/components/top-bar";
 
 /**
@@ -34,27 +35,36 @@ export function AppShell({
       >
         Skip to content
       </a>
-      {sidebar}
-      <TopBarCrumbsProvider>
-        <SidebarInset className="min-w-0">
-          <TopBar />
-          <div className="flex min-w-0 flex-1">
-            <div className="flex min-w-0 flex-1 flex-col">
-              <div id="content" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
-                {children}
-              </div>
-              {overlay && (
-                // Below 1280 px the open assistant is a 384 px sheet over the right of the page; the
-                // overlay centres on what the sheet leaves visible.
-                <div data-assistant={assistantOpen ? "open" : undefined} className="sticky bottom-4 z-40 h-0 sm:bottom-6 sm:data-[assistant=open]:pr-96 xl:data-[assistant=open]:pr-0">
-                  <div className="relative">{overlay}</div>
+      <SidebarSectionProvider>
+        {sidebar}
+        <TopBarCrumbsProvider>
+          <SidebarInset className="min-w-0">
+            <TopBar />
+            <div className="flex min-w-0 flex-1">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <div
+                  id="content"
+                  tabIndex={-1}
+                  className="flex min-w-0 flex-1 flex-col outline-none"
+                >
+                  {children}
                 </div>
-              )}
+                {overlay && (
+                  // Below 1280 px the open assistant is a 384 px sheet over the right of the page; the
+                  // overlay centres on what the sheet leaves visible.
+                  <div
+                    data-assistant={assistantOpen ? "open" : undefined}
+                    className="sticky bottom-4 z-40 h-0 sm:bottom-6 sm:data-[assistant=open]:pr-96 xl:data-[assistant=open]:pr-0"
+                  >
+                    <div className="relative">{overlay}</div>
+                  </div>
+                )}
+              </div>
+              {panel}
             </div>
-            {panel}
-          </div>
-        </SidebarInset>
-      </TopBarCrumbsProvider>
+          </SidebarInset>
+        </TopBarCrumbsProvider>
+      </SidebarSectionProvider>
     </SidebarProvider>
   );
 }

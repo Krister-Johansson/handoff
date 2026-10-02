@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { CircleDotIcon, GitPullRequestIcon } from "lucide-react";
 import { StatusBadge } from "@/components/runs/status-badge";
-import { runPath } from "@/lib/paths";
+import { issuePath, runPath } from "@/lib/paths";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import type { BacklogCounts, BacklogFilter, BacklogIssue } from "@/server/backlog";
@@ -67,10 +67,10 @@ export function Backlog({ projectId, graphs, graphName, filter, counts, issues, 
             <li key={issue.number} className={ROW}>
               <CircleDotIcon aria-hidden className="size-4 shrink-0 text-success-dot" />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <a href={issue.url} className="truncate hover:underline hover:underline-offset-3">
+                <Link href={issuePath(projectId, issue.number)} className="truncate hover:underline hover:underline-offset-3">
                   <span className="mr-1 font-mono text-xs text-muted-foreground">#{issue.number}</span>
                   {issue.title}
-                </a>
+                </Link>
                 <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                   {issue.labels.map((label) => (
                     <Tag key={label}>{label}</Tag>
