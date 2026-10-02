@@ -1,6 +1,7 @@
 import { criteriaInIssue, LAUNCH_FILE, parseLaunchFile } from "@handoff/core";
 import { and, desc, eq, graphs, gt, liveWorkers, projects, sql, webhookDeliveries, type Db } from "@handoff/db";
-import type { GitHubPort } from "@handoff/github";
+import type { GitHubPort, ProjectsPort } from "@handoff/github";
+import { projectsAccessProblem, SCOPE_FIX } from "./plan";
 
 /** ok: in place. todo: missing, with how to fix it. info: worth knowing, not needed. */
 export type CheckStatus = "ok" | "todo" | "info";
@@ -42,17 +43,43 @@ async function acceptanceCheck(github: GitHubPort, repo: { owner: string; name: 
   return withCriteria > 0 ? check({ ...base, status: "ok", detail }) : check({ ...base, status: "todo", detail, fix });
 }
 
+/** Whether the project has a plan on GitHub Projects that handoff can reach. Never required. */
+async function planCheck(plan: ProjectsPort | undefined, project: { repoOwner: string; planProjectNumber: number | null }): Promise<ReadinessCheck> {
+  const base = { id: "plan", title: "A plan on GitHub Projects", required: false };
+  const number = project.planProjectNumber;
+  if (number === null) {
+    return check({
+      ...base,
+      status: "info",
+      detail: "The project has no plan on GitHub Projects.",
+      fix: "Set up a plan to shape epics, stories and tasks: ask the assistant, or call setup_plan. Only tasks in Ready then reach the backlog.",
+    });
+  }
+  const problem = await projectsAccessProblem(plan).catch((error: unknown) => `GitHub refused the token: ${(error as Error).message}`);
+  if (problem || !plan) return check({ ...base, status: "todo", detail: problem ?? "GITHUB_TOKEN is not set.", fix: SCOPE_FIX });
+  const found = await plan.getProject(project.repoOwner, number).catch(() => undefined);
+  if (!found) {
+    return check({
+      ...base,
+      status: "todo",
+      detail: `GitHub Project #${number} of ${project.repoOwner} does not exist or GITHUB_TOKEN cannot see it.`,
+      fix: `Check the Project on GitHub, or run setup_plan to set up the plan again. ${SCOPE_FIX}`,
+    });
+  }
+  return check({ ...base, status: "ok", detail: `The plan is GitHub Project #${number}, ${found.title}: ${found.url}` });
+}
+
 /**
  * Whether a project is set up to work well with handoff, item by item, with how to fix what is missing.
  * The graph and a running worker are required; the rest makes runs better (an app the Demo and Try it
  * steps can start, CI the PR node waits for, criteria to check against, dependencies that order runs).
  */
-export async function projectReadiness(db: Db, github: GitHubPort | undefined, projectId: string) {
+export async function projectReadiness(db: Db, github: GitHubPort | undefined, projectId: string, plan?: ProjectsPort) {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) throw new Error(`no project ${projectId}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
   const dayAgo = sql`now() - interval '1 day'`;
-  const [graphRows, workers, delivery, claudeMd, launch, ci, issues] = await Promise.all([
+  const [graphRows, workers, delivery, claudeMd, launch, ci, issues, planned] = await Promise.all([
     db.select({ name: graphs.name }).from(graphs).where(eq(graphs.projectId, project.id)),
     liveWorkers(db, WORKER_WINDOW_MS),
     project.repoId === null
@@ -67,6 +94,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
     github?.getFile(repo, LAUNCH_FILE, project.defaultBranch).catch(() => undefined),
     github?.expectsChecks(repo, project.defaultBranch).catch(() => false),
     github?.listIssues(repo).catch(() => []) ?? Promise.resolve([]),
+    planCheck(plan, project),
   ]);
 
   const checks: ReadinessCheck[] = [
@@ -135,6 +163,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
           detail: "No webhook from this repository in the last day.",
           fix: `Run \`pnpm dev:webhooks ${project.repoOwner}/${project.repoName}\` while runs are active, or install the GitHub App, so CI results wake runs at once instead of on the next check.`,
         }),
+    planned,
   ];
   return { project: { id: project.id, name: project.name, repo: `${project.repoOwner}/${project.repoName}` }, ready: checks.every((c) => !c.required || c.status === "ok"), checks };
 }

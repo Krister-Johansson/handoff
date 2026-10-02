@@ -150,7 +150,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     setup_project: async ({ project }: { project: string }) => ({
-      ...(await projectReadiness(db, github, (await findProject(db, project)).id)),
+      ...(await projectReadiness(db, github, (await findProject(db, project)).id, plan)),
       guide: "Follow the handoff-setup skill to fix the items marked todo, one at a time, asking the user before changing their repository.",
     }),
 

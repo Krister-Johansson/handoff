@@ -73,7 +73,7 @@ export const CATALOG: ToolSpec[] = [
     name: "setup_project",
     title: "Check a project's setup",
     description:
-      "Checks whether a project is set up to work well with handoff: a graph, a running worker, a setup command, CLAUDE.md, an app that starts from .claude/launch.json for Demo and Try it, CI, acceptance criteria in issues, issue dependencies and webhooks. Each item says what was found and how to fix it.",
+      "Checks whether a project is set up to work well with handoff: a graph, a running worker, a setup command, CLAUDE.md, an app that starts from .claude/launch.json for Demo and Try it, CI, acceptance criteria in issues, issue dependencies, webhooks and a plan on GitHub Projects. Each item says what was found and how to fix it.",
     input: z.object({ project }),
     kind: "data",
     confirm: false,
