@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TimelineRun } from "@/lib/plan/schedule";
 import { parsePlanFilters } from "@/lib/plan/filters";
@@ -169,4 +169,72 @@ test("a late task shows Late: waiting on its blockers with a red arrow and an ov
   fireEvent.click(within(row(/Epic #10/)).getByRole("button", { name: "Collapse Epic #10 Voice" }));
   expect(arrow(70, 72)).toBeNull();
   expect(arrow(55, 57)).not.toBeNull();
+});
+
+test("an unscheduled item appears in the Unscheduled block with a Schedule button", () => {
+  const { unmount } = renderTimeline();
+  const block = screen.getByRole("region", { name: "Unscheduled" });
+  expect(within(block).getByText("2")).toBeInTheDocument();
+  expect(within(block).getByText("Project management")).toBeInTheDocument();
+  expect(within(block).getByRole("link", { name: "#53 Plan read model" })).toHaveAttribute("href", `${REPO_URL}/issues/53`);
+  expect(within(block).getByRole("button", { name: "Schedule #58 Plan page tree and board" })).toBeInTheDocument();
+  expect(within(block).queryByText(/#57/)).not.toBeInTheDocument();
+  expect(within(block).queryByText(/Give tasks a Start and Target/)).not.toBeInTheDocument();
+
+  fireEvent.click(within(block).getByRole("button", { name: /^Unscheduled/ }));
+  expect(within(block).queryByRole("button", { name: /^Schedule #58/ })).not.toBeInTheDocument();
+  unmount();
+
+  // Nothing dated: every item is listed, with the hint, and the chart keeps its rows.
+  const undated = planView([epic(12, "Project management", [story(41, "Shaping with the assistant", 12, [task(54, "Status writes", "In review")])])]);
+  renderTimeline({ plan: undated });
+  const all = screen.getByRole("region", { name: "Unscheduled" });
+  expect(within(all).getByText("Give tasks a Start and Target to see them on the timeline, or ask the assistant to schedule an epic.")).toBeInTheDocument();
+  expect(within(all).getAllByRole("button", { name: /^Schedule #/ }).map((b) => b.getAttribute("aria-label"))).toEqual([
+    "Schedule #12 Project management",
+    "Schedule #41 Shaping with the assistant",
+    "Schedule #54 Status writes",
+  ]);
+  expect(row(/Task #54/)).toBeInTheDocument();
+});
+
+test("the schedule dialog is prefilled, refuses a Target before Start, and saves through scheduleAction", async () => {
+  renderTimeline();
+  fireEvent.keyDown(within(row(/Task #57/)).getByRole("button", { name: "Actions for #57" }), { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Schedule" }));
+
+  const dialog = await screen.findByRole("dialog", { name: "Schedule #57 Add the migration" });
+  const start = within(dialog).getByLabelText("Start");
+  const target = within(dialog).getByLabelText("Target");
+  expect(start).toHaveValue("2026-10-01");
+  expect(target).toHaveValue("2026-10-09");
+  expect(within(dialog).getByText("Was Oct 1")).toBeInTheDocument();
+  expect(within(dialog).getByText("Was Oct 9")).toBeInTheDocument();
+  expect(within(dialog).getByText("Story #41 Shaping with the assistant spans Sep 24 to Oct 9, derived from its tasks.")).toBeInTheDocument();
+  expect(within(dialog).getByText("Blocked by #55, planned to end Oct 7.")).toBeInTheDocument();
+
+  fireEvent.change(target, { target: { value: "2026-09-30" } });
+  expect(within(dialog).getByText("Target must be on or after Start.")).toBeInTheDocument();
+  expect(target).toHaveAttribute("aria-invalid", "true");
+  expect(within(dialog).getByRole("button", { name: "Save to GitHub" })).toBeDisabled();
+
+  fireEvent.change(start, { target: { value: "2026-10-08" } });
+  fireEvent.change(target, { target: { value: "2026-10-14" } });
+  expect(within(dialog).queryByText("Target must be on or after Start.")).not.toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save to GitHub" }));
+  await waitFor(() => expect(actions.scheduleAction).toHaveBeenCalledWith({ projectId: "p1", issue: 57, start: "2026-10-08", target: "2026-10-14" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+  // From Unscheduled: nothing set yet, Clear empties a field, null clears it on GitHub, and a refusal is shown.
+  actions.scheduleAction.mockResolvedValueOnce({ ok: false, error: "This Project has no Start and Target fields." });
+  fireEvent.click(within(screen.getByRole("region", { name: "Unscheduled" })).getByRole("button", { name: "Schedule #58 Plan page tree and board" }));
+  const empty = await screen.findByRole("dialog", { name: "Schedule #58 Plan page tree and board" });
+  expect(within(empty).getAllByText("Was not set")).toHaveLength(2);
+  fireEvent.change(within(empty).getByLabelText("Start"), { target: { value: "2026-10-21" } });
+  fireEvent.change(within(empty).getByLabelText("Target"), { target: { value: "2026-10-23" } });
+  fireEvent.click(within(empty).getByRole("button", { name: "Clear Target" }));
+  expect(within(empty).getByLabelText("Target")).toHaveValue("");
+  fireEvent.click(within(empty).getByRole("button", { name: "Save to GitHub" }));
+  await waitFor(() => expect(actions.scheduleAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 58, start: "2026-10-21", target: null }));
+  expect(await within(empty).findByText("This Project has no Start and Target fields.")).toBeInTheDocument();
 });

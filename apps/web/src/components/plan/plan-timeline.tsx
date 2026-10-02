@@ -1,9 +1,19 @@
 "use client";
 
-import { Fragment, useMemo } from "react";
+import { Fragment, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarClockIcon, ChevronRightIcon, ClockAlertIcon, LockIcon, MoveHorizontalIcon } from "lucide-react";
-import type { PlanProject } from "@handoff/github";
+import { CalendarClockIcon, CalendarIcon, ChevronRightIcon, ClockAlertIcon, ExternalLinkIcon, LockIcon, MoreHorizontalIcon, MoveHorizontalIcon } from "lucide-react";
+import type { PlanItem, PlanProject } from "@handoff/github";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanTask } from "@/server/plan";
 import { Tag } from "@/components/tag";
 import type { DaySpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
@@ -14,7 +24,8 @@ import { addDays, dayOfInstant, defaultZoom, shortDay, timeScale, visibleRange, 
 import { runPath } from "@/lib/paths";
 import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import type { StartRunContext } from "./plan-actions";
+import { TaskActions, type StartRunContext } from "./plan-actions";
+import { ScheduleDialog, type ScheduleNote } from "./schedule-dialog";
 import { KindBadge, StatusPill } from "./plan-status";
 import { IssueTitle } from "./plan-task-parts";
 import { useCollapsed } from "./use-collapsed";
@@ -88,9 +99,50 @@ function TimeChips({ task, entry, window }: { task: PlanTask; entry: TimelineIte
   return <div className="flex min-w-0 gap-1.5 overflow-hidden">{chips}</div>;
 }
 
-/** The fixed left cell of a row: chevron, kind badge or status pill, number and title, then a task's chips. */
-function RowLabel({ row, entry, window, onToggle }: { row: TimelineRow; entry: TimelineItem | undefined; window: "story" | "epic"; onToggle: () => void }) {
+/** An epic's or a story's menu on the timeline: Open on GitHub and Schedule. */
+function ItemMenu({ item, onSchedule }: { item: PlanItem; onSchedule: () => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="icon-xs" variant="ghost" aria-label={`Actions for #${item.number}`}>
+          <MoreHorizontalIcon />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuGroup>
+          <DropdownMenuItem asChild>
+            <a href={item.url}>
+              <ExternalLinkIcon />
+              Open on GitHub
+            </a>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={onSchedule}>
+            <CalendarIcon />
+            Schedule
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+type RowLabelProps = {
+  row: TimelineRow;
+  entry: TimelineItem | undefined;
+  window: "story" | "epic";
+  projectId: string;
+  start: StartRunContext;
+  onToggle: () => void;
+  onSchedule: (item: PlanItem) => void;
+};
+
+/** The fixed left cell of a row: chevron, kind badge or status pill, number and title, the menu, then a task's chips. */
+function RowLabel({ row, entry, window, projectId, start, onToggle, onSchedule }: RowLabelProps) {
   const label = rowLabel(row);
+  const item = row.item;
   return (
     <div
       role="rowheader"
@@ -109,7 +161,14 @@ function RowLabel({ row, entry, window, onToggle }: { row: TimelineRow; entry: T
         ) : (
           row.item && <KindBadge kind={row.kind === "story" ? "story" : "epic"} />
         )}
-        {row.item ? <IssueTitle item={row.item} className={cn("text-xs", row.kind !== "task" && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}
+        {item ? <IssueTitle item={item} className={cn("text-xs", row.kind !== "task" && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}
+        <span className="ml-auto shrink-0">
+          {row.task ? (
+            <TaskActions task={row.task} projectId={projectId} start={start} compact onSchedule={() => onSchedule(row.task!)} />
+          ) : (
+            item && <ItemMenu item={item} onSchedule={() => onSchedule(item)} />
+          )}
+        </span>
       </div>
       {row.task && entry && <TimeChips task={row.task} entry={entry} window={window} />}
     </div>
@@ -250,13 +309,82 @@ function Strips({ row, entry, scale, projectId }: { row: TimelineRow; entry: Tim
   });
 }
 
+type UnscheduledGroup = { title: string; items: PlanItem[] };
+
+/** Items with neither dates nor a derived span, grouped by epic, each with a Schedule button. */
+function Unscheduled({ groups, undated, onSchedule }: { groups: UnscheduledGroup[]; undated: boolean; onSchedule: (item: PlanItem) => void }) {
+  const [open, setOpen] = useState(true);
+  const count = groups.reduce((n, g) => n + g.items.length, 0);
+  if (count === 0) return null;
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} asChild>
+      <section aria-label="Unscheduled" className="border-t">
+        <CollapsibleTrigger className="flex w-full items-center gap-2 bg-muted/50 px-3.5 py-2.5 text-left text-[13px] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
+          <ChevronRightIcon aria-hidden className={cn("size-4 text-muted-foreground transition-transform", open && "rotate-90")} />
+          <span className="font-medium">Unscheduled</span>
+          <Tag tone="fill">{count}</Tag>
+          <span className="text-xs text-muted-foreground">No Start and no Target</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          {undated && <p className="px-3.5 pt-1 pb-2.5 pl-[38px] text-[13px] text-muted-foreground">Give tasks a Start and Target to see them on the timeline, or ask the assistant to schedule an epic.</p>}
+          {groups.map((group) => (
+            <div key={group.title}>
+              <p className="px-3.5 pt-2 pb-0.5 pl-[38px] text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{group.title}</p>
+              <ul>
+                {group.items.map((item) => {
+                  const kind = item.kind ?? "task";
+                  return (
+                    <li key={item.number} className="flex min-w-0 items-center gap-2 border-t px-3.5 py-1.5 pl-[38px]">
+                      <KindBadge kind={kind} />
+                      <IssueTitle item={item} className="text-xs" />
+                      {kind === "task" && <StatusPill column={item.state === "closed" ? "Done" : (item.status ?? "Other")} />}
+                      <Button size="xs" variant="outline" className="ml-auto" aria-label={`Schedule #${item.number} ${item.title}`} onClick={() => onSchedule(item)}>
+                        <CalendarIcon data-icon="inline-start" />
+                        Schedule
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
+  );
+}
+
 /**
  * The plan as a Gantt chart: a fixed column of row labels in the tree's order and a time pane that
  * scrolls sideways, with planned bars, run strips and dependency arrows.
  */
-export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, readAt }: Props) {
+export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, readAt, graphs, graphName }: Props) {
   const collapsed = useCollapsed(projectId);
+  const [scheduling, setScheduling] = useState<PlanItem>();
   const byNumber = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
+  const items = useMemo(
+    () => new Map<number, PlanItem>([...epics.flatMap((e) => [e, ...e.stories, ...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...unparented].map((i) => [i.number, i])),
+    [epics, unparented],
+  );
+  const notesOf = (item: PlanItem): ScheduleNote[] => {
+    const notes: ScheduleNote[] = [];
+    const seen = new Set<number>();
+    for (let p = item.parent; p !== undefined && !seen.has(p); p = items.get(p)?.parent) {
+      seen.add(p);
+      const parent = items.get(p);
+      const entry = byNumber.get(p);
+      const span = entry?.planned ?? entry?.derived;
+      if (!parent || !span) continue;
+      const name = `${parent.kind === "story" ? "Story" : "Epic"} #${parent.number} ${parent.title}`;
+      notes.push({ kind: "window", text: entry?.planned ? `${name} runs ${spanText(span)}.` : `${name} spans ${spanText(span)}, derived from its tasks.` });
+      break;
+    }
+    for (const blocker of byNumber.get(item.number)?.waitingOn ?? []) {
+      const end = byNumber.get(blocker)?.planned?.end;
+      notes.push({ kind: "blocker", text: end ? `Blocked by #${blocker}, planned to end ${shortDay(end)}.` : `Blocked by #${blocker}, not scheduled.` });
+    }
+    return notes;
+  };
   const stories = useMemo(() => new Set(epics.flatMap((e) => e.stories.map((s) => s.number))), [epics]);
   const { rows, height, anchor } = timelineRows(epics, unparented, (key) => !collapsed.has(key), (n) => byNumber.get(n)?.actual.length ?? 0);
   const spans = timeline.items.flatMap((i) => [
@@ -284,6 +412,12 @@ export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, rea
     if (!from || !to || (from.row === to.row && !from.own)) return [];
     return [{ ...arrow, start: from, end: to, d: arrowPath(from, to) }];
   });
+  const unscheduled: UnscheduledGroup[] = [
+    ...epics.map((e) => ({ title: e.title, items: [e, ...e.stories.flatMap((s) => [s, ...s.tasks]), ...e.tasks] })),
+    { title: "Unparented", items: unparented },
+  ]
+    .map((g) => ({ ...g, items: g.items.filter((i) => byNumber.get(i.number)?.unscheduled) }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
@@ -324,7 +458,10 @@ export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, rea
                     row={row}
                     entry={entry}
                     window={row.item?.parent !== undefined && stories.has(row.item.parent) ? "story" : "epic"}
+                    projectId={projectId}
+                    start={{ graphs, graphName }}
                     onToggle={() => collapsed.toggle(row.key)}
+                    onSchedule={setScheduling}
                   />
                   <div role="gridcell" className="relative border-b" style={{ width: scale.width }}>
                     {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} />}
@@ -351,6 +488,8 @@ export function PlanTimeline({ projectId, epics, unparented, timeline, zoom, rea
           </div>
         </div>
       </div>
+      <Unscheduled groups={unscheduled} undated={timeline.items.every((i) => !i.planned)} onSchedule={setScheduling} />
+      <ScheduleDialog projectId={projectId} item={scheduling} notes={scheduling ? notesOf(scheduling) : []} onOpenChange={(open) => !open && setScheduling(undefined)} />
     </div>
   );
 }
