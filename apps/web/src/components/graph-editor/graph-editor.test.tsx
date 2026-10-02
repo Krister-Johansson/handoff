@@ -83,6 +83,19 @@ test("Restore in the drawer closes it and loads that version onto the canvas, un
   await waitFor(() => expect(screen.getByRole("button", { name: "Save as v5" })).toBeEnabled());
 });
 
+test("Escape closes the drawer and puts focus back on the Version history button", async () => {
+  renderEditor();
+  const button = screen.getByRole("button", { name: "Version history" });
+  button.focus();
+  fireEvent.click(button);
+  const drawer = screen.getByRole("dialog", { name: "Version history" });
+  // The fixture above is named document, so the page's document is window.document here.
+  await waitFor(() => expect(drawer).toContainElement(window.document.activeElement as HTMLElement));
+  fireEvent.keyDown(window.document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Version history" })).not.toBeInTheDocument());
+  expect(button).toHaveFocus();
+});
+
 test("the inspector keeps the Graph help and no longer lists the versions", () => {
   renderEditor();
   const inspector = screen.getByRole("complementary", { name: "Inspector" });
