@@ -366,3 +366,30 @@ test("page_show_view switches to the graph and events views and where_am_i says 
   await waitFor(() => expect(selectedTab()).toBe("Steps"));
   expect((await whereAmI()).page?.state.data).toMatchObject({ view: "steps" });
 });
+
+test("page_open_step opens the latest execution of a node key, and an attempt opens that one; a key that is not a step is refused with the keys", async () => {
+  const steps = [
+    { ...executions[0]!, id: "e1" },
+    { ...looped, id: "e2" },
+    { id: "e3", nodeKey: "reviewer", attempt: 1, status: "running", costUsd: null, durationMs: null },
+  ];
+  const { call, whereAmI } = await withAssistant({ labels: { planner: "Plan", reviewer: "Review" }, initialStatus: "running", initialExecutions: steps });
+  const drawerHeading = () => within(screen.getByRole("dialog")).getByRole("heading", { level: 2 });
+
+  expect(await call("page_open_step", { step: "planner" })).toEqual({ text: "Opened Plan (planner), attempt 2.", isError: false });
+  expect(drawerHeading()).toHaveTextContent("attempt 2");
+  expect(fetchMock).toHaveBeenCalledWith("/api/runs/r1/executions/e2", expect.anything());
+
+  expect(await call("page_open_step", { step: "planner", attempt: 1 })).toEqual({ text: "Opened Plan (planner), attempt 1.", isError: false });
+  await waitFor(() => expect(drawerHeading()).not.toHaveTextContent("attempt"));
+  expect(fetchMock).toHaveBeenCalledWith("/api/runs/r1/executions/e1", expect.anything());
+
+  // An execution id from where_am_i opens that execution.
+  expect(await call("page_open_step", { step: "e3" })).toEqual({ text: "Opened Review (reviewer), attempt 1.", isError: false });
+  expect(drawerHeading()).toHaveTextContent("Review");
+  expect((await whereAmI()).page?.state.data).toMatchObject({ openStep: { id: "e3", nodeKey: "reviewer", attempt: 1 } });
+
+  expect(await call("page_open_step", { step: "tester" })).toEqual({ text: "No step has the key or id tester. The steps are planner, reviewer.", isError: true });
+  expect(await call("page_open_step", { step: "planner", attempt: 3 })).toEqual({ text: "planner has no attempt 3. Its attempts are 1, 2.", isError: true });
+  expect(drawerHeading()).toHaveTextContent("Review");
+});

@@ -142,6 +142,26 @@ const VIEWS = ["steps", "graph", "events"] as const;
 type RunView = (typeof VIEWS)[number];
 const isView = (value: string): value is RunView => (VIEWS as readonly string[]).includes(value);
 
+/**
+ * The execution a page tool names: an execution id, or a node key with its latest attempt or the
+ * attempt asked for. Throws a refusal that lists what there is to choose from.
+ */
+function findStep(executions: ExecutionView[], step: string, attempt?: number): ExecutionView {
+  const byId = executions.find((e) => e.id === step);
+  if (byId && attempt === undefined) return byId;
+  // With an attempt, an execution id stands for its node.
+  const key = byId?.nodeKey ?? step;
+  const ofNode = executions.filter((e) => e.nodeKey === key);
+  if (ofNode.length === 0) {
+    const keys = [...new Set(executions.map((e) => e.nodeKey))];
+    throw new Error(`No step has the key or id ${step}. ${keys.length ? `The steps are ${keys.join(", ")}.` : "The run has no steps yet."}`);
+  }
+  if (attempt === undefined) return ofNode.at(-1)!;
+  const match = ofNode.findLast((e) => e.attempt === attempt);
+  if (!match) throw new Error(`${key} has no attempt ${attempt}. Its attempts are ${ofNode.map((e) => e.attempt).join(", ")}.`);
+  return match;
+}
+
 type EventPayload = {
   nodeKey?: string;
   attempt?: number;
@@ -262,7 +282,11 @@ export function RunLive({
         setView(view);
         return `Showing the ${view} view.`;
       },
-      page_open_step: undefined,
+      page_open_step: ({ step, attempt }) => {
+        const execution = findStep(executions, step, attempt);
+        setSelectedId(execution.id);
+        return `Opened ${labels[execution.nodeKey] ?? execution.nodeKey} (${execution.nodeKey}), attempt ${execution.attempt}.`;
+      },
       page_close_step: undefined,
       page_pop_out: undefined,
       page_filter_events: undefined,
@@ -273,6 +297,7 @@ export function RunLive({
       status,
       view,
       steps: executions.map((e) => ({ id: e.id, nodeKey: e.nodeKey, label: labels[e.nodeKey] ?? e.nodeKey, attempt: e.attempt, status: e.status })),
+      openStep: selected ? { id: selected.id, nodeKey: selected.nodeKey, attempt: selected.attempt } : null,
     }),
   );
 
