@@ -173,7 +173,7 @@ Tasks only. A Done task and a Running task do not drag (a run owns its task). A 
 
 ### 10. Target follows from Start and the duration; the order inside a day is computed
 
-Target is the day the task's hours end, counting from its Start, after the hours that tasks earlier in the day's order already use, at the capacity per day. Inside a day, bars sit one after another in blocker order, then by issue number. That order is not stored. handoff writes Target only on a person's drop, size change, estimate change or Arrange save; a forecast that moves later does not rewrite Targets (open question 6).
+Target is the day the task's hours end, counting from its Start, after the hours that tasks earlier in the day's order already use, at the capacity per day. Inside a day, bars sit one after another in blocker order, then by issue number. A task also starts after the last hour of a blocker that began on an earlier day and ends on the task's Start day; a blocker still running at the end of that day flags the task instead. That order is not stored. handoff writes Target only on a person's drop, size change, estimate change or Arrange save; a forecast that moves later does not rewrite Targets (open question 6).
 
 ### 11. Arrange places unscheduled tasks only
 
