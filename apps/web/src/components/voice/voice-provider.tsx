@@ -31,7 +31,6 @@ export type Bubble = {
 };
 
 /** Content a page offers to read aloud: its run summary, plan or review, or acceptance criteria. */
-export type Readable = { title: string; text: string };
 
 export type VoiceContextValue = {
   /** Whether listening is offered at all: recognition exists and can run on the device or is allowed on the server. */
@@ -54,9 +53,6 @@ export type VoiceContextValue = {
   /** Speaks text; listening stops first, so the microphone never hears the dashboard. */
   speak(text: string, options: { priority: SpeechPriority; title?: string }): void;
   stopSpeaking(): void;
-  /** What the open page offers to read aloud, registered by useReadAloud. */
-  readable: Readable | undefined;
-  registerReadable(content: Readable): () => void;
   bubble: Bubble;
   closeBubble(): void;
 };
@@ -99,7 +95,6 @@ export function VoiceProvider({
   const support = given ?? browser;
   const speaker = useMemo(() => givenSpeaker ?? (speechAvailable ? createSpeaker(elevenLabsPlayer(), readVoicePrefs) : undefined), [givenSpeaker, speechAvailable]);
   const speech = useSyncExternalStore(speaker?.subscribe ?? noSubscribe, speaker?.getState ?? (() => SILENT), () => SILENT);
-  const [readable, setReadable] = useState<Readable>();
   const prefs = useVoicePrefs();
   const [heard, setHeard] = useState<{ text: string; at: number }>();
   const assistant = useOptionalAssistant();
@@ -232,10 +227,6 @@ export function VoiceProvider({
     setBubble(CLOSED);
   }, [abort, speaker]);
 
-  const registerReadable = useCallback((content: Readable) => {
-    setReadable(content);
-    return () => setReadable((shown) => (shown === content ? undefined : shown));
-  }, []);
 
   const value = useMemo<VoiceContextValue>(
     () => ({
@@ -255,12 +246,10 @@ export function VoiceProvider({
       speech,
       speak,
       stopSpeaking,
-      readable,
-      registerReadable,
       bubble,
       closeBubble,
     }),
-    [supported, state, input.mode, input.interim, input.error, heard, prefs.lang, start, stop, abort, toggle, install, speaker, speech, speak, stopSpeaking, readable, registerReadable, bubble, closeBubble],
+    [supported, state, input.mode, input.interim, input.error, heard, prefs.lang, start, stop, abort, toggle, install, speaker, speech, speak, stopSpeaking, bubble, closeBubble],
   );
   return <VoiceContext.Provider value={value}>{children}</VoiceContext.Provider>;
 }
