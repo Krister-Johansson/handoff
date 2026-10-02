@@ -151,6 +151,14 @@ test("a task whose status write was skipped says so, with the reason on hover", 
   expect(within(row(/Task #57/)).getByText("Run active")).toBeInTheDocument();
 });
 
+test("a candidate task shows its Next tag", () => {
+  const epics = [epic(12, "Project management", [story(41, "Shaping", 12, [task(66, "First", "Ready"), task(67, "Second", "Ready"), task(68, "Not next", "Ready")])])];
+  render(<PlanTree {...base} epics={epics} next={{ 66: 1, 67: 2 }} />);
+  expect(within(row(/Task #66/)).getByText("Next 1").closest("[title]")).toHaveAttribute("title", "The scheduler starts it next");
+  expect(within(row(/Task #67/)).getByText("Next 2").closest("[title]")).toHaveAttribute("title", "The scheduler starts it second");
+  expect(within(row(/Task #68/)).queryByText(/^Next/)).not.toBeInTheDocument();
+});
+
 test("a task whose Status disagrees with its active run says what the run is doing", () => {
   const epics = [
     epic(12, "Project management", [

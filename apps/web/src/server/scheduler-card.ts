@@ -145,3 +145,8 @@ export async function schedulerStates(db: Db): Promise<Record<string, SchedulerB
   );
   return Object.fromEntries(states);
 }
+
+/** The place of each next task in the scheduler's order, by issue number, for the Plan's Next tags. */
+export function nextPlaces(card: SchedulerCard): Record<number, number> {
+  return Object.fromEntries(card.next.map((task, i) => [task.number, i + 1]));
+}
