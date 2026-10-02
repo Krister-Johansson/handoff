@@ -2,9 +2,9 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { and, appendEvents, eq, nodeExecutions, permissionRequests, questions, runs } from "@handoff/db";
+import { and, appendEvents, eq, events, nodeExecutions, permissionRequests, projects, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
-import { FakeGitHub } from "@handoff/github/testing";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG } from "../lib/assistant/catalog";
 import { createHandoffMcpServer } from "./agent-mcp";
 import { createProject, saveGraphVersion } from "./graphs";
@@ -13,16 +13,20 @@ const db = createTestDb();
 const BASE = "http://localhost:3000";
 let client: Client;
 let github: FakeGitHub;
+let plan: FakeProjects;
+let projectId: string;
 
 beforeEach(async () => {
   await truncateAll(db);
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  projectId = project.id;
   await saveGraphVersion(db, { projectId: project.id, name: "linear", document: linear });
   github = new FakeGitHub();
   for (const number of [11, 12]) {
     github.issues.set(number, { number, title: `Issue ${number}`, url: `https://github.com/octo/sample/issues/${number}`, body: `Body ${number}`, state: "open", updatedAt: `2026-09-30T0${number - 10}:00:00Z` });
   }
-  const server = createHandoffMcpServer({ db, github, baseUrl: BASE });
+  plan = new FakeProjects(github);
+  const server = createHandoffMcpServer({ db, github, projects: plan, baseUrl: BASE });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   client = new Client({ name: "test", version: "1.0.0" });
   await Promise.all([server.connect(serverSide), client.connect(clientSide)]);
@@ -235,4 +239,82 @@ test("answer_permission allows a pending request once and records who decided", 
 
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
+});
+
+const repo = { owner: "octo", name: "sample" };
+
+/** Gives the sandbox project a plan on its repository's GitHub Project, with `task` to add a task in a status. */
+async function withPlan() {
+  const { number } = await plan.createProject("octo", repo, "sandbox plan");
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, projectId));
+  const task = async (title: string, status: string) => {
+    const created = await plan.createIssue(repo, { project: number, title, body: `${title} body`, labels: ["task"] });
+    plan.itemsOf(repo).get(created.number)!.status = status;
+    return created.number;
+  };
+  const statusOf = (issue: number) => plan.getStatus(repo, number, issue);
+  return { number, task, statusOf };
+}
+
+const planEvents = async (runId: string) =>
+  (await db.select({ type: events.type, payload: events.payload }).from(events).where(eq(events.runId, runId))).filter((e) => e.type.startsWith("plan."));
+
+test("start_run over MCP sets the task to Running on the plan", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
+  expect(await statusOf(ready)).toBe("Running");
+  expect(await planEvents(run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running" } }]);
+});
+
+test("list_backlog over MCP lists the plan's Ready tasks and the unplanned issues", async () => {
+  const { task } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  await task("Shape the gate", "Shaping");
+  expect((await call("list_backlog", { project: "sandbox" })).map((i: { number: number }) => i.number).sort()).toEqual([11, 12, ready]);
+});
+
+test("cancel_run over MCP sets the task back to Ready", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
+  await call("cancel_run", { run_id });
+  expect(await statusOf(ready)).toBe("Ready");
+});
+
+test("resolve_loop with stop over MCP sets the task back to Ready", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [ready] });
+  const [planner] = await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.runId, run_id)).returning();
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
+  await db.transaction((tx) =>
+    appendEvents(tx, run_id, [
+      { type: "edge.exhausted", payload: { edgeKey: "planner->planner", attempts: 3 }, nodeExecutionId: planner!.id },
+      { type: "run.failed", payload: { reason: "loop_exhausted", nodeKey: "planner", awaiting: "repair" } },
+    ]),
+  );
+  expect(await call("resolve_loop", { run_id, action: "stop" })).toMatchObject({ resolved: "stop" });
+  expect(await statusOf(ready)).toBe("Ready");
+});
+
+test("run_again over MCP sets the task to Running again", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const first = await call("start_run", { project: "sandbox", issues: [ready] });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.run_id));
+  plan.itemsOf(repo).get(ready)!.status = "Ready";
+  const again = await call("run_again", { run_id: first.run_id });
+  expect(await statusOf(ready)).toBe("Running");
+  expect(await planEvents(again.run_id)).toEqual([{ type: "plan.status", payload: { issue: ready, status: "Running" } }]);
+});
+
+test("run_again over MCP starts a task its failed run left in Running", async () => {
+  const { task, statusOf } = await withPlan();
+  const ready = await task("Add the migration", "Ready");
+  const first = await call("start_run", { project: "sandbox", issues: [ready] });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first.run_id));
+  const again = await call("run_again", { run_id: first.run_id });
+  expect(again).toMatchObject({ run_id: expect.any(String), status: "queued" });
+  expect(await statusOf(ready)).toBe("Running");
 });

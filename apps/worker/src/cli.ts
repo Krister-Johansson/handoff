@@ -5,11 +5,11 @@ import { compileGraph, parseSkillMarkdown, suggestProjectName, type LinkedIssue 
 import { importSkillRepository } from "@handoff/engine/library-import";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, repairNodeExecution } from "@handoff/engine";
-import { gitHubFromEnv, type GitHubPort } from "@handoff/github";
+import { gitHubFromEnv, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
 import { dashboardAssistantHome, gcAssistantConversations, gcClaudeSessions } from "./gc.ts";
 
-/** github: undefined reads credentials from the environment; null skips GitHub (tests). */
-export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; github?: GitHubPort | null };
+/** github and projects: undefined reads credentials from the environment; null skips GitHub (tests). */
+export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; github?: GitHubPort | null; projects?: ProjectsPort | null };
 
 const USAGE = `usage:
   handoff project add --repo <owner/name> [--name <name>] [--branch <default>] [--clone <path>]
@@ -102,7 +102,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
   if (command === "run" && sub === "cancel") {
     const runId = rest[0];
     if (!runId) throw new Error(USAGE);
-    await cancelRun(db, runId, { reason: "cancelled from the CLI" });
+    // The run's tasks go back to Ready on the plan.
+    const projects = io.projects === undefined ? projectsFromEnv() : (io.projects ?? undefined);
+    await cancelRun(db, runId, { reason: "cancelled from the CLI", projects });
     out(`run ${runId} cancelled`);
     return;
   }

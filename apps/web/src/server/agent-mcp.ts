@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
 import { and, desc, eq, events, listLibraryIndex, nodeExecutions, projects, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
-import type { GitHubPort } from "@handoff/github";
+import type { GitHubPort, ProjectsPort } from "@handoff/github";
 import { projectReadiness } from "./readiness";
 import { dismissAttention, listAttention } from "./attention";
 import { isTodo, listBacklog } from "./backlog";
@@ -17,8 +17,11 @@ import { reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
 import { listNotifications } from "./notifications";
 
-/** `actor` is who answers through these tools, recorded on questions and permission requests: claude-code by default. */
-export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; baseUrl: string; actor?: string };
+/**
+ * `actor` is who answers through these tools, recorded on questions and permission requests: claude-code by default.
+ * `projects` reaches the plan on GitHub Projects; without it runs record plan.skipped and shaping tools refuse.
+ */
+export type HandoffMcpDeps = { db: Db; github: GitHubPort | undefined; projects?: ProjectsPort | undefined; baseUrl: string; actor?: string };
 
 const EVENTS_DEFAULT = 50;
 const EVENTS_MAX = 200;
@@ -105,7 +108,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
 type Handlers = Record<string, (args: never) => Promise<unknown>>;
 
 function handlersFor(deps: HandoffMcpDeps): Handlers {
-  const { db, github, baseUrl } = deps;
+  const { db, github, projects: plan, baseUrl } = deps;
   const actor = deps.actor ?? "claude-code";
   // The dashboard address of a run known only by id, under its project.
   const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
@@ -150,7 +153,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     list_backlog: async ({ project, include_started }: { project: string; include_started?: boolean }) => {
       const projectId = (await findProject(db, project)).id;
-      const backlog = await listBacklog(db, github, projectId);
+      const backlog = await listBacklog(db, github, projectId, plan);
       if ("error" in backlog) throw new Error(backlog.error);
       return backlog.issues
         .filter((issue) => include_started || isTodo(issue))
@@ -169,7 +172,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       const graphName = graph ?? detail?.defaultGraph;
       if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Settings tab.`);
       if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
-      const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github);
+      const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github, plan);
       return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };
     },
 
@@ -250,7 +253,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     resolve_loop: async ({ run_id, action }: { run_id: string; action: "retry" | "continue" | "stop" }) => {
-      await resolveExhaustedLoop(db, run_id, action);
+      await resolveExhaustedLoop(db, run_id, action, { projects: plan });
       return { resolved: action, url: await urlOf(run_id) };
     },
 
@@ -308,12 +311,12 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     cancel_run: async ({ run_id, reason }: { run_id: string; reason?: string }) => {
-      await cancelRun(db, run_id, reason ? { reason } : {});
+      await cancelRun(db, run_id, { ...(reason ? { reason } : {}), projects: plan });
       return { cancelled: true, url: await urlOf(run_id) };
     },
 
     run_again: async ({ run_id }: { run_id: string }) => {
-      const run = await runAgain(db, run_id);
+      const run = await runAgain(db, run_id, { projects: plan });
       return { run_id: run.id, status: run.status, url: url(runPath(run.projectId, run.id)) };
     },
 

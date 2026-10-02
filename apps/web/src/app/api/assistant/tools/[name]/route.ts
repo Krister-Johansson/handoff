@@ -1,5 +1,5 @@
 import { getDb } from "@/lib/db";
-import { getGitHub } from "@/lib/github";
+import { getGitHub, getProjects } from "@/lib/github";
 import { CATALOG } from "@/lib/assistant/catalog";
 import { runTool } from "@/server/agent-mcp";
 import { isSameLocalOrigin } from "@/server/local-request";
@@ -23,7 +23,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ nam
     return Response.json({ error: parsed.error.issues.map((i) => `${i.path.join(".") || "input"}: ${i.message}`).join("; ") }, { status: 400 });
   }
   try {
-    const result = await runTool({ db: getDb(), github: getGitHub(), baseUrl: new URL(request.url).origin, actor: "webmcp" }, spec.name, parsed.data);
+    const result = await runTool({ db: getDb(), github: getGitHub(), projects: getProjects(), baseUrl: new URL(request.url).origin, actor: "webmcp" }, spec.name, parsed.data);
     return Response.json({ result });
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: 422 });

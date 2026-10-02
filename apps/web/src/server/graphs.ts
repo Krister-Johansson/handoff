@@ -159,7 +159,7 @@ export async function createGraphFromTemplate(db: Db, projectId: string, name: s
  */
 export async function startRunFromGraph(
   db: Db,
-  input: { projectId: string; graphName: string; task: string; issues?: number[] | LinkedIssue[] },
+  input: { projectId: string; graphName: string; task: string; issues?: number[] | LinkedIssue[]; again?: boolean },
   github?: GitHubPort,
   plan?: ProjectsPort,
 ) {
@@ -170,7 +170,8 @@ export async function startRunFromGraph(
   if (!latest) throw new Error(`no graph named ${input.graphName}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
   const issues = await linkIssues(input.issues ?? [], repo, github, plan);
-  if (plan && project.planProjectNumber !== null && issues.length > 0) await refuseUnready(plan, repo, project.planProjectNumber, issues);
+  // A run started again passed the Ready gate the first time; its failed run leaves the task in Running.
+  if (plan && project.planProjectNumber !== null && issues.length > 0 && !input.again) await refuseUnready(plan, repo, project.planProjectNumber, issues);
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
   if (!task) throw new Error("Describe the task, or link at least one issue.");
@@ -229,8 +230,11 @@ async function linkIssues(issues: number[] | LinkedIssue[], repo: { owner: strin
   );
 }
 
-/** Starts the same task again on the latest version of the graph an earlier run used. */
-export async function runAgain(db: Db, runId: string) {
+/**
+ * Starts the same task again on the latest version of the graph an earlier run used. With the
+ * Projects port its tasks move to Running on the plan, as for any new run, without the Ready gate.
+ */
+export async function runAgain(db: Db, runId: string, opts: { projects?: ProjectsPort | undefined } = {}) {
   const [earlier] = await db
     .select({ projectId: runs.projectId, task: runs.task, status: runs.status, state: runs.state, graphName: graphs.name })
     .from(runs)
@@ -242,7 +246,7 @@ export async function runAgain(db: Db, runId: string) {
     throw new Error(`The run is still ${earlier.status}.`);
   }
   const issues = RunStateSchema.shape.issues.parse(earlier.state.issues) ?? [];
-  return startRunFromGraph(db, { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues });
+  return startRunFromGraph(db, { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues, again: true }, undefined, opts.projects);
 }
 
 const GRAPH_NAME = /^[a-z0-9][a-z0-9-]*$/;
