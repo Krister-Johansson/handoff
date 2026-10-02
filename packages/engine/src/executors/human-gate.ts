@@ -254,6 +254,10 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
         const attempt = ctx.state.nodes[asker]?.attempt;
         const answered = { question: question.question, answer: question.answer, ...(option ? { option } : {}), answeredBy: answer.answeredBy, ...(attempt !== undefined ? { attempt } : {}) };
         statePatch.memory = remember(ctx.state, asker, { answers: [answered] }).memory;
+        // A person decided it, so every later step keeps to it too, the code reviewer included.
+        const given = option && option !== question.answer ? `${option}: ${question.answer}` : question.answer;
+        const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
+        statePatch.decisions = [...previous, { gate: ctx.node.key, note: `${asker} asked "${question.question}" The answer: ${given}`, comments: [] }];
       }
       const edgeKey = (question.context as { reason?: string; edgeKey?: string }).edgeKey;
       if ((question.context as { reason?: string }).reason === "loop_exhausted" && edgeKey && question.option !== "abort") {

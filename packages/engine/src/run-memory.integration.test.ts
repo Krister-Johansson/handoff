@@ -145,3 +145,17 @@ test("a question answered at a gate reaches a later attempt that the tester sent
   expect(sentBack!.systemPrompt).toContain("ISO dates or US dates?");
   expect(sentBack!.systemPrompt).toContain("Use ISO 8601 dates.");
 });
+
+test("a question answer is in decisions, so the code reviewer's packet has it", async () => {
+  const cli = new FakeCliExecutor([{ output: outputs.coderAsks }]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsPass)));
+  cli.push(coderWrites({ "CHANGELOG.md": "# Changelog\n" }, outputs.coderDone), { output: outputs.approve });
+  await answerOpen(run.id, "Use ISO 8601 dates.", "ISO");
+  await drain(deps);
+
+  const review = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "review")!;
+  expect(review.status).toBe("passed");
+  const decisions = cli.requests[2]!.systemPrompt.split("# Decisions from the person reviewing this run")[1]?.split("\n# ")[0];
+  expect(decisions).toContain("ISO dates or US dates?");
+  expect(decisions).toContain("Use ISO 8601 dates.");
+});
