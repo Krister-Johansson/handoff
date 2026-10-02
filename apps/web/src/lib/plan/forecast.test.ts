@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { forecastOf, runParts } from "./forecast";
+import { durationOf, forecastOf, runParts } from "./forecast";
 
 /** An instant `minutes` after 09:00 on 1 October 2026. */
 const at = (minutes: number) => new Date(Date.UTC(2026, 9, 1, 9, minutes));
@@ -80,4 +80,16 @@ test("under five runs a size uses its default and keeps the measured median and 
   expect(forecastOf(four, "L")).toEqual({ size: "L", source: "default", minutes: 120, parts: null, costUsd: null, runs: 4, measuredMinutes: 110 });
   expect(forecastOf([], "S")).toEqual({ size: "S", source: "default", minutes: 30, parts: null, costUsd: null, runs: 0, measuredMinutes: null });
   expect(forecastOf([sample(50, 0, 0, 1)], "M")).toMatchObject({ source: "default", minutes: 60, runs: 1, measuredMinutes: 50 });
+});
+
+test("durationOf prefers the estimate, then the size's forecast, then the proposal", () => {
+  // M has a forecast of 90 minutes from five runs; S and L use their defaults.
+  const m = forecastOf([sample(90, 0, 0, 1), sample(90, 0, 0, 1), sample(90, 0, 0, 1), sample(90, 0, 0, 1), sample(90, 0, 0, 1)], "M");
+  const forecasts = { S: forecastOf([], "S"), M: m, L: forecastOf([], "L") };
+
+  expect(durationOf({ size: "M", estimate: 5 }, forecasts, "L")).toEqual({ hours: 5, source: "estimate" });
+  expect(durationOf({ size: "M" }, forecasts, "L")).toEqual({ hours: 1.5, source: "forecast" });
+  expect(durationOf({ size: "L" }, forecasts, "S")).toEqual({ hours: 2, source: "default" });
+  expect(durationOf({}, forecasts, "S")).toEqual({ hours: 0.5, source: "proposal" });
+  expect(durationOf({}, forecasts, undefined)).toBeUndefined();
 });

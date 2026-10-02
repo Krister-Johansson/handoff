@@ -112,3 +112,22 @@ export function forecastOf(samples: ForecastSample[], size: PlanSize): Forecast 
     measuredMinutes: minutes,
   };
 }
+
+export type Forecasts = Record<PlanSize, Forecast>;
+
+/** How long a task takes in hours, and where that comes from: a "proposal" is the planner's size, drawn dashed. */
+export type Duration = { hours: number; source: "estimate" | "forecast" | "default" | "proposal" };
+
+/**
+ * A task's duration: its manual estimate, else the forecast of its Size, else the forecast of its planner's
+ * proposal; undefined with none of them. A task with a Size ignores the proposal.
+ */
+export function durationOf(item: { size?: PlanSize | undefined; estimate?: number | undefined }, forecasts: Forecasts, proposal: PlanSize | undefined): Duration | undefined {
+  if (item.estimate !== undefined) return { hours: item.estimate, source: "estimate" };
+  if (item.size) {
+    const forecast = forecasts[item.size];
+    return { hours: forecast.minutes / 60, source: forecast.source === "runs" ? "forecast" : "default" };
+  }
+  if (proposal) return { hours: forecasts[proposal].minutes / 60, source: "proposal" };
+  return undefined;
+}
