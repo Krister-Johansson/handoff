@@ -1,6 +1,6 @@
 import type { Overview } from "@/server/overview";
 import { NeedsYou } from "./needs-you";
-import { RunningNow } from "./overview-runs";
+import { FinishedRuns, RunningNow } from "./overview-runs";
 
 /** The project the Overview is about, with its repository as owner/name. */
 export type OverviewProject = { id: string; name: string; repo: string };
@@ -18,6 +18,7 @@ export function ProjectOverview({ project, overview, now = new Date() }: { proje
     <div className="flex flex-col gap-7">
       <NeedsYou projectId={project.id} view={overview.needsYou} />
       <RunningNow runs={overview.running} projectId={project.id} repoUrl={repoUrl} now={now} />
+      <FinishedRuns runs={overview.finished} projectId={project.id} repoUrl={repoUrl} now={now} />
     </div>
   );
 }

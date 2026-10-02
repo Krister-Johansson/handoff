@@ -111,6 +111,38 @@ test("with no run active, Running now says so in one line", () => {
   expect(within(running).getByText("Start a run from an issue to do, or with New run.")).toBeInTheDocument();
 });
 
+test("Finished in the last day lists the runs that succeeded, with their merged pull request, cost and when they finished", () => {
+  show({
+    ...QUIET,
+    finished: [
+      run({
+        id: "r53",
+        task: "#53 Plan read model and the Ready gate",
+        status: "succeeded",
+        prNumber: 84,
+        finishedAt: minutesAgo(18 * 60),
+        line: { graph: "plan-review", version: 11, costUsd: 5.1, now: { tone: "success", text: "Done. PR #84 merged." }, steps: [], stepSince: null },
+      }),
+    ],
+  });
+  const finished = section("Finished in the last day");
+  expect(within(finished).getByRole("heading", { level: 2 })).toHaveTextContent("Finished in the last day1");
+  const [row] = within(finished).getAllByRole("listitem");
+  expect(within(row!).getByRole("link", { name: "#53 Plan read model and the Ready gate" })).toHaveAttribute("href", "/projects/p1/runs/r53");
+  expect(within(row!).getByRole("link", { name: "PR #84" })).toHaveAttribute("href", "https://github.com/Krister-Johansson/handoff/pull/84");
+  expect(row).toHaveTextContent("succeeded");
+  expect(row).toHaveTextContent("$5.10 · 18 hours ago");
+  expect(row).toHaveTextContent("Done. PR #84 merged.");
+});
+
+test("with no run finished in the last day, the section says so in one line", () => {
+  show(QUIET);
+  const finished = section("Finished in the last day");
+  expect(within(finished).getByRole("heading", { level: 2 })).toHaveTextContent(/^Finished in the last day$/);
+  expect(within(finished).getByText("No run finished in the last day")).toBeInTheDocument();
+  expect(within(finished).getByText("Runs that end show here for a day after they finish.")).toBeInTheDocument();
+});
+
 test("with nothing waiting, Needs you keeps its heading without a count and says so in one line", () => {
   show(QUIET);
   const needsYou = section("Needs you");

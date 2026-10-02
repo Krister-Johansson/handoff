@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
-import { CheckIcon, GitMergeIcon, GitPullRequestIcon, HandIcon, PlayIcon } from "lucide-react";
+import { CheckIcon, GitPullRequestIcon, HandIcon, PlayIcon } from "lucide-react";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { formatAgo, formatCost, formatSince } from "@/lib/format";
 import { runPath } from "@/lib/paths";
@@ -65,11 +65,10 @@ function StepTrail({ steps }: { steps: RunStep[] }) {
 }
 
 /** The run's pull request with its icon, opening it on GitHub. */
-function PrLink({ number, repoUrl, merged }: { number: number; repoUrl: string; merged: boolean }) {
-  const Icon = merged ? GitMergeIcon : GitPullRequestIcon;
+function PrLink({ number, repoUrl }: { number: number; repoUrl: string }) {
   return (
     <a href={`${repoUrl}/pull/${number}`} aria-label={`PR #${number}`} className="inline-flex items-center gap-1 font-mono text-xs text-muted-foreground hover:text-foreground hover:underline">
-      <Icon aria-hidden className={cn("size-3.5", merged ? "text-repaired" : "text-success")} />#{number}
+      <GitPullRequestIcon aria-hidden className="size-3.5" />#{number}
     </a>
   );
 }
@@ -78,7 +77,7 @@ function PrLink({ number, repoUrl, merged }: { number: number; repoUrl: string; 
  * One run: its task linking to the run page, its status, its pull request, cost and when, then what it
  * does now in its tone, and below that whatever the list adds (the steps so far).
  */
-function RunRow({ run, repoUrl, when, merged, children }: { run: OverviewRun; repoUrl: string; when: string; merged: boolean; children?: ReactNode }) {
+function RunRow({ run, repoUrl, when, children }: { run: OverviewRun; repoUrl: string; when: string; children?: ReactNode }) {
   const titleId = `run-${run.id}`;
   const { now } = run.line;
   return (
@@ -89,7 +88,7 @@ function RunRow({ run, repoUrl, when, merged, children }: { run: OverviewRun; re
         </Link>
         <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground tabular-nums max-sm:order-1">
           <StatusBadge status={run.status} />
-          {run.prNumber !== null && <PrLink number={run.prNumber} repoUrl={repoUrl} merged={merged} />}
+          {run.prNumber !== null && <PrLink number={run.prNumber} repoUrl={repoUrl} />}
           <span>{[run.line.costUsd ? formatCost(run.line.costUsd) : undefined, when].filter(Boolean).join(" · ")}</span>
         </span>
       </div>
@@ -102,6 +101,23 @@ function RunRow({ run, repoUrl, when, merged, children }: { run: OverviewRun; re
   );
 }
 
+/** Runs that succeeded in the last day, the latest first, with their pull request and when they finished. */
+export function FinishedRuns({ runs, projectId, repoUrl, now }: { runs: OverviewRun[]; projectId: string; repoUrl: string; now: Date }) {
+  return (
+    <OverviewSection id="finished" title="Finished in the last day" count={runs.length} more={{ href: `/projects/${projectId}/runs`, label: "All runs" }}>
+      {runs.length === 0 ? (
+        <OverviewEmpty icon={CheckIcon} title="No run finished in the last day" description="Runs that end show here for a day after they finish." />
+      ) : (
+        <OverviewList>
+          {runs.map((run) => (
+            <RunRow key={run.id} run={run} repoUrl={repoUrl} when={formatAgo(run.finishedAt ?? run.createdAt, now)} />
+          ))}
+        </OverviewList>
+      )}
+    </OverviewSection>
+  );
+}
+
 /** Every active run, newest first: where each stands, how long its current step has taken and its steps so far. */
 export function RunningNow({ runs, projectId, repoUrl, now }: { runs: OverviewRun[]; projectId: string; repoUrl: string; now: Date }) {
   return (
@@ -111,7 +127,7 @@ export function RunningNow({ runs, projectId, repoUrl, now }: { runs: OverviewRu
       ) : (
         <OverviewList>
           {runs.map((run) => (
-            <RunRow key={run.id} run={run} repoUrl={repoUrl} when={formatAgo(run.createdAt, now)} merged={false}>
+            <RunRow key={run.id} run={run} repoUrl={repoUrl} when={formatAgo(run.createdAt, now)}>
               {run.needsYou ? <NeedsYouChip /> : run.line.stepSince && <span className="text-muted-foreground">· {formatSince(run.line.stepSince, now)}</span>}
               <span className="basis-full">
                 <StepTrail steps={run.line.steps} />
