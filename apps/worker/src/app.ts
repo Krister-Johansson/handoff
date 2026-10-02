@@ -4,12 +4,14 @@ import { join, resolve } from "node:path";
 import { buildClaudeArgv, ClaudeCliExecutor } from "@handoff/cli-adapter";
 import { createDb } from "@handoff/db";
 import { runMigrations } from "@handoff/db/migrate";
+import { startBacklogScheduler } from "@handoff/engine/backlog-scheduler";
 import { branchDiff, cliNodeExecutor, demoExecutor, finishExecutor, startExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
 import { OctokitGitHub, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
 import { checkClaudeVersion } from "./claude-version.ts";
 import type { WorkerEnv } from "./env.ts";
 import { planAccess } from "./plan-status.ts";
 import { parseGitHubRemote } from "./remote.ts";
+import { startSchedulerWith } from "./scheduler-access.ts";
 
 export function createGitHub(env: WorkerEnv): GitHubPort {
   return env.github.mode === "app"
@@ -106,8 +108,11 @@ export async function runWorker(env: WorkerEnv) {
   log(`claude ${cli.version}; argv template: claude ${template.map((a) => (a.includes(" ") ? JSON.stringify(a) : a)).join(" ")}`);
   log(`worker ${deps.workerId} started; caps ${JSON.stringify(env.caps)}`);
   const handle = startWorker(deps, { pollIntervalMs: 1000, maxInFlight: 4 });
+  // The scheduler starts runs on Ready tasks of projects that turned it on; it reads them from the plan.
+  const scheduler = startSchedulerWith(projects, (plan) => startBacklogScheduler({ db: deps.db, github: createGitHub(env), projects: plan, owner: deps.workerId, log }, { pollMs: 5000 }), log);
   const shutdown = async (signal: string) => {
     log(`${signal} received; stopping (running nodes are released for reclaim)`);
+    await scheduler?.stop();
     await handle.stop();
     await deps.db.$client.end();
     process.exit(0);

@@ -98,7 +98,7 @@ test("a nudge that lands during a check brings the next check to 10 seconds afte
 });
 
 test("a paused or disabled project is never checked", async () => {
-  const paused = await planned({ pausedAt: sql`now()`, pausedBy: "krister", pauseReason: "Holiday" });
+  const paused = await planned({ pausedAt: new Date(), pausedBy: "krister", pauseReason: "Holiday" });
   const off = await planned({ enabled: false });
   const on = await planned();
 
