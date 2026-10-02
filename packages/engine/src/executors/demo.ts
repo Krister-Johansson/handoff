@@ -73,6 +73,7 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
             nodeExecutionId: ctx.execution.id,
             signal: ctx.signal,
             note: (message) => ctx.emit("preview.note", { message }),
+            seedCommand: ctx.project.demoSeedCommand,
             ...(options.docker ? { docker: options.docker } : {}),
           },
         );

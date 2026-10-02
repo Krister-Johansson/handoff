@@ -4,15 +4,17 @@ import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { demoConfiguration, LAUNCH_FILE, parseLaunchFile, previewCommand } from "@handoff/core";
+import { demoConfiguration, LAUNCH_FILE, parseLaunchFile, passEnvProblem, pickEnv, previewCommand } from "@handoff/core";
 import { and, eq, inArray, previews, type Db } from "@handoff/db";
-import { commandEnv } from "../contract/checks.ts";
+import { commandEnv, shell } from "../contract/checks.ts";
 import type { Workdir } from "../types.ts";
+import { runIdentity } from "../workdir/setup.ts";
 
 const execFileAsync = promisify(execFile);
 const READY_TIMEOUT_MS = 120_000;
 const STOP_GRACE_MS = 5_000;
 const SERVICES_TIMEOUT_MS = 5 * 60_000;
+const SEED_TIMEOUT_MS = 10 * 60_000;
 const COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
 
 /** A run's app could not start; the message says why in terms a person can act on. */
@@ -126,6 +128,10 @@ export type StartPreviewOptions = {
   docker?: DockerExec;
   /** Told about something worth knowing that did not stop the app, such as services already running elsewhere. */
   note?: (message: string) => void;
+  /** A command that seeds data to show, run in the worktree after the services start and before the app. */
+  seedCommand?: string | null;
+  /** Names of variables the seed command and the app get from the worker's own environment. Never values. */
+  passEnv?: readonly string[];
 };
 
 /**
@@ -150,7 +156,17 @@ export async function startPreview(deps: { db: Db; workerId: string }, opts: Sta
   const config = opts.configuration ? launch.configurations.find((c) => c.name === opts.configuration) : demoConfiguration(launch);
   if (!config) throw new PreviewError(`${LAUNCH_FILE} has no configuration named ${opts.configuration}.`);
 
+  const passEnv = opts.passEnv ?? [];
+  const problem = passEnvProblem(passEnv);
+  if (problem) throw new PreviewError(problem);
+  const identity = runIdentity(opts.runId, opts.workdir.path);
+
   await ensureServices(opts.workdir.path, opts.projectId, opts.docker, opts.note);
+  if (opts.seedCommand?.trim()) {
+    const seed = await shell(opts.seedCommand, opts.workdir.path, SEED_TIMEOUT_MS, undefined, passEnv, opts.signal, identity);
+    if (seed.timedOut) throw new PreviewError(`The project's demo seed command \`${opts.seedCommand}\` timed out after ${SEED_TIMEOUT_MS / 60_000} minutes:\n${tail(seed.output)}`);
+    if (seed.exitCode !== 0) throw new PreviewError(`The project's demo seed command \`${opts.seedCommand}\` exited ${seed.exitCode}:\n${tail(seed.output)}`);
+  }
   const port = await portFor(config.port, config.autoPort === false);
   const cmd = previewCommand(config, { root: opts.workdir.path, port });
   const id = randomUUID();
@@ -158,9 +174,11 @@ export async function startPreview(deps: { db: Db; workerId: string }, opts: Sta
   await db.insert(previews).values({ id, runId: opts.runId, nodeExecutionId: opts.nodeExecutionId ?? null, configuration: config.name, workerId, port, url: cmd.url, logPath });
 
   const log = openSync(logPath, "a");
-  // The app is code the agent wrote: it gets the same minimal environment as test commands, without CI.
+  // The app is code the agent wrote: it gets the same minimal environment as test commands, without CI,
+  // plus the run's identity and the variables passEnv names.
   const { CI: _ci, ...base } = commandEnv();
-  const child = spawn(cmd.command, cmd.args, { cwd: cmd.cwd, env: { ...base, ...cmd.env } as NodeJS.ProcessEnv, stdio: ["ignore", log, log], detached: true });
+  const env = { ...base, ...pickEnv(passEnv, process.env), ...identity, ...cmd.env };
+  const child = spawn(cmd.command, cmd.args, { cwd: cmd.cwd, env: env as NodeJS.ProcessEnv, stdio: ["ignore", log, log], detached: true });
   closeSync(log);
   child.unref();
   let exit: number | null | undefined;

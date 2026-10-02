@@ -166,3 +166,33 @@ test("a change with no file under the UI paths leaves through skipped with the r
   expect(cli.requests).toHaveLength(0);
   expect(await db.select().from(previews).where(eq(previews.runId, run.id))).toEqual([]);
 });
+
+/** A walk-through that only reads the app's page, so a test can see what the app served. */
+function readsTheApp(seen: { page?: string }) {
+  return new FakeCliExecutor([
+    async (request) => {
+      const url = /running at (\S+?)\./.exec(request.systemPrompt)![1]!;
+      seen.page = await (await fetch(url)).text();
+      const output = { summary: "Looked at it.", shots: [] };
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: output, validated: request.contract.parse(output) };
+    },
+  ]);
+}
+
+test("the seed command runs after services start and before the app", async () => {
+  const order = join(mkdtempSync(join(tmpdir(), "handoff-order-")), "order.log");
+  const docker: DockerExec = async (args) => {
+    if (args.includes("up")) writeFileSync(order, "services\n", { flag: "a" });
+    return { exitCode: 0, output: "" };
+  };
+  const seeded = `require("node:fs").appendFileSync(${JSON.stringify(order)}, "app\\n"); require("node:http").createServer((_, res) => res.end(require("node:fs").readFileSync(${JSON.stringify(order)}, "utf8"))).listen(Number(process.env.PORT));`;
+  const seen: { page?: string } = {};
+  const { run } = await demoRun(readsTheApp(seen), {
+    files: { ".claude/launch.json": launch, "app.js": seeded, "compose.yaml": "services: {}\n" },
+    project: { demoSeedCommand: `echo seed >> ${order}` },
+    docker,
+  });
+  expect((await inspect(db, run.id)).run.status).toBe("succeeded");
+  expect(readFileSync(order, "utf8")).toBe("services\nseed\napp\n");
+  expect(seen.page).toBe("services\nseed\napp\n");
+});
