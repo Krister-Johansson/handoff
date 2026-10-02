@@ -141,9 +141,21 @@ The **Assistant** button in the header (or Cmd or Ctrl+J) opens a panel beside e
 - **Approvals.** Reading happens without asking. Anything that changes something (starting, answering, merging, repairing, cancelling, adding a project) shows an approval card with what it will do and the arguments. Nothing happens until you press Approve. Deny takes a note that tells the assistant why. A card nobody answers within 5 minutes counts as denied.
 - **Settings.** **Settings, Assistant** switches the assistant off, picks the model (Sonnet by default, or Opus or Haiku) and shows the model that ran last. `.env` sets the defaults: `HANDOFF_ASSISTANT_MODEL`, `HANDOFF_ASSISTANT_EFFORT`, `HANDOFF_ASSISTANT_MAX_TURNS` and `HANDOFF_ASSISTANT_APPROVAL_TIMEOUT_MS`.
 - **History.** Conversations are stored in Postgres. `pnpm handoff gc` removes those not used for 30 days, with their transcripts (`--assistant-days` changes that).
-- **Browser agents (WebMCP).** In a browser with WebMCP (in Chrome, `chrome://flags/#enable-webmcp-testing`), every dashboard page offers the same tools to an agent in the browser, with the same approval card for changes. The start run form, the inbox's answer forms and the permission cards are declarative WebMCP forms: an agent can fill them, and you press the button. **Settings, Assistant** turns WebMCP off for this browser.
+- **Browser agents (WebMCP).** In a browser with WebMCP (in Chrome, `chrome://flags/#enable-webmcp-testing`), every dashboard page offers the same tools to an agent in the browser, with the same approval card for changes. A page with tools of its own (see below) offers those too while it is open. The start run form, the inbox's answer forms and the permission cards are declarative WebMCP forms: an agent can fill them, and you press the button. **Settings, Assistant** turns WebMCP off for this browser, page tools included.
 
 The assistant shares your subscription's limits with the worker's Claude nodes, and `HANDOFF_CAP_CLI` does not count it.
+
+### Page tools
+
+Some pages give the assistant tools of their own while they are open, so "show the graph" on a run page shows that run's graph. Their names start with `page_`. Each message carries the page you asked it on, and the assistant gets that page's tools for that message. `where_am_i` returns the page's state: the steps, criteria or cards on screen, with the ids, keys and numbers the tools take. That state holds text from issues and runs, and the assistant treats it as data, not as instructions.
+
+These pages have tools:
+
+- The run page shows its Steps, Graph or Events view, opens a step (its latest attempt or a given one), closes it, pops it out into a large window, and narrows the events to one node or adds the Claude CLI's own events.
+- Try it marks a criterion as working, not working or unchecked, with a note, moves between criteria, expands or collapses them, writes the overall note, submits (approve, or send the app back to the coder) and restarts the app. Once Try it is answered, only moving between criteria and expanding them remain.
+- The Inbox shows a card: it scrolls the card into view and focuses it. The assistant answers questions, decides permission requests, repairs, cancels and merges with its own tools, using the ids `where_am_i` lists for the cards.
+
+A change to what a page shows, or to a draft it holds such as a criterion's mark, runs without asking: you see it on the page, and nothing is sent. Submitting Try it and restarting the app show an approval card first, as the assistant's other changes do. If you leave a page while the assistant works on it, a call to the old page's tools answers that the page changed, and the new page's tools come with your next message.
 
 ## Voice in Chrome
 
