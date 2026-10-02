@@ -90,5 +90,6 @@ test("a code review comes with the findings of the step it reviews, from before 
   // A later round's review is not this question's.
   await seedExecution(db, run.id, { nodeKey: "code_review-1", nodeType: "code_review", status: "passed", attempt: 2, output: { verdict: "request_changes", comments: [] } });
 
-  expect((await getReview(db, run.id, question!.id))!.findings).toEqual({ verdict: "approve", comments });
+  // A finding from before severities reads as should_fix.
+  expect((await getReview(db, run.id, question!.id))!.findings).toEqual({ verdict: "approve", comments: [{ ...comments[0], severity: "should_fix" }] });
 });

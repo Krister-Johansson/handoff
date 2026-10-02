@@ -83,7 +83,7 @@ function ReviewBody({ review, runId, tokens }: { review: Review; runId: string; 
         <CodeReview questionId={review.id} runId={runId} from={shown.backTo ?? shown.from} markdown={shown.markdown} files={shown.files}
           views={review.views}
           earlier={review.earlier}
-          findings={review.findings && { ...review.findings, by: shown.from }}
+          findings={review.findings && { ...review.findings, by: shown.from, followUp: review.followUp }}
           tokens={tokens}
           {...(answered ? { answered: lineComments(answered) } : {})}
         />
