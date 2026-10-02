@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { asc, eq, notifications, projects, projectSchedulers, runs, wakeByKey } from "@handoff/db";
+import { asc, eq, nodeExecutions, notifications, projects, projectSchedulers, runs, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { checkProject } from "../backlog-scheduler/tick.ts";
@@ -234,4 +234,28 @@ test("a merge that closes a task nudges the scheduler, and the next check starts
   await checkProject({ db, github, projects: plan, owner: "worker-1" }, project.id);
   const started = await db.select().from(runs).where(eq(runs.startedBy, "scheduler"));
   expect(started.map((r) => r.issues.map((i) => i.number))).toEqual([[next.number]]);
+});
+
+test("a merge wakes the project's runs held on overlap", async () => {
+  const github = new FakeGitHub();
+  const { project, graphVersion } = await seedGraph(db, graph("auto"), { localClonePath: createOriginRepo() });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Theme tokens" });
+  const held = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Board view", startedBy: "scheduler" });
+  await db
+    .update(nodeExecutions)
+    .set({ nodeKey: "finish", nodeType: "finish", executorKind: "function", status: "waiting", waitKind: "timer", waitKey: `overlap:${project.id}`, waitDeadlineAt: new Date(Date.now() + 3_600_000) })
+    .where(eq(nodeExecutions.runId, held.id));
+  // Both runs wait at their Finish afterwards, so no run ends and only the merge can wake the held one.
+  const after: NodeExecutor = scripted({ kind: "waiting", wait: { kind: "timer", key: "later", deadlineAt: new Date(Date.now() + 3_600_000) } });
+  const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github, db }), finish: after };
+  const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+  await drain(deps);
+  const number = (await inspect(db, run.id)).run.prNumber!;
+  github.setChecks(number, "SUCCESS");
+  await wakeByKey(db, `gh:pr:42:${number}`, { reason: "webhook" });
+  await drain(deps);
+
+  expect(github.merged).toEqual([number]);
+  const claimed = (await inspect(db, held.id)).events.filter((e) => e.type === "node.claimed");
+  expect(claimed.map((e) => (e.payload as { wakeReason?: string }).wakeReason)).toEqual(["overlap"]);
 });
