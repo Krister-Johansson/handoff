@@ -111,6 +111,8 @@ export type PlanDates = { start?: string | null; target?: string | null };
 /** Fields to write on an item: Start and Target as YYYY-MM-DD, Size, and Estimate in hours. A value sets the field, null clears it, a missing key leaves it. */
 export type PlanFields = PlanDates & { size?: PlanSize | null; estimate?: number | null };
 export type SetFieldsResult = "set" | "not-in-project" | "no-field" | "no-option";
+/** The fields to write on one issue's item, for setManyPlanFields. */
+export type PlanFieldsChange = { issue: number; fields: PlanFields };
 
 /** One of a user's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
 export type PlanProjectChoice = { number: number; title: string; url: string; linked: boolean; missingStatusOptions: PlanStatus[] };
@@ -171,6 +173,14 @@ export interface ProjectsPort {
    * it would write, "no-option" when its Size field lacks the size, and then nothing changes.
    */
   setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult>;
+  /**
+   * setPlanFields for many issues of the Project in a few requests: one read of the Project, one of the
+   * issues' items per hundred issues, then several items' writes in each request. Checks every issue
+   * first; when any cannot be written, nothing is written and the result lists only those issues with
+   * why. Otherwise every issue is "set", in the order given. Throws naming the issues already written
+   * when GitHub refuses a request part way.
+   */
+  setManyPlanFields(repo: RepoRef, project: number, changes: PlanFieldsChange[]): Promise<{ issue: number; result: SetFieldsResult }[]>;
   /**
    * Creates the Size single select field with S, M and L and the Estimate number field on a user's
    * Project when missing, and adds S, M and L to an existing Size field after its own options, which

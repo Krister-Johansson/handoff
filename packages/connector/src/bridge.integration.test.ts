@@ -5,7 +5,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createBridge, type Bridge } from "./bridge.ts";
 
@@ -14,10 +14,16 @@ let items: Item[] = [];
 let http: HttpServer;
 let url = "";
 let bridge: Bridge | undefined;
+/** The stand-in's slow tool, as a large schedule is: it answers once released. */
+let slowStarted = false;
+let slowDone: Promise<void>;
+let releaseSlow: () => void = () => {};
 
-/** A stand-in for the dashboard's /api/mcp: bearer token "tok", an echo tool and list_attention. */
+/** A stand-in for the dashboard's /api/mcp: bearer token "tok", an echo tool, a slow tool and list_attention. */
 beforeEach(async () => {
   items = [];
+  slowStarted = false;
+  slowDone = new Promise((resolve) => (releaseSlow = resolve));
   http = createServer(async (req, res) => {
     if (req.headers.authorization !== "Bearer tok") return void res.writeHead(401).end("The token is missing or wrong.");
     const server = new McpServer({ name: "handoff", version: "1.0.0" });
@@ -29,6 +35,11 @@ beforeEach(async () => {
     }));
     server.registerTool("add_project", { inputSchema: { repo: z.string() } }, async ({ repo }) => ({ content: [{ type: "text", text: JSON.stringify({ repo }) }] }));
     server.registerTool("list_runs", { inputSchema: { project: z.string().optional() } }, async ({ project }) => ({ content: [{ type: "text", text: JSON.stringify({ project: project ?? "all" }) }] }));
+    server.registerTool("slow", {}, async () => {
+      slowStarted = true;
+      await slowDone;
+      return { content: [{ type: "text", text: "done" }] };
+    });
     // Stateless mode; the casts only bridge the SDK's optional-property types and exactOptionalPropertyTypes.
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true } as never);
     res.on("close", () => void transport.close());
@@ -40,8 +51,12 @@ beforeEach(async () => {
   url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
 });
 afterEach(async () => {
+  vi.useRealTimers();
+  releaseSlow();
   await bridge?.stop();
   bridge = undefined;
+  // A keep-alive socket whose idle timer was faked never times out, so close it.
+  http.closeAllConnections();
   await new Promise<void>((resolve) => http.close(() => resolve()));
 });
 
@@ -62,7 +77,7 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 test("the dashboard's tools are passed through, and the bridge declares itself a channel", async () => {
   const { client } = await connect("tok");
   expect(client.getServerCapabilities()?.experimental).toEqual({ "claude/channel": {} });
-  expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["add_project", "current_project", "echo", "get_project", "list_attention", "list_projects", "list_runs"]);
+  expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["add_project", "current_project", "echo", "get_project", "list_attention", "list_projects", "list_runs", "slow"]);
   expect(await client.callTool({ name: "echo", arguments: { text: "hi" } })).toMatchObject({ content: [{ type: "text", text: "echo hi" }] });
 });
 
@@ -137,4 +152,37 @@ test("outside a GitHub repository the project has to be named", async () => {
   const result = (await client.callTool({ name: "get_project", arguments: {} })) as { isError?: boolean; content: { text: string }[] };
   expect(result.isError).toBe(true);
   expect(result.content[0]?.text).toMatch(/name the project/i);
+});
+
+/** Turns the event loop until the stand-in's slow tool runs, without timers, which a test may fake. */
+async function untilSlowStarted() {
+  while (!slowStarted) await new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Claude Code's own wait for a stdio server is far longer; this is the outer client's. */
+const LONG = { timeout: 60 * 60_000 };
+
+test("a tool call that takes minutes, as a large schedule can, answers instead of failing at the MCP SDK's one-minute default", async () => {
+  const { client } = await connect("tok");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const call = client.callTool({ name: "slow", arguments: {} }, undefined, LONG);
+  await untilSlowStarted();
+  vi.advanceTimersByTime(3 * 60_000);
+  releaseSlow();
+  expect(await call).toMatchObject({ content: [{ type: "text", text: "done" }] });
+});
+
+test("a tool call past the bridge's four minutes says handoff may still be working, not that it is unreachable, and the next call works", async () => {
+  const { client } = await connect("tok");
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const call = client.callTool({ name: "slow", arguments: {} }, undefined, LONG);
+  await untilSlowStarted();
+  vi.advanceTimersByTime(4 * 60_000 + 1);
+  const result = (await call) as { isError?: boolean; content: { text: string }[] };
+  expect(result.isError).toBe(true);
+  expect(result.content[0]?.text).toMatch(/handoff did not answer slow within 4 minutes/);
+  expect(result.content[0]?.text).not.toMatch(/not reachable/);
+  releaseSlow();
+  vi.useRealTimers();
+  expect(await client.callTool({ name: "echo", arguments: { text: "after" } })).toMatchObject({ content: [{ type: "text", text: "echo after" }] });
 });

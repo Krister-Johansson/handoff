@@ -46,10 +46,36 @@ import {
 import type { RepoRef } from "../types.ts";
 import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import { planFieldWrites, setPlanFieldsDocument } from "./plan-fields.ts";
-import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
+import { planFieldWrites, planItemIdsDocument, setManyPlanFieldsDocument, setPlanFieldsDocument } from "./plan-fields.ts";
+import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanFieldsChange, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
+
+/**
+ * Field writes sent in one request by setManyPlanFields. GitHub documents no cap on mutations per
+ * request, but it ends a request that takes more than 10 seconds and runs a request's mutations one
+ * after another, so a request stays small; Octokit's throttle spaces the requests one second apart.
+ */
+const MUTATIONS_PER_REQUEST = 20;
+/** Issues looked up in one PlanItemIds query: at most 20 items each, well inside GitHub's node limit. */
+const ISSUES_PER_LOOKUP = 100;
+
+/** The items in runs whose writes add up to at most `max` mutations; an item's writes stay in one request. */
+function byMutationCount<T extends { writes: unknown[] }>(items: T[], max: number): T[][] {
+  const chunks: T[][] = [];
+  let count = 0;
+  for (const item of items) {
+    const last = chunks.at(-1);
+    if (!last || count + item.writes.length > max) {
+      chunks.push([item]);
+      count = item.writes.length;
+    } else {
+      last.push(item);
+      count += item.writes.length;
+    }
+  }
+  return chunks;
+}
 
 type GqlItem = NonNullable<NonNullable<NonNullable<PlanItemsQuery["user"]>["projectV2"]>["items"]["nodes"]>[number];
 
@@ -323,6 +349,57 @@ export class OctokitProjects implements ProjectsPort {
     const { document, variables } = setPlanFieldsDocument(writes);
     await this.octokit.graphql(document, { projectId: item.project.id, itemId: item.id, ...variables });
     return "set";
+  }
+
+  async setManyPlanFields(repo: RepoRef, project: number, changes: PlanFieldsChange[]): Promise<{ issue: number; result: SetFieldsResult }[]> {
+    const node = await this.projectNode(repo.owner, project);
+    const itemIds = node ? await this.itemIdsOf(repo, node.id, changes.map((c) => c.issue)) : new Map<number, string>();
+    const ids = node ? { dates: dateFieldIds(node), estimates: estimateFieldIds(node) } : undefined;
+    const checked = changes.map(({ issue, fields }) => {
+      const itemId = itemIds.get(issue);
+      const writes = ids && itemId ? planFieldWrites(ids, fields) : ("not-in-project" as const);
+      return { issue, itemId: itemId ?? "", writes };
+    });
+    const refused = checked.flatMap(({ issue, writes }) => (typeof writes === "string" ? [{ issue, result: writes }] : []));
+    if (refused.length) return refused;
+
+    const items = checked.flatMap(({ issue, itemId, writes }) => (typeof writes === "string" || writes.length === 0 ? [] : [{ issue, itemId, writes }]));
+    const written: number[] = [];
+    for (const chunk of byMutationCount(items, MUTATIONS_PER_REQUEST)) {
+      const { document, variables } = setManyPlanFieldsDocument(chunk);
+      try {
+        await this.octokit.graphql(document, { projectId: node!.id, ...variables });
+      } catch (error) {
+        const done = written.length ? `It wrote ${written.map((n) => `#${n}`).join(", ")} first; the rest are unchanged. ` : "";
+        throw new Error(`GitHub refused the writes for ${chunk.map((i) => `#${i.issue}`).join(", ")}: ${(error as Error).message}. ${done}`.trim(), { cause: error });
+      }
+      written.push(...chunk.map((i) => i.issue));
+    }
+    return changes.map(({ issue }) => ({ issue, result: "set" as const }));
+  }
+
+  /** The item id in the Project `projectId` of each issue that is one of its items, a hundred issues a request. */
+  private async itemIdsOf(repo: RepoRef, projectId: string, issues: number[]): Promise<Map<number, string>> {
+    const ids = new Map<number, string>();
+    for (let at = 0; at < issues.length; at += ISSUES_PER_LOOKUP) {
+      const chunk = issues.slice(at, at + ISSUES_PER_LOOKUP);
+      const { document, variables } = planItemIdsDocument(chunk);
+      type Found = { repository: Record<string, { projectItems: { nodes: ({ id: string; project: { id: string } } | null)[] | null } } | null> | null };
+      let data: Found;
+      try {
+        data = await this.octokit.graphql<Found>(document, { owner: repo.owner, name: repo.name, ...variables });
+      } catch (error) {
+        // An issue number the repository lacks answers NOT_FOUND next to the others' data.
+        const partial = (error as { data?: Found }).data;
+        if (!isNotFound(error) || !partial) throw error;
+        data = partial;
+      }
+      for (const issue of chunk) {
+        const item = present(data.repository?.[`i${issue}`]?.projectItems.nodes).find((i) => i.project.id === projectId);
+        if (item) ids.set(issue, item.id);
+      }
+    }
+    return ids;
   }
 
   async lineage(repo: RepoRef, issue: number): Promise<PlanAncestor[]> {

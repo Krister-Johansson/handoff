@@ -62,7 +62,7 @@ test("the handoff skill says start_run assigns the user and assign marks who wor
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   expect(skill).toMatch(/`start_run`[^\n]*assign/);
   expect(skill).toMatch(/`assign`[^\n]*`me`/);
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.9.0");
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.10.0");
 });
 
 test("the plugin ships a setup skill that walks through setup_project", () => {

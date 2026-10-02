@@ -13,7 +13,7 @@ const VALUE_OF: Record<PlanFieldKey, { key: string; type: string }> = {
 };
 
 /** One field to write on an item: its field id and the value, or null to clear it. */
-type FieldWrite = { key: PlanFieldKey; fieldId: string; value: string | number | null };
+export type FieldWrite = { key: PlanFieldKey; fieldId: string; value: string | number | null };
 
 /**
  * The writes for `fields` on a Project with these field ids, checking every field and Size option
@@ -42,20 +42,56 @@ export function planFieldWrites(ids: { dates: PlanDateFieldIds; estimates: PlanE
  * updates one value per mutation, so each field is its own mutation in the same request.
  */
 export function setPlanFieldsDocument(writes: FieldWrite[]): { document: string; variables: Record<string, unknown> } {
-  const declarations = ["$projectId: ID!", "$itemId: ID!"];
-  const selections: string[] = [];
-  const variables: Record<string, unknown> = {};
+  const out = newDocument(["$projectId: ID!", "$itemId: ID!"]);
+  addFieldMutations(out, writes, "", "itemId");
+  return { document: `mutation SetPlanFields(${out.declarations.join(", ")}) {\n${out.selections.join("\n")}\n}`, variables: out.variables };
+}
+
+/**
+ * One mutation request for several items' writes, built as `setPlanFieldsDocument` builds one item's:
+ * each item's id in `$i<issue>Item`, its mutations aliased `i<issue>_<key>` with the variables
+ * `i<issue>_<key>Field` and `i<issue>_<key>Value`. The caller adds the variable projectId.
+ */
+export function setManyPlanFieldsDocument(items: { issue: number; itemId: string; writes: FieldWrite[] }[]): { document: string; variables: Record<string, unknown> } {
+  const out = newDocument(["$projectId: ID!"]);
+  for (const { issue, itemId, writes } of items) {
+    out.declarations.push(`$i${issue}Item: ID!`);
+    out.variables[`i${issue}Item`] = itemId;
+    addFieldMutations(out, writes, `i${issue}_`, `i${issue}Item`);
+  }
+  return { document: `mutation SetManyPlanFields(${out.declarations.join(", ")}) {\n${out.selections.join("\n")}\n}`, variables: out.variables };
+}
+
+/**
+ * One query for the Project items of several issues of a repository: each issue aliased `i<issue>`,
+ * its number in the variable of that name, with the id and Project id of each of its items. The
+ * caller adds the variables owner and name.
+ */
+export function planItemIdsDocument(issues: number[]): { document: string; variables: Record<string, unknown> } {
+  const declarations = ["$owner: String!", "$name: String!", ...issues.map((n) => `$i${n}: Int!`)];
+  const selections = issues.map((n) => `    i${n}: issue(number: $i${n}) { projectItems(first: 20) { nodes { id project { id } } } }`);
+  return {
+    document: `query PlanItemIds(${declarations.join(", ")}) {\n  repository(owner: $owner, name: $name) {\n${selections.join("\n")}\n  }\n}`,
+    variables: Object.fromEntries(issues.map((n) => [`i${n}`, n])),
+  };
+}
+
+type DocumentParts = { declarations: string[]; selections: string[]; variables: Record<string, unknown> };
+const newDocument = (declarations: string[]): DocumentParts => ({ declarations, selections: [], variables: {} });
+
+/** Adds a mutation per write on the item in `$<itemVariable>`, aliased `<prefix><key>` with the variables `<prefix><key>Field` and `<prefix><key>Value`. */
+function addFieldMutations(out: DocumentParts, writes: FieldWrite[], prefix: string, itemVariable: string) {
   for (const { key, fieldId, value } of writes) {
-    const target = `projectId: $projectId, itemId: $itemId, fieldId: $${key}Field`;
-    declarations.push(`$${key}Field: ID!`);
-    variables[`${key}Field`] = fieldId;
+    const name = `${prefix}${key}`;
+    const target = `projectId: $projectId, itemId: $${itemVariable}, fieldId: $${name}Field`;
+    out.declarations.push(`$${name}Field: ID!`);
+    out.variables[`${name}Field`] = fieldId;
     if (value === null) {
-      selections.push(`  ${key}: clearProjectV2ItemFieldValue(input: { ${target} }) { projectV2Item { id } }`);
+      out.selections.push(`  ${name}: clearProjectV2ItemFieldValue(input: { ${target} }) { projectV2Item { id } }`);
     } else {
-      declarations.push(`$${key}Value: ${VALUE_OF[key].type}!`);
-      variables[`${key}Value`] = value;
-      selections.push(`  ${key}: updateProjectV2ItemFieldValue(input: { ${target}, value: { ${VALUE_OF[key].key}: $${key}Value } }) { projectV2Item { id } }`);
+      out.declarations.push(`$${name}Value: ${VALUE_OF[key].type}!`);
+      out.variables[`${name}Value`] = value;
+      out.selections.push(`  ${name}: updateProjectV2ItemFieldValue(input: { ${target}, value: { ${VALUE_OF[key].key}: $${name}Value } }) { projectV2Item { id } }`);
     }
   }
-  return { document: `mutation SetPlanFields(${declarations.join(", ")}) {\n${selections.join("\n")}\n}`, variables };
 }
