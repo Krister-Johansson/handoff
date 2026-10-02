@@ -1,4 +1,4 @@
-import { BanIcon, CheckIcon, ChevronRightIcon, Loader2Icon, XIcon } from "lucide-react";
+import { BanIcon, CheckIcon, ChevronRightIcon, Loader2Icon, WrenchIcon, XIcon } from "lucide-react";
 import { Tag } from "@/components/tag";
 import type { ToolCallView } from "@/lib/assistant/port";
 import { cn } from "@/lib/utils";
@@ -10,15 +10,43 @@ const ICON = {
   denied: <BanIcon aria-hidden className="size-[13px] flex-none text-muted-foreground" />,
 };
 const TAG = { running: "active", failed: "danger", denied: "outline" } as const;
+/** From this many calls on, the list folds under one summary row. */
+const FOLD_FROM = 4;
+
+/** "3 done, 1 failed": the calls counted by status, in a fixed order. */
+function counts(calls: ToolCallView[]) {
+  return (["done", "running", "failed", "denied"] as const)
+    .map((status) => [status, calls.filter((c) => c.status === status).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([status, n]) => `${n} ${status}`)
+    .join(", ");
+}
 
 /**
  * A reply's tool calls as compact rows in one list: a status icon, the title and a one-line summary.
  * Done shows only the check; running, failed and denied carry a tag. A row opens to its raw result.
+ * Four or more calls fold under a row that counts them.
  */
 export function ToolRows({ calls, className }: { calls: ToolCallView[]; className?: string }) {
   if (!calls.length) return null;
+  const rows = <Rows calls={calls} />;
+  if (calls.length < FOLD_FROM) return <div className={cn("overflow-hidden rounded-md border bg-subtle text-xs", className)}>{rows}</div>;
   return (
-    <ul className={cn("overflow-hidden rounded-md border bg-subtle text-xs", className)}>
+    <details className={cn("group/fold overflow-hidden rounded-md border bg-subtle text-xs", className)}>
+      <summary className="flex h-[30px] cursor-pointer list-none items-center gap-2 bg-background/40 pr-2 pl-2.5 [&::-webkit-details-marker]:hidden">
+        <WrenchIcon aria-hidden className="size-[13px] flex-none text-muted-foreground" />
+        <span className="flex-none font-medium">{`${calls.length} tool calls`}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{counts(calls)}</span>
+        <ChevronRightIcon aria-hidden className="size-[13px] flex-none text-muted-foreground/70 transition-transform group-open/fold:rotate-90" />
+      </summary>
+      <div className="border-t">{rows}</div>
+    </details>
+  );
+}
+
+function Rows({ calls }: { calls: ToolCallView[] }) {
+  return (
+    <ul>
       {calls.map((call) => (
         <li key={call.id} className="border-t first:border-t-0" role="group" aria-label={call.title}>
           <details className="group/row">
@@ -26,7 +54,9 @@ export function ToolRows({ calls, className }: { calls: ToolCallView[]; classNam
               {ICON[call.status]}
               <span className="flex-none font-medium whitespace-nowrap text-foreground/85">{call.title}</span>
               <span className="min-w-0 flex-1 truncate text-muted-foreground">{call.summary}</span>
-              {call.status !== "done" && (
+              {call.status === "done" ? (
+                <span className="sr-only">done</span>
+              ) : (
                 <Tag tone={TAG[call.status]} className="h-[18px] flex-none px-1.5 text-[10.5px]">
                   {call.status}
                 </Tag>

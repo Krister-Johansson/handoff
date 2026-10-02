@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { BotIcon, Loader2Icon, ShieldQuestionIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { ChatMessage } from "@/lib/assistant/port";
 import { ApprovalCard } from "./approval-card";
@@ -9,31 +11,98 @@ import { Composer } from "./composer";
 import { ConversationPicker } from "./conversation-picker";
 import { MessageList } from "./message-list";
 
+type Status = { tone: "working" | "calling" | "waiting" | "plain"; text: string } | undefined;
+
 /** One line on what the assistant is doing now; announced, unlike the streaming text. */
-function statusLine(messages: ChatMessage[], streaming: boolean): string | undefined {
+function statusLine(messages: ChatMessage[], streaming: boolean, agentActivity: string | undefined): Status {
   const last = messages.at(-1);
-  if (last?.role !== "assistant") return undefined;
-  if (streaming) {
-    if (last.requests.some((r) => r.status === "open")) return "Waiting for your approval";
+  if (last?.role === "assistant" && streaming) {
+    if (last.requests.some((r) => r.status === "open")) return { tone: "waiting", text: "Waiting for your approval" };
     const running = last.calls.findLast((c) => c.status === "running");
-    return running ? `Calling ${running.title}` : "Thinking";
+    return running ? { tone: "calling", text: `Calling ${running.title}` } : { tone: "working", text: "Thinking" };
   }
-  return last.status === "stopped" ? "Stopped" : undefined;
+  if (agentActivity) return { tone: "working", text: agentActivity };
+  return last?.role === "assistant" && last.status === "stopped" ? { tone: "plain", text: "Stopped" } : undefined;
+}
+
+const STATUS_ICON: Record<NonNullable<Status>["tone"], ReactNode> = {
+  working: <span aria-hidden className="size-1.5 rounded-full bg-active-dot" />,
+  calling: <Loader2Icon aria-hidden className="animate-spin motion-reduce:animate-none" />,
+  waiting: <ShieldQuestionIcon aria-hidden />,
+  plain: null,
+};
+
+/** The height of the dashboard's sticky header (and the transcript strip in it), so the sheet starts below it. */
+function useHeaderHeight() {
+  const [height, setHeight] = useState(53);
+  useEffect(() => {
+    const header = document.querySelector("body header");
+    if (!header) return;
+    const observer = new ResizeObserver(([entry]) => setHeight(Math.round(entry!.target.getBoundingClientRect().height)));
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
+  return height;
+}
+
+function Kbd({ children }: { children: ReactNode }) {
+  return <kbd className="inline-grid h-[18px] min-w-[18px] place-items-center rounded border border-b-2 bg-background px-1 font-mono text-[10.5px] text-muted-foreground">{children}</kbd>;
+}
+
+function Empty() {
+  return (
+    <div className="flex flex-col gap-3 px-1 pt-2">
+      <p className="max-w-[360px] text-[13px] leading-[1.55] text-foreground/85">
+        Ask what needs you, how a run is going, or tell it to start, merge or answer something. It asks before it changes anything.
+      </p>
+      <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5">
+          <Kbd>⌘</Kbd>
+          <Kbd>J</Kbd>opens and closes this panel
+        </span>
+        <span className="flex items-center gap-1.5">
+          <Kbd>V</Kbd>starts listening, <Kbd>Esc</Kbd>stops
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Off({ reason, onNavigate }: { reason: "no-token" | "off"; onNavigate: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-2.5 px-5 py-6 text-[13px] leading-[1.55]">
+      <p className="text-sm font-semibold">The assistant is off.</p>
+      {reason === "off" ? (
+        <p className="max-w-[380px] text-foreground/85">
+          It is switched off in{" "}
+          <Link href="/settings?tab=assistant" className="underline underline-offset-[3px]" onClick={onNavigate}>
+            Settings
+          </Link>
+          .
+        </p>
+      ) : (
+        <p className="max-w-[380px] text-foreground/85">It runs Claude Code on your subscription. Add CLAUDE_CODE_OAUTH_TOKEN to the dashboard&apos;s environment and restart it.</p>
+      )}
+    </div>
+  );
 }
 
 /**
- * The assistant panel: a sheet on the right that stays open while the page behind it changes. It is
- * not modal, so the person can keep using the page.
+ * The assistant panel: a sheet on the right, below the header so the Assistant button, the microphone
+ * and the transcript strip stay in view. It stays open while the page behind it changes and is not
+ * modal, so the person can keep using the page.
  */
 export function AssistantSheet() {
   const assistant = useAssistant();
   const panel = useAssistantPanel();
-  const status = statusLine(panel.messages, assistant.status === "streaming") ?? panel.agentActivity;
+  const top = useHeaderHeight();
+  const status = statusLine(panel.messages, assistant.status === "streaming", panel.agentActivity);
   return (
     <Sheet open={assistant.isOpen} onOpenChange={(open) => (open ? assistant.open() : assistant.close())} modal={false}>
       <SheetContent
         side="right"
-        className="w-full gap-0 sm:max-w-md"
+        className="w-full gap-0 bg-card shadow-[-16px_0_40px_oklch(0_0_0/7%)] sm:max-w-md dark:shadow-[-16px_0_40px_oklch(0_0_0/22%)]"
+        style={{ top, height: `calc(100dvh - ${top}px)` }}
         onInteractOutside={(e) => e.preventDefault()}
         onOpenAutoFocus={(e) => e.preventDefault()}
         // Escape closes the panel only when nothing is written in the composer.
@@ -41,52 +110,41 @@ export function AssistantSheet() {
           if (assistant.composerRef.current?.value) e.preventDefault();
         }}
       >
-        <SheetHeader className="flex-row items-center justify-between gap-2 border-b pr-12">
-          <SheetTitle>Assistant</SheetTitle>
+        <SheetHeader className="h-12 flex-none flex-row items-center gap-0.5 border-b py-0 pr-12 pl-4">
+          <SheetTitle className="mr-auto text-sm font-semibold">Assistant</SheetTitle>
           <SheetDescription className="sr-only">Ask about your projects and runs, or have the assistant act on them. Changes wait for your approval.</SheetDescription>
           {assistant.available && <ConversationPicker />}
         </SheetHeader>
         {assistant.available ? (
           <>
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
               {panel.agentRequests.length > 0 && (
-                <section aria-labelledby="agent-requests" className="mb-3 flex flex-col gap-2">
-                  <h3 id="agent-requests" className="text-xs font-medium text-muted-foreground">
+                <section aria-labelledby="agent-requests" className="flex flex-col gap-2 border-b pb-4">
+                  <h3 id="agent-requests" className="flex items-center gap-1.5 text-xs font-medium text-foreground/85 [&_svg]:size-3.5 [&_svg]:text-muted-foreground">
+                    <BotIcon aria-hidden />
                     A browser agent asks
+                    <span className="ml-auto font-normal text-muted-foreground">through WebMCP</span>
                   </h3>
                   {panel.agentRequests.map((request) => (
                     <ApprovalCard key={request.requestId} request={request} />
                   ))}
                 </section>
               )}
-              {panel.messages.length ? (
-                <MessageList messages={panel.messages} />
-              ) : (
-                <p className="text-[13px] text-muted-foreground">Ask what needs you, how a run is going, or tell it to start, merge or answer something. It asks before it changes anything.</p>
-              )}
+              {panel.messages.length ? <MessageList messages={panel.messages} /> : <Empty />}
             </div>
-            <div className="flex flex-col gap-2 border-t px-4 py-3">
-              <p aria-live="polite" className="min-h-4 text-xs text-muted-foreground">
-                {status}
+            <div className="flex flex-none flex-col gap-2 border-t bg-card px-4 pt-2 pb-3.5">
+              <p
+                aria-live="polite"
+                className={`flex min-h-[18px] items-center gap-[7px] text-xs [&_svg]:size-[13px] ${status?.tone === "waiting" ? "text-attention" : "text-muted-foreground"}`}
+              >
+                {status && STATUS_ICON[status.tone]}
+                {status?.text}
               </p>
               <Composer />
             </div>
           </>
         ) : (
-          <div className="px-4 py-3 text-[13px]">
-            <p className="font-medium">The assistant is off.</p>
-            {panel.offReason === "off" ? (
-              <p className="mt-1 text-muted-foreground">
-                It is switched off in{" "}
-                <Link href="/settings?tab=assistant" className="underline underline-offset-2" onClick={assistant.close}>
-                  Settings
-                </Link>
-                .
-              </p>
-            ) : (
-              <p className="mt-1 text-muted-foreground">It runs Claude Code on your subscription. Add CLAUDE_CODE_OAUTH_TOKEN to the dashboard&apos;s environment and restart it.</p>
-            )}
-          </div>
+          <Off reason={panel.offReason} onNavigate={assistant.close} />
         )}
       </SheetContent>
     </Sheet>
