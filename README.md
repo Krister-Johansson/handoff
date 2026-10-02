@@ -70,6 +70,22 @@ To look around without GitHub or Claude, `pnpm demo` seeds a demo run with simul
 - **Waiting.** A node that waits for CI, a review or your answer holds no process. Webhooks, or the periodic re-check, wake it.
 - **Recovery.** A failed node can be repaired in place from the inbox or with `pnpm handoff run repair`. Everything before it is kept. Rate limits are retried automatically with backoff.
 
+### Several issues in one run
+
+A run can link more than one issue, for example `start_run` with issues `[16, 88]`. The run has one branch and opens one pull request for all of them.
+
+- Each issue is checked on its own before the run starts: a planned task must be Ready, it must not be blocked on GitHub, and no other active run may hold it. If any issue fails a check, the whole start is refused.
+- The planner reads every issue's body, comments, story and epic, and writes one plan for all of them.
+- Each linked task moves to Running when the run starts, to In review when the pull request opens, and to Done when it merges. Cancelling the run moves each one back to Ready.
+- The pull request says `Closes #N` for each issue, and the Merge node closes every linked issue itself.
+- The Plan shows the same run on each of its tasks.
+
+Known limits, to address when a real project needs them:
+
+- The scheduler starts one task per run. Only a person groups issues.
+- A run cannot drop one of its issues. If only some of them should ship, cancel the run and start separate runs.
+- An issue blocked by another issue in the same run is still refused at start, although both would ship in one pull request.
+
 The library (**Library** in the dashboard) holds skills, MCP servers and subagents that nodes enable by name. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.
 
 ## The Plan
