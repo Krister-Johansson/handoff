@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
+import { eq, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "./executors/cli-node.ts";
 import { humanGateExecutor } from "./executors/human-gate.ts";
-import { repairNodeExecution } from "./operations.ts";
+import { answerQuestion, repairNodeExecution } from "./operations.ts";
 import { createRun } from "./runs.ts";
 import { createOriginRepo, git } from "./testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "./testing/harness.ts";
@@ -112,4 +113,35 @@ test("a repair note reaches every later attempt of the node, not only the repair
   expect(repaired!.systemPrompt).toContain(note);
   expect(later!.session.mode).toBe("new");
   expect(later!.systemPrompt).toContain(note);
+});
+
+/** Answers the run's open question at the gate, as a person on the run page would. */
+async function answerOpen(runId: string, answer: string, option?: string) {
+  const open = (await db.select().from(questions).where(eq(questions.runId, runId))).filter((q) => q.answer === null);
+  expect(open).toHaveLength(1);
+  await answerQuestion(db, open[0]!.id, { answer, ...(option ? { option } : {}), answeredBy: "krister" });
+}
+
+test("a question answered at a gate reaches a later attempt that the tester sent back, in a new session", async () => {
+  const cli = new FakeCliExecutor([{ output: outputs.coderAsks }]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsFail), done(outputs.testsPass)));
+  cli.push(
+    coderWrites({ "CHANGELOG.md": "# Changelog\n" }, outputs.coderDone),
+    coderWrites({ "CHANGELOG.md": "# Changelog\n\n- 2026-10-02\n" }, outputs.coderDone),
+    { output: outputs.approve },
+  );
+  await answerOpen(run.id, "Use ISO 8601 dates.", "ISO");
+  await drain(deps);
+
+  const attempts = await coders(run.id);
+  expect(attempts.map((e) => [e.attempt, e.status])).toEqual([
+    [1, "passed"],
+    [2, "passed"],
+    [3, "passed"],
+  ]);
+  const [, resumed, sentBack] = cli.requests;
+  expect(resumed!.session.mode).toBe("resume");
+  expect(sentBack!.session.mode).toBe("new");
+  expect(sentBack!.systemPrompt).toContain("ISO dates or US dates?");
+  expect(sentBack!.systemPrompt).toContain("Use ISO 8601 dates.");
 });
