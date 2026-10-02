@@ -352,6 +352,16 @@ export function registerDataTools(server: McpServer, deps: HandoffMcpDeps, optio
 }
 
 /**
+ * Runs one of the catalog's data tools with arguments already checked against its input, as the
+ * dashboard's WebMCP tools route does. Throws the handler's error.
+ */
+export async function runTool(deps: HandoffMcpDeps, name: string, args: unknown): Promise<unknown> {
+  const handler = handlersFor(deps)[name] as ((args: unknown) => Promise<unknown>) | undefined;
+  if (!handler) throw new Error(`There is no tool ${name}.`);
+  return handler(args);
+}
+
+/**
  * handoff's operations as MCP tools, for an agent such as the user's Claude Code session. The catalog
  * says what each tool is.
  */

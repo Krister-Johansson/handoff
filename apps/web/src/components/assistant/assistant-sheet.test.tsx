@@ -198,3 +198,53 @@ test("a UI tool call to another site is refused without navigating", async () =>
   expect(transport.uiReplies[0]).toMatchObject({ isError: true, text: expect.stringContaining("only opens pages of this dashboard") });
   expect(push).not.toHaveBeenCalled();
 });
+
+/** A stand-in for the browser's document.modelContext. */
+function installModelContext() {
+  const tools = new Map<string, { execute: (input: object, o: { signal: AbortSignal }) => Promise<unknown> }>();
+  const context = Object.assign(new EventTarget(), {
+    tools,
+    registerTool: async (tool: { name: string; execute: (input: object, o: { signal: AbortSignal }) => Promise<unknown> }, options?: { signal?: AbortSignal }) => {
+      tools.set(tool.name, tool);
+      options?.signal?.addEventListener("abort", () => tools.delete(tool.name));
+    },
+    run: (name: string, input: object) => tools.get(name)!.execute(input, { signal: new AbortController().signal }),
+  });
+  Object.defineProperty(document, "modelContext", { value: context, configurable: true });
+  return context;
+}
+
+test("a browser agent's confirm tool opens the panel with an approval card, and runs only after Approve", async () => {
+  const context = installModelContext();
+  const fetchMock = vi.fn(async () => Response.json({ result: { status: "cancelled" } }));
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    render(<App />);
+    await waitFor(() => expect(context.tools.has("cancel_run")).toBe(true));
+    let result: unknown;
+    act(() => void context.run("cancel_run", { run_id: "7f3a1b2c-0000-4000-8000-000000000000" }).then((r) => (result = r)));
+    const card = await within(await screen.findByRole("dialog", { name: "Assistant" })).findByRole("group", { name: "Approve: Cancel a run" });
+    expect(within(card).getByText("Cancel run 7f3a1b2c")).toBeInTheDocument();
+    expect(within(panel()).getByText("A browser agent asks")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(within(card).getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(result).toBe(JSON.stringify({ status: "cancelled" })));
+    expect(fetchMock).toHaveBeenCalledWith("/api/assistant/tools/cancel_run", expect.objectContaining({ method: "POST" }));
+  } finally {
+    vi.unstubAllGlobals();
+    delete (document as { modelContext?: unknown }).modelContext;
+  }
+});
+
+test("with WebMCP switched off in this browser no tools register", async () => {
+  localStorage.setItem("handoff.webmcp", "off");
+  const context = installModelContext();
+  try {
+    render(<App />);
+    await act(async () => {});
+    expect(context.tools.size).toBe(0);
+  } finally {
+    localStorage.removeItem("handoff.webmcp");
+    delete (document as { modelContext?: unknown }).modelContext;
+  }
+});

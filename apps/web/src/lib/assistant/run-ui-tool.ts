@@ -4,7 +4,8 @@ import { planUiTool, UiToolError } from "./ui-tools";
 export type UiToolOutcome = { text: string; isError: boolean; note?: string };
 
 const heading = () => document.querySelector<HTMLElement>("main h1") ?? document.querySelector<HTMLElement>("h1");
-const headingText = (h: HTMLElement | null) => h?.textContent?.trim() ?? "";
+/** The heading's title: the page header marks it, so a count beside it is left out. */
+const headingText = (h: HTMLElement | null) => (h?.querySelector("[data-page-title]") ?? h)?.textContent?.trim() ?? "";
 const here = () => `${window.location.pathname}${window.location.search}`;
 
 /**

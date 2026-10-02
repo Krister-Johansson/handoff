@@ -8,6 +8,7 @@ import { AgentConnection } from "@/components/settings/agent-connection";
 import { NotificationSettingsLoader } from "@/components/settings/notification-settings-loader";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { ThemeSetting } from "@/components/settings/theme-setting";
+import { WebMcpSetting } from "@/components/settings/webmcp-setting";
 import { WorkerSettings } from "@/components/settings/worker-settings";
 import { lastAgentConnection } from "@/server/agent-endpoint";
 import { AgentTokenStore, defaultAgentTokenFile } from "@/server/agent-token";
@@ -83,6 +84,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           {tab === "agents" && (
             <Section title="Connect Claude Code" description="Let your Claude Code session see your projects and runs, start runs for issues and answer what runs ask.">
               <AgentConnection origin={origin} checkout={checkoutRoot()} initialToken={token} lastConnection={connectionLine()} />
+            </Section>
+          )}
+          {tab === "agents" && (
+            <Section title="Browser agents" description="Let an agent in this browser use handoff's tools on the dashboard's pages, through WebMCP.">
+              <WebMcpSetting />
             </Section>
           )}
           {worker && (

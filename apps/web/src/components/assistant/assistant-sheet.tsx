@@ -2,6 +2,7 @@
 
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import type { ChatMessage } from "@/lib/assistant/port";
+import { ApprovalCard } from "./approval-card";
 import { useAssistant, useAssistantPanel } from "./assistant-provider";
 import { Composer } from "./composer";
 import { ConversationPicker } from "./conversation-picker";
@@ -26,7 +27,7 @@ function statusLine(messages: ChatMessage[], streaming: boolean): string | undef
 export function AssistantSheet() {
   const assistant = useAssistant();
   const panel = useAssistantPanel();
-  const status = statusLine(panel.messages, assistant.status === "streaming");
+  const status = statusLine(panel.messages, assistant.status === "streaming") ?? panel.agentActivity;
   return (
     <Sheet open={assistant.isOpen} onOpenChange={(open) => (open ? assistant.open() : assistant.close())} modal={false}>
       <SheetContent
@@ -47,6 +48,16 @@ export function AssistantSheet() {
         {assistant.available ? (
           <>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+              {panel.agentRequests.length > 0 && (
+                <section aria-labelledby="agent-requests" className="mb-3 flex flex-col gap-2">
+                  <h3 id="agent-requests" className="text-xs font-medium text-muted-foreground">
+                    A browser agent asks
+                  </h3>
+                  {panel.agentRequests.map((request) => (
+                    <ApprovalCard key={request.requestId} request={request} />
+                  ))}
+                </section>
+              )}
               {panel.messages.length ? (
                 <MessageList messages={panel.messages} />
               ) : (

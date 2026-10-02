@@ -136,7 +136,7 @@ export function PageHeader({
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
           <h1 className="flex flex-wrap items-center gap-2.5 text-[22px] leading-tight font-semibold tracking-[-0.015em] break-words">
-            {title}
+            <span data-page-title>{title}</span>
             {titleExtra}
           </h1>
           {description && <div className="text-[13px] text-muted-foreground">{description}</div>}
