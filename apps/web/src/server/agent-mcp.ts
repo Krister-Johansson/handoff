@@ -41,7 +41,7 @@ A project can keep a plan on a GitHub Project: epics, stories and tasks, each in
 
 Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, pause_scheduler stops new starts and stop_scheduler turns it off.
 
-A run may stop to ask a question (a Human gate) or fail. Tell the user what it asks or why it failed. Answer a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
+A run may stop to ask permission for a tool call, ask a question (a Human gate) or fail; get_run has the whole command, the question's options and the failure. Tell the user what it asks or why it failed. Answer a permission or a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
 
 const json = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] });
 const fail = (message: string) => ({ content: [{ type: "text" as const, text: message }], isError: true });
@@ -104,7 +104,8 @@ type TryContext = {
 function tryItOf(deps: HandoffMcpDeps, run: { id: string; projectId: string }, q: { id: string; context: unknown }, demoSummary: string | null) {
   const { acceptance = [], preview, shots = [] } = q.context as TryContext;
   const demo = (s: NonNullable<TryContext["shots"]>[number]) => ({ note: s.caption, works: s.works, screenshot_url: `${deps.baseUrl}/api/screenshots/${s.id}` });
-  const loose = shots.filter((s) => !s.criterion || !acceptance.includes(s.criterion));
+  const criteria = new Set(acceptance);
+  const loose = shots.filter((s) => !s.criterion || !criteria.has(s.criterion));
   return {
     app_url: preview?.status === "running" ? (preview.url ?? null) : null,
     app: preview?.status ?? "not_started",
@@ -132,9 +133,11 @@ function tryItAnswer(context: unknown, criteria: CriterionVerdict[], note: strin
   const { reason, acceptance = [] } = (context ?? {}) as { reason?: string; acceptance?: string[] };
   if (reason !== "try") throw new Error("criteria answer a Try it gate; this question takes an answer and an option.");
   const listed = `The criteria: ${acceptance.map((c) => `"${c}"`).join(", ")}.`;
-  const unknown = criteria.find((c) => !acceptance.includes(c.criterion));
+  const known = new Set(acceptance);
+  const unknown = criteria.find((c) => !known.has(c.criterion));
   if (unknown) throw new Error(`There is no criterion "${unknown.criterion}". ${listed}`);
-  const missing = acceptance.filter((c) => !criteria.some((v) => v.criterion === c));
+  const given = new Set(criteria.map((c) => c.criterion));
+  const missing = acceptance.filter((c) => !given.has(c));
   if (missing.length) throw new Error(`Give a verdict for every criterion; missing: ${missing.map((c) => `"${c}"`).join(", ")}.`);
   const failing = criteria.filter((c) => !c.works);
   const summary = failing.length === 0 ? "Every criterion works." : `${failing.length} of ${criteria.length} criteria ${failing.length === 1 ? "does" : "do"} not work.`;
