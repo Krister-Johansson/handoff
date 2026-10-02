@@ -136,3 +136,28 @@ test("Send back gives the coder the files", async () => {
   expect(sentBack.systemPrompt).toContain("Scratch files do not belong in the repository.");
   expect((await inspect(db, run.id)).run.status).toBe("succeeded");
 });
+
+test("a path failure with another failing check fails as before", async () => {
+  const strict = structuredClone(graph);
+  strict.nodes[1]!.attributes.contract!.checks.push({ kind: "command", command: "test -f MISSING.md", expectExitCode: 0 } as never);
+  const cli = new FakeCliExecutor([coderWrites({ "CHANGELOG.md": "# Changelog\n", "notes.txt": "scratch\n" })]);
+  const { run } = await startRun(cli, scripted(done(outputs.testsPass)), strict);
+
+  const [coder] = await coders(run.id);
+  expect(coder).toMatchObject({ status: "failed", error: { code: "contract_failed" } });
+  expect(await openQuestions(run.id)).toHaveLength(0);
+  expect((await inspect(db, run.id)).run.status).toBe("failed");
+});
+
+test("Fail the step fails the attempt with the files outside the plan", async () => {
+  const cli = new FakeCliExecutor([coderWrites({ "CHANGELOG.md": "# Changelog\n", "notes.txt": "scratch\n" })]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsPass)));
+  await answerOpen(run.id, "fail");
+  await drain(deps);
+
+  const [coder, ...more] = await coders(run.id);
+  expect(more).toHaveLength(0);
+  expect(coder).toMatchObject({ status: "failed", error: { code: "paths_outside_plan", detail: { files: ["notes.txt"] } } });
+  expect(cli.requests).toHaveLength(1);
+  expect((await inspect(db, run.id)).run.status).toBe("failed");
+});

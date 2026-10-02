@@ -458,7 +458,9 @@ export async function resolvePaths(tx: DbTx, input: { row: NodeExecutionRow; wor
   const checks = (row.checks ?? []) as CheckResult[];
   const listed = files.map((f) => `\`${f}\``).join(", ");
   const error: ExecutionError = { code: "paths_outside_plan", message: `files outside the plan: ${files.join(", ")}`, detail: { files } };
-  if (question.option === "send_back") {
+  if (question.option === "fail") return completeFailed(tx, { row, workerId: input.workerId, graph: input.graph, error, output: row.output, checks });
+  // An answer without a known option (a text answer over MCP, say) sends the work back with it rather than guessing.
+  if (question.option !== "allow") {
     const told = [
       `${by} sent this back because it changed files outside the plan: ${listed}.`,
       "Undo your changes to them. If the task cannot be done without one, keep it and list it in extraPaths with the reason.",
