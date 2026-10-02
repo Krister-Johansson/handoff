@@ -13,24 +13,31 @@ export type ProjectForecasts = {
  * capacity. Computed on every read; nothing of it is stored.
  */
 export async function loadForecasts(db: Db, projectId: string, sizeOfIssue: (issue: number) => PlanSize | undefined): Promise<ProjectForecasts> {
-  const [project] = await db.select({ capacity: projects.planHoursPerDay }).from(projects).where(eq(projects.id, projectId));
-  const finished = await db
-    .select({
-      id: runs.id,
-      size: runs.size,
-      proposal: sql<string | null>`${runs.state}->'plan'->>'size'`,
-      issue: sql<number>`(${runs.issues}->0->>'number')::int`,
-      startedAt: runs.startedAt, finishedAt: runs.finishedAt, mergeQueuedAt: runs.mergeQueuedAt, mergeRequestedAt: runs.mergeRequestedAt })
-    .from(runs)
-    .where(
-      and(
-        eq(runs.projectId, projectId),
-        eq(runs.status, "succeeded"),
-        isNotNull(runs.startedAt),
-        isNotNull(runs.finishedAt),
-        sql`jsonb_array_length(${runs.issues}) = 1`,
+  // The capacity and the runs are independent reads. Callers pass the pool, not a transaction, so they run at once.
+  const [[project], finished] = await Promise.all([
+    db.select({ capacity: projects.planHoursPerDay }).from(projects).where(eq(projects.id, projectId)),
+    db
+      .select({
+        id: runs.id,
+        size: runs.size,
+        proposal: sql<string | null>`${runs.state}->'plan'->>'size'`,
+        issue: sql<number>`(${runs.issues}->0->>'number')::int`,
+        startedAt: runs.startedAt,
+        finishedAt: runs.finishedAt,
+        mergeQueuedAt: runs.mergeQueuedAt,
+        mergeRequestedAt: runs.mergeRequestedAt,
+      })
+      .from(runs)
+      .where(
+        and(
+          eq(runs.projectId, projectId),
+          eq(runs.status, "succeeded"),
+          isNotNull(runs.startedAt),
+          isNotNull(runs.finishedAt),
+          sql`jsonb_array_length(${runs.issues}) = 1`,
+        ),
       ),
-    );
+  ]);
   const ids = finished.map((r) => r.id);
   const [asked, requested, executions] = ids.length
     ? await Promise.all([
