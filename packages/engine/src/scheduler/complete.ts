@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeResult, type RunState } from "@handoff/core";
+import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeMemory, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, questions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
@@ -148,6 +148,14 @@ function rememberAttempt(state: RunState, row: NodeExecutionRow, output: unknown
   return extraPaths.length || notes.length ? remember(state, row.nodeKey, { extraPaths, notes }) : state;
 }
 
+/** Additions to the memory of one or more nodes, by node key. */
+export type MemoryAdditions = Record<string, Partial<NodeMemory>>;
+
+/** Appends to nodes' memory in the state read under the run's lock. */
+function addMemory(state: RunState, additions: MemoryAdditions | undefined): RunState {
+  return Object.entries(additions ?? {}).reduce((next, [nodeKey, add]) => remember(next, nodeKey, add), state);
+}
+
 /**
  * Tells a person how the run ended, when the node that ended it has that kind on. The notification
  * commits with the run's end.
@@ -211,6 +219,8 @@ export async function completePassed(
     statePatch?: Record<string, unknown> | undefined;
     checks: CheckResult[];
     cost?: { usd?: number | undefined; usage?: unknown } | undefined;
+    /** What to add to nodes' memory, appended to the run's current state under its lock so no concurrent write is lost. */
+    memory?: MemoryAdditions | undefined;
   },
 ) {
   const { row } = input;
@@ -241,7 +251,7 @@ export async function completePassed(
     attempt: row.attempt,
     ...(updated.executorSessionId ? { sessionId: updated.executorSessionId } : {}),
   };
-  const merged = rememberAttempt(mergeState(state, row.nodeKey, result, input.statePatch), row, input.output);
+  const merged = addMemory(rememberAttempt(mergeState(state, row.nodeKey, result, input.statePatch), row, input.output), input.memory);
   const routed = await route(tx, input.graph, row, "passed", input.output, merged);
   lead.push(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
@@ -397,6 +407,24 @@ export async function askAboutPaths(
   }
   await appendEvents(tx, row.runId, events);
   await yieldWaiting(tx, { row, workerId: input.workerId, wait: { kind: "human", token: question!.id } });
+}
+
+type PathsQuestion = { option: string | null; answer: string | null; answeredBy: string | null; context: Record<string, unknown> };
+
+/**
+ * Carries out a person's answer to a paths question on the execution that waited for it. Allow
+ * passes the attempt with the files in the node's memory, so its later attempts may change them too.
+ */
+export async function resolvePaths(tx: DbTx, input: { row: NodeExecutionRow; workerId: string; graph: CompiledGraph; question: PathsQuestion }) {
+  const { row, question } = input;
+  const files = Array.isArray(question.context.files) ? question.context.files.map(String) : [];
+  const by = question.answeredBy ?? "a person";
+  const note = question.answer && question.answer !== question.option ? question.answer.trim() : "";
+  const checks = (row.checks ?? []) as CheckResult[];
+  const reason = `Allowed by ${by} for this run${note ? `: ${note}` : "."}`;
+  const allowed = checks.map((c) => (c.kind === "diff_within_paths" && !c.passed ? { ...c, passed: true, detail: `files outside owned paths allowed by ${by}: ${files.join(", ")}` } : c));
+  const extraPaths = files.map((path) => ({ path, reason, attempt: row.attempt, by: "person" as const }));
+  await completePassed(tx, { row, workerId: input.workerId, graph: input.graph, output: row.output, checks: allowed, memory: { [row.nodeKey]: { extraPaths } } });
 }
 
 export async function releaseForReclaim(tx: DbTx, input: { row: NodeExecutionRow; workerId: string }) {

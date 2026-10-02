@@ -83,3 +83,31 @@ test("a lone path failure waits with a paths question naming the files", async (
   expect(types).toContain("human.asked");
   expect(types).not.toContain("node.failed");
 });
+
+/** Answers the run's open question, as a person on the run page would. */
+async function answerOpen(runId: string, option: string, answer: string = option) {
+  const [open, ...more] = await openQuestions(runId);
+  expect(more).toHaveLength(0);
+  await answerQuestion(db, open!.id, { answer, option, answeredBy: "krister" });
+}
+
+test("Allow for this run passes the attempt and the next attempt may change the file", async () => {
+  const cli = new FakeCliExecutor([coderWrites({ "CHANGELOG.md": "# Changelog\n", "notes.txt": "scratch\n" })]);
+  const { run, deps } = await startRun(cli, scripted(done(outputs.testsFail), done(outputs.testsPass)));
+  cli.push(coderWrites({ "CHANGELOG.md": "# Changelog\n\n- one\n", "notes.txt": "scratch, changed\n" }), { output: outputs.approve });
+  await answerOpen(run.id, "allow");
+  await drain(deps);
+
+  const attempts = await coders(run.id);
+  expect(attempts.map((e) => [e.attempt, e.status])).toEqual([
+    [1, "passed"],
+    [2, "passed"],
+  ]);
+  expect(attempts[0]!.checks).toEqual([expect.objectContaining({ kind: "diff_within_paths", passed: true })]);
+  expect(attempts[1]!.checks).toEqual([expect.objectContaining({ kind: "diff_within_paths", passed: true })]);
+  const { run: row } = await inspect(db, run.id);
+  expect(row.status).toBe("succeeded");
+  expect(row.state).toMatchObject({ memory: { coder: { extraPaths: [expect.objectContaining({ path: "notes.txt", attempt: 1, by: "person" })] } } });
+  // The tester ran once per coder attempt, so the allowed attempt went on to it.
+  expect(cli.requests).toHaveLength(3);
+});

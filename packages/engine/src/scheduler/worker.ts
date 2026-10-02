@@ -16,6 +16,7 @@ import {
   stopWorker,
   nodeExecutions,
   projects,
+  questions,
   reapExpiredLeases,
   reapExpiredWaits,
   runs,
@@ -31,7 +32,7 @@ import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
-import { askAboutPaths, completeFailed, completePassed, LeaseLostError, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
+import { askAboutPaths, completeFailed, completePassed, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
 export type EngineDeps = {
   db: Db;
@@ -233,6 +234,19 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     await appendEvents(tx, run.id, events);
   });
 
+  // An attempt that waited on a paths question goes on with the person's answer; its agent does not run again.
+  const paths = row.waitToken ? await answeredPathsQuestion(db, row.waitToken) : undefined;
+  if (paths) {
+    try {
+      await db.transaction((tx) => resolvePaths(tx, { row, workerId, graph, question: paths }));
+    } catch (error) {
+      if (error instanceof LeaseLostError) deps.log?.("lease lost at completion", { id: row.id });
+      else throw error;
+    }
+    await releaseIfFinished(deps, run.id, project);
+    return;
+  }
+
   const controller = new AbortController();
   const abort = () => controller.abort();
   outerSignal?.addEventListener("abort", abort, { once: true });
@@ -362,6 +376,12 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     else throw error;
   }
   await releaseIfFinished(deps, run.id, project);
+}
+
+/** The answered paths question an execution waited on, if that is what woke it. */
+async function answeredPathsQuestion(db: Db, token: string) {
+  const [question] = await db.select().from(questions).where(eq(questions.id, token));
+  return question && question.context.reason === "paths" && question.answer !== null ? question : undefined;
 }
 
 const TERMINAL_RUN = new Set(["succeeded", "failed", "cancelled"]);
