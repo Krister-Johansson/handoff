@@ -866,3 +866,71 @@ test("Arrange shows a preview of the placed tasks and writes nothing until Save"
   expect(actions.saveArrangeAction).not.toHaveBeenCalled();
   expect(actions.moveItemAction).not.toHaveBeenCalled();
 });
+
+test("Save writes Start and Target for each task and Cancel leaves them unscheduled", async () => {
+  const { unmount } = renderSized({ plan: arranging });
+  const arrangeButton = () => within(screen.getByRole("region", { name: "Unscheduled" })).getByRole("button", { name: "Arrange by estimate" });
+
+  // Cancel: the preview goes and nothing is written.
+  fireEvent.click(arrangeButton());
+  fireEvent.click(within(screen.getByRole("region", { name: "Arrange preview" })).getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("region", { name: "Arrange preview" })).not.toBeInTheDocument();
+  expect(within(row(/^Task #153 /)).queryByRole("link", { name: /^Task #153 / })).not.toBeInTheDocument();
+  expect(within(unscheduledRow(153)).queryByText("In preview")).not.toBeInTheDocument();
+  expect(arrangeButton()).toHaveAttribute("aria-pressed", "false");
+
+  // Save: both tasks' dates in one write, and their bars stay where the preview put them.
+  fireEvent.click(arrangeButton());
+  fireEvent.click(screen.getByRole("button", { name: "Save 2 tasks to GitHub" }));
+  expect(await screen.findByText("Saving 2 tasks to GitHub")).toBeInTheDocument();
+  await waitFor(() =>
+    expect(actions.saveArrangeAction).toHaveBeenCalledWith({
+      projectId: "p1",
+      items: [
+        { issue: 153, start: "2026-10-03", target: "2026-10-03" },
+        { issue: 152, start: "2026-10-04", target: "2026-10-04" },
+      ],
+    }),
+  );
+  expect(await screen.findByText("Arranged 2 tasks")).toBeInTheDocument();
+  expect(screen.getByText("Saved Start and Target to GitHub.")).toBeInTheDocument();
+  expect(router.refresh).toHaveBeenCalled();
+  expect(screen.queryByRole("region", { name: "Arrange preview" })).not.toBeInTheDocument();
+  expect(barOf(153)).not.toHaveAttribute("data-preview");
+  expect(leftOf(barOf(152))).toBe(OCT_1 + 3 * DAY + 32);
+  expect(within(screen.getByRole("region", { name: "Unscheduled" })).queryByRole("listitem", { name: /^Task #15[23] / })).not.toBeInTheDocument();
+  expect(unscheduledRow(154)).toBeInTheDocument();
+  expect(actions.saveArrangeAction).toHaveBeenCalledTimes(1);
+  expect(actions.moveItemAction).not.toHaveBeenCalled();
+  unmount();
+  toast.dismiss();
+
+  // A task GitHub refuses goes back to Unscheduled and the toast names it; the other stays saved.
+  actions.saveArrangeAction.mockResolvedValueOnce({ ok: true, saved: [153], refused: [{ issue: 152, reason: "it is not in the Project" }] });
+  renderSized({ plan: arranging });
+  fireEvent.click(arrangeButton());
+  fireEvent.click(screen.getByRole("button", { name: "Save 2 tasks to GitHub" }));
+  expect(await screen.findByText("GitHub did not take #152")).toBeInTheDocument();
+  expect(screen.getByText("#152: it is not in the Project. #153 is saved.")).toBeInTheDocument();
+  expect(barOf(153)).toBeInTheDocument();
+  expect(within(row(/^Task #152 /)).queryByRole("link", { name: /^Task #152 / })).not.toBeInTheDocument();
+  expect(unscheduledRow(152)).toBeInTheDocument();
+});
+
+test("Arrange is off when no unscheduled task has a size or an estimate", async () => {
+  // #153 loses its size, and #152 has none: Unscheduled holds only tasks without a duration.
+  const { unmount } = renderSized({ plan: sizedWith({ 153: { size: undefined } }) });
+  const arrange = within(screen.getByRole("region", { name: "Unscheduled" })).getByRole("button", { name: "Arrange by estimate" });
+  expect(arrange).toHaveAttribute("aria-disabled", "true");
+  fireEvent.focus(arrange);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("No unscheduled task here has a size or an estimate");
+
+  fireEvent.click(arrange);
+  expect(screen.queryByRole("region", { name: "Arrange preview" })).not.toBeInTheDocument();
+  expect(arrange).toHaveAttribute("aria-pressed", "false");
+
+  // Without the Plan page's sizes there is nothing to arrange by, so there is no button.
+  unmount();
+  renderTimeline();
+  expect(within(screen.getByRole("region", { name: "Unscheduled" })).queryByRole("button", { name: "Arrange by estimate" })).not.toBeInTheDocument();
+});

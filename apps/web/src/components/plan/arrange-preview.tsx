@@ -57,10 +57,12 @@ export function ArrangeBanner({ arrange, capacity }: { arrange: ArrangeControl; 
           {leftOutText(preview)}
         </AlertDescription>
         <div className="col-start-2 mt-1.5 flex gap-2 sm:absolute sm:top-1/2 sm:right-2.5 sm:mt-0 sm:-translate-y-1/2">
-          <Button size="sm" variant="outline">
+          <Button size="sm" variant="outline" onClick={arrange.cancel}>
             Cancel
           </Button>
-          <Button size="sm">Save {count} to GitHub</Button>
+          <Button size="sm" onClick={arrange.save}>
+            Save {count} to GitHub
+          </Button>
         </div>
       </Alert>
     </div>
