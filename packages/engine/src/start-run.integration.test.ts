@@ -27,3 +27,14 @@ test("startRun refuses an issue that an active run links and names the run", asy
   await expect(start([12, 11])).rejects.toThrow(`#11 is taken by run ${first.id}, which is queued.`);
   expect((await db.select().from(runs)).map((r) => r.id)).toEqual([first.id]);
 });
+
+test("two concurrent starts on one issue create one run", async () => {
+  const { start } = await project();
+  const results = await Promise.allSettled([start([11]), start([11]), start([11])]);
+  expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(results.flatMap((r) => (r.status === "rejected" ? [(r.reason as Error).message] : []))).toEqual([
+    expect.stringContaining("#11 is taken by run"),
+    expect.stringContaining("#11 is taken by run"),
+  ]);
+  expect(await db.select().from(runs)).toHaveLength(1);
+});

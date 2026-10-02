@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { LinkedIssue } from "@handoff/core";
 import { graphs, graphVersions, projects, runs, type Db, type DbExecutor } from "@handoff/db";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
@@ -45,7 +45,9 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
   if (!task) throw new Error("Describe the task, or link at least one issue.");
+  // Starts on one project take turns, so two starts (a person's and the scheduler's) cannot both take an issue.
   const run = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, issues);
     return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues });
   });
