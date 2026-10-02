@@ -218,6 +218,64 @@ test("with no Ready task, Ready to start says so in one line", () => {
   expect(within(ready).getByText("No task is ready")).toBeInTheDocument();
 });
 
+const issue = (number: number, title: string, run: { id: string; status: string } | null) => ({
+  number,
+  title,
+  url: `https://github.com/example-org/example-shop/issues/${number}`,
+  labels: [],
+  author: null,
+  updatedAt: "2026-10-01T10:00:00Z",
+  blockedBy: [],
+  run: run && { ...run, prNumber: null },
+  plan: null,
+});
+
+test("without a plan, Open issues with runs takes the place of the features, with a pointer to set up the plan", () => {
+  show({
+    ...QUIET,
+    work: {
+      kind: "issues",
+      reason: "no-plan",
+      error: "This project has no plan on GitHub yet.",
+      issues: { withRuns: [issue(3, "F03 Prisma schema and first migration", { id: "r3", status: "waiting" }), issue(5, "F05 User model and sessions", { id: "r5", status: "failed" })], toDo: [] },
+    },
+  });
+  expect(screen.queryByRole("region", { name: /^Features in progress/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: /^Ready to start/ })).not.toBeInTheDocument();
+  const issues = section("Open issues with runs");
+  expect(within(issues).getByRole("heading", { level: 2 })).toHaveTextContent("Open issues with runs2");
+  expect(within(issues).getByRole("link", { name: "Open Issues" })).toHaveAttribute("href", "/projects/p1/issues");
+  const [schema, sessions] = within(issues).getAllByRole("listitem", { name: /^#/ });
+  expect(within(schema!).getByRole("link", { name: "#3 F03 Prisma schema and first migration" })).toHaveAttribute("href", "https://github.com/example-org/example-shop/issues/3");
+  expect(within(schema!).getByRole("link", { name: "waiting" })).toHaveAttribute("href", "/projects/p1/runs/r3");
+  expect(within(sessions!).getByRole("link", { name: "failed" })).toHaveAttribute("href", "/projects/p1/runs/r5");
+  expect(within(issues).getByText("No plan on GitHub yet")).toBeInTheDocument();
+  expect(within(issues).getByText("Link a GitHub Project to follow epics, their progress and the Ready tasks on this page.")).toBeInTheDocument();
+  expect(within(issues).getByRole("button", { name: "Set up the plan" })).toBeInTheDocument();
+});
+
+test("without a plan and with no issue run yet, Issues to do lists the issues with Start run", () => {
+  show({
+    ...QUIET,
+    work: { kind: "issues", reason: "no-plan", error: "", issues: { withRuns: [], toDo: [issue(12, "Add rate limiting to the webhook endpoint", { id: "r12", status: "cancelled" })] } },
+  });
+  expect(screen.queryByRole("region", { name: /^Open issues with runs/ })).not.toBeInTheDocument();
+  const toDo = section("Issues to do");
+  expect(within(toDo).getByRole("heading", { level: 2 })).toHaveTextContent("Issues to do1");
+  const [row] = within(toDo).getAllByRole("listitem", { name: /^#/ });
+  expect(row).toHaveTextContent("Last run cancelled");
+  expect(within(row!).getByRole("button", { name: "Start run" })).toBeInTheDocument();
+  expect(within(toDo).getByRole("button", { name: "Set up the plan" })).toBeInTheDocument();
+});
+
+test("when the plan cannot be read, the issues section says why instead of offering to set one up", () => {
+  show({ ...QUIET, work: { kind: "issues", reason: "no-scope", error: "GITHUB_TOKEN lacks the project scope.", issues: { error: "Set GITHUB_TOKEN or a GitHub App for the dashboard to list the repository's issues." } } });
+  const toDo = section("Issues to do");
+  expect(within(toDo).getByText("Set GITHUB_TOKEN or a GitHub App for the dashboard to list the repository's issues.")).toBeInTheDocument();
+  expect(within(toDo).getByText("GITHUB_TOKEN lacks the project scope.")).toBeInTheDocument();
+  expect(within(toDo).queryByRole("button", { name: "Set up the plan" })).not.toBeInTheDocument();
+});
+
 test("with nothing waiting, Needs you keeps its heading without a count and says so in one line", () => {
   show(QUIET);
   const needsYou = section("Needs you");

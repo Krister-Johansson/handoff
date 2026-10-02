@@ -1,5 +1,6 @@
 import type { Overview } from "@/server/overview";
 import { FeaturesInProgress } from "./features";
+import { IssuesWork } from "./issues";
 import { NeedsYou } from "./needs-you";
 import { ReadyToStart } from "./ready";
 import { FinishedRuns, RunningNow } from "./overview-runs";
@@ -30,11 +31,13 @@ export function ProjectOverview({ project, overview, start, now = new Date() }: 
           </div>
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-7">
-          {work.kind === "plan" && (
+          {work.kind === "plan" ? (
             <>
               <FeaturesInProgress features={work.features} projectId={project.id} repoUrl={repoUrl} />
               <ReadyToStart ready={work.ready} unplannedToDo={work.unplannedToDo} projectId={project.id} repoUrl={repoUrl} start={start} />
             </>
+          ) : (
+            <IssuesWork work={work} project={project} start={start} />
           )}
         </div>
       </div>
