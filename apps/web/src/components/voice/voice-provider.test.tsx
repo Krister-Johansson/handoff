@@ -127,7 +127,7 @@ test("the voice provider speaks new notifications with the speaker", () => {
   voicePrefs({ speakNotifications: true });
   const player = new FakePlayer();
   render(<VoiceTestApp speaker={createSpeaker(player, () => DEFAULT_VOICE_PREFS)} />);
-  act(() => notify([{ id: "e2", kind: "failed", title: "sandbox: run failed at coder", body: "", href: "/projects/p1/runs/e2" }]));
+  act(() => notify([{ id: "e2", tone: "danger", title: "sandbox: run failed at coder", body: "", href: "/projects/p1/runs/e2" }]));
   expect(player.spoken).toEqual(["sandbox: run failed at coder."]);
   expect(screen.getByRole("status", { name: "Voice" })).toHaveTextContent("Speaking");
 });
@@ -141,7 +141,7 @@ test("a notification that arrives while listening is spoken when listening ends"
   await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
   const recognizer = FakeSpeechRecognition.instances[0]!;
   act(() => recognizer.emitStart());
-  act(() => notify([{ id: "q1", kind: "input", title: "sandbox: gate asks a question", body: "", href: "/inbox" }]));
+  act(() => notify([{ id: "q1", tone: "attention", title: "sandbox: gate asks a question", body: "", href: "/inbox" }]));
   // The person keeps dictating; the dashboard does not talk over them.
   expect(player.spoken).toEqual([]);
   expect(recognizer.aborted).toBe(false);

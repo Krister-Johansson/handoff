@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -49,6 +49,16 @@ test("the project group links to each project route and marks the current one", 
     ["Inbox", "/inbox"],
     ["Library", "/library"],
   ]);
+
+  // The Plan page and a run page mark their items too.
+  for (const [pathname, item] of [
+    ["/projects/p1/plan", "Plan"],
+    ["/projects/p1/runs/r1", "Runs"],
+  ] as const) {
+    cleanup();
+    renderSidebar({ pathname });
+    expect(current()).toEqual([item]);
+  }
 });
 
 test("outside a project the switcher shows the last project from the cookie", () => {

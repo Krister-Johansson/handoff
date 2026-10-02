@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { eq, previews, questions } from "@handoff/db";
+import { eq, notifications, previews, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { answerQuestion, restartTryIt } from "../operations.ts";
 import { createRun } from "../runs.ts";
@@ -64,7 +64,10 @@ test("a Try it gate starts the run's app and asks the person to check each accep
   expect(question.context).toEqual({ reason: "try", acceptance: ["A user can create a new task"], preview: { id: preview.id, url: preview.url, status: "running" } });
   const { executions, events } = await inspect(db, run.id);
   expect(executions.find((e) => e.nodeKey === "try")).toMatchObject({ status: "waiting", waitKind: "human" });
-  expect(events.find((e) => e.type === "notify")?.payload).toMatchObject({ kind: "input", nodeKey: "try", questionId: question.id, title: expect.stringMatching(/: the app is ready for you to try$/), body: "Tasks" });
+  expect(events.map((e) => e.type)).not.toContain("notify");
+  expect(await db.select().from(notifications).where(eq(notifications.runId, run.id))).toMatchObject([
+    { tone: "attention", title: expect.stringMatching(/: the app is ready for you to try$/), body: "Tasks", href: `/projects/${run.projectId}/runs/${run.id}/try/${question.id}` },
+  ]);
 });
 
 test("answering stops the app and goes on, and a failed item goes back to the coder", async () => {

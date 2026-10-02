@@ -1,4 +1,5 @@
-import type { CompiledGraph, CompiledNode, ContextPacket, NodeType, RunState } from "@handoff/core";
+import type { Told } from "./notify.ts";
+import type { CompiledGraph, CompiledNode, ContextPacket, NodeType, NotifyKind, RunState } from "@handoff/core";
 import type { NodeExecutionRow, projects, runs } from "@handoff/db";
 import type { MaterializedLibrary } from "./library/materialize.ts";
 
@@ -29,6 +30,8 @@ export type ExecutorContext = {
   library?: MaterializedLibrary;
   signal: AbortSignal;
   emit(type: string, payload: unknown): void;
+  /** Tells a person about `kind`, when this node's settings have it on. The executor writes the text and the link. */
+  notify(kind: NotifyKind, told: Told): Promise<void>;
   setSessionId(id: string): Promise<void>;
   /** Stores the GitHub repository id on the project so later lookups are free. */
   recordRepoId(repoId: number): Promise<void>;

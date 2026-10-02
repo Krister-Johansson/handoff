@@ -166,9 +166,9 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "list_notifications",
     title: "List notifications",
-    description: "The notification feed, newest first, as the bell and the notifications page show it, with whether each is unread or done.",
+    description: "The notification feed, newest first, as the bell and the notifications page show it: each item's tone (neutral, success, attention or danger), title, body and link, and whether it is unread. What still waits for a person is in the inbox, not here.",
     input: z.object({
-      filter: z.enum(["unread", "input", "finished", "failed"]).optional().describe("unread, input (needs you), finished or failed"),
+      filter: z.enum(["unread", "attention", "success", "danger"]).optional().describe("unread, attention (asked you), success (finished) or danger (failed)"),
       limit: z.number().int().positive().max(50).optional(),
     }),
     kind: "data",
@@ -467,7 +467,7 @@ export const CATALOG: ToolSpec[] = [
     name: "go_to_notifications",
     title: "Open notifications",
     description: "Opens the notifications page, optionally filtered.",
-    input: z.object({ filter: z.enum(["unread", "input", "finished", "failed"]).optional().describe("unread, input (needs you), finished or failed") }),
+    input: z.object({ filter: z.enum(["unread", "attention", "success", "danger"]).optional().describe("unread, attention (asked you), success (finished) or danger (failed)") }),
     kind: "ui",
     confirm: false,
     readOnly: true,
@@ -487,6 +487,23 @@ export const CATALOG: ToolSpec[] = [
     confirm: false,
     readOnly: true,
     summarize: (a) => `Open the ${a.tab} page of project ${short(a.project_id)}${a.filter ? ` (${a.filter})` : ""}`,
+  }),
+  spec({
+    name: "go_to_plan",
+    title: "Open the plan",
+    description:
+      "Opens a project's Plan page: epics, stories and tasks from its GitHub Project, as a tree or a board, optionally narrowed to one epic (or the unplanned issues), some statuses, or tasks by their run.",
+    input: z.object({
+      project_id: z.string().describe("The project's id from list_projects"),
+      view: z.enum(["tree", "board"]).optional(),
+      epic: z.union([z.number().int().positive(), z.literal("unplanned")]).optional().describe("An epic's issue number, or unplanned"),
+      status: z.array(z.enum(["Shaping", "Ready", "Running", "In review", "Done"])).optional(),
+      run: z.enum(["any", "active", "needs-you", "none"]).optional().describe("Tasks with an active run, whose run needs the person, or with no run"),
+    }),
+    kind: "ui",
+    confirm: false,
+    readOnly: true,
+    summarize: (a) => `Open the plan of project ${short(a.project_id)}${a.view === "board" ? " as a board" : ""}${a.epic !== undefined ? `, epic ${a.epic === "unplanned" ? "unplanned" : `#${a.epic}`}` : ""}`,
   }),
   spec({
     name: "go_to_run",

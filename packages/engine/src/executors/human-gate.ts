@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
-import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, notifies, questionBrief, remember, type DiffFile, type Notification } from "@handoff/core";
+import { acceptanceOf, brief, DemoOutputSchema, gateMode, limitDiff, questionBrief, remember, reviewPath, runPath, tryPath, type DiffFile } from "@handoff/core";
 import { previews, questions, type Db } from "@handoff/db";
+import { notifyFrom, type Told } from "../notify.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 
@@ -175,15 +176,15 @@ async function composeTry(ctx: ExecutorContext, deps: GateDeps): Promise<Ask> {
 }
 
 /**
- * What the gate's notification says: the app to try or the work to review, with the run's task, or that
- * the gate asks a question, with the summary its asker wrote or the question cut short.
+ * What the gate's notification says and where it leads: the app to try or the work to review, with the
+ * run's task, or that the gate asks a question, with the summary its asker wrote or the question cut short.
  */
-function toldText(ctx: ExecutorContext, question: { question: string; context: Record<string, unknown> }): Pick<Notification, "title" | "body"> {
+function toldText(ctx: ExecutorContext, question: { id: string; question: string; context: Record<string, unknown> }): Told {
   const name = ctx.project.name;
   const { reason, review } = question.context as { reason?: string; review?: Review };
-  if (reason === "try") return { title: `${name}: the app is ready for you to try`, body: brief(ctx.run.task) };
-  if (review) return { title: `${name}: the ${review.kind} from ${review.from} needs your review`, body: brief(ctx.run.task) };
-  return { title: `${name}: ${ctx.node.key} asks a question`, body: questionBrief(question.question, question.context) };
+  if (reason === "try") return { title: `${name}: the app is ready for you to try`, body: brief(ctx.run.task), href: tryPath(ctx.project.id, ctx.run.id, question.id) };
+  if (review) return { title: `${name}: the ${review.kind} from ${review.from} needs your review`, body: brief(ctx.run.task), href: reviewPath(ctx.project.id, ctx.run.id, question.id) };
+  return { title: `${name}: ${ctx.node.key} asks a question`, body: questionBrief(question.question, question.context), href: runPath(ctx.project.id, ctx.run.id) };
 }
 
 export function humanGateExecutor(deps: GateDeps): NodeExecutor {
@@ -205,17 +206,18 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
       }
       if (!question) {
         const ask = tryIt ? await composeTry(ctx, deps) : await compose(ctx, deps.branchDiff);
-        [question] = await deps.db
-          .insert(questions)
-          .values({ runId: ctx.run.id, nodeExecutionId: ctx.execution.id, ...ask })
-          .onConflictDoNothing()
-          .returning();
+        // A question and its notification are two rows that commit together. Only a new question tells the person.
+        question = await deps.db.transaction(async (tx) => {
+          const [created] = await tx
+            .insert(questions)
+            .values({ runId: ctx.run.id, nodeExecutionId: ctx.execution.id, ...ask })
+            .onConflictDoNothing()
+            .returning();
+          if (created) await notifyFrom(tx, ctx.node, "input", ctx.run, toldText(ctx, created));
+          return created;
+        });
         question ??= (await deps.db.select().from(questions).where(and(eq(questions.nodeExecutionId, ctx.execution.id))))[0]!;
         ctx.emit("human.asked", { questionId: question.id, question: question.question, options: question.options });
-        if (notifies(ctx.node, "input")) {
-          const told: Notification = { kind: "input", nodeKey: ctx.node.key, questionId: question.id, ...toldText(ctx, question) };
-          ctx.emit("notify", told);
-        }
       } else if (tryIt && question.answer === null) {
         // Woken without an answer (Restart app): start the app again if it stopped.
         const preview = await ensurePreview(ctx, deps);
