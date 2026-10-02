@@ -1,7 +1,7 @@
 "use client";
 
 import { nodeCatalog, portsOf, type CompileError, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
-import { parseEdgePatch, parseNodePatch } from "@/lib/assistant/page-tools";
+import { NODE_PATCHES, parseEdgePatch, parseNodePatch } from "@/lib/assistant/page-tools";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { canConnect } from "@/lib/connect-rules";
 import type { LibraryChoices, LibraryKind } from "@/lib/library-choices";
@@ -137,19 +137,21 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
       },
       page_get_node: ({ key }) => {
         const node = nodeOf(graph, key);
-        const { nodeType, label, isStart, config, library, contract, notify } = node.data;
+        const { nodeType, label, isStart, config, library: chosen, contract, notify } = node.data;
         const edges = {
           in: graph.edges.filter((e) => e.target === key).map((e) => ({ id: e.id, from: e.source, port: e.data.port ?? null, input: e.data.input ?? "in" })),
           out: graph.edges.filter((e) => e.source === key).map((e) => ({ id: e.id, to: e.target, port: e.data.port ?? null })),
         };
-        return JSON.stringify({ key, type: nodeType, label, isStart, config, library: library ?? null, contract: contract ?? null, notify: notify ?? {}, edges });
+        // The fields page_update_node takes for this type, so the model need not guess them.
+        const fields = Object.keys(NODE_PATCHES[nodeType as NodeType].shape);
+        return JSON.stringify({ key, type: nodeType, label, isStart, config, library: chosen ?? null, contract: contract ?? null, notify: notify ?? {}, edges, fields });
       },
       page_get_edge: ({ id }) => {
         const { source, target, data } = edgeOf(graph, id);
         const { port, input, condition, on, loop, maxAttempts, onExhausted, priority } = data;
         return JSON.stringify({ id, source, target, port: port ?? null, input: input ?? "in", condition: condition ?? null, on, loop, maxAttempts: maxAttempts ?? null, onExhausted: onExhausted ?? null, priority });
       },
-      page_update_node:({ key, patch }) => {
+      page_update_node: ({ key, patch }) => {
         const node = nodeOf(graph, key);
         const parsed = parseNodePatch(key, node.data.nodeType as NodeType, patch);
         if (!parsed.ok) throw new Error(parsed.message);

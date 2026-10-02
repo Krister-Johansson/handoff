@@ -284,6 +284,8 @@ test("page_get_node returns the node's label, type, config and edges", async () 
       ],
       out: [{ id: "coder->reviewer", to: "reviewer", port: "done" }],
     },
+    // What page_update_node takes for a coder.
+    fields: ["label", "notify", "instructions", "model", "effort", "maxTurns", "allTools", "allowedTools", "library", "checks"],
   });
   expect(await call("page_get_node", { key: "tester" })).toEqual({ text: "There is no node tester. The nodes are: planner, coder, reviewer.", isError: true });
 });
