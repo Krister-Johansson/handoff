@@ -33,6 +33,21 @@ test("the Planner of a run linked to issues reads them in its context", async ()
   expect(prompt).toContain("slugify('2nd') returns 'nd'.");
 });
 
+test("the Planner of a run on a task reads its story and epic under Part of", async () => {
+  const { project, graphVersion } = await seedGraph(db, linear);
+  const lineage = [
+    { kind: "story" as const, number: 4, title: "Readable slugs", body: "Slugs keep what people typed." },
+    { kind: "epic" as const, number: 2, title: "URLs", body: "Every page has a stable URL." },
+  ];
+  await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Fix the slugify issue", issues: [{ ...issue, lineage }] });
+  const cli = new FakeCliExecutor([{ output: outputs.planner }]);
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 10, timeoutMs: 60_000 }), coder: scripted({ kind: "waiting", wait: { kind: "human", token: crypto.randomUUID() } }) }));
+  const prompt = cli.requests[0]!.systemPrompt;
+  expect(prompt).toContain("### Part of");
+  expect(prompt).toContain('Story #4 "Readable slugs": Slugs keep what people typed.');
+  expect(prompt).toContain('Epic #2 "URLs": Every page has a stable URL.');
+});
+
 test("the Coder reads the planner's acceptance criteria when the issue lists none", async () => {
   const { project, graphVersion } = await seedGraph(db, linear);
   await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Fix the slugify issue", issues: [issue] });

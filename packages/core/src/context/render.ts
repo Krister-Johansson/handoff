@@ -30,7 +30,14 @@ export type ContextPacket = {
   decisions?: { gate: string; note?: string | undefined; comments: ({ quote?: string | undefined; body: string } & Place)[] }[];
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
   suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
-  issues?: { number: number; title: string; url: string; body: string }[];
+  /** The linked issues; `lineage` holds each one's parent and grandparent, nearest first. */
+  issues?: {
+    number: number;
+    title: string;
+    url: string;
+    body: string;
+    lineage?: { kind?: string | undefined; number: number; title: string; body: string }[] | undefined;
+  }[];
   /** The run's app, started from its worktree for this step to walk through in a browser. */
   app?: { url: string };
   /** What a person will check in the running app to see the task is done. */
@@ -74,6 +81,11 @@ function renderConflict({ base, baseSha, files }: NonNullable<ContextPacket["con
 const LOG_TAIL_LINES = 80;
 const ISSUE_BODY_CHARS = 4000;
 
+/** "Story", "Epic" or "Task" for a parent's kind; "Parent" when it has none. */
+const kindName = (kind: string | undefined) => (kind ? `${kind[0]!.toUpperCase()}${kind.slice(1)}` : "Parent");
+/** A body cut at ISSUE_BODY_CHARS, with a note naming what was cut. */
+const cutBody = (body: string, what: string) =>
+  body.length > ISSUE_BODY_CHARS ? `${body.slice(0, ISSUE_BODY_CHARS)}\n\n(${what} body cut at ${ISSUE_BODY_CHARS} characters)` : body;
 const tail = (text: string, n: number) => text.split("\n").slice(-n).join("\n");
 const list = (items: string[], empty: string) => (items.length ? items.map((i) => `- ${i}`).join("\n") : empty);
 
@@ -115,9 +127,17 @@ export function renderContextPacket(packet: ContextPacket): string {
     out.push("# Linked issues", "", "The task works on these GitHub issues. The pull request closes them when it merges.", "");
     for (const issue of packet.issues) {
       const body = issue.body.trim();
-      const cut = body.length > ISSUE_BODY_CHARS;
       out.push(`## #${issue.number} ${issue.title}`, "", issue.url, "");
-      if (body) out.push(cut ? `${body.slice(0, ISSUE_BODY_CHARS)}\n\n(issue body cut at ${ISSUE_BODY_CHARS} characters)` : body, "");
+      if (issue.lineage?.length) {
+        // The story and the epic are context: the issue's own body says what to build.
+        out.push("### Part of", "");
+        for (const parent of issue.lineage) {
+          const kind = kindName(parent.kind);
+          out.push(`${kind} #${parent.number} ${quoted(parent.title)}: ${cutBody(parent.body.trim(), kind.toLowerCase())}`, "");
+        }
+        if (body) out.push("### This issue", "");
+      }
+      if (body) out.push(cutBody(body, "issue"), "");
     }
   }
   if (packet.acceptance?.items.length) {
