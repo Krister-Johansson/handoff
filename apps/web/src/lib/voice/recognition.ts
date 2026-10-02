@@ -6,6 +6,8 @@ export type Recognizer = EventTarget & {
   continuous: boolean;
   interimResults: boolean;
   processLocally?: boolean;
+  unspokenPunctuation?: boolean;
+  phrases?: unknown[];
   start(): void;
   stop(): void;
   abort(): void;
@@ -33,12 +35,31 @@ export async function installOnDevice(ctor: RecognitionCtor, lang: string): Prom
   }
 }
 
-export function createRecognizer(ctor: RecognitionCtor, options: { lang: string; continuous: boolean; processLocally: boolean }): Recognizer {
+/** How much a page's own words are favoured, on Chrome's scale of 0 to 10; high values cause false matches. */
+const PHRASE_BOOST = 2;
+
+type PhraseCtor = new (phrase: string, boost?: number) => unknown;
+
+/**
+ * A recognizer for one session. Dictation lets Chrome add punctuation from pauses where it can
+ * (`unspokenPunctuation`, Chrome 151). On the device, the page's words (project names, node keys) are
+ * favoured through contextual biasing (`phrases`, Chrome 142); with server recognition they are not.
+ */
+export function createRecognizer(
+  ctor: RecognitionCtor,
+  options: { lang: string; continuous: boolean; processLocally: boolean; phrases?: readonly string[] },
+): Recognizer {
   const recognizer = new ctor() as Recognizer;
   recognizer.lang = options.lang;
   recognizer.continuous = options.continuous;
   recognizer.interimResults = true;
   recognizer.processLocally = options.processLocally;
+  if ("unspokenPunctuation" in recognizer) recognizer.unspokenPunctuation = options.continuous;
+  const Phrase = (globalThis as { SpeechRecognitionPhrase?: PhraseCtor }).SpeechRecognitionPhrase;
+  const words = [...new Set(options.phrases?.map((p) => p.trim()).filter(Boolean))];
+  if (options.processLocally && words.length && Phrase && "phrases" in recognizer) {
+    recognizer.phrases = words.map((word) => new Phrase(word, PHRASE_BOOST));
+  }
   return recognizer;
 }
 

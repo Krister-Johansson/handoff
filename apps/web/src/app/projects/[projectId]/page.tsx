@@ -139,7 +139,9 @@ function SettingsTab({ project, runCount, defaultGraph }: Pick<Detail, "project"
       >
         <dl className={cn(CARD_BODY, "grid grid-cols-[140px_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]")}>
           <dt className="text-muted-foreground">Name</dt>
-          <dd className="font-mono text-xs leading-5">{project.name}</dd>
+          <dd className="font-mono text-xs leading-5" data-voice-phrase={project.name}>
+            {project.name}
+          </dd>
           <dt className="text-muted-foreground">Repository</dt>
           <dd className="font-mono text-xs leading-5">
             {project.repoOwner}/{project.repoName}

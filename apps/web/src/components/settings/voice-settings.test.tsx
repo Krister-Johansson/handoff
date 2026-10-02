@@ -22,7 +22,9 @@ class OnDevice {
 
 test("the Voice tab says recognition is unavailable when no constructor exists and keeps the speaking switches", () => {
   render(<VoiceSettings support={{ onDeviceCheck: false }} elevenLabs={VOICES} />);
-  expect(screen.getByRole("note")).toHaveTextContent("This browser has no speech recognition, so the microphone button is hidden. Replies and notifications can still be read aloud.");
+  expect(screen.getByRole("note")).toHaveTextContent(
+    "This browser has no speech recognition, so the microphone button and V are not available. Chrome on Windows, macOS or Linux supports it. Replies and notifications can still be read aloud.",
+  );
   expect(screen.getByRole("switch", { name: "Server-based recognition" })).toBeDisabled();
   expect(screen.getByLabelText("Language")).toBeDisabled();
   expect(screen.getByText("Listening")).toBeInTheDocument();
@@ -40,6 +42,17 @@ test("turning on server recognition writes allowServerRecognition true, and with
   expect(screen.getByText(/Add ELEVENLABS_API_KEY to the dashboard's environment and restart it\./)).toBeInTheDocument();
   expect(screen.getByRole("switch", { name: "Speak replies" })).toBeDisabled();
   expect(screen.queryByLabelText("ElevenLabs voice")).not.toBeInTheDocument();
+});
+
+test("the Voice tab lists the voice shortcuts", () => {
+  render(<VoiceSettings support={{ recognition: OnDevice as unknown as VoiceSupport["recognition"], onDeviceCheck: true }} elevenLabs={VOICES} />);
+  const shortcuts = screen.getByRole("list", { name: "Voice shortcuts" });
+  expect(within(shortcuts).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+    "VOutside a text field: ask the assistant. The voice bubble listens for one question.",
+    "Microphone buttonIn a text field: dictate into it until you stop. What you say goes in at the caret.",
+    "EscapeStop speaking, then stop listening, then close the voice bubble.",
+  ]);
+  expect(screen.getByText(/A screen reader and the dashboard's voice can speak at the same time\./)).toBeInTheDocument();
 });
 
 test("a browser without the on-device check says listening needs server recognition", () => {

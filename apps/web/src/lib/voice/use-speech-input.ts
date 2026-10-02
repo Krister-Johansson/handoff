@@ -15,6 +15,8 @@ export type SpeechInputOptions = {
   /** Whether audio may go to the browser vendor's recognition service when there is no on-device pack. */
   allowServer: boolean;
   onFinal(text: string, mode: ListenMode): void;
+  /** Words to favour, read when a session starts: the project names and node keys on the page. */
+  phrases?: () => readonly string[];
 };
 
 const BLOCKING = new Set(["not-allowed", "service-not-allowed", "audio-capture"]);
@@ -31,7 +33,18 @@ export function useSpeechInput(options: SpeechInputOptions) {
   const [interim, setInterim] = useState("");
   const [error, setError] = useState<string>();
   const [mode, setMode] = useState<ListenMode>("command");
-  const current = useRef<{ recognizer: Recognizer; mode: ListenMode; listening: boolean; discarded: boolean; blocked: boolean; listeners: AbortController }>(undefined);
+  const current = useRef<{
+    recognizer: Recognizer;
+    mode: ListenMode;
+    listening: boolean;
+    discarded: boolean;
+    blocked: boolean;
+    /** The model refused the phrases; the session starts again without them when Chrome ends it. */
+    retryWithoutPhrases: boolean;
+    listeners: AbortController;
+  }>(undefined);
+  // Once the on-device model refuses phrases, later sessions do without them.
+  const phrasesRefused = useRef(false);
   const latest = useRef(options);
   useEffect(() => {
     latest.current = options;
@@ -46,9 +59,10 @@ export function useSpeechInput(options: SpeechInputOptions) {
   );
 
   const listen = useCallback((ctor: RecognitionCtor, listenMode: ListenMode, processLocally: boolean) => {
-    const recognizer = createRecognizer(ctor, { lang: latest.current.lang, continuous: listenMode === "dictation", processLocally });
+    const phrases = processLocally && !phrasesRefused.current ? latest.current.phrases?.() : undefined;
+    const recognizer = createRecognizer(ctor, { lang: latest.current.lang, continuous: listenMode === "dictation", processLocally, ...(phrases ? { phrases } : {}) });
     const listeners = new AbortController();
-    const session = { recognizer, mode: listenMode, listening: true, discarded: false, blocked: false, listeners };
+    const session = { recognizer, mode: listenMode, listening: true, discarded: false, blocked: false, retryWithoutPhrases: false, listeners };
     current.current = session;
     onRecognizer(
       recognizer,
@@ -62,6 +76,7 @@ export function useSpeechInput(options: SpeechInputOptions) {
             const result = results[i]!;
             const text = result[0]?.transcript.trim() ?? "";
             if (result.isFinal) {
+              session.retryWithoutPhrases = false;
               if (text) latest.current.onFinal(text, session.mode);
             } else pending += `${pending ? " " : ""}${text}`;
           }
@@ -69,6 +84,13 @@ export function useSpeechInput(options: SpeechInputOptions) {
         },
         error: (code) => {
           if (session.discarded || code === "aborted") return;
+          if (code === "phrases-not-supported") {
+            // The language's model cannot be biased: drop the phrases and keep listening.
+            phrasesRefused.current = true;
+            recognizer.phrases = [];
+            session.retryWithoutPhrases = true;
+            return;
+          }
           if (BLOCKING.has(code)) {
             session.blocked = true;
             session.listening = false;
@@ -77,8 +99,11 @@ export function useSpeechInput(options: SpeechInputOptions) {
         },
         end: () => {
           if (current.current !== session || session.discarded) return;
-          if (session.mode === "dictation" && session.listening && !session.blocked) {
-            // Chrome ended the session after a pause; dictation goes on until the person stops it.
+          const retry = session.retryWithoutPhrases;
+          session.retryWithoutPhrases = false;
+          if (session.listening && !session.blocked && (retry || session.mode === "dictation")) {
+            // Chrome ended the session after a pause, or after refusing the phrases before anything was
+            // heard; dictation goes on until the person stops it, and a command is listened for again.
             recognizer.start();
             return;
           }

@@ -7,6 +7,7 @@ import { approvalAnswer } from "@/lib/voice/approval-answer";
 import { isTyping } from "@/lib/voice/is-typing";
 import { readVoicePrefs, useVoicePrefs } from "@/lib/voice/prefs";
 import { languageName } from "@/lib/voice/recognition";
+import { dictationField, insertDictation, pagePhrases } from "@/lib/voice/dictation";
 import { elevenLabsPlayer } from "@/lib/voice/elevenlabs-player";
 import { createSpeaker, spokenReply, type Speaker, type SpeakerState, type SpeechPriority } from "@/lib/voice/speaker";
 import { useVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
@@ -118,7 +119,12 @@ export function VoiceProvider({
   const say = useCallback((text: string) => latest.current.speaker?.speak(text, { priority: "reply" }), []);
   const onFinal = useCallback(
     (text: string, listenMode: ListenMode) => {
-      if (listenMode === "dictation") return setHeard({ text, at: Date.now() });
+      if (listenMode === "dictation") {
+        // Final words go into the focused text field at its caret; interim words stay in the strip.
+        const field = dictationField(document.activeElement);
+        if (field) insertDictation(field, text);
+        return setHeard({ text, at: Date.now() });
+      }
       const { assistant: port, panel: conversation, bubble: shown } = latest.current;
       if (shown.approval && port) {
         const answer = approvalAnswer(text);
@@ -136,7 +142,7 @@ export function VoiceProvider({
     },
     [say],
   );
-  const input = useSpeechInput({ ctor: support.recognition, lang: prefs.lang, allowServer: prefs.allowServerRecognition, onFinal });
+  const input = useSpeechInput({ ctor: support.recognition, lang: prefs.lang, allowServer: prefs.allowServerRecognition, onFinal, phrases: pagePhrases });
   const supported = Boolean(support.recognition) && (support.onDeviceCheck || prefs.allowServerRecognition);
   const { start: startInput, stop, abort, install, state } = input;
 
