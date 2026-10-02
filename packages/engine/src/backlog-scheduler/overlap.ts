@@ -1,3 +1,5 @@
+import { RunStateSchema } from "@handoff/core";
+import { and, asc, eq, inArray, ne, runs, type DbExecutor } from "@handoff/db";
 import { baseOf, dirOf, LOCKFILES, WORKSPACE_FILE } from "../contract/package-files.ts";
 
 const hasGlob = (p: string) => /[*?[{]/.test(p);
@@ -51,4 +53,24 @@ export function overlaps(paths: string[], others: string[]): string[] {
     }
   }
   return [...shared];
+}
+
+/** An active run of the same project whose owned paths a run shares, with the shared paths. */
+export type Overlap = { runId: string; paths: string[] };
+
+/**
+ * The first other active run of the project, oldest first, whose plan owns paths this run's plan
+ * also owns. Runs without a plan own nothing yet.
+ */
+export async function overlapWith(db: DbExecutor, run: { id: string; projectId: string }, ownedPaths: string[]): Promise<Overlap | undefined> {
+  const others = await db
+    .select({ id: runs.id, state: runs.state })
+    .from(runs)
+    .where(and(eq(runs.projectId, run.projectId), ne(runs.id, run.id), inArray(runs.status, ["queued", "running", "waiting"])))
+    .orderBy(asc(runs.createdAt));
+  for (const other of others) {
+    const paths = overlaps(ownedPaths, RunStateSchema.parse(other.state).plan?.ownedPaths ?? []);
+    if (paths.length > 0) return { runId: other.id, paths };
+  }
+  return undefined;
 }
