@@ -1,6 +1,6 @@
 import { getDb } from "@/lib/db";
 import { listProjects } from "@/server/graphs";
-import { inboxGroups } from "@/server/inbox-groups";
+import { inboxTotal } from "@/server/inbox-groups";
 import { workerSummary } from "@/server/workers";
 import { AppSidebar } from "./app-sidebar";
 
@@ -12,9 +12,7 @@ export async function AppSidebarData({ lastProjectId }: { lastProjectId: string 
   const db = getDb();
   const [projects, inboxCount, worker] = await Promise.all([
     listProjects(db).catch(() => []),
-    inboxGroups(db)
-      .then((groups) => groups.count)
-      .catch(() => 0),
+    inboxTotal(db).catch(() => 0),
     workerSummary(db).catch(() => ({ live: 0, queuedRuns: 0 })),
   ]);
   return (

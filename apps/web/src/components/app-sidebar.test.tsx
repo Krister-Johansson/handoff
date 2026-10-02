@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -173,5 +173,52 @@ test("collapsed, Inbox shows a dot when it has items", () => {
   renderSidebar({ pathname: "/library", open: false, inboxCount: 0 });
   expect(screen.getByRole("link", { name: "Inbox" })).toBeInTheDocument();
   expect(screen.queryByTestId("inbox-dot")).not.toBeInTheDocument();
+});
+
+/** The sidebar as the layout renders it, kept mounted across navigations, reading the Inbox count with `load`. */
+function liveSidebar(load: () => Promise<number>, open = true) {
+  const sidebar = (inboxCount: number) => (
+    <TooltipProvider>
+      <SidebarProvider defaultOpen={open}>
+        <AppSidebar projects={PROJECTS} inboxCount={inboxCount} worker={{ live: 1, queuedRuns: 0 }} loadInboxCount={load} inboxIntervalMs={20} />
+      </SidebarProvider>
+    </TooltipProvider>
+  );
+  const { rerender } = render(sidebar(1));
+  return { rerender: (inboxCount: number) => rerender(sidebar(inboxCount)) };
+}
+
+test("the Inbox badge follows the count while the layout stays mounted", async () => {
+  nav.pathname = "/projects/p1";
+  let waiting = 1;
+  liveSidebar(async () => waiting);
+  expect(screen.getByRole("link", { name: "Inbox, 1 waiting" })).toBeInTheDocument();
+
+  // Answered in another tab, by MCP or by the worker: the badge clears without a reload.
+  waiting = 0;
+  await waitFor(() => expect(screen.getByRole("link", { name: "Inbox" })).toBeInTheDocument());
+  expect(screen.queryByText("1")).not.toBeInTheDocument();
+
+  // Something new waits.
+  waiting = 2;
+  expect(await screen.findByRole("link", { name: "Inbox, 2 waiting" })).toBeInTheDocument();
+});
+
+test("the Inbox badge takes the count the layout renders again with, as after an answer", () => {
+  nav.pathname = "/inbox";
+  const { rerender } = liveSidebar(() => new Promise<number>(() => {}));
+  expect(screen.getByRole("link", { name: "Inbox, 1 waiting" })).toBeInTheDocument();
+  rerender(0);
+  expect(screen.getByRole("link", { name: "Inbox" })).toBeInTheDocument();
+});
+
+test("collapsed, the Inbox dot follows the same count", async () => {
+  nav.pathname = "/library";
+  let waiting = 1;
+  liveSidebar(async () => waiting, false);
+  expect(screen.getByTestId("inbox-dot")).toBeInTheDocument();
+  waiting = 0;
+  await waitFor(() => expect(screen.queryByTestId("inbox-dot")).not.toBeInTheDocument());
+  expect(screen.getByRole("link", { name: "Inbox" })).toBeInTheDocument();
 });
 

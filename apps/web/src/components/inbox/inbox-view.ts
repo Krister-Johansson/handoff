@@ -19,7 +19,12 @@ export type InboxView = {
 /** Every item in the inbox, in the order the groups show them. */
 export const inboxItems = (view: InboxView) => [...(view.permissions ?? []), ...view.reviews, ...view.questions, ...view.readyToMerge, ...view.failedRuns, ...view.stuckRuns, ...view.pullRequests];
 
-export const inboxCount = (view: InboxView) => inboxItems(view).length;
+/**
+ * How many items wait on a person, over the groups the Inbox page shows. The page's count and the
+ * sidebar's Inbox badge both come from this.
+ */
+export const inboxCount = (view: { [K in keyof InboxView]: readonly unknown[] | undefined }) =>
+  [view.permissions, view.reviews, view.questions, view.readyToMerge, view.failedRuns, view.stuckRuns, view.pullRequests].reduce((n, group) => n + (group?.length ?? 0), 0);
 
 /** The inbox narrowed to one project's items, or all of it without a project. */
 export function narrowInbox(view: InboxView, projectId: string | undefined): InboxView {

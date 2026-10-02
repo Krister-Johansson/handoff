@@ -22,6 +22,7 @@ import {
 import { ProjectSwitcher, type SidebarProject } from "@/components/project-switcher";
 import { useProjectSection } from "@/components/sidebar-section";
 import { WorkerStatusView } from "@/components/worker-status-view";
+import { useInboxCount } from "@/hooks/use-inbox-count";
 import { lastProject, rememberProject } from "@/lib/last-project";
 import { projectAt, projectPath } from "@/lib/paths";
 import { workerLabel } from "@/lib/worker-status";
@@ -90,15 +91,21 @@ function NavItem({
 export function AppSidebar({
   projects,
   lastProjectId,
-  inboxCount,
+  inboxCount: renderedInboxCount,
   worker,
+  loadInboxCount,
+  inboxIntervalMs,
 }: {
   projects: SidebarProject[];
   /** The project used last, from its cookie; shown outside a project. */
   lastProjectId?: string;
+  /** The Inbox count when the layout rendered; the badge reads it again while the layout stays. */
   inboxCount: number;
   worker: { live: number; queuedRuns: number };
+  loadInboxCount?: () => Promise<number>;
+  inboxIntervalMs?: number;
 }) {
+  const inboxCount = useInboxCount(renderedInboxCount, { load: loadInboxCount, intervalMs: inboxIntervalMs });
   const pathname = usePathname() ?? "/";
   const at = projectAt(pathname);
   const section = useProjectSection(pathname);
