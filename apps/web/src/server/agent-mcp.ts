@@ -74,6 +74,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     graph: graph?.name,
     task: run.task,
     status: run.status,
+    started_by: run.startedBy,
     url: `${deps.baseUrl}${runPath(run.projectId, run.id)}`,
     branch: run.branchName,
     pr: run.prNumber ? { number: run.prNumber, url: `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` } : null,
@@ -177,7 +178,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       const graphName = graph ?? detail?.defaultGraph;
       if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Graphs page.`);
       if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
-      const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github, plan);
+      const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [], startedBy: actor }, github, plan);
       return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };
     },
 
@@ -191,6 +192,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
           project: r.project,
           task: r.task,
           status: r.status,
+          started_by: r.startedBy,
           current_step: step
             ? {
                 node: step.nodeKey,
@@ -321,7 +323,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     run_again: async ({ run_id }: { run_id: string }) => {
-      const run = await runAgain(db, run_id, { projects: plan });
+      const run = await runAgain(db, run_id, { projects: plan, startedBy: actor });
       return { run_id: run.id, status: run.status, url: url(runPath(run.projectId, run.id)) };
     },
 

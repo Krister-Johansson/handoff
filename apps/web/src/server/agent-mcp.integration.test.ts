@@ -83,6 +83,16 @@ test("start_run starts a run on the default graph linked to the issues, and get_
   expect(detail).toMatchObject({ status: "queued", project: "sandbox", graph: "linear", issues: [{ number: 11 }], steps: [{ node: "planner", attempt: 1, status: "pending" }], pr: null, questions: [] });
 });
 
+test("start_run records claude-code as the starter", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [11] });
+  const [run] = await db.select().from(runs).where(eq(runs.id, run_id));
+  expect(run?.startedBy).toBe("claude-code");
+  expect(await call("get_run", { run_id })).toMatchObject({ started_by: "claude-code" });
+  expect(await call("list_runs", { project: "sandbox" })).toEqual([expect.objectContaining({ id: run_id, started_by: "claude-code" })]);
+  // A second start on the same issue is refused and names the run that has it.
+  expect(await call("start_run", { project: "sandbox", issues: [11] })).toEqual({ error: expect.stringContaining(`#11 is taken by run ${run_id}`) });
+});
+
 test("a question is answered once for the person, and a second answer is refused", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Pick a license for the repository" });
   const gate = await seedExecution(db, run_id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });

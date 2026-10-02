@@ -64,6 +64,15 @@ test("running a cancelled run again sets its task to Running", async () => {
   expect(await statusOf()).toBe("Running");
 });
 
+test("runs started and run again from the dashboard record dashboard as the starter", async () => {
+  const { project, issue } = await readyTask();
+  await startRunAction({}, form({ projectId: project.id, graphName: "linear", task: "", issue: String(issue) }));
+  const [first] = await db.select().from(runs);
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, first!.id));
+  await runAgainAction({}, form({ runId: first!.id }));
+  expect((await db.select().from(runs)).map((r) => r.startedBy)).toEqual(["dashboard", "dashboard"]);
+});
+
 test("the schedule dialog's save writes Start and Target through scheduleAction and refuses a Target before Start", async () => {
   const { project, plan, issue } = await readyTask();
   expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: "2026-10-09" })).toEqual({ ok: true });
