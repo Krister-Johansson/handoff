@@ -57,9 +57,33 @@ export type IssueDetail = {
   url: string;
   body: string;
   state: "open" | "closed";
+  /** Why a closed issue closed (completed, not_planned, duplicate); null while open or when GitHub does not say. */
+  stateReason: string | null;
+  labels: string[];
+  assignees: string[];
+  /** Who opened it; null for a deleted account. */
+  author: string | null;
+  /** GitHub's author association: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE and so on. */
+  authorAssociation: string;
+  createdAt: string;
+  updatedAt: string;
+  /** True when the number is a pull request's: GitHub's issues API answers for pull requests too. */
+  pullRequest: boolean;
   /** The parent and the grandparent, nearest first; read only when `getIssue` is asked for them. */
   parents?: PlanAncestor[];
 };
+
+/** An issue another one refers to, open or closed. */
+export type IssueRef = { number: number; title: string; url: string; state: "open" | "closed" };
+
+/** GitHub's issue dependencies of one issue: the issues blocking it and the issues it blocks. */
+export type IssueDependencies = { blockedBy: IssueRef[]; blocking: IssueRef[] };
+
+/** A comment on an issue, with GitHub's author association (OWNER, MEMBER, CONTRIBUTOR, NONE and so on). */
+export type IssueComment = { id: number; author: string | null; authorAssociation: string; createdAt: string; updatedAt: string; body: string; url: string };
+
+/** A person who can be assigned issues in a repository. */
+export type Assignable = { login: string; avatarUrl: string };
 
 export interface GitHubPort {
   /** Open issues of a repository (not pull requests), most recently updated first, up to 100. */
@@ -70,10 +94,22 @@ export interface GitHubPort {
   getFile(repo: RepoRef, path: string, ref: string): Promise<string | undefined>;
   /** The open issues GitHub records as blocking this one (its "blocked by" dependencies). */
   openBlockers(repo: RepoRef, number: number): Promise<number[]>;
+  /** Every issue blocking this one and every issue it blocks, open or closed, as GitHub records them. */
+  dependencies(repo: RepoRef, number: number): Promise<IssueDependencies>;
+  /** An issue's comments, oldest first as GitHub lists them. */
+  listIssueComments(repo: RepoRef, number: number): Promise<IssueComment[]>;
+  /** An issue's sub-issues in the order GitHub keeps them, open or closed. */
+  listSubIssues(repo: RepoRef, number: number): Promise<IssueRef[]>;
+  /** The people who can be assigned issues in the repository. */
+  listAssignable(repo: RepoRef): Promise<Assignable[]>;
+  /** Replaces an issue's assignees ([] clears them); returns the assignees GitHub kept, which drops logins it cannot assign. */
+  setAssignees(repo: RepoRef, number: number, logins: string[]): Promise<string[]>;
   /** Records on GitHub that `issue` is blocked by `blocker`. */
   addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void>;
   /** Comments on an issue, then closes it as completed. */
   closeIssue(repo: RepoRef, number: number, comment: string): Promise<void>;
+  /** The login of the token's user ("you" on the dashboard); undefined with a GitHub App, which acts as no person. */
+  viewer(): Promise<string | undefined>;
   /** Repositories this credential can reach, most recently pushed first. */
   listRepos(): Promise<RepoSummary[]>;
   getRepoId(repo: RepoRef): Promise<number>;

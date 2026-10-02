@@ -50,6 +50,13 @@ test("the handoff skill says a person decides what is Ready and names start_sche
   for (const tool of ["start_scheduler", "pause_scheduler", "get_scheduler"]) expect(section).toContain(tool);
 });
 
+test("the handoff skill says start_run assigns the user and assign marks who works on an issue", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  expect(skill).toMatch(/`start_run`[^\n]*assign/);
+  expect(skill).toMatch(/`assign`[^\n]*`me`/);
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.7.0");
+});
+
 test("the plugin ships a setup skill that walks through setup_project", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
   expect(skill).toMatch(/^---\nname: handoff-setup\ndescription: /);
