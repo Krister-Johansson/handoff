@@ -38,7 +38,7 @@ To work on issues: list_backlog, then start_run with the issue numbers (the task
 
 A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order. Each of these writes asks the person first.
 
-Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, and pause_scheduler stops new starts.
+Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, pause_scheduler stops new starts and stop_scheduler turns it off.
 
 A run may stop to ask a question (a Human gate) or fail. Tell the user what it asks or why it failed. Answer a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
 
