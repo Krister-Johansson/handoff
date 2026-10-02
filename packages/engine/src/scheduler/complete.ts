@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeMemory, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, questions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
-import { nudgeScheduler } from "../backlog-scheduler/nudge.ts";
+import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
 
@@ -209,8 +209,12 @@ async function finishRouting(
     .where(eq(runs.id, runId))
     .returning({ projectId: runs.projectId });
   await appendEvents(tx, runId, events);
-  // A run that ends frees a slot, or holds the project when it failed: the scheduler checks again soon.
-  if (status !== "running" && ended) await nudgeScheduler(tx, ended.projectId);
+  // A run that ends frees a slot, or holds the project when it failed: the scheduler checks again soon,
+  // and runs held on its paths check again.
+  if (status !== "running" && ended) {
+    await nudgeScheduler(tx, ended.projectId);
+    await wakeOverlapHeld(tx, ended.projectId);
+  }
 }
 
 export async function completePassed(

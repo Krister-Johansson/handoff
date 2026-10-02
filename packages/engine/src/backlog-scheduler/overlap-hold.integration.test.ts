@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { eq, nodeExecutions, runs, sql, type Db } from "@handoff/db";
+import { eq, nodeExecutions, runs, sql, wakeByKey, type Db } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { cancelRun } from "../operations.ts";
 import { createRun } from "../runs.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
@@ -50,4 +51,38 @@ test("a scheduler-started run whose plan shares paths with an active run waits b
     runId: other.id,
     paths: ["apps/board/card.tsx", "pnpm-lock.yaml"],
   });
+});
+
+test("the held run's coder starts when the other run ends", async () => {
+  // A run a person cancels.
+  const seeded = await seedGraph(db, linear);
+  const cancelled = await activeRun(db, seeded, ["apps/board"]);
+  const held = await createRun(db, { projectId: seeded.project.id, graphVersionId: seeded.graphVersion.id, task: "Card drag", startedBy: "scheduler" });
+  const executors = planning(["apps/board/card.tsx"]);
+  const deps = engineDeps(db, executors);
+  await drain(deps);
+  expect(executors.coder.calls).toHaveLength(0);
+
+  await cancelRun(db, cancelled.id);
+  await drain(deps);
+  expect(executors.coder.calls.map((c) => c.run.id)).toEqual([held.id]);
+
+  // A run that finishes its last step.
+  await truncateAll(db);
+  const again = await seedGraph(db, linear);
+  const finishing = await activeRun(db, again, ["apps/board"]);
+  await db
+    .update(nodeExecutions)
+    .set({ nodeKey: "merge", nodeType: "merge", executorKind: "github", waitKind: "merge_queue", waitKey: "mq:test" })
+    .where(eq(nodeExecutions.runId, finishing.id));
+  const waits = await createRun(db, { projectId: again.project.id, graphVersionId: again.graphVersion.id, task: "Card drag", startedBy: "scheduler" });
+  const next = { ...planning(["apps/board/card.tsx"]), merge: scripted(done({ merged: true })) };
+  const nextDeps = engineDeps(db, next);
+  await drain(nextDeps);
+  expect(next.coder.calls).toHaveLength(0);
+
+  await wakeByKey(db, "mq:test", { reason: "merge_queue" });
+  await drain(nextDeps);
+  expect((await inspect(db, finishing.id)).run.status).toBe("succeeded");
+  expect(next.coder.calls.map((c) => c.run.id)).toEqual([waits.id]);
 });
