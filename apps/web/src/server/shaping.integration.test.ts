@@ -1,10 +1,10 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, events, runs } from "@handoff/db";
+import { eq, events, projectSchedulers, runs, sql } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
-import { planIssue, setupPlan, type ShapingDeps } from "./shaping.ts";
+import { moveToReady, planIssue, setupPlan, type ShapingDeps } from "./shaping.ts";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -110,4 +110,17 @@ test("plan_issue leaves an issue whose run ended in Shaping and writes nothing o
   expect(await planIssue(deps, projectId, { issue: 11 })).toMatchObject({ number: 11, status: "Shaping" });
   expect(statusOf(11)).toBe("Shaping");
   expect(await planEvents(run.id)).toEqual([]);
+});
+
+test("moving tasks to Ready nudges the project's scheduler", async () => {
+  await setupPlan(deps, projectId);
+  await planIssue(deps, projectId, { issue: 11 });
+  await db
+    .insert(projectSchedulers)
+    .values({ projectId, enabled: true, graphName: "linear", lastCheckAt: sql`now() - interval '30 seconds'`, nextCheckAt: sql`now() + interval '30 seconds'` });
+
+  await moveToReady(deps, projectId, [11]);
+
+  const [row] = await db.select({ due: sql<boolean>`${projectSchedulers.nextCheckAt} <= now()` }).from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId));
+  expect(row!.due).toBe(true);
 });
