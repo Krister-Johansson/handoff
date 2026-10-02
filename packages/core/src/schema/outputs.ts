@@ -7,6 +7,9 @@ const QuestionSchema = z.object({
   options: z.array(z.string()).optional(),
 });
 
+/** A task's size, the same S, M and L as the plan's Size field. */
+export const PlanSizeSchema = z.enum(["S", "M", "L"]);
+
 /**
  * A plan, or a question when the task leaves a decision to a person. Outputs from before planners
  * could ask have no status and are plans.
