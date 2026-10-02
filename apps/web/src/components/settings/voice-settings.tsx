@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { MicOffIcon, PlayIcon } from "lucide-react";
+import { MicIcon, MicOffIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -86,7 +86,8 @@ export function VoiceSettings({ support: given, elevenLabs }: { support?: VoiceS
       {!listens && (
         <p role="note" className="mb-[18px] flex items-start gap-2 rounded-md border bg-subtle px-3 py-2 text-xs leading-normal text-muted-foreground [&_svg]:mt-px [&_svg]:size-3.5">
           <MicOffIcon aria-hidden />
-          This browser has no speech recognition, so the microphone button is hidden. Replies and notifications can still be read aloud.
+          This browser has no speech recognition, so the microphone button and V are not available. Chrome on Windows, macOS or Linux supports it. Replies and
+          notifications can still be read aloud.
         </p>
       )}
       {listens && !support.onDeviceCheck && (
@@ -151,6 +152,31 @@ export function VoiceSettings({ support: given, elevenLabs }: { support?: VoiceS
           Test voice
         </Button>
       </Row>
+      <Group>Shortcuts</Group>
+      <ul aria-label="Voice shortcuts" className="flex flex-col pt-1">
+        {SHORTCUTS.map((s) => (
+          <li key={s.key} className="flex flex-col items-start gap-1 py-1.5 text-[13px] sm:grid sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:items-baseline sm:gap-3">
+            {s.button ? (
+              <span className="inline-flex h-5 items-center gap-1 text-xs font-medium [&_svg]:size-3.5">
+                <MicIcon aria-hidden />
+                {s.key}
+              </span>
+            ) : (
+              <kbd className="inline-grid h-5 w-fit min-w-5 place-items-center rounded border border-b-2 bg-background px-1.5 font-mono text-[11px] text-muted-foreground">{s.key}</kbd>
+            )}
+            <span className="text-muted-foreground">{s.does}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="pt-2 text-xs leading-normal text-muted-foreground">
+        A screen reader and the dashboard&apos;s voice can speak at the same time. If you use one, you may want Speak replies and Speak notifications off.
+      </p>
     </div>
   );
 }
+
+const SHORTCUTS = [
+  { key: "V", does: "Outside a text field: ask the assistant. The voice bubble listens for one question." },
+  { key: "Microphone button", button: true, does: "In a text field: dictate into it until you stop. What you say goes in at the caret." },
+  { key: "Escape", does: "Stop speaking, then stop listening, then close the voice bubble." },
+];

@@ -2,6 +2,14 @@ type Availability = "available" | "downloadable" | "downloading" | "unavailable"
 
 type ResultInit = { transcript: string; isFinal: boolean };
 
+/** A stand-in for Chrome's SpeechRecognitionPhrase: a word or phrase to favour, and how much. */
+export class FakeSpeechRecognitionPhrase {
+  constructor(
+    readonly phrase: string,
+    readonly boost = 1,
+  ) {}
+}
+
 /**
  * A stand-in for Chrome's SpeechRecognition. Tests set the on-device availability, then drive each
  * created recognizer by hand: emitStart, emitResult, emitError, emitEnd.
@@ -34,6 +42,8 @@ export class FakeSpeechRecognition extends EventTarget {
   continuous = false;
   interimResults = false;
   processLocally = false;
+  /** Contextual biasing, as in Chrome 142 and later. */
+  phrases: unknown[] = [];
   starts = 0;
   stopped = false;
   aborted = false;

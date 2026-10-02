@@ -45,7 +45,9 @@ function NodeName({ step, label }: { step: StepView; label: string }) {
   return (
     <>
       {label}
-      <span className="font-mono text-xs font-normal text-muted-foreground">{step.nodeKey}</span>
+      <span className="font-mono text-xs font-normal text-muted-foreground" data-voice-phrase={step.nodeKey}>
+        {step.nodeKey}
+      </span>
       {step.attempt > 1 && <Tag>{`attempt ${step.attempt}`}</Tag>}
     </>
   );

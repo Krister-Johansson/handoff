@@ -84,6 +84,28 @@ The **Assistant** button in the header (or Cmd or Ctrl+J) opens a panel beside e
 
 The assistant shares your subscription's limits with the worker's Claude nodes, and `HANDOFF_CAP_CLI` does not count it.
 
+## Voice in Chrome
+
+In Chrome you can speak to the dashboard and have it speak back. Every button and key works the same without voice.
+
+Listening is push to talk. Press V outside a text field, or the microphone button in the header, and the dashboard listens. Escape stops listening and drops what was half heard. Chrome recognizes speech on your computer by default, so the audio and the transcript stay on it. The first time, the microphone button may show a download icon instead: press it to install your language for offline use. If your language has no on-device pack, turn on **Settings, Voice, Server-based recognition**. Chrome then sends your voice to Google's speech service. That switch is off until you turn it on. In a browser without speech recognition the microphone button is not shown.
+
+A question asked with V opens the voice bubble at the bottom of the page. The bubble shows what Chrome hears and sends the question to the assistant, in the conversation the panel has open. While the assistant works, the bubble shows "Thinking" or the tool it calls. Then it shows the reply and speaks it, up to three sentences. When the assistant asks for approval, the bubble reads the action out and listens once. "Yes" (or "approve", "go ahead") approves. "No" (or "deny", "stop") denies, and the words after it become the note. The Approve and Deny buttons work too. Escape stops the speech, and a second Escape closes the bubble. **Open in panel** shows the whole conversation. With the assistant off, the bubble says so and sends nothing.
+
+To dictate, click into a text field, such as the assistant's message box or a review note, and press the microphone button. The dashboard listens until you stop it and puts each finished phrase in the field at the caret. Words Chrome is still working out show in the strip under the header, not in the field. Dictation never sends anything: you press Send or Submit as usual. Where Chrome supports it, it adds punctuation from your pauses. With on-device recognition, Chrome also favours the project names and node keys shown on the page.
+
+The dashboard speaks with ElevenLabs. Add `ELEVENLABS_API_KEY` to `.env` and restart the dashboard; without a key nothing is read aloud. The key stays on the server: the browser sends each sentence to the dashboard, and the dashboard gets the audio from ElevenLabs. The text that is read aloud goes to ElevenLabs. `HANDOFF_ELEVENLABS_VOICE_ID` sets the default voice (otherwise the account's first voice) and `HANDOFF_ELEVENLABS_MODEL` the model (`eleven_flash_v2_5` by default). The dashboard never listens while it speaks: V or the microphone button stops the speech first.
+
+**Settings, Voice** keeps these settings in your browser:
+
+- the language you speak, and server-based recognition
+- Speak replies, for the assistant's replies in the panel (replies in the voice bubble are always spoken)
+- Speak notifications, for new questions, permission requests, failed runs and pull requests ready to merge, and Also finished and merged runs
+- the ElevenLabs voice, the rate and a Test voice button
+- the voice shortcuts
+
+The review and Try it pages also have a **Read aloud** button.
+
 ## Running each run in a container
 
 ```bash

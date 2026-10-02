@@ -203,6 +203,7 @@ export function ProjectCard({ project, attention, latest, now = new Date() }: { 
       <div className="flex min-w-0 flex-col gap-0.5 pr-8">
         <Link
           href={`/projects/${project.id}`}
+          data-voice-phrase={project.name}
           className="truncate rounded-sm text-[15px] font-semibold underline-offset-3 after:absolute after:inset-0 after:rounded-xl hover:underline focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
         >
           {project.name}

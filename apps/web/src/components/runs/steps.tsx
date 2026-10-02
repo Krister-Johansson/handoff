@@ -84,7 +84,9 @@ export function Steps({
               <span className="flex min-w-0 flex-[1_1_100%] flex-col gap-px sm:flex-1">
                 <span className="flex min-w-0 flex-wrap items-center gap-2">
                   <span className="font-medium">{label}</span>
-                  <span className="font-mono text-xs whitespace-nowrap text-muted-foreground">{step.nodeKey}</span>
+                  <span className="font-mono text-xs whitespace-nowrap text-muted-foreground" data-voice-phrase={step.nodeKey}>
+                    {step.nodeKey}
+                  </span>
                   {step.attempt > 1 && <Tag>{`attempt ${step.attempt}`}</Tag>}
                   {step.via && loopEdges?.has(step.via) && <Tag mono>{`via ${step.via}`}</Tag>}
                 </span>

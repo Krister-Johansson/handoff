@@ -74,7 +74,7 @@ function CardContext({ tag, tone = "neutral", item, compact, node, when }: { tag
       <span className={cn("inline-flex h-5 items-center rounded-[5px] border px-[7px] text-[11px] font-medium whitespace-nowrap", TAG[tone])}>{tag}</span>
       {!compact && (
         <>
-          <Link href={`/projects/${item.projectId}`} className="hover:text-foreground hover:underline hover:underline-offset-3">
+          <Link href={`/projects/${item.projectId}`} data-voice-phrase={item.projectName} className="hover:text-foreground hover:underline hover:underline-offset-3">
             {item.projectName}
           </Link>
           <span aria-hidden>·</span>
@@ -86,7 +86,9 @@ function CardContext({ tag, tone = "neutral", item, compact, node, when }: { tag
       {node && (
         <>
           {!compact && <span aria-hidden>·</span>}
-          <span className="font-mono">{node}</span>
+          <span className="font-mono" data-voice-phrase={node}>
+            {node}
+          </span>
         </>
       )}
       {when}
