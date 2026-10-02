@@ -19,7 +19,8 @@ import type { Forecast } from "../lib/plan/forecast";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
-import { getScheduler, pauseScheduler, startScheduler } from "./scheduler";
+import { checkText } from "../lib/scheduler-text";
+import { getScheduler, pauseScheduler, startScheduler, stopScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
 
 /**
@@ -415,9 +416,14 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     schedule: async ({ project, items }: { project: string; items: ScheduleItem[] }) => schedule(shaping, (await findProject(db, project)).id, items),
 
-    start_scheduler: async ({ project, max_runs, order, graph }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string }) => {
+    start_scheduler: async ({ project, max_runs, order, graph, skip_label }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string; skip_label?: string | null }) => {
       const { id } = await findProject(db, project);
-      return { ...(await startScheduler({ db, projects: plan }, id, { maxRuns: max_runs, order, graph }, actor)), url: url(planPath(id)) };
+      return { ...(await startScheduler({ db, projects: plan }, id, { maxRuns: max_runs, order, graph, skipLabel: skip_label }, actor)), url: url(planPath(id)) };
+    },
+
+    stop_scheduler: async ({ project }: { project: string }) => {
+      const { id } = await findProject(db, project);
+      return { ...(await stopScheduler(db, id, actor)), url: url(planPath(id)) };
     },
 
     pause_scheduler: async ({ project, reason }: { project: string; reason?: string }) => {
@@ -443,6 +449,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         next: s.next,
         skipped: s.skipped,
         checked_at: s.checkedAt?.toISOString() ?? null,
+        ...(s.state === "off" ? {} : { check: checkText(s, new Date()) }),
         next_check_at: s.nextCheckAt?.toISOString() ?? null,
         events: s.events.map((e) => ({ type: e.type, payload: e.payload, at: e.at.toISOString() })),
         url: url(planPath(id)),
