@@ -272,6 +272,8 @@ export async function completePassed(
     },
   );
   await finishRouting(tx, input.graph, row.runId, row, routed, lead);
+  // The scheduler starts nothing while a run it started has no plan; the plan's arrival lets it start the next.
+  if (run.startedBy === "scheduler" && !state.plan && routed.state.plan) await nudgeScheduler(tx, run.projectId);
 }
 
 export async function completeFailed(

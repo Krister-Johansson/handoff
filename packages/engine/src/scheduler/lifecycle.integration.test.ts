@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { eq, liveWorkers, nodeExecutions, previews } from "@handoff/db";
+import { eq, liveWorkers, nodeExecutions, previews, runs } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { schedulerOn } from "../testing/scheduler.ts";
@@ -95,4 +95,28 @@ test("a run that ends nudges its project's scheduler", async () => {
   await drain(engineDeps(db, { ...executors, planner: scripted({ kind: "failed", error: { code: "boom", message: "boom" } }) }));
   expect((await inspect(db, fails.run.id)).run.status).toBe("failed");
   expect(await failing.due()).toBe(0);
+});
+
+test("a run the scheduler started nudges its project's scheduler when its planner passes", async () => {
+  const executors = { planner: scripted(done(outputs.planner, { plan: outputs.planner })), coder: scripted(done(outputs.coderDone)) };
+  const scheduled = await startRun(db, linear);
+  await db.update(runs).set({ startedBy: "scheduler" }).where(eq(runs.id, scheduled.run.id));
+  const scheduler = await schedulerOn(db, scheduled.project.id);
+  const deps = engineDeps(db, executors);
+  await runOnce(deps);
+  expect((await inspect(db, scheduled.run.id)).run.state).toMatchObject({ plan: outputs.planner });
+  expect(await scheduler.due()).toBe(0);
+  // Only the plan's arrival nudges: the coder that follows does not.
+  await scheduler.reset();
+  await runOnce(deps);
+  expect(await scheduler.due()).toBe(30);
+
+  // A run a person started does not hold the scheduler while it plans, so its plan nudges nothing.
+  await truncateAll(db);
+  const mine = await startRun(db, linear);
+  await db.update(runs).set({ startedBy: "dashboard" }).where(eq(runs.id, mine.run.id));
+  const theirs = await schedulerOn(db, mine.project.id);
+  await runOnce(engineDeps(db, executors));
+  expect((await inspect(db, mine.run.id)).run.state).toMatchObject({ plan: outputs.planner });
+  expect(await theirs.due()).toBe(30);
 });
