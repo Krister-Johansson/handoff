@@ -1,8 +1,9 @@
 "use client";
 
-import { nodeCatalog, type CompileError, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { nodeCatalog, portsOf, type CompileError, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
 import { parseNodePatch } from "@/lib/assistant/page-tools";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
+import { canConnect } from "@/lib/connect-rules";
 import type { LibraryChoices, LibraryKind } from "@/lib/library-choices";
 import type { EditorAction } from "./state";
 
@@ -22,7 +23,10 @@ type Editor = {
   library: LibraryChoices;
 };
 
-const keysOf = (graph: FlowGraph) => graph.nodes.map((n) => n.id).join(", ");
+/** What a structural page tool answers while the editor is locked. */
+const LOCKED = "The graph is locked; unlock it to change its structure.";
+
+const keysOf =(graph: FlowGraph) => graph.nodes.map((n) => n.id).join(", ");
 const edgeIdsOf = (graph: FlowGraph) => graph.edges.map((e) => e.id).join(", ") || "none";
 
 /** The node a page tool names by key, or a refusal that lists the keys there are. */
@@ -96,6 +100,11 @@ function nodeChanges(graph: FlowGraph, node: FlowNode, patch: NodePatch): Editor
  * same things the canvas and the inspector do, under the same lock.
  */
 export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library }: Editor) {
+  /** Refuses a change to the graph's structure while the editor is locked, as the canvas does. */
+  const unlocked = () => {
+    if (locked) throw new Error(LOCKED);
+  };
+
   /** Selects one node or edge on the canvas and in the inspector, or nothing. */
   const select = (next: Selection) => {
     edit({ type: "nodesChange", changes: graph.nodes.map((n) => ({ id: n.id, type: "select", selected: n.id === next.nodeId })) });
@@ -143,7 +152,21 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
       page_rename_node: undefined,
       page_update_edge: undefined,
       page_add_node: undefined,
-      page_connect: undefined,
+      page_connect: ({ source, target, port }) => {
+        unlocked();
+        const from = nodeOf(graph, source);
+        const to = nodeOf(graph, target);
+        if (!canConnect({ node: from.id, type: "source" }, { node: to.id, type: "target" })) throw new Error("A node cannot connect to itself.");
+        const outputs = portsOf(from.data.nodeType, from.data.config).outputs;
+        if (!outputs.length) throw new Error(`${source} has no outputs: a Finish ends the graph.`);
+        if (!portsOf(to.data.nodeType, to.data.config).inputs.length) throw new Error(`${target} has no input: a Start begins the graph.`);
+        const names = outputs.map((o) => o.id).join(", ");
+        if (port === undefined && outputs.length > 1) throw new Error(`${source} has several outputs: ${names}. Say which with port.`);
+        const output = port === undefined ? outputs[0]! : outputs.find((o) => o.id === port);
+        if (!output) throw new Error(`${source} has no output ${port}. Its outputs are: ${names}.`);
+        edit({ type: "connect", source, target, sourceHandle: output.id, targetHandle: "in" });
+        return `Connected ${source} (${output.id}) to ${target}${output.kind === "feedback" ? ", as feedback" : ""}. The graph is not saved yet.`;
+      },
       page_remove: undefined,
       page_tidy_layout: undefined,
       page_issues: undefined,

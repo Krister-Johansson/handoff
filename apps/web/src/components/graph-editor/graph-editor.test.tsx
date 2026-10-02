@@ -320,3 +320,42 @@ test("page_update_node changes a coder's instructions and marks the graph unsave
   // Each node type has its own fields: a reviewer has no tests to run.
   expect(await call("page_update_node", { key: "reviewer", patch: { checks: [] } })).toMatchObject({ isError: true, text: expect.stringMatching(/^A reviewer has no checks\. Its fields are: label, notify, instructions/) });
 });
+
+/** A Planner that hands to a Coder, and a Reviewer and a Finish not connected yet. */
+const unconnected = {
+  attributes: { startNode: "planner" },
+  nodes: [
+    { key: "planner", attributes: { type: "planner", label: "Planner", x: 0, y: 0, config: {} } },
+    { key: "coder", attributes: { type: "coder", label: "Coder", x: 300, y: 0, config: {} } },
+    { key: "reviewer", attributes: { type: "reviewer", label: "Review", x: 600, y: 0, config: {} } },
+    { key: "finish", attributes: { type: "finish", label: "Finish", x: 900, y: 0, config: {} } },
+  ],
+  edges: [{ key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done", input: "in" } }],
+};
+
+const edgesOf = async (whereAmI: () => Promise<{ page?: { state: { data: Record<string, unknown> } } }>) => (await whereAmI()).page!.state.data.edges;
+
+test("page_connect adds an edge the rules allow and refuses one they do not", async () => {
+  const { call, whereAmI } = await withAssistant(unconnected);
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
+
+  expect(await call("page_connect", { source: "coder", target: "reviewer", port: "done" })).toEqual({ text: "Connected coder (done) to reviewer. The graph is not saved yet.", isError: false });
+  // A reviewer's changes go back to the coder as feedback.
+  expect(await call("page_connect", { source: "reviewer", target: "coder", port: "changes" })).toEqual({
+    text: "Connected reviewer (changes) to coder, as feedback. The graph is not saved yet.",
+    isError: false,
+  });
+  expect(await edgesOf(whereAmI)).toEqual([
+    { id: "planner->coder", source: "planner", target: "coder", port: "done", loop: false },
+    { id: "coder->reviewer", source: "coder", target: "reviewer", port: "done", loop: false },
+    { id: "reviewer->coder", source: "reviewer", target: "coder", port: "changes", loop: false },
+  ]);
+  expect(screen.getByText("· edited, not saved")).toBeInTheDocument();
+
+  expect(await call("page_connect", { source: "reviewer", target: "finish" })).toEqual({ text: "reviewer has several outputs: approve, changes. Say which with port.", isError: true });
+  expect(await call("page_connect", { source: "reviewer", target: "finish", port: "done" })).toEqual({ text: "reviewer has no output done. Its outputs are: approve, changes.", isError: true });
+  expect(await call("page_connect", { source: "coder", target: "coder", port: "done" })).toEqual({ text: "A node cannot connect to itself.", isError: true });
+  expect(await call("page_connect", { source: "finish", target: "planner" })).toEqual({ text: "finish has no outputs: a Finish ends the graph.", isError: true });
+  expect(await call("page_connect", { source: "coder", target: "tester", port: "done" })).toEqual({ text: "There is no node tester. The nodes are: planner, coder, reviewer, finish.", isError: true });
+  expect(await edgesOf(whereAmI)).toHaveLength(3);
+});
