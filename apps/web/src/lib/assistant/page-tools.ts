@@ -460,17 +460,26 @@ function patchOf(type: NodeType) {
 }
 export const NODE_PATCHES = Object.fromEntries((Object.keys(nodeCatalog) as NodeType[]).map((type) => [type, patchOf(type)])) as Record<NodeType, ReturnType<typeof patchOf>>;
 
-/** A node's change, checked against its type's fields: the parsed change, or a refusal that names the fields there are. */
-export function parseNodePatch(key: string, type: NodeType, patch: Record<string, unknown>): { ok: true; patch: Record<string, unknown> } | { ok: false; message: string } {
-  const schema = NODE_PATCHES[type];
+type Parsed<T> = { ok: true; patch: T } | { ok: false; message: string };
+
+/**
+ * A change checked against an inspector's fields. A key the fields do not have is refused first, with
+ * the fields there are (`what` names the thing, as "A coder"); then the values are checked.
+ */
+function parsePatch<T extends z.ZodObject>(schema: T, patch: Record<string, unknown>, what: string, subject: string): Parsed<z.infer<T>> {
   const fields = Object.keys(schema.shape);
-  const unknown = Object.keys(patch).filter((k) => !fields.includes(k));
-  const article = /^[aeiou]/.test(type) ? "An" : "A";
-  if (unknown.length) return { ok: false, message: `${article} ${type} has no ${unknown.join(", ")}. Its fields are: ${fields.join(", ")}.` };
+  const known = new Set(fields);
+  const unknown = Object.keys(patch).filter((k) => !known.has(k));
+  if (unknown.length) return { ok: false, message: `${what} has no ${unknown.join(", ")}. Its fields are: ${fields.join(", ")}.` };
   const parsed = schema.safeParse(patch);
   if (parsed.success) return { ok: true, patch: parsed.data };
   const issues = parsed.error.issues.map((i) => `${i.path.length ? `${i.path.join(".")}: ` : ""}${i.message}`).join("; ");
-  return { ok: false, message: `The change to ${key} is not valid: ${issues}` };
+  return { ok: false, message: `The change to ${subject} is not valid: ${issues}` };
+}
+
+/** A node's change, checked against its type's fields: the parsed change, or a refusal that names the fields there are. */
+export function parseNodePatch(key: string, type: NodeType, patch: Record<string, unknown>): Parsed<Record<string, unknown>> {
+  return parsePatch(NODE_PATCHES[type], patch, `${/^[aeiou]/.test(type) ? "An" : "A"} ${type}`, key);
 }
 
 /** What page_update_edge may change: the edge inspector's fields. null clears a loop's attempts or its exhausted gate. */
@@ -486,14 +495,8 @@ export const EDGE_PATCH = z
   .partial();
 
 /** An edge's change, checked against the edge inspector's fields: the parsed change, or a refusal that names them. */
-export function parseEdgePatch(id: string, patch: Record<string, unknown>): { ok: true; patch: z.infer<typeof EDGE_PATCH> } | { ok: false; message: string } {
-  const fields = Object.keys(EDGE_PATCH.shape);
-  const unknown = Object.keys(patch).filter((k) => !fields.includes(k));
-  if (unknown.length) return { ok: false, message: `An edge has no ${unknown.join(", ")}. Its fields are: ${fields.join(", ")}.` };
-  const parsed = EDGE_PATCH.safeParse(patch);
-  if (parsed.success) return { ok: true, patch: parsed.data };
-  const issues = parsed.error.issues.map((i) => `${i.path.length ? `${i.path.join(".")}: ` : ""}${i.message}`).join("; ");
-  return { ok: false, message: `The change to edge ${id} is not valid: ${issues}` };
+export function parseEdgePatch(id: string, patch: Record<string, unknown>): Parsed<z.infer<typeof EDGE_PATCH>> {
+  return parsePatch(EDGE_PATCH, patch, "An edge", `edge ${id}`);
 }
 
 type ToolOf<K extends PageKind> = (typeof TOOLS)[K][number];
