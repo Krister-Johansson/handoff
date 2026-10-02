@@ -7,6 +7,7 @@ test("the side navigation links every section by ?tab= and marks the open one", 
   const nav = screen.getByRole("navigation", { name: "Settings sections" });
   const links = within(nav).getAllByRole("link");
   expect(links.map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
+    ["Projects", "/settings?tab=projects"],
     ["Appearance", "/settings?tab=appearance"],
     ["Notifications", "/settings?tab=notifications"],
     ["Voice", "/settings?tab=voice"],

@@ -175,7 +175,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     start_run: async ({ project, issues, task, graph }: { project: string; issues?: number[]; task?: string; graph?: string }) => {
       const detail = await getProjectDetail(db, (await findProject(db, project)).id);
       const graphName = graph ?? detail?.defaultGraph;
-      if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Settings tab.`);
+      if (!detail || !graphName) throw new Error(`${project} has no graph yet. Create one on its Graphs page.`);
       if (!issues?.length && (task ?? "").trim().length < 5) throw new Error("Link at least one issue or describe the task.");
       const run = await startRunFromGraph(db, { projectId: detail.project.id, graphName, task: task ?? "", issues: issues ?? [] }, github, plan);
       return { run_id: run.id, status: run.status, graph: graphName, branch: run.branchName, url: url(runPath(detail.project.id, run.id)) };

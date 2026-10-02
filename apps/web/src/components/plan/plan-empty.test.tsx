@@ -27,12 +27,16 @@ test("no plan offers Set up the plan, a missing scope shows the commands, an emp
   expect(within(dialog).getByText("Linked to o/handoff")).toBeInTheDocument();
   expect(within(dialog).getByText(/Renames or adds Shaping, Ready, Running and In review/)).toBeInTheDocument();
   expect(within(dialog).getByText('"handoff plan", linked to o/handoff')).toBeInTheDocument();
+  // A refusal keeps the dialog open with its sentence; a plan set up closes it.
+  actions.setupPlanAction.mockResolvedValueOnce({ ok: false, error: "GITHUB_TOKEN lacks the project scope." } as never);
   fireEvent.click(within(dialog).getByRole("radio", { name: /gqlPrune Roadmap/ }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Use this Project" }));
   await waitFor(() => expect(actions.setupPlanAction).toHaveBeenLastCalledWith({ projectId: "p1", use: 3 }));
+  expect(await within(dialog).findByText("GITHUB_TOKEN lacks the project scope.")).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole("radio", { name: /Create a new Project/ }));
   fireEvent.click(within(dialog).getByRole("button", { name: "Create a new Project" }));
   await waitFor(() => expect(actions.setupPlanAction).toHaveBeenLastCalledWith({ projectId: "p1" }));
+  await waitFor(() => expect(screen.queryByRole("dialog", { name: "Set up the plan" })).not.toBeInTheDocument());
   unmount();
 
   const scope = render(<PlanEmpty reason="no-scope" project={project} />);

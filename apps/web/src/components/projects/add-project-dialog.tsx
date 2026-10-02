@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState, useTransition } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import { CheckIcon, ChevronsUpDownIcon, LockIcon, PlusIcon } from "lucide-react";
 import { createProjectAction, listReposAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
@@ -64,9 +64,9 @@ function RepoPicker({ repos, value, onChange }: { repos: AvailableRepo[]; value:
 
 /**
  * Add project button and dialog: pick a repository from GitHub, or type owner/name without GitHub access.
- * As a `card`, the trigger is the dashed tile at the end of the projects grid.
+ * `defaultOpen` opens it on arrival, for links that say "add a project".
  */
-export function AddProjectDialog({ variant = "button" }: { variant?: "button" | "card" }) {
+export function AddProjectDialog({ size = "default", defaultOpen = false }: { size?: "sm" | "default"; defaultOpen?: boolean }) {
   const [state, action, pending] = useActionState(createProjectAction, {} as ActionState);
   const [loaded, setLoaded] = useState<Loaded>();
   const [loading, startLoading] = useTransition();
@@ -76,29 +76,22 @@ export function AddProjectDialog({ variant = "button" }: { variant?: "button" | 
   const onOpenChange = (open: boolean) => {
     if (open && !loaded) startLoading(async () => setLoaded(await listReposAction()));
   };
+  // Opened on arrival, the dialog never reports opening, so it lists the repositories once here.
+  useEffect(() => {
+    if (defaultOpen) startLoading(async () => setLoaded(await listReposAction()));
+  }, [defaultOpen]);
   const choose = (next: AvailableRepo) => {
     setRepo(next);
     setBranch(next.defaultBranch);
   };
 
   return (
-    <Dialog onOpenChange={onOpenChange}>
+    <Dialog defaultOpen={defaultOpen} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        {variant === "card" ? (
-          <button
-            type="button"
-            className="flex min-h-[150px] flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed text-muted-foreground transition-colors outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <PlusIcon aria-hidden className="size-4" />
-            <span className="font-medium">Add a repository</span>
-            <span className="text-xs">owner/name on GitHub</span>
-          </button>
-        ) : (
-          <Button>
-            <PlusIcon data-icon="inline-start" />
-            Add project
-          </Button>
-        )}
+        <Button size={size}>
+          <PlusIcon data-icon="inline-start" />
+          Add project
+        </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <form action={action} className="contents">
@@ -115,7 +108,7 @@ export function AddProjectDialog({ variant = "button" }: { variant?: "button" | 
                 <>
                   <RepoPicker repos={loaded.repos} value={repo} onChange={choose} />
                   <input type="hidden" name="repo" value={repo?.fullName ?? ""} />
-                  <FieldDescription>The project is named after the repository. You can rename it later from its menu.</FieldDescription>
+                  <FieldDescription>The project is named after the repository. You can rename it later in Settings, Projects.</FieldDescription>
                 </>
               ) : (
                 <>

@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { homePath } from "@/lib/last-project";
 import ProjectPage from "./[projectId]/page";
+import ProjectsPage from "./page";
 
 const redirect = vi.hoisted(() =>
   vi.fn((href: string) => {
@@ -22,11 +23,15 @@ test("an old ?tab= link redirects to its route", async () => {
   await expect(open({ tab: "nowhere" })).rejects.toThrow("redirect /projects/p1/runs");
 });
 
-test("/ opens the project used last, else the first project, else the projects to add one", () => {
+test("/projects redirects to Settings, Projects", () => {
+  expect(() => ProjectsPage()).toThrow("redirect /settings?tab=projects");
+});
+
+test("/ opens the project used last, else the first project, else Settings, Projects to add one", () => {
   const projects = [{ id: "p1" }, { id: "p2" }];
   expect(homePath(projects, "p2")).toBe("/projects/p2");
   expect(homePath(projects, undefined)).toBe("/projects/p1");
   // A project deleted since keeps no claim on the cookie.
   expect(homePath(projects, "gone")).toBe("/projects/p1");
-  expect(homePath([], "p2")).toBe("/projects");
+  expect(homePath([], "p2")).toBe("/settings?tab=projects");
 });

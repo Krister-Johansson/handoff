@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronsUpDownIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "@/components/ui/sidebar";
-import { projectPath } from "@/lib/paths";
+import { PROJECTS_SETTINGS_PATH, projectPath } from "@/lib/paths";
 import type { ProjectSection } from "@/lib/project-tab";
 import { cn } from "@/lib/utils";
 
@@ -80,7 +80,7 @@ export function ProjectSwitcher({ projects, project, section }: { projects: Side
             )}
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href="/projects" onClick={close}>
+                <Link href={`${PROJECTS_SETTINGS_PATH}&add=1`} onClick={close}>
                   <span aria-hidden className="grid size-6 place-items-center rounded-md border text-muted-foreground">
                     <PlusIcon />
                   </span>
@@ -88,7 +88,7 @@ export function ProjectSwitcher({ projects, project, section }: { projects: Side
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href="/settings" onClick={close}>
+                <Link href={PROJECTS_SETTINGS_PATH} onClick={close}>
                   <span aria-hidden className="grid size-6 place-items-center text-muted-foreground">
                     <SettingsIcon />
                   </span>
