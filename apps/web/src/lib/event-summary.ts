@@ -37,5 +37,14 @@ export function summarizeEvent(event: EventLike): string {
   }
   if (event.type === "run.failed") return typeof p.nodeKey === "string" ? `at ${p.nodeKey}` : "";
   if (event.type === "run.created" && typeof p.branchName === "string") return p.branchName;
+  if (event.type === "plan.status") return `#${String(p.issue)} to ${String(p.status)}`;
+  if (event.type === "plan.skipped") return `#${String(p.issue)} not moved to ${String(p.status)}: ${SKIP_REASONS[String(p.reason)] ?? String(p.reason)}`;
   return "";
 }
+
+/** Why a status write on the plan was skipped, for the codes writePlanStatus records; other reasons are GitHub's own message. */
+const SKIP_REASONS: Record<string, string> = {
+  "not-in-project": "not in the plan's Project",
+  "no-option": "the Project has no such Status option",
+  "no-access": "no GITHUB_TOKEN with the project scope",
+};
