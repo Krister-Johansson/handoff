@@ -328,7 +328,7 @@ test("code review is skipped with the earlier verdict when the fingerprint match
       { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix" } },
     ],
   };
-  const verdict = { verdict: "approve", comments: [{ path: "notes.txt", line: 2, body: "Consider a full stop." }] };
+  const verdict = { verdict: "approve", comments: [{ path: "notes.txt", line: 2, body: "Consider a full stop.", severity: "should_fix" }] };
   const cli = new FakeCliExecutor([{ output: verdict }]);
   const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Change the notes" });
@@ -348,4 +348,72 @@ test("code review is skipped with the earlier verdict when the fingerprint match
   expect(executions.find((e) => e.nodeKey === "review" && e.attempt === 2)!.output).toEqual(verdict);
   const held = events.find((e) => e.type === "approval.held");
   expect((held?.payload as { message?: string } | undefined)?.message).toMatch(/^Unchanged since your approval at .+; only main was merged in$/);
+});
+
+/**
+ * A coder that commits a change to the notes and stops the run when it is sent back, a code review in
+ * Claude, and a PR node that stops the run.
+ */
+async function reviewOnRepo(cli: FakeCliExecutor) {
+  const origin = createOriginRepo({ "notes.txt": "one\n" });
+  const coder: NodeExecutor = {
+    needsWorkdir: true,
+    execute: async (ctx) => {
+      if (ctx.execution.attempt > 1) return { kind: "waiting", wait: { kind: "github_pr", key: "sent-back" } };
+      writeFileSync(join(ctx.workdir!.path, "notes.txt"), "one\ntwo\n");
+      git(ctx.workdir!.path, "commit", "-qam", "Add two");
+      return { kind: "completed", output: { status: "done", summary: "Changed the notes." } };
+    },
+  };
+  const graph = {
+    attributes: { startNode: "coder" },
+    nodes: [
+      { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "review", attributes: { type: "code_review", x: 300, y: 0 } },
+      { key: "pr", attributes: { type: "pr", x: 600, y: 0 } },
+    ],
+    edges: [
+      { key: "coder->review", source: "coder", target: "review", attributes: { port: "done" } },
+      { key: "review->coder", source: "review", target: "coder", attributes: { port: "changes" } },
+      { key: "review->pr", source: "review", target: "pr", attributes: { port: "approve" } },
+    ],
+  };
+  const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Change the notes" });
+  const executors = { coder, code_review: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr: stopAfterCoder } as unknown as ExecutorRegistry;
+  await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+  return inspect(db, run.id);
+}
+
+const approvalsOf = (state: unknown) => (state as { approvals?: Record<string, unknown> }).approvals ?? {};
+
+test("a review that says approve with a blocking finding routes as request_changes", async () => {
+  const blocking = { verdict: "approve", comments: [{ path: "notes.txt", line: 2, body: "Loses the user's notes on save.", severity: "blocking" }] };
+  const { executions, run, events } = await reviewOnRepo(new FakeCliExecutor([{ output: blocking }]));
+  expect(executions.map((e) => [e.nodeKey, e.attempt, e.status])).toEqual([
+    ["coder", 1, "passed"],
+    ["review", 1, "passed"],
+    ["coder", 2, "waiting"],
+  ]);
+  expect(executions[1]!.output).toEqual({ ...blocking, verdict: "request_changes" });
+  expect(approvalsOf(run.state).review).toBeUndefined();
+  expect(events.find((e) => e.type === "review.verdict_derived")?.payload).toEqual({ said: "approve", verdict: "request_changes", blocking: 1 });
+});
+
+test("a review that says request_changes with no blocking finding routes as approve", async () => {
+  const minor = {
+    verdict: "request_changes",
+    comments: [
+      { path: "notes.txt", line: 2, body: "Name the constant.", severity: "should_fix" },
+      { path: "notes.txt", body: "Add a test later.", severity: "follow_up" },
+    ],
+  };
+  const { executions, run } = await reviewOnRepo(new FakeCliExecutor([{ output: minor }]));
+  expect(executions.map((e) => [e.nodeKey, e.attempt, e.status])).toEqual([
+    ["coder", 1, "passed"],
+    ["review", 1, "passed"],
+    ["pr", 1, "waiting"],
+  ]);
+  expect(executions[1]!.output).toEqual({ ...minor, verdict: "approve" });
+  expect(approvalsOf(run.state).review).toBeDefined();
 });

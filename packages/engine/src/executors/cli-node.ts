@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, type NodeType } from "@handoff/core";
+import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, verdictOf, type NodeType, type ReviewerOutput } from "@handoff/core";
 import type { Db } from "@handoff/db";
 import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
@@ -139,7 +139,20 @@ function textOf(payload: unknown): string | undefined {
   return text || undefined;
 }
 
-const RESUME_PROMPT = "Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
+const isReview = (ctx: ExecutorContext) => ctx.node.type === "reviewer" || ctx.node.type === "code_review";
+
+/**
+ * A review whose verdict follows its findings: request_changes with a blocking finding, approve
+ * without one, whatever the reviewer wrote. Records `review.verdict_derived` when the two differ.
+ */
+function followFindings(ctx: ExecutorContext, review: ReviewerOutput): ReviewerOutput {
+  const verdict = verdictOf(review.comments);
+  if (verdict === review.verdict) return review;
+  ctx.emit("review.verdict_derived", { said: review.verdict, verdict, blocking: review.comments.filter((c) => c.severity === "blocking").length });
+  return { ...review, verdict };
+}
+
+const RESUME_PROMPT ="Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
 
 /** Planner, Coder and Reviewer: one Claude CLI turn per execution, validated against the node's contract. */
 export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
@@ -278,15 +291,16 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       }
       switch (result.outcome) {
         case "success": {
+          const output = isReview(ctx) ? followFindings(ctx, result.validated as ReviewerOutput) : result.validated;
           const statePatch: Record<string, unknown> = {
             // A planner's question is not a plan: the run keeps no plan until the answer comes back.
-            ...(ctx.node.type === "planner" && (result.validated as { status?: string }).status !== "needs_input" ? { plan: result.validated } : {}),
+            ...(ctx.node.type === "planner" && (output as { status?: string }).status !== "needs_input" ? { plan: output } : {}),
             // A review remembers the commit it looked at, so its next round can look only at what changed since.
             ...(reviewedAt ? { reviewedAt: { ...(ctx.state.reviewedAt as Record<string, string> | undefined), [ctx.node.key]: reviewedAt } } : {}),
             // A code review's approval holds until the run's own change changes.
-            ...(ctx.node.type === "code_review" && (result.validated as { verdict?: string }).verdict === "approve" ? await recordApproval(ctx, { at: new Date().toISOString() }) : {}),
+            ...(ctx.node.type === "code_review" && (output as { verdict?: string }).verdict === "approve" ? await recordApproval(ctx, { at: new Date().toISOString() }) : {}),
           };
-          return { kind: "completed", output: result.validated, cost, ...(Object.keys(statePatch).length ? { statePatch } : {}) };
+          return { kind: "completed", output, cost, ...(Object.keys(statePatch).length ? { statePatch } : {}) };
         }
         case "interrupted":
           return { kind: "interrupted" };
