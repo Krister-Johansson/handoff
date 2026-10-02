@@ -61,6 +61,11 @@ test("summarizes the assignment of a run's issue to the token's user and one tha
   expect(summarizeEvent({ type: "issue.assign.skipped", payload: { issue: 16, reason: "Validation Failed" } })).toBe("#16 not assigned: Validation Failed");
 });
 
+test("an approval that held says why the step did not ask again", () => {
+  const message = "Unchanged since your approval at 2026-10-02 14:03 UTC; only main was merged in";
+  expect(summarizeEvent({ type: "approval.held", payload: { message, approvedAt: "2026-10-02T14:03:00.000Z", base: "main" } })).toBe(message);
+});
+
 test("returns an empty string for unknown events", () => {
   expect(summarizeEvent({ type: "something.new", payload: {} })).toBe("");
 });
