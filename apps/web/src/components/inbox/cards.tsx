@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatAgo } from "@/lib/format";
 import { reviewPath, runPath, tryPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
+import { useCardPlace } from "./card-place";
 
 const REASONS: Record<string, string> = {
   needs_input: "A node asked a question",
@@ -71,10 +72,11 @@ function When({ prefix, at }: { prefix: string; at: Date | string | null | undef
  * run page, which is already about that run), the node it came from, and when.
  */
 function CardContext({ tag, tone = "neutral", item, compact, node, when }: { tag: string; tone?: Tone; item: RunRef; compact: boolean; node?: string; when?: ReactNode }) {
-  return (
+  const inProject = useCardPlace() === "project";
+  const line = (
     <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
       <span className={cn("inline-flex h-5 items-center rounded-[5px] border px-[7px] text-[11px] font-medium whitespace-nowrap", TAG[tone])}>{tag}</span>
-      {!compact && (
+      {!compact && !inProject && (
         <>
           <Link href={`/projects/${item.projectId}`} data-voice-phrase={item.projectName} className="hover:text-foreground hover:underline hover:underline-offset-3">
             {item.projectName}
@@ -87,7 +89,7 @@ function CardContext({ tag, tone = "neutral", item, compact, node, when }: { tag
       )}
       {node && (
         <>
-          {!compact && <span aria-hidden>·</span>}
+          {!compact && !inProject && <span aria-hidden>·</span>}
           <span className="font-mono" data-voice-phrase={node}>
             {node}
           </span>
@@ -95,6 +97,16 @@ function CardContext({ tag, tone = "neutral", item, compact, node, when }: { tag
       )}
       {when}
     </div>
+  );
+  if (compact || !inProject) return line;
+  // On a project's page the run gets a line of its own under the tag, which keeps narrow cards readable.
+  return (
+    <>
+      {line}
+      <Link href={runPath(item.projectId, item.runId)} className="mt-1 truncate text-xs text-muted-foreground hover:text-foreground hover:underline hover:underline-offset-3">
+        {item.task}
+      </Link>
+    </>
   );
 }
 

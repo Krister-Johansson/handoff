@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
+import { ProjectCards } from "./card-place";
 import { FailedRunCard, PullRequestCard, QuestionCard, StuckRunCard } from "./cards";
 
 const actions = vi.hoisted(() => ({
@@ -34,6 +35,17 @@ test("a question names its project, run and node, and an option answers it", asy
   await waitFor(() => expect(actions.answerAction).toHaveBeenCalled());
   const form = actions.answerAction.mock.calls[0]![1] as FormData;
   expect([form.get("questionId"), form.get("option")]).toEqual(["q1", "any error"]);
+});
+
+test("on a project's page a question names its run but not the project", () => {
+  render(
+    <ProjectCards>
+      <QuestionCard item={{ ...run, id: "q1", question: "Roll back on any error?", options: ["any error"], nodeKey: "coder", reason: "needs_input" }} />
+    </ProjectCards>,
+  );
+  expect(screen.queryByRole("link", { name: "todooverkill" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "#7 Todo CRUD" })).toHaveAttribute("href", "/projects/p1/runs/r1");
+  expect(screen.getByRole("button", { name: "any error" })).toBeInTheDocument();
 });
 
 test("on the run page a question leaves out the project and run it is already on", () => {

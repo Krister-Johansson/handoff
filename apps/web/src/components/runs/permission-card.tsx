@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { formatAgo } from "@/lib/format";
 import { runPath } from "@/lib/paths";
+import { useCardPlace } from "@/components/inbox/card-place";
 import { describePermission } from "@handoff/core";
 import { ruleFor } from "@/lib/permission";
 
-export type PermissionRequestView = { id: string; runId: string; nodeKey: string; toolName: string; input: Record<string, unknown> };
+export type PermissionRequestView = { id: string; runId: string; nodeKey: string; toolName: string; input: Record<string, unknown>; createdAt: Date | string };
 
 /**
  * A tool call a step's allow rules do not cover, while the step waits for an answer: what it wants to
@@ -21,6 +23,8 @@ export type PermissionRequestView = { id: string; runId: string; nodeKey: string
  */
 export function PermissionCard({ request, run }: { request: PermissionRequestView; run?: { projectId: string; projectName: string; task: string } }) {
   const { action, detail } = describePermission(request.toolName, request.input);
+  const inProject = useCardPlace() === "project";
+  const asked = new Date(request.createdAt);
   const rule = ruleFor(request.toolName, request.input);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string>();
@@ -50,14 +54,19 @@ export function PermissionCard({ request, run }: { request: PermissionRequestVie
             {request.nodeKey} {action}
           </h3>
         </div>
-        {run && (
-          <p className="text-xs text-muted-foreground">
-            {run.projectName} ·{" "}
-            <Link href={runPath(run.projectId, request.runId)} className="hover:text-foreground hover:underline">
-              {run.task}
-            </Link>
-          </p>
-        )}
+        <p className="flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+          {run && (
+            <>
+              {!inProject && <span>{run.projectName} ·</span>}
+              <Link href={runPath(run.projectId, request.runId)} className="min-w-0 truncate hover:text-foreground hover:underline">
+                {run.task}
+              </Link>
+            </>
+          )}
+          <span className="ml-auto whitespace-nowrap" title={asked.toISOString()} suppressHydrationWarning>
+            asked {formatAgo(asked)}
+          </span>
+        </p>
         <p className="text-sm text-muted-foreground">The step waits for your answer. Its allow rules do not cover this call.</p>
         {detail && <TerminalOutput text={detail} label="request" />}
         <form

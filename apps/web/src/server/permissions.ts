@@ -4,7 +4,7 @@ import type { PermissionRequestView } from "../components/runs/permission-card";
 /** A run's permission requests still waiting for a person, oldest first. */
 export async function pendingPermissions(db: Db, runId: string): Promise<PermissionRequestView[]> {
   const rows = await db
-    .select({ id: permissionRequests.id, runId: permissionRequests.runId, nodeKey: nodeExecutions.nodeKey, toolName: permissionRequests.toolName, input: permissionRequests.input })
+    .select({ id: permissionRequests.id, runId: permissionRequests.runId, nodeKey: nodeExecutions.nodeKey, toolName: permissionRequests.toolName, input: permissionRequests.input, createdAt: permissionRequests.createdAt })
     .from(permissionRequests)
     .innerJoin(nodeExecutions, eq(nodeExecutions.id, permissionRequests.nodeExecutionId))
     .where(and(eq(permissionRequests.runId, runId), eq(permissionRequests.status, "pending")))
@@ -28,6 +28,7 @@ export async function allPendingPermissions(db: Db) {
       nodeKey: nodeExecutions.nodeKey,
       toolName: permissionRequests.toolName,
       input: permissionRequests.input,
+      createdAt: permissionRequests.createdAt,
       projectId: projects.id,
       projectName: projects.name,
       task: runs.task,
