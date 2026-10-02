@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, ExternalLinkIcon, ListChecksIcon, RotateCwIcon } from "lucide-react";
+import { unstable_rethrow } from "next/navigation";
 import { answerReviewAction, restartTryItAction } from "@/app/inbox/actions";
 import { Screenshot, type Shot } from "@/components/runs/screenshot";
 import { Tag } from "@/components/tag";
@@ -38,6 +39,18 @@ type Props = {
 
 const isTyping = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
 const sectionId = (index: number) => `try-criterion-${index}`;
+
+type Option = "approve" | "changes";
+
+/** Whether an error is Next's own: the redirect a server action ends with, after Next has started the navigation. */
+function isNextNavigation(error: unknown) {
+  try {
+    unstable_rethrow(error);
+    return false;
+  } catch {
+    return true;
+  }
+}
 
 /** How a refusal lists the criteria a page tool can take. */
 const criteriaList = (acceptance: string[]) => `The criteria are: ${acceptance.map((text, i) => `${i + 1}. ${text}`).join("; ")}.`;
@@ -259,17 +272,27 @@ function Criterion({
 }
 
 /** Approve when every criterion works, or send back what does not, with an overall note. */
-function Submit({ from, checks, acceptance, questionId, runId }: { from: string; checks: Check[]; acceptance: string[]; questionId: string; runId: string }) {
-  const [note, setNote] = useState("");
-  const [error, setError] = useState<string>();
-  const [pending, start] = useTransition();
-  const failed = acceptance.flatMap((quote, i) => (checks[i]?.works === false ? [{ quote, body: checks[i]!.note.trim() || "Does not work." }] : []));
-  const allWork = checks.every((c) => c.works === true);
-  const answer = (option: "approve" | "changes") =>
-    start(async () => {
-      const result = await answerReviewAction({ questionId, runId, option, note: note.trim(), comments: option === "changes" ? failed : [] });
-      setError(result.ok ? undefined : result.error);
-    });
+function Submit({
+  from,
+  questionId,
+  failed,
+  allWork,
+  note,
+  onNote,
+  error,
+  pending,
+  onAnswer,
+}: {
+  from: string;
+  questionId: string;
+  failed: number;
+  allWork: boolean;
+  note: string;
+  onNote: (note: string) => void;
+  error: string | undefined;
+  pending: boolean;
+  onAnswer: (option: Option) => void;
+}) {
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -281,19 +304,19 @@ function Submit({ from, checks, acceptance, questionId, runId }: { from: string;
         <PopoverHeader>
           <PopoverTitle>Submit</PopoverTitle>
           <PopoverDescription>
-            {failed.length ? `${failed.length} ${failed.length === 1 ? "criterion does" : "criteria do"} not work; they go back to ${from}.` : allWork ? "Every criterion works." : "Check every criterion to approve."}
+            {failed ? `${failed} ${failed === 1 ? "criterion does" : "criteria do"} not work; they go back to ${from}.` : allWork ? "Every criterion works." : "Check every criterion to approve."}
           </PopoverDescription>
         </PopoverHeader>
         <Field data-invalid={error ? true : undefined}>
           <FieldLabel htmlFor={`try-overall-${questionId}`}>Note (optional)</FieldLabel>
-          <Textarea id={`try-overall-${questionId}`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything else the coder should know." />
+          <Textarea id={`try-overall-${questionId}`} rows={2} value={note} onChange={(e) => onNote(e.target.value)} placeholder="Anything else the coder should know." />
           {error && <FieldError>{error}</FieldError>}
         </Field>
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" disabled={pending || (failed.length === 0 && !note.trim())} onClick={() => answer("changes")}>
+          <Button type="button" variant="outline" disabled={pending || (failed === 0 && !note.trim())} onClick={() => onAnswer("changes")}>
             {`Send back to ${from}`}
           </Button>
-          <Button type="button" disabled={pending || !allWork} onClick={() => answer("approve")}>
+          <Button type="button" disabled={pending || !allWork} onClick={() => onAnswer("approve")}>
             Approve
           </Button>
         </div>
@@ -314,6 +337,11 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
   const [closed, setClosed] = useState<ReadonlySet<number>>(() => new Set(checks.flatMap((c, i) => (c.works === true ? [i] : []))));
   const [current, go] = useCursor(acceptance.length);
   const checked = checks.filter((c) => c.works !== undefined).length;
+  const [note, setNote] = useState("");
+  const [submitError, setSubmitError] = useState<string>();
+  const [submitting, startSubmit] = useTransition();
+  const failed = acceptance.flatMap((quote, i) => (checks[i]?.works === false ? [{ quote, body: checks[i]!.note.trim() || "Does not work." }] : []));
+  const allWork = checks.every((c) => c.works === true);
   const criteria = new Set(acceptance);
   const loose = shots.filter((s) => !s.criterion || !criteria.has(s.criterion));
 
@@ -338,6 +366,29 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
     return to >= 0 ? to : undefined;
   };
 
+  /**
+   * Sends the answer: approve, or the criteria that do not work back to the coder, with the overall
+   * note. Resolves to the action's error; on success the action redirects to the run page, which
+   * reaches here as Next's redirect error.
+   */
+  const send = async (option: Option, overall: string) => {
+    const result = await answerReviewAction({ questionId, runId, option, note: overall.trim(), comments: option === "changes" ? failed : [] });
+    const error = result.ok ? undefined : result.error;
+    setSubmitError(error);
+    return error;
+  };
+  const submitOptions = {
+    from,
+    questionId,
+    failed: failed.length,
+    allWork,
+    note,
+    onNote: setNote,
+    error: submitError,
+    pending: submitting,
+    onAnswer: (option: Option) => startSubmit(async () => void (await send(option, note))),
+  };
+
   usePageTools(
     "try",
     {
@@ -360,7 +411,21 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
         return `Now on criterion ${named}`;
       },
       page_set_note: undefined,
-      page_submit: undefined,
+      page_submit: readOnly
+        ? undefined
+        : async ({ option }) => {
+            if (option === "approve" && !allWork) {
+              const unchecked = checks.flatMap((c, i) => (c.works === true ? [] : [i + 1]));
+              throw new Error(`Check every criterion to approve. Not marked as working: ${unchecked.join(", ")}.`);
+            }
+            try {
+              const error = await send(option, note);
+              if (error) throw new Error(error);
+            } catch (error) {
+              if (!isNextNavigation(error)) throw error;
+            }
+            return "Approved: every criterion works. The run page opens.";
+          },
       page_restart_app: undefined,
       page_expand_criteria: undefined,
     },
@@ -387,13 +452,13 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
             <ChevronsUpDownIcon />
           </Button>
           <span className={cn("text-xs text-muted-foreground", readOnly && "ml-auto")}>{`${checked} of ${acceptance.length} checked`}</span>
-          {!readOnly && <Submit from={from} checks={checks} acceptance={acceptance} questionId={questionId} runId={runId} />}
+          {!readOnly && <Submit {...submitOptions} />}
         </div>
       )}
       {acceptance.length === 0 && !readOnly && (
         <div className="flex items-center gap-2">
           <p className="text-sm text-muted-foreground">This run has no acceptance criteria. Try the app, then approve it or send it back with a note.</p>
-          <Submit from={from} checks={checks} acceptance={acceptance} questionId={questionId} runId={runId} />
+          <Submit {...submitOptions} />
         </div>
       )}
       {acceptance.map((criterion, index) => (

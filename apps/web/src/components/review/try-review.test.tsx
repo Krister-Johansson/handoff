@@ -8,7 +8,14 @@ import { TryReview } from "./try-review";
 
 const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn(), restartTryItAction: vi.fn() }));
 vi.mock("@/app/inbox/actions", () => actions);
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }), usePathname: () => "/projects/p1/runs/r1/try/q1" }));
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/projects/p1/runs/r1/try/q1",
+}));
+
+/** What a server action that redirects rejects with in the browser, once Next has started the navigation. */
+const redirectTo = (path: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${path};303;` });
 beforeEach(() => {
   actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true });
   actions.restartTryItAction.mockReset().mockResolvedValue({ ok: true });
@@ -199,4 +206,19 @@ test("page_go_to_criterion moves next, previous and to an index", async () => {
 
   expect(await call("page_go_to_criterion", { index: 5 })).toEqual({ text: "There is no criterion 5. The criteria run from 1 to 3.", isError: true });
   expect(cursor()).toHaveTextContent("2 of 3");
+});
+
+test("page_submit approve is refused while a criterion is unticked, and after approval calls answerReviewAction with approve", async () => {
+  const { call } = await withAssistant();
+  await call("page_mark_criterion", { index: 1, works: true });
+
+  expect(await call("page_submit", { option: "approve" })).toEqual({ text: "Check every criterion to approve. Not marked as working: 2, 3.", isError: true });
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+
+  await call("page_mark_criterion", { index: 2, works: true });
+  await call("page_mark_criterion", { index: 3, works: true });
+  // On success the action redirects to the run page, which Next reports to the caller as a rejection.
+  actions.answerReviewAction.mockRejectedValueOnce(redirectTo(`/projects/p1/runs/${RUN}`));
+  expect(await call("page_submit", { option: "approve" })).toEqual({ text: "Approved: every criterion works. The run page opens.", isError: false });
+  expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "approve", note: "", comments: [] });
 });
