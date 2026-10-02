@@ -15,6 +15,29 @@ fragment PlanDateFields on ProjectV2 {
   }
 }
 
+# A Project without Size or Estimate answers each lookup with a NOT_FOUND error next to complete data.
+fragment PlanEstimateFields on ProjectV2 {
+  size: field(name: "Size") {
+    __typename
+    ... on ProjectV2SingleSelectField {
+      id
+      options {
+        id
+        name
+        color
+        description
+      }
+    }
+  }
+  estimate: field(name: "Estimate") {
+    __typename
+    ... on ProjectV2Field {
+      id
+      dataType
+    }
+  }
+}
+
 query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
   user(login: $login) {
     id
@@ -31,6 +54,7 @@ fragment PlanProjectChoice on ProjectV2 {
   url
   closed
   ...PlanDateFields
+  ...PlanEstimateFields
   field(name: "Status") {
     __typename
     ... on ProjectV2SingleSelectField {
@@ -80,6 +104,7 @@ query PlanProject($login: String!, $number: Int!) {
       url
       title
       ...PlanDateFields
+      ...PlanEstimateFields
       field(name: "Status") {
         __typename
         ... on ProjectV2SingleSelectField {

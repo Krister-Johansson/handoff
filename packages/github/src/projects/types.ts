@@ -1,8 +1,10 @@
 import type { RepoRef } from "../types.ts";
-import type { PLAN_KINDS, STATUS_OPTIONS } from "./kinds.ts";
+import type { PLAN_KINDS, PLAN_SIZES, STATUS_OPTIONS } from "./kinds.ts";
 
 export type PlanStatus = (typeof STATUS_OPTIONS)[number];
 export type PlanKind = (typeof PLAN_KINDS)[number];
+/** handoff's sizes, the options S, M and L of the Project's single select field named Size. */
+export type PlanSize = (typeof PLAN_SIZES)[number];
 
 /** An issue of the project's repository that is an item of its GitHub Project. */
 export type PlanItem = {
@@ -43,6 +45,10 @@ export type PlanItem = {
   target?: string | undefined;
   /** The item's iteration, when the Project has an iteration field named Iteration; read only. */
   iteration?: PlanIteration | undefined;
+  /** S, M or L from the Size field; undefined without a value, without the field, or for another option. */
+  size?: PlanSize | undefined;
+  /** Hours from the Estimate number field; undefined without a value, without the field, or at 0 or less. */
+  estimate?: number | undefined;
 };
 
 /** An iteration of a Project's iteration field: its title, first day (YYYY-MM-DD) and length in days. */
@@ -64,10 +70,22 @@ export type PlanProject = {
    * undefined when the Project has no such field. Optional like `dateFields`.
    */
   priorityOptions?: string[] | undefined;
+  /** The Size and Estimate field ids, each undefined while the Project lacks it. Optional like `dateFields`. */
+  estimateFields?: PlanEstimateFieldIds | undefined;
 };
 
 /** The field ids of a Project's Start and Target date fields; undefined for one it lacks. */
 export type PlanDateFieldIds = { start: string | undefined; target: string | undefined };
+
+/**
+ * The Size single select field's id with the ids of its S, M and L options (undefined for one it lacks),
+ * and the Estimate number field's id. Each field is undefined while the Project lacks it or has a field
+ * of that name of another type.
+ */
+export type PlanEstimateFieldIds = {
+  size: { id: string; options: Record<PlanSize, string | undefined> } | undefined;
+  estimate: string | undefined;
+};
 
 /** One ancestor of an issue, as `lineage` returns it. */
 export type PlanAncestor = { number: number; title: string; body: string; kind: PlanKind | undefined };
@@ -89,6 +107,10 @@ export type NewPlanIssue = {
 
 /** Dates to write on an item, YYYY-MM-DD: a date sets the field, null clears it, a missing key leaves it. */
 export type PlanDates = { start?: string | null; target?: string | null };
+
+/** Fields to write on an item: Start and Target as YYYY-MM-DD, Size, and Estimate in hours. A value sets the field, null clears it, a missing key leaves it. */
+export type PlanFields = PlanDates & { size?: PlanSize | null; estimate?: number | null };
+export type SetFieldsResult = "set" | "not-in-project" | "no-field" | "no-option";
 
 /** One of a user's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
 export type PlanProjectChoice = { number: number; title: string; url: string; linked: boolean; missingStatusOptions: PlanStatus[] };
@@ -143,6 +165,18 @@ export interface ProjectsPort {
    * Throws when a field of that name exists but is not a date field.
    */
   ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds>;
+  /**
+   * Sets or clears (null) an issue's Start, Target, Size and Estimate in one request after one read; a
+   * field left out stays as it is. Checks every field first: "no-field" when the Project lacks a field
+   * it would write, "no-option" when its Size field lacks the size, and then nothing changes.
+   */
+  setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult>;
+  /**
+   * Creates the Size single select field with S, M and L and the Estimate number field on a user's
+   * Project when missing, and adds S, M and L to an existing Size field after its own options, which
+   * keep their ids. Returns the ids. Throws when a field of that name exists with another type.
+   */
+  ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds>;
   /** Whether the token can write Projects: `project` among a classic token's scopes. */
   scopes(): Promise<{ project: boolean; classic: boolean }>;
 }

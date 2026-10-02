@@ -14,6 +14,9 @@ export const hasKindLabel = (labels: readonly string[]) => labels.some((l) => KI
 const ACTIVE = new Set(["queued", "running", "waiting"]);
 export const hasActiveRun = (task: PlanTask) => task.run !== null && ACTIVE.has(task.run.status);
 
+/** The open Ready tasks no run is working on: the ones the backlog offers. */
+export const readyInBacklog = (ready: readonly PlanTask[]) => ready.filter((t) => t.state === "open" && (t.run === null || t.run.status === "cancelled")).length;
+
 export type Move = "ready" | "shaping";
 
 /**

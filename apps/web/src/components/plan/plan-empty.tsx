@@ -4,7 +4,6 @@ import { CopyIcon, KeyRoundIcon, LayersIcon, SearchXIcon, SquareKanbanIcon } fro
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { SetUpPlanDialog, type PlanProjectRef } from "./set-up-plan-dialog";
-import { ShapeButton } from "./shape-button";
 
 function Command({ text }: { text: string }) {
   return (
@@ -78,9 +77,6 @@ export function PlanEmpty({ reason, project, error }: { reason: PlanEmptyReason;
             <EmptyTitle>Nothing shaped yet</EmptyTitle>
             <EmptyDescription>Shape the first epic with the assistant or from Claude Code: an epic with its goal, stories with acceptance criteria, then tasks.</EmptyDescription>
           </EmptyHeader>
-          <EmptyContent>
-            <ShapeButton projectName={project.name} />
-          </EmptyContent>
         </>
       )}
     </Empty>

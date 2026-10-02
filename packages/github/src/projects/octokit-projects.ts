@@ -4,8 +4,9 @@ import {
   AddPlanItemDocument,
   AddPlanLabelsDocument,
   AddPlanSubIssueDocument,
-  ClearPlanFieldDocument,
   CreatePlanDateFieldDocument,
+  CreatePlanEstimateFieldDocument,
+  CreatePlanSizeFieldDocument,
   CreatePlanLabelDocument,
   CreatePlanIssueDocument,
   IssueCreateRefsDocument,
@@ -18,17 +19,20 @@ import {
   PlanProjectDocument,
   PlanProjectsDocument,
   PlanProjectSetupDocument,
-  SetPlanDateDocument,
+  SetPlanSizeOptionsDocument,
   SetPlanStatusDocument,
   SetStatusOptionsDocument,
   type AddPlanItemMutation,
   type CreatePlanDateFieldMutation,
+  type CreatePlanEstimateFieldMutation,
+  type CreatePlanSizeFieldMutation,
   type CreatePlanIssueMutation,
   type CreatePlanProjectMutation,
   type IssueCreateRefsQuery,
   type IssueNodeIdQuery,
   type IssuePlanQuery,
   type PlanDateFieldsFragment,
+  type PlanEstimateFieldsFragment,
   type PlanItemsQuery,
   type PlanOwnerIdsQuery,
   type PlanProjectChoiceFragment,
@@ -36,12 +40,14 @@ import {
   type PlanProjectSetupQuery,
   type PlanProjectsQuery,
   type ProjectV2SingleSelectFieldOptionInput,
+  type SetPlanSizeOptionsMutation,
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
-import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "./kinds.ts";
+import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "./types.ts";
+import { planFieldWrites, setPlanFieldsDocument } from "./plan-fields.ts";
+import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -83,6 +89,7 @@ export class OctokitProjects implements ProjectsPort {
       statusOptions: optionIds(statusField(project.field)),
       dateFields: dateFieldIds(project),
       priorityOptions: project.priority?.__typename === "ProjectV2SingleSelectField" ? project.priority.options.map((o) => o.name) : undefined,
+      estimateFields: estimateFieldIds(project),
     };
   }
 
@@ -237,6 +244,53 @@ export class OctokitProjects implements ProjectsPort {
     return ids;
   }
 
+  async ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds> {
+    const project = await this.projectNode(login, number);
+    if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
+    const ids = estimateFieldIds(project);
+    // Check both fields first, so a Project with a wrong Estimate does not get a Size either.
+    if (project.size && !ids.size) throw new Error(`GitHub Project #${number} has a Size field that is not a single select. Rename it on GitHub, then try again.`);
+    if (project.estimate && !ids.estimate) throw new Error(`GitHub Project #${number} has an Estimate field that is not a number field. Rename it on GitHub, then try again.`);
+    const existing = project.size?.__typename === "ProjectV2SingleSelectField" ? project.size : undefined;
+    const size = existing ? await this.addSizeOptions(existing) : await this.createSizeField(project.id);
+    const estimate = ids.estimate ?? (await this.createEstimateField(project.id));
+    return { size, estimate };
+  }
+
+  /**
+   * Adds the S, M and L options a Size field lacks after its own options, sending every existing option
+   * back with its id so no item loses its value; returns the field's ids. Changes nothing when it has all three.
+   */
+  private async addSizeOptions(field: { id: string; options: ChoiceOption[] }): Promise<NonNullable<PlanEstimateFieldIds["size"]>> {
+    const missing = PLAN_SIZES.filter((name) => !field.options.some((o) => o.name === name));
+    if (missing.length === 0) return sizeFieldIds(field);
+    const options: ProjectV2SingleSelectFieldOptionInput[] = [
+      ...field.options.map((o) => ({ id: o.id, name: o.name, color: o.color, description: o.description })),
+      ...missing.map((name) => ({ name, ...SIZE_STYLE[name] })),
+    ];
+    const updated = await this.octokit.graphql<SetPlanSizeOptionsMutation>(SetPlanSizeOptionsDocument.toString(), { fieldId: field.id, options });
+    const result = updated.updateProjectV2Field?.projectV2Field;
+    if (result?.__typename !== "ProjectV2SingleSelectField") throw new Error("updating the Size field returned no single select field");
+    return sizeFieldIds(result);
+  }
+
+  /** Creates the Size single select field with the options S, M and L and returns its ids. */
+  private async createSizeField(projectId: string): Promise<NonNullable<PlanEstimateFieldIds["size"]>> {
+    const options = PLAN_SIZES.map((name) => ({ name, ...SIZE_STYLE[name] }));
+    const created = await this.octokit.graphql<CreatePlanSizeFieldMutation>(CreatePlanSizeFieldDocument.toString(), { projectId, name: ESTIMATE_FIELD_NAMES.size, options });
+    const field = created.createProjectV2Field?.projectV2Field;
+    if (field?.__typename !== "ProjectV2SingleSelectField") throw new Error("creating the Size field returned no single select field");
+    return sizeFieldIds(field);
+  }
+
+  /** Creates the Estimate number field and returns its id. */
+  private async createEstimateField(projectId: string): Promise<string> {
+    const created = await this.octokit.graphql<CreatePlanEstimateFieldMutation>(CreatePlanEstimateFieldDocument.toString(), { projectId, name: ESTIMATE_FIELD_NAMES.estimate });
+    const field = created.createProjectV2Field?.projectV2Field;
+    if (field?.__typename !== "ProjectV2Field") throw new Error("creating the Estimate field returned no number field");
+    return field.id;
+  }
+
   /** Sets a new issue's Start and Target, once it is an item; throws naming the issue when they cannot be written. */
   private async setNewDates(repo: RepoRef, input: NewPlanIssue, issue: number) {
     const dates = { ...(input.start ? { start: input.start } : {}), ...(input.target ? { target: input.target } : {}) };
@@ -254,17 +308,20 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async setDates(repo: RepoRef, project: number, issue: number, dates: PlanDates): Promise<SetDatesResult> {
+    const result = await this.setPlanFields(repo, project, issue, dates);
+    // Only a Size write can miss an option.
+    if (result === "no-option") throw new Error(`setDates got no-option for #${issue}`);
+    return result;
+  }
+
+  async setPlanFields(repo: RepoRef, project: number, issue: number, fields: PlanFields): Promise<SetFieldsResult> {
     const { item } = await this.issuePlan(repo, project, issue);
     if (!item) return "not-in-project";
-    const fields = dateFieldIds(item.project);
-    const writes = DATE_KEYS.filter((key) => dates[key] !== undefined).map((key) => ({ fieldId: fields[key], date: dates[key] }));
-    // Check every field first, so a Project with Start but no Target changes nothing.
-    if (writes.some((w) => !w.fieldId)) return "no-field";
-    for (const { fieldId, date } of writes) {
-      const ids = { projectId: item.project.id, itemId: item.id, fieldId };
-      if (date === null) await this.octokit.graphql(ClearPlanFieldDocument.toString(), ids);
-      else await this.octokit.graphql(SetPlanDateDocument.toString(), { ...ids, date });
-    }
+    const writes = planFieldWrites({ dates: dateFieldIds(item.project), estimates: estimateFieldIds(item.project) }, fields);
+    if (typeof writes === "string") return writes;
+    if (writes.length === 0) return "set";
+    const { document, variables } = setPlanFieldsDocument(writes);
+    await this.octokit.graphql(document, { projectId: item.project.id, itemId: item.id, ...variables });
     return "set";
   }
 
@@ -281,7 +338,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   /**
-   * Runs a query that looks up the Start, Target or Priority field by name. A Project without one answers
+   * Runs a query that looks up the Start, Target, Size, Estimate or Priority field by name. A Project without one answers
    * with a NOT_FOUND per missing field next to complete data, which is a Project without that field, not an error.
    */
   private async withOptionalFields<T>(document: string, variables: Record<string, unknown>): Promise<T> {
@@ -307,7 +364,7 @@ export class OctokitProjects implements ProjectsPort {
 
   /** The issue and its item in the repository owner's Project `project`, if it is one. */
   private async issuePlan(repo: RepoRef, project: number | undefined, number: number) {
-    // Each of the issue's Projects that lacks Start or Target adds a NOT_FOUND, whichever Project the plan is.
+    // Each of the issue's Projects that lacks Start, Target, Size or Estimate adds a NOT_FOUND, whichever Project the plan is.
     const { repository } = await this.withOptionalFields<IssuePlanQuery>(IssuePlanDocument.toString(), { owner: repo.owner, name: repo.name, number });
     const issue = repository?.issue;
     if (!repository || !issue) throw new Error(`issue ${repo.owner}/${repo.name}#${number} not found`);
@@ -365,7 +422,7 @@ function labelIdsOf(known: { id: string; name: string }[], names: string[], repo
 
 type StatusFieldConfig ={ __typename: string; id?: string; options?: { id: string; name: string }[] } | null | undefined;
 
-/** The data of a GraphQL answer whose only errors are the Start, Target and Priority field lookups finding no such field. */
+/** The data of a GraphQL answer whose only errors are the Start, Target, Size, Estimate and Priority field lookups finding no such field. */
 function dataDespiteMissingFields(error: unknown): unknown {
   const { errors, data } = (error ?? {}) as { errors?: { type?: string; path?: (string | number)[] }[]; data?: unknown };
   if (!data || !Array.isArray(errors) || errors.length === 0) return undefined;
@@ -436,6 +493,8 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
         item.iteration?.__typename === "ProjectV2ItemFieldIterationValue"
           ? { title: item.iteration.title, startDate: item.iteration.startDate, duration: item.iteration.duration }
           : undefined,
+      size: item.size?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? sizeOf(item.size.name) : undefined,
+      estimate: item.estimate?.__typename === "ProjectV2ItemFieldNumberValue" && item.estimate.number != null && item.estimate.number > 0 ? item.estimate.number : undefined,
     },
   ];
 }
@@ -443,14 +502,40 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
 const DATE_KEYS = ["start", "target"] as const;
 /** The names of the date fields on GitHub, the pair the roadmap layout reads once a person picks them. */
 const DATE_FIELD_NAMES = { start: "Start", target: "Target" } as const;
-/** The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`, also inside IssuePlan's items) and Priority (`PlanProject`). */
-const OPTIONAL_FIELD_ALIASES = new Set<string>([...Object.keys(DATE_FIELD_NAMES), "priority"]);
+/** The names of the estimate fields on GitHub. */
+const ESTIMATE_FIELD_NAMES = { size: "Size", estimate: "Estimate" } as const;
+/**
+ * The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`),
+ * Size and Estimate (`PlanEstimateFields`), both also inside IssuePlan's items, and Priority (`PlanProject`).
+ */
+const OPTIONAL_FIELD_ALIASES = new Set<string>([...Object.keys(DATE_FIELD_NAMES), ...Object.keys(ESTIMATE_FIELD_NAMES), "priority"]);
 
 /** The ids of a Project's Start and Target fields, each undefined when missing or not a date field. */
 function dateFieldIds(project: PlanDateFieldsFragment): PlanDateFieldIds {
   const id = (field: PlanDateFieldsFragment["start"]) => (field?.__typename === "ProjectV2Field" && field.dataType === "DATE" ? field.id : undefined);
   return { start: id(project.start), target: id(project.target) };
 }
+
+/** The ids of a Project's Size single select field with its S, M and L options and of its Estimate number field; undefined for a field it lacks or of another type. */
+function estimateFieldIds(project: PlanEstimateFieldsFragment): PlanEstimateFieldIds {
+  return {
+    size: project.size?.__typename === "ProjectV2SingleSelectField" ? sizeFieldIds(project.size) : undefined,
+    estimate: project.estimate?.__typename === "ProjectV2Field" && project.estimate.dataType === "NUMBER" ? project.estimate.id : undefined,
+  };
+}
+
+/** A Size field's id and the ids of its S, M and L options; its other options are not handoff's sizes. */
+function sizeFieldIds(field: { id: string; options: { id: string; name: string }[] }): NonNullable<PlanEstimateFieldIds["size"]> {
+  const optionId = (name: PlanSize) => field.options.find((o) => o.name === name)?.id;
+  return { id: field.id, options: { S: optionId("S"), M: optionId("M"), L: optionId("L") } };
+}
+
+/** How handoff's Size options look on GitHub's board; the descriptions say what each size means. */
+const SIZE_STYLE: Record<PlanSize, Pick<ProjectV2SingleSelectFieldOptionInput, "color" | "description">> = {
+  S: { color: "GREEN", description: "A change in one place" },
+  M: { color: "YELLOW", description: "A feature across a few files" },
+  L: { color: "ORANGE", description: "A change across several areas" },
+};
 
 /** The day of a date field's value; undefined when the item has none or the field is not a date field. */
 function dateOf(value: { __typename: string; date?: string | null } | null | undefined): string | undefined {

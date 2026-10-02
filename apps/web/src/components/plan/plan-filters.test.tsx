@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { filterPlan, parsePlanFilters } from "@/lib/plan/filters";
 import { PlanBoard } from "./plan-board";
-import { PlanFilters } from "./plan-filters";
+import { FilterChips, PlanFilters } from "./plan-filters";
 import { PlanTree } from "./plan-tree";
 import { epic, planView, PROJECT, REPO_URL, run, story, task, unplannedIssue } from "./testing/plan-fixtures";
 
@@ -37,19 +37,24 @@ function filters(params: Record<string, string>) {
 
 test("epic, status and run filters live in the URL and narrow both views", () => {
   const { parsed } = filters({});
-  const { unmount } = render(<PlanFilters projectId="p1" view="board" filters={parsed} epics={view.epics} counts={{ Shaping: 1, Ready: 0, Running: 3, "In review": 1, Done: 1, Other: 0 }} unplanned={1} />);
-  fireEvent.click(screen.getByRole("button", { name: "Epic All" }));
+  const { unmount } = render(<PlanFilters projectId="p1" view="board" filters={parsed} epics={view.epics} counts={{ Shaping: 1, Ready: 0, Running: 3, "In review": 1, Done: 1, Other: 0 }} unplanned={1} people={[]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Epic" }));
   fireEvent.click(screen.getByRole("option", { name: /#12 Project management/ }));
   expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=board&epic=12", { scroll: false });
 
-  fireEvent.click(screen.getByRole("button", { name: "Run Any" }));
+  fireEvent.click(screen.getByRole("button", { name: "Run" }));
   fireEvent.click(screen.getByRole("radio", { name: /Needs you/ }));
   expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=board&run=needs-you", { scroll: false });
   unmount();
 
   // Two filters set: the Status popover adds to the picked statuses, and the chips undo each filter.
   const set = filters({ epic: "12", status: "Running" }).parsed;
-  render(<PlanFilters projectId="p1" view="tree" filters={set} epics={view.epics} counts={{ Shaping: 1, Ready: 0, Running: 3, "In review": 1, Done: 1, Other: 0 }} unplanned={1} />);
+  render(
+    <>
+      <PlanFilters projectId="p1" view="tree" filters={set} epics={view.epics} counts={{ Shaping: 1, Ready: 0, Running: 3, "In review": 1, Done: 1, Other: 0 }} unplanned={1} people={[]} />
+      <FilterChips projectId="p1" view="tree" filters={set} epics={view.epics} />
+    </>,
+  );
   fireEvent.keyDown(screen.getByRole("button", { name: "Status Running" }), { key: "Enter" });
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /In review/ }));
   expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?epic=12&status=Running,In%20review", { scroll: false });

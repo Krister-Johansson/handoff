@@ -88,3 +88,53 @@ test("a plan item's assignees are its issue's on GitHub, so assigning on GitHub 
   await github.setAssignees(repo, task.number, ["octocat"]);
   expect((await projects.listItems("octo", project.number, repo)).map((i) => i.assignees)).toEqual([["octocat"]]);
 });
+
+test("FakeProjects writes Size, Estimate and dates in one call, reading another Size option or an Estimate of 0 as none", async () => {
+  const github = new FakeGitHub();
+  const projects = new FakeProjects(github);
+  const project = await projects.createProject("octo", repo, "sample plan");
+  const first = await projects.createIssue(repo, { project: project.number, title: "First", body: "", labels: ["task"] });
+  const second = await projects.createIssue(repo, { project: project.number, title: "Second", body: "", labels: ["task"] });
+
+  // A new Project has no Size or Estimate until setup adds them; nothing is written.
+  expect(project.estimateFields).toBeUndefined();
+  expect(await projects.setPlanFields(repo, project.number, first.number, { start: "2026-10-06", size: "M" })).toBe("no-field");
+  expect(await projects.ensureEstimateFields("octo", project.number)).toEqual({
+    size: { id: expect.any(String), options: { S: expect.any(String), M: expect.any(String), L: expect.any(String) } },
+    estimate: expect.any(String),
+  });
+
+  expect(await projects.setPlanFields(repo, project.number, first.number, { start: "2026-10-06", target: "2026-10-07", size: "M", estimate: 10.5 })).toBe("set");
+  expect(await projects.setPlanFields(repo, project.number, 99, { size: "S" })).toBe("not-in-project");
+  // A person picks one of the field's own options on GitHub, and types 0 as the estimate.
+  projects.itemsOf(repo).get(second.number)!.size = "🦑 Large";
+  projects.itemsOf(repo).get(second.number)!.estimate = 0;
+
+  const read = async () => (await projects.listItems("octo", project.number, repo)).map((i) => [i.number, i.start, i.target, i.size, i.estimate]);
+  expect(await read()).toEqual([
+    [first.number, "2026-10-06", "2026-10-07", "M", 10.5],
+    [second.number, undefined, undefined, undefined, undefined],
+  ]);
+
+  expect(await projects.setPlanFields(repo, project.number, first.number, { size: null, estimate: null })).toBe("set");
+  expect(await read()).toEqual([
+    [first.number, "2026-10-06", "2026-10-07", undefined, undefined],
+    [second.number, undefined, undefined, undefined, undefined],
+  ]);
+
+  // A Size field without L refuses L and changes nothing else.
+  projects.plans.get("octo/sample")!.project.estimateFields!.size!.options.L = undefined;
+  expect(await projects.setPlanFields(repo, project.number, first.number, { estimate: 3, size: "L" })).toBe("no-option");
+  expect((await read())[0]).toEqual([first.number, "2026-10-06", "2026-10-07", undefined, undefined]);
+});
+
+test("FakeProjects ensureEstimateFields adds S, M and L to a Size field that lacks them and keeps the ids it has", async () => {
+  const projects = new FakeProjects(new FakeGitHub());
+  const project = await projects.createProject("octo", repo, "sample plan");
+  projects.plans.get("octo/sample")!.project.estimateFields = { size: { id: "F_size", options: { S: undefined, M: "o_M", L: undefined } }, estimate: undefined };
+
+  const ids = await projects.ensureEstimateFields("octo", project.number);
+  expect(ids).toEqual({ size: { id: "F_size", options: { S: expect.any(String), M: "o_M", L: expect.any(String) } }, estimate: expect.any(String) });
+  expect(await projects.ensureEstimateFields("octo", project.number)).toEqual(ids);
+  expect((await projects.getProject("octo", project.number))?.estimateFields).toEqual(ids);
+});

@@ -3,6 +3,7 @@ import type { PlanTask } from "@/server/plan";
 import { hasActiveRun } from "@/lib/plan/task";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { taskColumn } from "@/lib/plan/task";
+import { AssigneeButton } from "./assignee-button";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
 
 /** What a card says when a person moved it on GitHub against its run. */
@@ -12,9 +13,6 @@ function movedNote(task: PlanTask): string | undefined {
   if (column === "Running" && !task.run) return "Moved here on GitHub. Nothing starts until someone starts a run.";
   return undefined;
 }
-
-/** The initials of a GitHub login, for the assignee's circle. */
-const initials = (login: string) => login.slice(0, 2).toUpperCase();
 
 /**
  * One task on the board: the epic as a muted eyebrow, the number and title opening the issue on
@@ -38,7 +36,6 @@ export function PlanCard({
   start: StartRunContext;
 }) {
   const note = movedNote(task);
-  const assignee = task.assignees[0];
   return (
     <li aria-label={`#${task.number} ${task.title}`} className="flex flex-col gap-1.5 rounded-md border bg-card p-2.5 text-[13px] shadow-xs">
       <div className="flex min-w-0 items-start gap-2">
@@ -57,11 +54,9 @@ export function PlanCard({
         {taskColumn(task) !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={repoUrl} />}
         <RunCell task={task} projectId={projectId} needsYou={needsYou} />
         <PrLink task={task} repoUrl={repoUrl} />
-        {assignee && (
-          <span title={assignee} className="ml-auto grid size-5 place-items-center rounded-full bg-muted text-[9px] font-semibold text-muted-foreground">
-            {initials(assignee)}
-          </span>
-        )}
+        <span className="ml-auto flex empty:hidden">
+          <AssigneeButton task={task} />
+        </span>
       </div>
     </li>
   );
