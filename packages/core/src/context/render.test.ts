@@ -19,6 +19,12 @@ test("renderContextPacket renders the fixed sections in order", () => {
   expect(md).toContain("coder_output");
 });
 
+test("the output contract asks for a short summary with a question, which notifications show", () => {
+  const contract = renderContextPacket(packet).split("# Output contract")[1];
+  expect(contract).toContain("return status `needs_input` with a question");
+  expect(contract).toContain("`summary` of at most 80 characters");
+});
+
 test("renderContextPacket adds the previous attempt with failed check tails and unresolved review comments only", () => {
   const md = renderContextPacket({
     ...packet,

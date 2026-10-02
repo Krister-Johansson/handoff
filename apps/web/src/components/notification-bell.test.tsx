@@ -87,6 +87,13 @@ test("notifications there when the page opens make no toast; new ones each make 
   expect(toast.success).toHaveBeenCalledTimes(1);
 });
 
+test("a toast keeps its text to two lines, like the bell's list", async () => {
+  const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: [asked], unread: 1 });
+  render(<NotificationBell load={load} markRead={vi.fn()} intervalMs={20} />);
+  await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+  expect(toast.warning).toHaveBeenCalledWith(asked.title, expect.objectContaining({ classNames: expect.objectContaining({ description: expect.stringContaining("line-clamp-2") }) }));
+});
+
 test("many new notifications at once make one toast", async () => {
   const many = Array.from({ length: 5 }, (_, i) => item(`n${i}`, "started", `sandbox: run started ${i}`, `2026-10-01T10:1${i}:00.000Z`));
   const load = vi.fn().mockResolvedValueOnce({ items: [], unread: 0 }).mockResolvedValue({ items: many, unread: 5 });

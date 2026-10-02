@@ -108,8 +108,8 @@ async function compose(ctx: ExecutorContext, branchDiff: BranchDiff | undefined)
     };
   }
   const from = trigger?.from ? ctx.state.nodes[trigger.from]?.output : undefined;
-  const asked = (from as { question?: { text?: string; options?: string[] } } | undefined)?.question;
-  if (asked?.text) return { question: asked.text, options: asked.options ?? [], context: { reason: "needs_input", from: trigger?.from } };
+  const asked = (from as { question?: { text?: string; summary?: string; options?: string[] } } | undefined)?.question;
+  if (asked?.text) return { question: asked.text, options: asked.options ?? [], context: { reason: "needs_input", from: trigger?.from, ...(asked.summary ? { summary: asked.summary } : {}) } };
   const config = ctx.node.config;
   // Review mode: show what arrived, so the person can read it, comment and approve or ask for changes.
   const found = trigger?.from ? await withCode(ctx, reviewFor(ctx, trigger.from), branchDiff) : undefined;
