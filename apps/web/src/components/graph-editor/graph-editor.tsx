@@ -164,7 +164,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
       } else setSaveError(result.errors.map((e) => e.message).join("; "));
     });
 
-  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit });
+  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library });
 
   const nextVersion = Math.max(version, ...versions.map((v) => v.version)) + 1;
 

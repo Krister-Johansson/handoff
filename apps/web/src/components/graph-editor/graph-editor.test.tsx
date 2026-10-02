@@ -287,3 +287,36 @@ test("page_get_node returns the node's label, type, config and edges", async () 
   });
   expect(await call("page_get_node", { key: "tester" })).toEqual({ text: "There is no node tester. The nodes are: planner, coder, reviewer.", isError: true });
 });
+
+test("page_update_node changes a coder's instructions and marks the graph unsaved, and an unknown key is refused with the known ones", async () => {
+  const { call } = await withAssistant(reviewed);
+  await call("page_select", { node: "coder" });
+  expect(screen.getByRole("button", { name: "Saved" })).toBeDisabled();
+
+  expect(await call("page_update_node", { key: "coder", patch: { instructions: "Keep commits small and focused.", effort: "high" } })).toEqual({
+    text: "Changed instructions, effort of coder. The graph is not saved yet.",
+    isError: false,
+  });
+  // The inspector shows the new text even though the coder was already open in it.
+  expect(within(inspector()).getByLabelText("Instructions")).toHaveValue("Keep commits small and focused.");
+  expect(within(inspector()).getByLabelText("Effort")).toHaveValue("high");
+  expect(screen.getByText("· edited, not saved")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save as v5" })).toBeEnabled();
+
+  // null clears a setting, as emptying its field does.
+  expect(await call("page_update_node", { key: "coder", patch: { maxTurns: null } })).toMatchObject({ isError: false });
+  expect(within(inspector()).getByLabelText("Max turns")).toHaveValue(null);
+
+  expect(await call("page_update_node", { key: "coder", patch: { instructions: "Ship it.", temperature: 0.2 } })).toEqual({
+    text: "A coder has no temperature. Its fields are: label, notify, instructions, model, effort, maxTurns, allTools, allowedTools, library, checks.",
+    isError: true,
+  });
+  expect(await call("page_update_node", { key: "coder", patch: { effort: "huge" } })).toEqual({
+    text: 'The change to coder is not valid: effort: Invalid option: expected one of "low"|"medium"|"high"|"xhigh"|"max"',
+    isError: true,
+  });
+  expect(within(inspector()).getByLabelText("Instructions")).toHaveValue("Keep commits small and focused.");
+
+  // Each node type has its own fields: a reviewer has no tests to run.
+  expect(await call("page_update_node", { key: "reviewer", patch: { checks: [] } })).toMatchObject({ isError: true, text: expect.stringMatching(/^A reviewer has no checks\. Its fields are: label, notify, instructions/) });
+});

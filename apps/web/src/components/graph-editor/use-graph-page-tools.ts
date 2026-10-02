@@ -1,7 +1,9 @@
 "use client";
 
-import type { CompileError, FlowGraph } from "@handoff/core";
+import { nodeCatalog, type CompileError, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
+import { parseNodePatch } from "@/lib/assistant/page-tools";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
+import type { LibraryChoices, LibraryKind } from "@/lib/library-choices";
 import type { EditorAction } from "./state";
 
 export type Selection = { nodeId?: string; edgeId?: string };
@@ -17,6 +19,7 @@ type Editor = {
   locked: boolean;
   issues: CompileError[];
   edit: (action: EditorAction) => void;
+  library: LibraryChoices;
 };
 
 const keysOf = (graph: FlowGraph) => graph.nodes.map((n) => n.id).join(", ");
@@ -36,11 +39,63 @@ function edgeOf(graph: FlowGraph, id: string) {
   return edge;
 }
 
+/** Library names a change asks for that the project's library does not have, as "skills: x, y". */
+function missingFromLibrary(chosen: Partial<Record<LibraryKind, string[]>>, available: LibraryChoices): string[] {
+  return (Object.keys(chosen) as LibraryKind[]).flatMap((kind) => {
+    const names = new Set(available[kind].map((e) => e.name));
+    const missing = (chosen[kind] ?? []).filter((name) => !names.has(name));
+    return missing.length ? [`${kind}: ${missing.join(", ")}`] : [];
+  });
+}
+
+type NodePatch = {
+  label?: string;
+  library?: Record<LibraryKind, string[]>;
+  notify?: Record<string, boolean>;
+  checks?: ({ kind: "diff_within_paths" } | { kind: "tests_green"; command: string; passEnv?: string[] })[];
+  exhaustedGate?: boolean;
+  [setting: string]: unknown;
+};
+
+/**
+ * The editor actions that make a checked change to a node, as the inspector's fields would: the label,
+ * library, notifications and checks on the node, the gate that takes exhausted loops on the graph, the
+ * rest in its config, where null removes a setting.
+ */
+function nodeChanges(graph: FlowGraph, node: FlowNode, patch: NodePatch): EditorAction[] {
+  const { label, library, notify, checks, exhaustedGate, ...settings } = patch;
+  const set = Object.fromEntries(Object.entries(settings).filter(([, v]) => v !== null));
+  const cleared = new Set(Object.entries(settings).flatMap(([k, v]) => (v === null ? [k] : [])));
+  // A Finish node kept its finished switch in config.notify; setting it moves it to notify.
+  if (notify?.finished !== undefined && "notify" in node.data.config) cleared.add("notify");
+  const output = node.data.contract?.output ?? nodeCatalog[node.data.nodeType as NodeType].contract;
+  const actions: EditorAction[] = [
+    {
+      type: "updateNode",
+      id: node.id,
+      patch: {
+        ...(label !== undefined ? { label } : {}),
+        ...(library ? { library } : {}),
+        ...(notify ? { notify: { ...node.data.notify, ...notify } } : {}),
+        ...(checks ? { contract: { output, checks: checks.map((c) => (c.kind === "tests_green" ? { timeoutMs: 600_000, ...c } : c)) } } : {}),
+        config: set,
+      },
+    },
+  ];
+  if (cleared.size) {
+    const config = Object.fromEntries(Object.entries({ ...node.data.config, ...set }).filter(([k]) => !cleared.has(k)));
+    actions.push({ type: "replaceNodeConfig", id: node.id, config });
+  }
+  if (exhaustedGate === true) actions.push({ type: "setExhaustedGate", id: node.id });
+  if (exhaustedGate === false && graph.attributes.exhaustedGate === node.id) actions.push({ type: "setExhaustedGate", id: undefined });
+  return actions;
+}
+
 /**
  * The graph editor's page tools: what the assistant or a browser agent can do on the open graph, the
  * same things the canvas and the inspector do, under the same lock.
  */
-export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit }: Editor) {
+export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library }: Editor) {
   /** Selects one node or edge on the canvas and in the inspector, or nothing. */
   const select = (next: Selection) => {
     edit({ type: "nodesChange", changes: graph.nodes.map((n) => ({ id: n.id, type: "select", selected: n.id === next.nodeId })) });
@@ -75,7 +130,16 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
         return JSON.stringify({ key, type: nodeType, label, isStart, config, library: library ?? null, contract: contract ?? null, notify: notify ?? {}, edges });
       },
       page_get_edge: undefined,
-      page_update_node: undefined,
+      page_update_node: ({ key, patch }) => {
+        const node = nodeOf(graph, key);
+        const parsed = parseNodePatch(key, node.data.nodeType as NodeType, patch);
+        if (!parsed.ok) throw new Error(parsed.message);
+        const change = parsed.patch as NodePatch;
+        const missing = change.library ? missingFromLibrary(change.library, library) : [];
+        if (missing.length) throw new Error(`The project's library has no ${missing.join("; ")}.`);
+        for (const action of nodeChanges(graph, node, change)) edit(action);
+        return `Changed ${Object.keys(change).join(", ")} of ${key}. The graph is not saved yet.`;
+      },
       page_rename_node: undefined,
       page_update_edge: undefined,
       page_add_node: undefined,
