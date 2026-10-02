@@ -59,11 +59,12 @@ function InboxCard({ icon: Icon, tone, children }: { icon: LucideIcon; tone: Ton
 /**
  * A card in the Inbox under the id the assistant's page_show_item takes: a question's or permission's
  * id, the run's for one ready to merge or out of rounds, the execution's for a failed step or a pull
- * request. It takes focus from script only, which shows its ring.
+ * request. Tab skips it; page_show_item focuses it from script, and the ring shows on :focus because
+ * Chrome does not count a focus from script as :focus-visible when the person last used the mouse.
  */
 export function InboxItem({ id, children }: { id: string; children: ReactNode }) {
   return (
-    <div id={id} tabIndex={-1} className="rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+    <div id={id} tabIndex={-1} className="rounded-xl outline-none focus:ring-[3px] focus:ring-ring/50">
       {children}
     </div>
   );
