@@ -10,7 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { runPath } from "@/lib/paths";
-import { describePermission, ruleFor } from "@/lib/permission";
+import { describePermission } from "@handoff/core";
+import { ruleFor } from "@/lib/permission";
 
 export type PermissionRequestView = { id: string; runId: string; nodeKey: string; toolName: string; input: Record<string, unknown> };
 

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { brief, questionBrief } from "./brief";
+import { brief, questionBrief } from "./brief.ts";
 
 const LONG =
   "Four palette colours fall below 3:1 on the --accent that a hovered board or dashboard card paints in the dark theme. Measured contrast against dark --accent: Blue 2.88, Green 2.97, Amber 2.97, Teal 2.72. How should the hovered-card case be handled?";

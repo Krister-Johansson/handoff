@@ -62,7 +62,9 @@ test("a Try it gate starts the run's app and asks the person to check each accep
   expect(await (await fetch(`http://127.0.0.1:${preview.port}`)).text()).toBe("todo app");
   expect(question).toMatchObject({ options: ["approve", "changes"], answer: null });
   expect(question.context).toEqual({ reason: "try", acceptance: ["A user can create a new task"], preview: { id: preview.id, url: preview.url, status: "running" } });
-  expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "try")).toMatchObject({ status: "waiting", waitKind: "human" });
+  const { executions, events } = await inspect(db, run.id);
+  expect(executions.find((e) => e.nodeKey === "try")).toMatchObject({ status: "waiting", waitKind: "human" });
+  expect(events.find((e) => e.type === "notify")?.payload).toMatchObject({ kind: "input", nodeKey: "try", questionId: question.id, title: expect.stringMatching(/: the app is ready for you to try$/), body: "Tasks" });
 });
 
 test("answering stops the app and goes on, and a failed item goes back to the coder", async () => {

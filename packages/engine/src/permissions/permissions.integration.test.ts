@@ -4,7 +4,7 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import type { CliRunOptions, CliRunRequest, CliRunResult } from "@handoff/cli-adapter";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { eq, permissionRequests } from "@handoff/db";
+import { eq, permissionRequests, projects } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { decidePermission } from "../operations.ts";
@@ -73,7 +73,14 @@ test("a tool call the rules do not cover waits for a person, who is told, and th
   expect(row).toMatchObject({ toolName: "Bash", input: { command: "git -C /w log --oneline -8" }, status: "allowed", decidedBy: "krister" });
   const { events, executions } = await inspect(db, run.id);
   expect(executions.find((e) => e.nodeKey === "planner")!.status).toBe("passed");
-  expect(events.find((e) => e.type === "notify")?.payload).toEqual({ kind: "permission", nodeKey: "planner", requestId: ID });
+  const [project] = await db.select().from(projects).where(eq(projects.id, run.projectId));
+  expect(events.find((e) => e.type === "notify")?.payload).toEqual({
+    kind: "permission",
+    nodeKey: "planner",
+    requestId: ID,
+    title: `${project!.name}: planner asks to run a command`,
+    body: "git -C /w log --oneline -8",
+  });
 });
 
 test("a denial goes back with the person's message, and an answered request cannot be answered again", async () => {

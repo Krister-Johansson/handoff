@@ -15,10 +15,10 @@ async function setUp() {
   await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
   const start = (task: string) => startRunFromGraph(db, { projectId: project.id, graphName: "g", task });
   const event = (runId: string, type: string, payload: Record<string, unknown> = {}) => db.transaction((tx) => appendEvents(tx, runId, [{ type, payload }]));
-  // A node's notification, as the engine emits it. A run whose node failed it is failed, as the engine leaves it.
+  // A node's notification, as the engine emits it, with the text the node wrote. A run whose node failed it is failed, as the engine leaves it.
   const notify = (runId: string, kind: string, payload: Record<string, unknown> = {}, nodeExecutionId?: string) =>
     db.transaction(async (tx) => {
-      await appendEvents(tx, runId, [{ type: "notify", payload: { kind, ...payload }, nodeExecutionId: nodeExecutionId ?? null }]);
+      await appendEvents(tx, runId, [{ type: "notify", payload: { kind, title: `${kind} title`, body: `${kind} body`, ...payload }, nodeExecutionId: nodeExecutionId ?? null }]);
       if (kind === "failed") await tx.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
     });
   // A gate's question and the notification it sends.
@@ -33,12 +33,12 @@ async function setUp() {
   return { project, start, event, notify, ask, age };
 }
 
-test("the feed lists runs that started, finished or failed and questions for a person, newest first", async () => {
+test("the feed lists what nodes said, newest first, with the title and body each node wrote", async () => {
   const { project, start, event, notify, ask, age } = await setUp();
   const done = await start("Add a CHANGELOG.md");
   await notify(done.id, "started");
   await age(50);
-  await notify(done.id, "finished");
+  await notify(done.id, "finished", { title: "sandbox: run finished", body: "Add a CHANGELOG.md" });
   await age(40);
   const broken = await start("Add usage docs");
   await notify(broken.id, "failed", { nodeKey: "coder", reason: "node_failed" });
@@ -58,12 +58,12 @@ test("the feed lists runs that started, finished or failed and questions for a p
   const { items, unread } = await listNotifications(db, { limit: 8 });
   const run = (id: string) => `/projects/${project.id}/runs/${id}`;
   expect(items.map(({ kind, title, body, href }) => ({ kind, title, body, href }))).toEqual([
-    { kind: "input", title: "sandbox: ask asks a question", body: "Which license?", href: run(asking.id) },
-    { kind: "input", title: "sandbox: the plan from planner needs your review", body: "Build a todo app", href: `${run(asking.id)}/review/${review!.id}` },
-    { kind: "failed", title: "sandbox: code_review ran out of rounds", body: "Review until done", href: run(stuck.id) },
-    { kind: "failed", title: "sandbox: run failed at coder", body: "Add usage docs", href: run(broken.id) },
+    { kind: "input", title: "input title", body: "input body", href: run(asking.id) },
+    { kind: "input", title: "input title", body: "input body", href: `${run(asking.id)}/review/${review!.id}` },
+    { kind: "failed", title: "failed title", body: "failed body", href: run(stuck.id) },
+    { kind: "failed", title: "failed title", body: "failed body", href: run(broken.id) },
     { kind: "finished", title: "sandbox: run finished", body: "Add a CHANGELOG.md", href: run(done.id) },
-    { kind: "started", title: "sandbox: run started", body: "Add a CHANGELOG.md", href: run(done.id) },
+    { kind: "started", title: "started title", body: "started body", href: run(done.id) },
   ]);
   expect(items[0]!.id).toMatch(/^event:\d+$/);
   expect(items.every((i) => i.unread)).toBe(true);
@@ -71,18 +71,12 @@ test("the feed lists runs that started, finished or failed and questions for a p
   expect((await listNotifications(db, { limit: 2 })).items.map((i) => i.kind)).toEqual(["input", "input"]);
 });
 
-test("a question's notification shows its summary, or the question cut short when it has none", async () => {
-  const { start, ask } = await setUp();
+test("the feed shows a notification's text as the node wrote it, however long", async () => {
+  const { start, notify } = await setUp();
   const run = await start("Pick a license");
-  const long = `${"The repository has no license file and the README names two. ".repeat(4)}Which license?`;
-  const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  await ask({ runId: run.id, nodeExecutionId: gate.id, question: long, context: { reason: "needs_input", summary: "MIT or Apache-2.0?" } });
-  const gate2 = await seedExecution(db, run.id, { nodeKey: "gate2", nodeType: "human_gate", executorKind: "human", status: "waiting" });
-  await ask({ runId: run.id, nodeExecutionId: gate2.id, question: long });
-  const bodies = Object.fromEntries((await listNotifications(db, { limit: 8 })).items.map((item) => [item.title, item.body]));
-  expect(bodies["sandbox: gate asks a question"]).toBe("MIT or Apache-2.0?");
-  expect(bodies["sandbox: gate2 asks a question"]).toMatch(/^The repository has no license file .*…$/);
-  expect(bodies["sandbox: gate2 asks a question"]!.length).toBeLessThanOrEqual(140);
+  const body = "The repository has no license file and the README names two. ".repeat(4);
+  await notify(run.id, "failed", { title: "A title the feed would not have written", body });
+  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ title: "A title the feed would not have written", body });
 });
 
 test("opening the feed marks what it showed as read, and later items are unread again", async () => {
@@ -160,7 +154,7 @@ test("a pull request first in line and waiting for a person is a notification th
   await age(5);
   await notify(run.id, "ready", { number: 54 });
   const { items } = await listNotifications(db, { limit: 8 });
-  expect(items[0]).toMatchObject({ kind: "ready", title: "sandbox: PR #54 is ready to merge", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${run.id}` });
+  expect(items[0]).toMatchObject({ kind: "ready", title: "ready title", body: "ready body", href: `/projects/${project.id}/runs/${run.id}` });
   expect((await listNotifications(db, { limit: 8, filter: "input" })).items.map((i) => i.kind)).toEqual(["ready"]);
 });
 
@@ -223,7 +217,7 @@ test("a merge node that says its pull request merged is news that asks nothing",
   const run = await start("Add a CHANGELOG.md");
   await notify(run.id, "merged", { nodeKey: "merge", number: 54 });
   const { items, unread } = await listNotifications(db, { limit: 8 });
-  expect(items).toMatchObject([{ kind: "merged", title: "sandbox: PR #54 merged", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true }]);
+  expect(items).toMatchObject([{ kind: "merged", title: "merged title", body: "merged body", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true }]);
   expect(unread).toBe(1);
   expect((await listNotifications(db, { limit: 8, filter: "finished" })).items.map((i) => i.kind)).toEqual(["merged"]);
 });
@@ -237,7 +231,7 @@ test("a step asking permission for a tool call needs you until someone answers",
   await notify(run.id, "permission", { nodeKey: "coder-1", requestId: id }, coder.id);
   const { items, unread } = await listNotifications(db, { limit: 8 });
   expect(items).toMatchObject([
-    { kind: "permission", title: "sandbox: coder-1 asks to run a command", body: "git -C /w log --oneline -8", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true },
+    { kind: "permission", title: "permission title", body: "permission body", href: `/projects/${project.id}/runs/${run.id}`, done: false, unread: true },
   ]);
   expect(unread).toBe(1);
   expect((await listNotifications(db, { limit: 8, filter: "input" })).items.map((i) => i.kind)).toEqual(["permission"]);
@@ -251,5 +245,5 @@ test("a Try it gate's notification opens its own page", async () => {
   const run = await start("Add projects");
   const gate = await seedExecution(db, run.id, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting" });
   const [question] = await ask({ runId: run.id, nodeExecutionId: gate.id, question: "Try the app and check each acceptance criterion.", context: { reason: "try" } });
-  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ title: "sandbox: the app is ready for you to try", href: `/projects/${project.id}/runs/${run.id}/try/${question.id}` });
+  expect((await listNotifications(db, { limit: 8 })).items[0]).toMatchObject({ title: "input title", href: `/projects/${project.id}/runs/${run.id}/try/${question.id}` });
 });

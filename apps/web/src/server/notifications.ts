@@ -1,15 +1,11 @@
 import { alias, and, desc, eq, events, nodeExecutions, not, notificationReads, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
-import { brief, questionBrief } from "../lib/brief";
-import { describePermission } from "../lib/permission";
+import type { Notification } from "@handoff/core";
 import { reviewPath, runPath, tryPath } from "../lib/paths";
 import type { NotificationFilter, NotificationItem, NotificationKind } from "../lib/notifications";
 
 /** The kinds a filter shows: "Needs you" covers questions, permission requests and pull requests ready to merge; "Finished" merges too. */
 const kindsOf = (filter: NotificationKind): NotificationKind[] =>
   filter === "input" ? ["input", "permission", "ready"] : filter === "finished" ? ["finished", "merged"] : [filter];
-
-/** What a node said in its notification: what about, which node, and the details its kind needs. */
-type Payload = { kind: NotificationKind; nodeKey?: string; reason?: string; number?: number; questionId?: string; requestId?: string };
 
 const kind = sql<string>`${events.payload}->>'kind'`;
 
@@ -32,17 +28,12 @@ const done = sql<boolean>`case ${kind}
   when 'failed' then ${runs.status} <> 'failed'
   else false end`;
 
-function failedTitle(projectName: string, { nodeKey, reason }: Payload) {
-  if (reason === "loop_exhausted") return `${projectName}: ${nodeKey ?? "a step"} ran out of rounds`;
-  return nodeKey ? `${projectName}: run failed at ${nodeKey}` : `${projectName}: run failed`;
-}
-
 async function readUntil(db: Db) {
   const [row] = await db.select({ readUntil: notificationReads.readUntil }).from(notificationReads);
   return row?.readUntil;
 }
 
-/** The notifications nodes sent, with their run, project, question and sending step. Demo runs stay out. */
+/** The notifications nodes sent, with their run and what tells where each links and whether it is done. Demo runs stay out. */
 const feed = (db: Db) =>
   db
     .select({
@@ -52,12 +43,7 @@ const feed = (db: Db) =>
       done,
       runId: runs.id,
       projectId: runs.projectId,
-      task: runs.task,
-      projectName: projects.name,
-      question: questions.question,
       context: questions.context,
-      toolName: permissionRequests.toolName,
-      toolInput: permissionRequests.input,
     })
     .from(events)
     .innerJoin(runs, eq(runs.id, events.runId))
@@ -69,39 +55,26 @@ const feed = (db: Db) =>
 
 type Row = Awaited<ReturnType<ReturnType<typeof feed>["execute"]>>[number];
 
+/** Where a notification leads: a Try it gate's page, a review's page, or the run. */
+function hrefOf(row: Row, { kind, questionId }: Notification) {
+  const context = row.context as { review?: unknown; reason?: string } | null;
+  if (kind === "input" && questionId && context?.reason === "try") return tryPath(row.projectId, row.runId, questionId);
+  if (kind === "input" && questionId && context?.review) return reviewPath(row.projectId, row.runId, questionId);
+  return runPath(row.projectId, row.runId);
+}
+
+/** A feed item: the title and body are the node's own, shown as they are. */
 function toItem(row: Row, until: Date | undefined): NotificationItem {
-  const payload = row.payload as Payload;
-  const base = { id: `event:${row.id}`, kind: payload.kind, body: brief(row.task), href: runPath(row.projectId, row.runId), createdAt: row.createdAt, done: row.done };
+  const payload = row.payload as Notification;
   const unread = !row.done && (!until || row.createdAt.getTime() > until.getTime());
-  const name = row.projectName;
-  switch (payload.kind) {
-    case "failed":
-      return { ...base, title: failedTitle(name, payload), unread };
-    case "ready":
-      return { ...base, title: `${name}: PR #${payload.number} is ready to merge`, unread };
-    case "permission": {
-      const { action, detail } = describePermission(row.toolName ?? "a tool", row.toolInput ?? {});
-      return { ...base, title: `${name}: ${payload.nodeKey ?? "a step"} ${action}`, body: brief(detail || row.task), unread };
-    }
-    case "merged":
-      return { ...base, title: `${name}: PR #${payload.number} merged`, unread };
-    case "input": {
-      const context = row.context as { review?: { from?: string; kind?: string }; reason?: string } | null;
-      const review = context?.review;
-      if (context?.reason === "try" && payload.questionId) return { ...base, title: `${name}: the app is ready for you to try`, href: tryPath(row.projectId, row.runId, payload.questionId), unread };
-      if (review && payload.questionId) return { ...base, title: `${name}: the ${review.kind} from ${review.from} needs your review`, href: reviewPath(row.projectId, row.runId, payload.questionId), unread };
-      return { ...base, title: `${name}: ${payload.nodeKey ?? "a gate"} asks a question`, body: row.question ? questionBrief(row.question, context) : base.body, unread };
-    }
-    default:
-      return { ...base, title: `${name}: run ${payload.kind}`, unread };
-  }
+  return { id: `event:${row.id}`, kind: payload.kind, title: payload.title, body: payload.body, href: hrefOf(row, payload), createdAt: row.createdAt, done: row.done, unread };
 }
 
 /**
  * The notification feed, newest first: what nodes said a person should hear about. A Start node can say
  * the run started, a Finish node that it finished, any node that it failed the run, a gate that it waits
- * for a person, and a merge node that its pull request is ready or merged. Each item says whether its
- * action is done, and is unread when it came after the person last opened the feed and is not done.
+ * for a person, and a merge node that its pull request is ready or merged. The node writes the title and
+ * the body; the feed adds nothing to them. Each item says whether its action is done, and is unread when it came after the person last opened the feed and is not done.
  * `before` pages back from a time, and `filter` narrows to the unread items or to one kind; "Needs you"
  * leaves out what is done.
  */

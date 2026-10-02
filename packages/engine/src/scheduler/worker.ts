@@ -4,7 +4,7 @@ import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
-import { notifies, redactSecrets, RunStateSchema } from "@handoff/core";
+import { brief, notifies, redactSecrets, RunStateSchema, type Notification } from "@handoff/core";
 import { stopWorkerPreviews } from "../preview/preview.ts";
 import {
   appendEvents,
@@ -221,7 +221,10 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
     const events: NewEvent[] = [];
     if (run.status === "queued") {
       events.push({ type: "run.started", payload: {} });
-      if (notifies(node, "started")) events.push({ type: "notify", payload: { kind: "started", nodeKey: row.nodeKey }, nodeExecutionId: row.id });
+      if (notifies(node, "started")) {
+        const told: Notification = { kind: "started", nodeKey: row.nodeKey, title: `${project.name}: run started`, body: brief(run.task) };
+        events.push({ type: "notify", payload: told, nodeExecutionId: row.id });
+      }
     }
     events.push({
       type: "node.claimed",
