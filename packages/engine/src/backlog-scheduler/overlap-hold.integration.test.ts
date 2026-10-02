@@ -67,6 +67,28 @@ test("a run a person started is not held", async () => {
   for (const run of [mine, older]) expect((await inspect(db, run.id)).types).not.toContain("run.overlap_held");
 });
 
+test("a held run does not take the Claude slot", async () => {
+  const seeded = await seedGraph(db, linear);
+  await activeRun(db, seeded, ["apps/board"]);
+  const held = await createRun(db, { projectId: seeded.project.id, graphVersionId: seeded.graphVersion.id, task: "Card drag", startedBy: "scheduler" });
+  const executors = {
+    planner: scripted((ctx) => (ctx.run.id === held.id ? done(plan(["apps/board/card.tsx"]), { plan: plan(["apps/board/card.tsx"]) }) : done(plan(["docs"]), { plan: plan(["docs"]) }))),
+    coder: scripted(done(outputs.coderDone)),
+  };
+  // One Claude process at a time, as HANDOFF_CAP_CLI defaults to.
+  const deps = engineDeps(db, executors, { caps: { cli: 1, shell: 4, github: 4, human: 100, function: 8 } });
+  await drain(deps);
+  expect((await inspect(db, held.id)).executions.find((e) => e.nodeKey === "coder")?.status).toBe("waiting");
+
+  const other = await createRun(db, { projectId: seeded.project.id, graphVersionId: seeded.graphVersion.id, task: "Docs", startedBy: "scheduler" });
+  await drain(deps);
+
+  expect(executors.planner.calls.map((c) => c.run.id)).toEqual([held.id, other.id]);
+  expect(executors.coder.calls.map((c) => c.run.id)).toEqual([other.id]);
+  const [running] = await db.select({ n: sql<number>`count(*)::int` }).from(nodeExecutions).where(eq(nodeExecutions.status, "running"));
+  expect(running!.n).toBe(0);
+});
+
 test("the held run's coder starts when the other run ends", async () => {
   // A run a person cancels.
   const seeded = await seedGraph(db, linear);
