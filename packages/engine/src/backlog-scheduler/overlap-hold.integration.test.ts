@@ -53,6 +53,20 @@ test("a scheduler-started run whose plan shares paths with an active run waits b
   });
 });
 
+test("a run a person started is not held", async () => {
+  const seeded = await seedGraph(db, linear);
+  await activeRun(db, seeded, ["apps/board"], "scheduler");
+  const mine = await createRun(db, { projectId: seeded.project.id, graphVersionId: seeded.graphVersion.id, task: "Card drag", startedBy: "dashboard" });
+  // A run from before runs recorded who started them is a person's too.
+  const older = await createRun(db, { projectId: seeded.project.id, graphVersionId: seeded.graphVersion.id, task: "Card colors" });
+  const executors = planning(["apps/board/card.tsx"]);
+
+  await drain(engineDeps(db, executors));
+
+  expect(executors.coder.calls.map((c) => c.run.id).sort()).toEqual([mine.id, older.id].sort());
+  for (const run of [mine, older]) expect((await inspect(db, run.id)).types).not.toContain("run.overlap_held");
+});
+
 test("the held run's coder starts when the other run ends", async () => {
   // A run a person cancels.
   const seeded = await seedGraph(db, linear);
