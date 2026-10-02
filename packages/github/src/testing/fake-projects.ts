@@ -70,7 +70,7 @@ export class FakeProjects implements ProjectsPort {
           status: statusOf(item.status),
           parent: this.parents.get(issueNumber),
           labels,
-          assignees: item.assignees ?? [],
+          assignees: issue.assignees ?? item.assignees ?? [],
           subIssues: { total: children.length, completed: children.filter((c) => c?.state === "closed").length },
           blockedBy: (issue.blockedBy ?? []).filter((n) => this.github.issues.get(n)?.state !== "closed"),
           blockers: [...(issue.blockedBy ?? [])],

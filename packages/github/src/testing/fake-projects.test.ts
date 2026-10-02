@@ -79,3 +79,12 @@ test("FakeProjects keeps Start and Target on items, and a Project without the da
   expect(await projects.setDates(repo, project.number, task.number, { target: "2026-10-09" })).toBe("set");
   expect((await projects.getProject("octo", project.number))?.dateFields?.target).toEqual(expect.any(String));
 });
+
+test("a plan item's assignees are its issue's on GitHub, so assigning on GitHub shows in the plan", async () => {
+  const github = new FakeGitHub();
+  const projects = new FakeProjects(github);
+  const project = await projects.createProject("octo", repo, "sample plan");
+  const task = await projects.createIssue(repo, { project: project.number, title: "Add the column", body: "brief", labels: ["task"] });
+  await github.setAssignees(repo, task.number, ["octocat"]);
+  expect((await projects.listItems("octo", project.number, repo)).map((i) => i.assignees)).toEqual([["octocat"]]);
+});
