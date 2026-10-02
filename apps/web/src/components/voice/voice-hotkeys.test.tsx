@@ -78,6 +78,22 @@ test("Ctrl+M with the panel open dictates into the composer", async () => {
   expect(composer.value).toBe("how is run 7f3a");
 });
 
+test("Ctrl+M works while typing", async () => {
+  render(<VoiceTestApp />);
+  const note = screen.getByLabelText<HTMLTextAreaElement>("Note");
+  note.value = "Half a thought";
+  note.focus();
+  expect(ctrlM(note)).toBe(false);
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
+  // With the panel closed it asks in the bubble, also from a text field, and leaves the field as it was.
+  expect(latest()).toMatchObject({ continuous: false });
+  act(() => latest().emitStart());
+  expect(screen.getByRole("region", { name: "Voice assistant" })).toHaveTextContent("Listening");
+  expect(note.value).toBe("Half a thought");
+  ctrlM(note);
+  expect(latest().stopped).toBe(true);
+});
+
 test("Escape stops listening and leaves an idle page alone", async () => {
   render(<VoiceTestApp />);
   const idle = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
