@@ -4,6 +4,7 @@ import { hasActiveRun } from "@/lib/plan/task";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { taskColumn } from "@/lib/plan/task";
 import { AssigneeButton } from "./assignee-button";
+import { SizeChip } from "./size-chip";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
 
 /** What a card says when a person moved it on GitHub against its run. */
@@ -54,7 +55,8 @@ export function PlanCard({
         {taskColumn(task) !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={repoUrl} />}
         <RunCell task={task} projectId={projectId} needsYou={needsYou} />
         <PrLink task={task} repoUrl={repoUrl} />
-        <span className="ml-auto flex empty:hidden">
+        <span className="ml-auto flex items-center gap-1.5 empty:hidden">
+          <SizeChip task={task} />
           <AssigneeButton task={task} />
         </span>
       </div>

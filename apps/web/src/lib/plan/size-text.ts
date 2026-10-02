@@ -67,6 +67,31 @@ export function forecastSentence(forecast: Forecast, capacity: number, projectNa
 export const overridden = (forecast: Forecast, capacity: number) =>
   `the ${forecast.size} ${forecast.source === "runs" ? "forecast" : "default"} of ${usually(forecast, capacity)}`;
 
+/** A sum of tasks' durations: "~2h 30m" when any part is a forecast, with how many tasks have neither size nor estimate. */
+export type DurationSum = { text: string; more: number; title: string };
+
+/**
+ * The durations of a story's, an epic's or a column's tasks added up; undefined when none of them has one.
+ * The text starts with "~" when any part is a forecast, and `more` counts the tasks with neither.
+ */
+export function sumOf(tasks: readonly SizedTask[], forecasts: Forecasts, capacity: number): DurationSum | undefined {
+  const durations = tasks.map((t) => durationOf(t, forecasts, t.proposal?.size));
+  const sized = durations.filter((d) => d !== undefined);
+  if (sized.length === 0) return undefined;
+  const hours = sized.reduce((sum, d) => sum + d.hours, 0);
+  const estimates = sized.filter((d) => d.source === "estimate").length;
+  const forecast = estimates < sized.length;
+  const kinds = estimates === 0 ? "forecasts" : forecast ? "forecasts and estimates" : "estimates";
+  const missing = tasks.filter((_, i) => !durations[i]).map((t) => `#${t.number}`);
+  const without =
+    missing.length === 0 ? "" : missing.length === 1 ? `; ${missing[0]} has no size` : missing.length === 2 ? `; ${missing.join(" and ")} have no size` : `; ${missing.length} tasks have no size`;
+  return {
+    text: `${forecast ? "~" : ""}${formatDuration(hours, capacity)}`,
+    more: missing.length,
+    title: `${durationInWords(hours)} over ${plural(sized.length, "task")}, ${kinds}${without}`,
+  };
+}
+
 /**
  * A task's size chip: its manual estimate pinned, else its Size's forecast (dotted for a default), else the
  * planner's proposal (dashed), else "Size".

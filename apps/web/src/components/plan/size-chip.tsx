@@ -7,7 +7,7 @@ import type { PlanTask } from "@/server/plan";
 import { setSizeAction } from "@/app/projects/actions";
 import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
-import { chipOf, type SizeChange } from "@/lib/plan/size-text";
+import { chipOf, sumOf, type SizeChange } from "@/lib/plan/size-text";
 import { cn } from "@/lib/utils";
 import { Sizing, type SizingControl } from "./plan-context";
 import { SizePopover, type SizeValue } from "./size-popover";
@@ -25,7 +25,23 @@ export function SizeChip({ task }: { task: PlanTask }) {
   return <SizeControl task={task} sizing={sizing} />;
 }
 
-const applied = (value: SizeValue, change: SizeChange): SizeValue => ({
+/**
+ * The durations of a story's, an epic's or a column's tasks added up, "~" when any part is a forecast and
+ * "+1" for each task with neither a size nor an estimate. Nothing when no task has a duration.
+ */
+export function SizeSum({ tasks, className }: { tasks: readonly PlanTask[]; className?: string }) {
+  const sizing = use(Sizing);
+  const sum = sizing && sumOf(tasks, sizing.forecasts, sizing.capacity);
+  if (!sum) return null;
+  return (
+    <span title={sum.title} className={cn("shrink-0 text-[11px] font-medium whitespace-nowrap text-muted-foreground tabular-nums", className)}>
+      {sum.text}
+      {sum.more > 0 && <span className="ml-[3px] text-[10px] text-muted-foreground/70">+{sum.more}</span>}
+    </span>
+  );
+}
+
+const applied =(value: SizeValue, change: SizeChange): SizeValue => ({
   size: change.size === undefined ? value.size : (change.size ?? undefined),
   estimate: change.estimate === undefined ? value.estimate : (change.estimate ?? undefined),
 });

@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { cn } from "@/lib/utils";
 import type { StartRunContext } from "./plan-actions";
 import { PlanCard } from "./plan-card";
+import { SizeSum } from "./size-chip";
 import { COLUMN_TONE } from "@/lib/plan/task";
 
 const COLUMNS: PlanColumn[] = ["Shaping", "Ready", "Running", "In review", "Done", "Other"];
@@ -99,7 +100,8 @@ export function PlanBoard({
                 <span aria-hidden className={cn("size-2 rounded-full", COLUMN_TONE[column].dot)} />
                 <h3 className="text-[13px] font-semibold">{column}</h3>
                 <span className="text-xs text-muted-foreground tabular-nums">{board[column].length}</span>
-                <span className="ml-auto">
+                <span className="ml-auto flex items-center gap-1">
+                  <SizeSum tasks={board[column]} />
                   <ColumnMenu column={column} project={project} />
                 </span>
               </header>

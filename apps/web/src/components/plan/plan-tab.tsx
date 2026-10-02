@@ -18,7 +18,7 @@ import { searchPlan, type SearchResult } from "@/lib/plan/search";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import type { PlanViewName } from "@/lib/project-tab";
 import type { StartRunContext } from "./plan-actions";
-import { Assigning, SearchQuery, type AssignControl } from "./plan-context";
+import { Assigning, SearchQuery, Sizing, type AssignControl } from "./plan-context";
 import { PlanBoard } from "./plan-board";
 import { PlanEmpty } from "./plan-empty";
 import { FilterChips, PlanFilters } from "./plan-filters";
@@ -206,6 +206,11 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
   const found = useMemo(() => searchPlan(narrowed, query), [narrowed, query]);
   const people = useMemo(() => peopleOf(plan, me), [plan, me]);
   const assigning = useMemo(() => assign && { ...assign, me }, [assign, me]);
+  const sizing = useMemo(() => {
+    if (!plan.forecasts || plan.capacity === undefined) return undefined;
+    const spans = new Map(timeline.items.map((i) => [i.number, i.planned]));
+    return { projectId: project.id, projectName: project.name, forecasts: plan.forecasts, capacity: plan.capacity, spanOf: (issue: number) => spans.get(issue) };
+  }, [plan.forecasts, plan.capacity, timeline.items, project.id, project.name]);
   const current = { ...filters, q: query.trim() };
 
   // Voice owns Escape while it speaks or listens; the search keeps its text then.
@@ -223,6 +228,7 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
 
   return (
     <Assigning value={assigning}>
+      <Sizing value={sizing}>
       <SearchQuery value={found.active ? query.trim() : ""}>
         <div className="flex flex-col gap-3">
           <PlanToolbar
@@ -261,6 +267,7 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
           </div>
         </div>
       </SearchQuery>
+      </Sizing>
     </Assigning>
   );
 }

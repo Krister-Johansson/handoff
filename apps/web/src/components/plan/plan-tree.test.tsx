@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import { PlanTree } from "./plan-tree";
-import { epic, REPO_URL, run, story, task, unplannedIssue } from "./testing/plan-fixtures";
+import { Sizing } from "./plan-context";
+import { epic, REPO_URL, run, sizingOf, story, task, unplannedIssue } from "./testing/plan-fixtures";
 
 const actions = vi.hoisted(() => ({
   moveToReadyAction: vi.fn(async () => ({ ok: true })),
@@ -11,6 +12,7 @@ const actions = vi.hoisted(() => ({
   listIssuesAction: vi.fn(async () => ({ issues: [] })),
 }));
 vi.mock("@/app/projects/actions", () => actions);
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }) }));
 
 const base = { projectId: "p1", repoUrl: REPO_URL, needsYou: [] as string[], graphs: ["loop"], graphName: "loop", unparented: [], unplanned: [] };
 
@@ -188,4 +190,25 @@ test("unplanned issues sit in their own block, stay startable, and Plan it adds 
   fireEvent.change(within(dialog).getByLabelText("Story (optional)"), { target: { value: "41" } });
   fireEvent.click(within(dialog).getByRole("button", { name: "Plan it" }));
   await waitFor(() => expect(actions.planIssueAction).toHaveBeenCalledWith({ projectId: "p1", issue: 301, story: 41 }));
+});
+
+test("task rows carry their size chip and story and epic rows the sum of their tasks", () => {
+  const epics = [
+    epic(120, "Refined product redesign", [
+      story(127, "Restyle project views", 120, [
+        task(145, "R5 Restyle board columns", "Shaping", { size: "M" }),
+        task(147, "R7 Restyle the dashboard", "Shaping", { proposal: { size: "M", runId: "r9", steps: 6, paths: 4 } }),
+        task(152, "Document the workflow", "Shaping"),
+      ]),
+    ]),
+  ];
+  render(
+    <Sizing value={sizingOf()}>
+      <PlanTree {...base} epics={epics} />
+    </Sizing>,
+  );
+  expect(within(row(/Task #145/)).getByRole("button", { name: "Size M, forecast 50m. Change the size or estimate of #145" })).toBeInTheDocument();
+  expect(within(row(/Task #152/)).getByRole("button", { name: "Set a size for #152" })).toBeInTheDocument();
+  expect(within(row(/Story #127/)).getByTitle("1 hour 40 minutes over 2 tasks, forecasts; #152 has no size")).toHaveTextContent(/^~1h 40m\+1$/);
+  expect(within(row(/Epic #120/)).getAllByTitle(/over 2 tasks/)[0]).toHaveTextContent(/^~1h 40m\+1$/);
 });
