@@ -297,3 +297,23 @@ test("an answered Try it binds only navigation tools", async () => {
   expect(actions.answerReviewAction).not.toHaveBeenCalled();
   expect(actions.restartTryItAction).not.toHaveBeenCalled();
 });
+
+test("page tool calls that arrive back to back each see what the call before changed", async () => {
+  const { transport } = await withAssistant();
+  // A browser agent can send the next call before React has rendered the last one's changes.
+  await act(async () => {
+    transport.emit({ type: "ui_call", requestId: "b1", name: "page_mark_criterion", args: { index: 1, works: true } });
+    transport.emit({ type: "ui_call", requestId: "b2", name: "page_mark_criterion", args: { index: 2, works: true } });
+    transport.emit({ type: "ui_call", requestId: "b3", name: "page_go_to_criterion", args: { index: 1 } });
+    transport.emit({ type: "ui_call", requestId: "b4", name: "page_go_to_criterion", args: { direction: "next" } });
+  });
+  await waitFor(() => expect(transport.uiReplies).toHaveLength(4));
+  expect(transport.uiReplies.map((r) => r.text)).toEqual([
+    "Marked criterion 1 as working. Now on criterion 2.",
+    "Marked criterion 2 as working. Now on criterion 3.",
+    'Now on criterion 1 of 3: "A user can create a new project".',
+    'Now on criterion 2 of 3: "The project shows in the sidebar".',
+  ]);
+  expect(screen.getByText("2 of 3 checked")).toBeInTheDocument();
+  expect(cursor()).toHaveTextContent("2 of 3");
+});

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { flushSync } from "react-dom";
 import { useOptionalPageRegistry } from "@/components/assistant/assistant-provider";
 import type { PageHandlers, PageKind } from "./page-tools";
 import type { OpenPage, PageToolHandler } from "./run-page-tool";
@@ -29,7 +30,13 @@ export function usePageTools<K extends PageKind>(kind: K, handlers: NoInfer<Page
     const call = (name: string) => (args: never) => {
       const handler = latest.current.handlers[name];
       if (!handler) throw new Error(`${name} is not available on this page now.`);
-      return handler(args);
+      // A browser agent can send the next call before React renders; rendering the changes at once
+      // means the next call's handler sees them.
+      let result: ReturnType<PageToolHandler> = "";
+      flushSync(() => {
+        result = handler(args);
+      });
+      return result;
     };
     const page: OpenPage = {
       kind,
