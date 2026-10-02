@@ -28,3 +28,21 @@ test("waiting on you is the union of open questions and permission requests insi
   expect(parts.waitingMs).toBe(35 * MIN);
   expect(parts.wallMs).toBe(60 * MIN);
 });
+
+/** An execution created at `created` minutes that spent `queued` minutes ready and not running. */
+const execution = (created: number, queued: number, costUsd: number | null = null) => ({
+  createdAt: at(created),
+  runnableAt: at(created),
+  claimedAt: at(created + queued),
+  queuedMs: queued * MIN,
+  costUsd,
+});
+
+test("agent time is the wall time less waiting and queue, never below zero", () => {
+  // The start execution waited 5 minutes for a worker before the run started at 09:00, then 3 more inside it.
+  const parts = runParts(run(60), [{ createdAt: at(10), answeredAt: at(30) }], [], [execution(-5, 8), execution(20, 4)]);
+  expect(parts).toMatchObject({ wallMs: 60 * MIN, waitingMs: 20 * MIN, queueMs: 7 * MIN, agentMs: 33 * MIN });
+
+  const swamped = runParts(run(10), [{ createdAt: at(0), answeredAt: at(8) }], [], [execution(1, 5)]);
+  expect(swamped).toMatchObject({ wallMs: 10 * MIN, waitingMs: 8 * MIN, queueMs: 5 * MIN, agentMs: 0 });
+});
