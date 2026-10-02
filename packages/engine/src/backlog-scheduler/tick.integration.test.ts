@@ -78,6 +78,20 @@ test("a check starts runs in order until max_runs runs are active", async () => 
   expect(events[1]!.payload).toEqual({ place: 1, settings: { maxRuns: 2, order: "project", graphName: "g", skipLabel: "human" } });
 });
 
+test("a check in priority order starts the task with the highest Priority first", async () => {
+  const p = await planned({ order: "priority" });
+  p.plan.plans.get("octo/sample")!.project.priorityOptions = ["High", "Low"];
+  const low = await p.task("Low, first in Project order");
+  const high = await p.task("High");
+  p.plan.itemsOf(repo).get(low)!.priority = "Low";
+  p.plan.itemsOf(repo).get(high)!.priority = "High";
+
+  await p.check();
+
+  expect((await p.started()).map((r) => r.issue)).toEqual([high]);
+  expect((await p.row()).lastResult).toMatchObject({ candidates: [{ number: low }] });
+});
+
 test("runs a person started count toward max_runs", async () => {
   const p = await planned({ maxRuns: 2 });
   const mine = await p.task("Started by hand");

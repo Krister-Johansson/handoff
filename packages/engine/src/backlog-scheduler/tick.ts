@@ -132,8 +132,12 @@ async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: Proje
   const planning = await planningRun(db, projectId);
   if (planning) return { ...result, state: "idle", reason: "planning", runId: planning };
   const repo = { owner: project.repoOwner, name: project.repoName };
-  const items = await deps.projects.listItems(repo.owner, project.planProjectNumber, repo);
-  const found = candidates(items, await issueRuns(db, projectId), { order: row.order, skipLabel: row.skipLabel });
+  // Priority order needs the field's options in the field's order: one more read of the Project.
+  const [items, plan] = await Promise.all([
+    deps.projects.listItems(repo.owner, project.planProjectNumber, repo),
+    row.order === "priority" ? deps.projects.getProject(repo.owner, project.planProjectNumber) : undefined,
+  ]);
+  const found = candidates(items, await issueRuns(db, projectId), { order: row.order, priorityOptions: plan?.priorityOptions, skipLabel: row.skipLabel });
   const skipped = [...found.skipped];
   await recordSkips(db, projectId, found.skipped);
   // One start per check: the run it starts has no plan yet, so the next check waits for its planner.
