@@ -1,0 +1,73 @@
+query PlanItems($login: String!, $number: Int!, $cursor: String) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      items(first: 100, after: $cursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          status: fieldValueByName(name: "Status") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+          content {
+            __typename
+            ... on Issue {
+              number
+              title
+              url
+              state
+              updatedAt
+              repository {
+                name
+                owner {
+                  login
+                }
+              }
+              labels(first: 20) {
+                nodes {
+                  name
+                }
+              }
+              assignees(first: 10) {
+                nodes {
+                  login
+                }
+              }
+              issueType {
+                name
+              }
+              parent {
+                number
+                parent {
+                  number
+                  parent {
+                    number
+                  }
+                }
+              }
+              subIssuesSummary {
+                total
+                completed
+              }
+              blockedBy(first: 20) {
+                nodes {
+                  number
+                  state
+                }
+              }
+              closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
+                nodes {
+                  number
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

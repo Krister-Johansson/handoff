@@ -1,0 +1,49 @@
+query IssuePlan($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    owner {
+      id
+    }
+    issue(number: $number) {
+      id
+      number
+      title
+      body
+      labels(first: 20) {
+        nodes {
+          name
+        }
+      }
+      issueType {
+        name
+      }
+      projectItems(first: 20) {
+        nodes {
+          id
+          project {
+            id
+            number
+            owner {
+              id
+            }
+            field(name: "Status") {
+              __typename
+              ... on ProjectV2SingleSelectField {
+                id
+                options {
+                  id
+                  name
+                }
+              }
+            }
+          }
+          status: fieldValueByName(name: "Status") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+}

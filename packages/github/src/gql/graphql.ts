@@ -40,6 +40,13 @@ export type CheckStatusState =
   /** The check suite or run is in waiting state. */
   | 'WAITING';
 
+/** The possible states of an issue. */
+export type IssueState =
+  /** An issue that has been closed */
+  | 'CLOSED'
+  /** An issue that is still open */
+  | 'OPEN';
+
 /** Whether or not a PullRequest can be merged. */
 export type MergeableState =
   /** The pull request cannot be merged due to merge conflicts. */
@@ -48,6 +55,40 @@ export type MergeableState =
   | 'MERGEABLE'
   /** The mergeability of the pull request is still being calculated. */
   | 'UNKNOWN';
+
+/** The display color of a single-select field option. */
+export type ProjectV2SingleSelectFieldOptionColor =
+  /** BLUE */
+  | 'BLUE'
+  /** GRAY */
+  | 'GRAY'
+  /** GREEN */
+  | 'GREEN'
+  /** ORANGE */
+  | 'ORANGE'
+  /** PINK */
+  | 'PINK'
+  /** PURPLE */
+  | 'PURPLE'
+  /** RED */
+  | 'RED'
+  /** YELLOW */
+  | 'YELLOW';
+
+/** Represents a single select field option */
+export type ProjectV2SingleSelectFieldOptionInput = {
+  /** The display color of the option */
+  color: ProjectV2SingleSelectFieldOptionColor;
+  /** The description text of the option */
+  description: string;
+  /**
+   * The ID of an existing single select option. Include this to preserve the
+   * option's identity during updates, preventing item field values from being cleared.
+   */
+  id?: string | null | undefined;
+  /** The name of the option */
+  name: string;
+};
 
 /** The review status of a pull request. */
 export type PullRequestReviewDecision =
@@ -92,6 +133,146 @@ export type StatusState =
   | 'PENDING'
   /** Status is successful. */
   | 'SUCCESS';
+
+export type IssuePlanQueryVariables = Exact<{
+  owner: string;
+  name: string;
+  number: number;
+}>;
+
+
+export type IssuePlanQuery = { repository: { owner:
+      | { id: string }
+      | { id: string }
+    , issue: { id: string, number: number, title: string, body: string, labels: { nodes: Array<{ name: string } | null> | null } | null, issueType: { name: string } | null, projectItems: { nodes: Array<{ id: string, project: { id: string, number: number, owner:
+              | { id: string }
+              | { id: string }
+              | { id: string }
+              | { id: string }
+            , field:
+              | { __typename: 'ProjectV2Field' }
+              | { __typename: 'ProjectV2IterationField' }
+              | { __typename: 'ProjectV2MultiSelectField' }
+              | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+             | null }, status:
+            | { __typename: 'ProjectV2ItemFieldDateValue' }
+            | { __typename: 'ProjectV2ItemFieldIterationValue' }
+            | { __typename: 'ProjectV2ItemFieldLabelValue' }
+            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldNumberValue' }
+            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+            | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+            | { __typename: 'ProjectV2ItemFieldTextValue' }
+            | { __typename: 'ProjectV2ItemFieldUserValue' }
+            | { __typename: 'ProjectV2ItemIssueFieldValue' }
+           | null } | null> | null } | null } | null } | null };
+
+export type PlanItemsQueryVariables = Exact<{
+  login: string;
+  number: number;
+  cursor?: string | null | undefined;
+}>;
+
+
+export type PlanItemsQuery = { user: { projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ status:
+            | { __typename: 'ProjectV2ItemFieldDateValue' }
+            | { __typename: 'ProjectV2ItemFieldIterationValue' }
+            | { __typename: 'ProjectV2ItemFieldLabelValue' }
+            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+            | { __typename: 'ProjectV2ItemFieldNumberValue' }
+            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+            | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+            | { __typename: 'ProjectV2ItemFieldTextValue' }
+            | { __typename: 'ProjectV2ItemFieldUserValue' }
+            | { __typename: 'ProjectV2ItemIssueFieldValue' }
+           | null, content:
+            | { __typename: 'DraftIssue' }
+            | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
+                  | { login: string }
+                  | { login: string }
+                 }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
+            | { __typename: 'PullRequest' }
+           | null } | null> | null } } | null } | null };
+
+export type CreatePlanProjectMutationVariables = Exact<{
+  ownerId: string | number;
+  title: string;
+}>;
+
+
+export type CreatePlanProjectMutation = { createProjectV2: { projectV2: { id: string, number: number, url: string, title: string, field:
+        | { __typename: 'ProjectV2Field' }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+       | null } | null } | null };
+
+export type SetStatusOptionsMutationVariables = Exact<{
+  fieldId: string | number;
+  options: Array<ProjectV2SingleSelectFieldOptionInput> | ProjectV2SingleSelectFieldOptionInput;
+}>;
+
+
+export type SetStatusOptionsMutation = { updateProjectV2Field: { projectV2Field:
+      | { __typename: 'ProjectV2Field' }
+      | { __typename: 'ProjectV2IterationField' }
+      | { __typename: 'ProjectV2MultiSelectField' }
+      | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+     | null } | null };
+
+export type LinkPlanRepositoryMutationVariables = Exact<{
+  projectId: string | number;
+  repositoryId: string | number;
+}>;
+
+
+export type LinkPlanRepositoryMutation = { linkProjectV2ToRepository: { repository: { id: string } | null } | null };
+
+export type AddPlanItemMutationVariables = Exact<{
+  projectId: string | number;
+  contentId: string | number;
+}>;
+
+
+export type AddPlanItemMutation = { addProjectV2ItemById: { item: { id: string } | null } | null };
+
+export type SetPlanStatusMutationVariables = Exact<{
+  projectId: string | number;
+  itemId: string | number;
+  fieldId: string | number;
+  optionId: string;
+}>;
+
+
+export type SetPlanStatusMutation = { updateProjectV2ItemFieldValue: { projectV2Item: { id: string } | null } | null };
+
+export type PlanOwnerIdsQueryVariables = Exact<{
+  login: string;
+  owner: string;
+  name: string;
+}>;
+
+
+export type PlanOwnerIdsQuery = { user: { id: string } | null, repository: { id: string } | null };
+
+export type PlanProjectQueryVariables = Exact<{
+  login: string;
+  number: number;
+}>;
+
+
+export type PlanProjectQuery = { user: { projectV2: { id: string, number: number, url: string, title: string, field:
+        | { __typename: 'ProjectV2Field' }
+        | { __typename: 'ProjectV2IterationField' }
+        | { __typename: 'ProjectV2MultiSelectField' }
+        | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+       | null } | null } | null };
 
 export type PullRequestSnapshotQueryVariables = Exact<{
   owner: string;
@@ -142,6 +323,242 @@ export class TypedDocumentString<TResult, TVariables>
   }
 }
 
+export const IssuePlanDocument = new TypedDocumentString(`
+    query IssuePlan($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    owner {
+      id
+    }
+    issue(number: $number) {
+      id
+      number
+      title
+      body
+      labels(first: 20) {
+        nodes {
+          name
+        }
+      }
+      issueType {
+        name
+      }
+      projectItems(first: 20) {
+        nodes {
+          id
+          project {
+            id
+            number
+            owner {
+              id
+            }
+            field(name: "Status") {
+              __typename
+              ... on ProjectV2SingleSelectField {
+                id
+                options {
+                  id
+                  name
+                }
+              }
+            }
+          }
+          status: fieldValueByName(name: "Status") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<IssuePlanQuery, IssuePlanQueryVariables>;
+export const PlanItemsDocument = new TypedDocumentString(`
+    query PlanItems($login: String!, $number: Int!, $cursor: String) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      items(first: 100, after: $cursor) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
+        nodes {
+          status: fieldValueByName(name: "Status") {
+            __typename
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+          content {
+            __typename
+            ... on Issue {
+              number
+              title
+              url
+              state
+              updatedAt
+              repository {
+                name
+                owner {
+                  login
+                }
+              }
+              labels(first: 20) {
+                nodes {
+                  name
+                }
+              }
+              assignees(first: 10) {
+                nodes {
+                  login
+                }
+              }
+              issueType {
+                name
+              }
+              parent {
+                number
+                parent {
+                  number
+                  parent {
+                    number
+                  }
+                }
+              }
+              subIssuesSummary {
+                total
+                completed
+              }
+              blockedBy(first: 20) {
+                nodes {
+                  number
+                  state
+                }
+              }
+              closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
+                nodes {
+                  number
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<PlanItemsQuery, PlanItemsQueryVariables>;
+export const CreatePlanProjectDocument = new TypedDocumentString(`
+    mutation CreatePlanProject($ownerId: ID!, $title: String!) {
+  createProjectV2(input: { ownerId: $ownerId, title: $title }) {
+    projectV2 {
+      id
+      number
+      url
+      title
+      field(name: "Status") {
+        __typename
+        ... on ProjectV2SingleSelectField {
+          id
+          options {
+            id
+            name
+            color
+            description
+          }
+        }
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<CreatePlanProjectMutation, CreatePlanProjectMutationVariables>;
+export const SetStatusOptionsDocument = new TypedDocumentString(`
+    mutation SetStatusOptions($fieldId: ID!, $options: [ProjectV2SingleSelectFieldOptionInput!]!) {
+  updateProjectV2Field(
+    input: { fieldId: $fieldId, singleSelectOptions: $options }
+  ) {
+    projectV2Field {
+      __typename
+      ... on ProjectV2SingleSelectField {
+        id
+        options {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<SetStatusOptionsMutation, SetStatusOptionsMutationVariables>;
+export const LinkPlanRepositoryDocument = new TypedDocumentString(`
+    mutation LinkPlanRepository($projectId: ID!, $repositoryId: ID!) {
+  linkProjectV2ToRepository(
+    input: { projectId: $projectId, repositoryId: $repositoryId }
+  ) {
+    repository {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<LinkPlanRepositoryMutation, LinkPlanRepositoryMutationVariables>;
+export const AddPlanItemDocument = new TypedDocumentString(`
+    mutation AddPlanItem($projectId: ID!, $contentId: ID!) {
+  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+    item {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<AddPlanItemMutation, AddPlanItemMutationVariables>;
+export const SetPlanStatusDocument = new TypedDocumentString(`
+    mutation SetPlanStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+  updateProjectV2ItemFieldValue(
+    input: {
+      projectId: $projectId
+      itemId: $itemId
+      fieldId: $fieldId
+      value: { singleSelectOptionId: $optionId }
+    }
+  ) {
+    projectV2Item {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<SetPlanStatusMutation, SetPlanStatusMutationVariables>;
+export const PlanOwnerIdsDocument = new TypedDocumentString(`
+    query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
+  user(login: $login) {
+    id
+  }
+  repository(owner: $owner, name: $name) {
+    id
+  }
+}
+    `) as unknown as TypedDocumentString<PlanOwnerIdsQuery, PlanOwnerIdsQueryVariables>;
+export const PlanProjectDocument = new TypedDocumentString(`
+    query PlanProject($login: String!, $number: Int!) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      id
+      number
+      url
+      title
+      field(name: "Status") {
+        __typename
+        ... on ProjectV2SingleSelectField {
+          id
+          options {
+            id
+            name
+          }
+        }
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<PlanProjectQuery, PlanProjectQueryVariables>;
 export const PullRequestSnapshotDocument = new TypedDocumentString(`
     query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {

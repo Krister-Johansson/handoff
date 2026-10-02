@@ -1,0 +1,29 @@
+query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
+  user(login: $login) {
+    id
+  }
+  repository(owner: $owner, name: $name) {
+    id
+  }
+}
+
+query PlanProject($login: String!, $number: Int!) {
+  user(login: $login) {
+    projectV2(number: $number) {
+      id
+      number
+      url
+      title
+      field(name: "Status") {
+        __typename
+        ... on ProjectV2SingleSelectField {
+          id
+          options {
+            id
+            name
+          }
+        }
+      }
+    }
+  }
+}
