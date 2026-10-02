@@ -14,7 +14,7 @@ import { useVoiceSupport, type VoiceSupport } from "@/lib/voice/support";
 import { useSpeechInput, type InputState, type ListenMode } from "@/lib/voice/use-speech-input";
 
 /**
- * The voice bubble: a question said with V goes to the assistant, and its reply comes back here.
+ * The voice bubble: a question said after Ctrl+M goes to the assistant, and its reply comes back here.
  * `since` is where the question's messages start in the conversation; `approval` is a card waiting
  * for a spoken yes or no.
  */
@@ -77,7 +77,7 @@ const noSubscribe = () => () => {};
 
 /**
  * Voice for the whole dashboard: support, preferences and one listening session. Push to talk: the
- * header button or V starts it, and it never starts while the dashboard is speaking. A session
+ * header button or Ctrl+M starts it, and it never starts while the dashboard is speaking. A session
  * started from a text field dictates; one started elsewhere hears one command.
  */
 export function VoiceProvider({
@@ -206,7 +206,7 @@ export function VoiceProvider({
       if (!latest.current.bubble.open) return;
       setBubble((b) => ({ ...b, approval: { requestId: request.requestId }, misheard: undefined }));
       say(`${request.title}: ${request.summary}. Say yes or no.`);
-      // Once the card is read out, listen once for the answer; V listens again after that.
+      // Once the card is read out, listen once for the answer; Ctrl+M listens again after that.
       const listen = () => {
         const shown = latest.current.bubble;
         if (shown.open && shown.approval?.requestId === request.requestId) void startInput("command");

@@ -23,7 +23,7 @@ class OnDevice {
 test("the Voice tab says recognition is unavailable when no constructor exists and keeps the speaking switches", () => {
   render(<VoiceSettings support={{ onDeviceCheck: false }} elevenLabs={VOICES} />);
   expect(screen.getByRole("note")).toHaveTextContent(
-    "This browser has no speech recognition, so the microphone button and V are not available. Chrome on Windows, macOS or Linux supports it. Replies and notifications can still be read aloud.",
+    "This browser has no speech recognition, so the microphone button and Ctrl+M are not available. Chrome on Windows, macOS or Linux supports it. Replies and notifications can still be read aloud.",
   );
   expect(screen.getByRole("switch", { name: "Server-based recognition" })).toBeDisabled();
   expect(screen.getByLabelText("Language")).toBeDisabled();
@@ -48,7 +48,7 @@ test("the Voice tab lists the voice shortcuts", () => {
   render(<VoiceSettings support={{ recognition: OnDevice as unknown as VoiceSupport["recognition"], onDeviceCheck: true }} elevenLabs={VOICES} />);
   const shortcuts = screen.getByRole("list", { name: "Voice shortcuts" });
   expect(within(shortcuts).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
-    "VOutside a text field: ask the assistant. The voice bubble listens for one question.",
+    "Ctrl+MAsk the assistant: the voice bubble listens for one question. With the assistant panel open, dictate into its message box. Works in a text field too.",
     "Microphone buttonIn a text field: dictate into it until you stop. What you say goes in at the caret.",
     "EscapeStop speaking, then stop listening, then close the voice bubble.",
   ]);

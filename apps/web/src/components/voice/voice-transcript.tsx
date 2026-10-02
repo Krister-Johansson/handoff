@@ -19,7 +19,7 @@ function line(voice: ReturnType<typeof useVoice>): { label: string; text?: strin
     case "starting":
       return voice.mode === "dictation" ? { label: "Starting" } : undefined;
     case "listening":
-      // A question said with V shows in the voice bubble; the strip is for dictation.
+      // A question asked with Ctrl+M shows in the voice bubble; the strip is for dictation.
       return voice.mode === "dictation" ? { label: "Dictating", ...(voice.interim ? { text: voice.interim } : {}) } : undefined;
     case "downloadable":
       return { label: `${voice.languageName} can be installed for offline use. Press the download button in the header.` };

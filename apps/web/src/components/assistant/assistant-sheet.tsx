@@ -66,7 +66,8 @@ function Empty() {
           <Kbd>J</Kbd>opens and closes this panel
         </span>
         <span className="flex items-center gap-1.5">
-          <Kbd>V</Kbd>starts listening, <Kbd>Esc</Kbd>stops
+          <Kbd>Ctrl</Kbd>
+          <Kbd>M</Kbd>dictates into the message box, <Kbd>Esc</Kbd>stops
         </span>
       </div>
     </div>

@@ -41,7 +41,7 @@ export function VoiceButton() {
       )}
       aria-label={active ? "Stop listening" : "Listen"}
       aria-pressed={active}
-      title={active ? "Stop listening (V or Escape)" : "Listen (V)"}
+      title={active ? "Stop listening (Ctrl+M or Escape)" : "Listen (Ctrl+M)"}
       onMouseDown={(e) => e.preventDefault()}
       onClick={voice.toggle}
     >

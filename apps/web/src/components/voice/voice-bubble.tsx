@@ -244,7 +244,8 @@ function Status({ kind, reply, bubble, listening }: { kind: StatusKind; reply: R
         ask={false}
         keys={
           <>
-            Press <Kbd>V</Kbd> or <Kbd>Escape</Kbd> to stop
+            Press <Kbd>Ctrl</Kbd>
+            <Kbd>M</Kbd> or <Kbd>Escape</Kbd> to stop
           </>
         }
       />
@@ -256,7 +257,8 @@ function Status({ kind, reply, bubble, listening }: { kind: StatusKind; reply: R
         ask
         keys={
           <>
-            Press <Kbd>V</Kbd> to ask again
+            Press <Kbd>Ctrl</Kbd>
+            <Kbd>M</Kbd> to ask again
           </>
         }
       />
