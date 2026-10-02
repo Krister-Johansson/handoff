@@ -1,4 +1,4 @@
-import { EFFORT_LEVELS, LibrarySelectionSchema, nodeCatalog, NodeTypeSchema, notifyKindsOf, REVIEW_LEVELS, type NodeType } from "@handoff/core";
+import { ConditionSchema, EFFORT_LEVELS,LibrarySelectionSchema, nodeCatalog, NodeTypeSchema, notifyKindsOf, REVIEW_LEVELS, type NodeType } from "@handoff/core";
 import { z } from "zod";
 import type { ToolSpec } from "./catalog";
 
@@ -471,6 +471,29 @@ export function parseNodePatch(key: string, type: NodeType, patch: Record<string
   if (parsed.success) return { ok: true, patch: parsed.data };
   const issues = parsed.error.issues.map((i) => `${i.path.length ? `${i.path.join(".")}: ` : ""}${i.message}`).join("; ");
   return { ok: false, message: `The change to ${key} is not valid: ${issues}` };
+}
+
+/** What page_update_edge may change: the edge inspector's fields. null clears a loop's attempts or its exhausted gate. */
+export const EDGE_PATCH = z
+  .strictObject({
+    condition: clearable(ConditionSchema),
+    on: z.enum(["passed", "failed", "any"]),
+    loop: z.boolean(),
+    maxAttempts: clearable(z.number().int().positive()),
+    onExhausted: clearable(z.string().min(1)),
+    priority: z.number().int(),
+  })
+  .partial();
+
+/** An edge's change, checked against the edge inspector's fields: the parsed change, or a refusal that names them. */
+export function parseEdgePatch(id: string, patch: Record<string, unknown>): { ok: true; patch: z.infer<typeof EDGE_PATCH> } | { ok: false; message: string } {
+  const fields = Object.keys(EDGE_PATCH.shape);
+  const unknown = Object.keys(patch).filter((k) => !fields.includes(k));
+  if (unknown.length) return { ok: false, message: `An edge has no ${unknown.join(", ")}. Its fields are: ${fields.join(", ")}.` };
+  const parsed = EDGE_PATCH.safeParse(patch);
+  if (parsed.success) return { ok: true, patch: parsed.data };
+  const issues = parsed.error.issues.map((i) => `${i.path.length ? `${i.path.join(".")}: ` : ""}${i.message}`).join("; ");
+  return { ok: false, message: `The change to edge ${id} is not valid: ${issues}` };
 }
 
 type ToolOf<K extends PageKind> = (typeof TOOLS)[K][number];

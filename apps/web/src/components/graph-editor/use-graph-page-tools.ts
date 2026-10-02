@@ -1,11 +1,11 @@
 "use client";
 
 import { nodeCatalog, portsOf, type CompileError, type FlowGraph, type FlowNode, type NodeType } from "@handoff/core";
-import { parseNodePatch } from "@/lib/assistant/page-tools";
+import { parseEdgePatch, parseNodePatch } from "@/lib/assistant/page-tools";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { canConnect } from "@/lib/connect-rules";
 import type { LibraryChoices, LibraryKind } from "@/lib/library-choices";
-import { NODE_LABELS, nextNodeId, type EditorAction } from "./state";
+import { KEY, NODE_LABELS, nextNodeId, type EditorAction } from "./state";
 
 export type Selection = { nodeId?: string; edgeId?: string };
 
@@ -25,6 +25,8 @@ type Editor = {
   saveVersion: () => Promise<{ version: number } | { error: string }>;
   /** The middle of the view in graph coordinates, where the palette adds a node. */
   centre: () => { x: number; y: number };
+  /** Lays the graph out again, as Tidy layout does. */
+  tidy: () => Promise<void>;
 };
 
 /** What a structural page tool answers while the editor is locked. */
@@ -103,7 +105,7 @@ function nodeChanges(graph: FlowGraph, node: FlowNode, patch: NodePatch): Editor
  * The graph editor's page tools: what the assistant or a browser agent can do on the open graph, the
  * same things the canvas and the inspector do, under the same lock.
  */
-export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion, centre }: Editor) {
+export function useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion, centre, tidy }: Editor) {
   /** Refuses a change to the graph's structure while the editor is locked, as the canvas does. */
   const unlocked = () => {
     if (locked) throw new Error(LOCKED);
@@ -142,8 +144,12 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
         };
         return JSON.stringify({ key, type: nodeType, label, isStart, config, library: library ?? null, contract: contract ?? null, notify: notify ?? {}, edges });
       },
-      page_get_edge: undefined,
-      page_update_node: ({ key, patch }) => {
+      page_get_edge: ({ id }) => {
+        const { source, target, data } = edgeOf(graph, id);
+        const { port, input, condition, on, loop, maxAttempts, onExhausted, priority } = data;
+        return JSON.stringify({ id, source, target, port: port ?? null, input: input ?? "in", condition: condition ?? null, on, loop, maxAttempts: maxAttempts ?? null, onExhausted: onExhausted ?? null, priority });
+      },
+      page_update_node:({ key, patch }) => {
         const node = nodeOf(graph, key);
         const parsed = parseNodePatch(key, node.data.nodeType as NodeType, patch);
         if (!parsed.ok) throw new Error(parsed.message);
@@ -153,8 +159,33 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
         for (const action of nodeChanges(graph, node, change)) edit(action);
         return `Changed ${Object.keys(change).join(", ")} of ${key}. The graph is not saved yet.`;
       },
-      page_rename_node: undefined,
-      page_update_edge: undefined,
+      page_rename_node: ({ key, to }) => {
+        nodeOf(graph, key);
+        if (!KEY.test(to)) throw new Error("A key has only letters, digits, - and _.");
+        if (to === key) return `${key} already has that key.`;
+        if (graph.nodes.some((n) => n.id === to)) throw new Error(`There is already a node ${to}.`);
+        edit({ type: "renameNode", id: key, to });
+        // The inspector follows the node to its new key, as its Key field does.
+        if (selection.nodeId === key) setSelection({ nodeId: to });
+        return `Renamed ${key} to ${to}. The graph is not saved yet.`;
+      },
+      page_update_edge: ({ id, patch }) => {
+        const edge = edgeOf(graph, id);
+        const parsed = parseEdgePatch(id, patch);
+        if (!parsed.ok) throw new Error(parsed.message);
+        const change = parsed.patch;
+        if (change.onExhausted) {
+          const gates = graph.nodes.filter((n) => n.data.nodeType === "human_gate").map((n) => n.id);
+          if (!gates.includes(change.onExhausted)) {
+            throw new Error(`onExhausted names a human gate, and ${change.onExhausted} is not one. ${gates.length ? `The human gates are: ${gates.join(", ")}.` : "This graph has no human gate."}`);
+          }
+        }
+        // null clears a setting; the loop switch brings its attempts along, as in the inspector.
+        const cleared = Object.fromEntries(Object.entries(change).map(([k, v]) => [k, v === null ? undefined : v]));
+        const loop = change.loop === true && !edge.data.loop ? { maxAttempts: edge.data.maxAttempts ?? 3 } : change.loop === false ? { maxAttempts: undefined, onExhausted: undefined } : {};
+        edit({ type: "updateEdge", id, patch: { ...loop, ...cleared } });
+        return `Changed ${Object.keys(change).join(", ")} of edge ${id}. The graph is not saved yet.`;
+      },
       page_add_node: ({ type, position }) => {
         unlocked();
         const start = graph.nodes.find((n) => n.data.nodeType === "start");
@@ -191,8 +222,15 @@ export function useGraphPageTools({ projectId, graphName, version, graph, select
         if ((selection.nodeId && gone.has(selection.nodeId)) || (selection.edgeId && (gone.has(selection.edgeId) || along.includes(selection.edgeId)))) setSelection({});
         return `Removed ${ids.join(", ")}${along.length ? `, and ${along.length === 1 ? "its edge" : "its edges"} ${along.join(", ")}` : ""}. The graph is not saved yet.`;
       },
-      page_tidy_layout: undefined,
-      page_issues: undefined,
+      // Tidy is in the toolbar, not behind the lock: it moves nodes, and changes nothing a run follows.
+      page_tidy_layout: async () => {
+        await tidy();
+        return "Laid the graph out again. The graph is not saved yet.";
+      },
+      page_issues: () =>
+        issues.length
+          ? `${issues.length} ${issues.length === 1 ? "issue" : "issues"}: ${issues.map((i) => i.message).join("; ")}`
+          : "The graph has no issues; it can be saved.",
       // Saving is allowed while locked, as the Save button is: the lock guards the structure, not the settings.
       page_save_graph: async () => {
         if (saved) throw new Error(`The graph has no unsaved changes; it is v${version}.`);

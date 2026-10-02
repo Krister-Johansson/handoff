@@ -190,7 +190,8 @@ export function issuesOf(state: FlowGraph): CompileError[] {
   return result.ok ? [] : result.errors;
 }
 
-const KEY = /^[A-Za-z0-9_-]+$/;
+/** What a node key may hold. */
+export const KEY = /^[A-Za-z0-9_-]+$/;
 
 /** Renames a node key everywhere it is referenced: edges (and their derived keys), start node, gates. */
 function renameNode(state: FlowGraph, from: string, to: string): FlowGraph {

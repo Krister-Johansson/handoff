@@ -413,6 +413,57 @@ test("page_add_node adds a node of a type once the graph is unlocked, at a posit
   expect(await call("page_add_node", { type: "start" })).toEqual({ text: "The graph already has a Start node, start-1.", isError: true });
 });
 
+test("page_get_edge and page_update_edge read and change an edge, and page_rename_node renames a node and its edges follow", async () => {
+  const { call, whereAmI } = await withAssistant(reviewed);
+  expect(JSON.parse((await call("page_get_edge", { id: "reviewer->coder" })).text)).toMatchObject({
+    id: "reviewer->coder",
+    source: "reviewer",
+    target: "coder",
+    port: "changes",
+    input: "feedback",
+    loop: true,
+    maxAttempts: 3,
+    on: "passed",
+  });
+
+  await call("page_select", { edge: "reviewer->coder" });
+  expect(await call("page_update_edge", { id: "reviewer->coder", patch: { maxAttempts: 5 } })).toEqual({ text: "Changed maxAttempts of edge reviewer->coder. The graph is not saved yet.", isError: false });
+  expect(within(inspector()).getByLabelText("Max attempts")).toHaveValue(5);
+  // Turning the loop off drops its attempts, as the inspector's switch does.
+  await call("page_update_edge", { id: "reviewer->coder", patch: { loop: false } });
+  expect(JSON.parse((await call("page_get_edge", { id: "reviewer->coder" })).text)).toMatchObject({ loop: false, maxAttempts: null });
+  expect(await call("page_update_edge", { id: "reviewer->coder", patch: { weight: 2 } })).toEqual({
+    text: "An edge has no weight. Its fields are: condition, on, loop, maxAttempts, onExhausted, priority.",
+    isError: true,
+  });
+  expect(await call("page_update_edge", { id: "reviewer->coder", patch: { onExhausted: "coder" } })).toEqual({ text: "onExhausted names a human gate, and coder is not one. This graph has no human gate.", isError: true });
+
+  expect(await call("page_rename_node", { key: "coder", to: "builder" })).toEqual({ text: "Renamed coder to builder. The graph is not saved yet.", isError: false });
+  expect(await edgesOf(whereAmI)).toEqual([
+    { id: "planner->builder", source: "planner", target: "builder", port: "done", loop: false },
+    { id: "builder->reviewer", source: "builder", target: "reviewer", port: "done", loop: false },
+    { id: "reviewer->builder", source: "reviewer", target: "builder", port: "changes", loop: false },
+  ]);
+  expect(await call("page_rename_node", { key: "builder", to: "planner" })).toEqual({ text: "There is already a node planner.", isError: true });
+  expect(await call("page_rename_node", { key: "builder", to: "the coder" })).toEqual({ text: "A key has only letters, digits, - and _.", isError: true });
+});
+
+test("page_issues lists what keeps the graph from being saved, and page_tidy_layout lays the graph out again", async () => {
+  const { call } = await withAssistant(unconnected);
+  const issues = await call("page_issues");
+  expect(issues.isError).toBe(false);
+  expect(issues.text).toMatch(/^\d+ issues?: /);
+  expect(issues.text).toContain("reviewer");
+  expect(screen.getByRole("toolbar", { name: "Graph" })).toHaveTextContent(/\d+ issues?/);
+
+  expect(await call("page_tidy_layout")).toEqual({ text: "Laid the graph out again. The graph is not saved yet.", isError: false });
+  expect(screen.getByText("· edited, not saved")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
+  await call("page_remove", { ids: ["reviewer", "finish"] });
+  expect(await call("page_issues")).toEqual({ text: "The graph has no issues; it can be saved.", isError: false });
+});
+
 test("page_save_graph is refused with the issues while the graph is invalid, and otherwise saves as the next version", async () => {
   vi.mocked(saveGraphAction).mockReset().mockResolvedValue({ ok: true, version: 5 });
   const { call } = await withAssistant(unconnected);

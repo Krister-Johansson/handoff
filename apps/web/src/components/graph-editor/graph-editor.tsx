@@ -135,7 +135,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
   }, []);
 
   const tidy = () =>
-    void runLayout().then(({ positions, routes: next }) => {
+    runLayout().then(({ positions, routes: next }) => {
       const rounded = Object.fromEntries(Object.entries(positions).map(([id, p]) => [id, { x: Math.round(p.x), y: Math.round(p.y) }]));
       edit({ type: "applyLayout", positions: rounded });
       setRoutes(next);
@@ -176,7 +176,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
       await saveVersion();
     });
 
-  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion, centre });
+  useGraphPageTools({ projectId, graphName, version, graph, selection, setSelection, saved, locked, issues, edit, library, saveVersion, centre, tidy });
 
   const nextVersion = Math.max(version, ...versions.map((v) => v.version)) + 1;
 
@@ -268,7 +268,7 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
                   <Separator orientation="vertical" className="mx-0.5 h-[18px] self-center" />
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <Button size="icon-sm" variant="ghost" aria-label="Tidy layout" onClick={tidy}>
+                      <Button size="icon-sm" variant="ghost" aria-label="Tidy layout" onClick={() => void tidy()}>
                         <LayoutGridIcon />
                       </Button>
                     </TooltipTrigger>
