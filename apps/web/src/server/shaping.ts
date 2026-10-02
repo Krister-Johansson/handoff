@@ -150,9 +150,10 @@ async function tasksOf({ plan, repo, number, project }: Planned, issues: number[
 }
 
 async function setStatuses({ plan, repo, number }: Planned, issues: number[], status: PlanStatus) {
-  for (const issue of issues) {
-    const result = await plan.setStatus(repo, number, issue, status);
-    if (result !== "set") throw new Error(`#${issue} could not move to ${status}: ${result === "no-option" ? `the Project has no ${status} option; run setup_plan` : "it is not in the Project"}.`);
+  const results = await Promise.all(issues.map(async (issue) => ({ issue, result: await plan.setStatus(repo, number, issue, status) })));
+  const failed = results.find((r) => r.result !== "set");
+  if (failed) {
+    throw new Error(`#${failed.issue} could not move to ${status}: ${failed.result === "no-option" ? `the Project has no ${status} option; run setup_plan` : "it is not in the Project"}.`);
   }
 }
 
@@ -165,10 +166,10 @@ export async function moveToReady(deps: ShapingDeps, projectId: string, issues: 
   const planned = await plannedProject(deps, projectId);
   const { github } = deps;
   if (!github) throw new Error("Moving tasks to Ready needs GitHub access to read their bodies (GITHUB_TOKEN or a GitHub App).");
-  for (const task of await tasksOf(planned, issues)) {
-    const { body } = await github.getIssue(planned.repo, task.number);
-    if (!body.trim()) throw new Error(`#${task.number} has no body. Write its brief first: the agents read it.`);
-  }
+  const tasks = await tasksOf(planned, issues);
+  const bodies = await Promise.all(tasks.map(async (task) => ({ issue: task.number, body: (await github.getIssue(planned.repo, task.number)).body })));
+  const empty = bodies.find((b) => !b.body.trim());
+  if (empty) throw new Error(`#${empty.issue} has no body. Write its brief first: the agents read it.`);
   await setStatuses(planned, issues, "Ready");
   return { moved: issues, status: "Ready" as const };
 }
@@ -181,8 +182,7 @@ const ACTIVE = new Set(["queued", "running", "waiting"]);
  */
 export async function moveToShaping(deps: ShapingDeps, projectId: string, issues: number[]) {
   const planned = await plannedProject(deps, projectId);
-  const tasks = await tasksOf(planned, issues);
-  const runs = await latestRuns(deps.db, planned.project.id);
+  const [tasks, runs] = await Promise.all([tasksOf(planned, issues), latestRuns(deps.db, planned.project.id)]);
   for (const task of tasks) {
     const run = runs.get(task.number);
     if (run && ACTIVE.has(run.status)) throw new Error(`#${task.number} has an active run (${run.id}, ${run.status}). Cancel the run first; a running task keeps its status.`);
