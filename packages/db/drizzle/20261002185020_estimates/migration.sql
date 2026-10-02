@@ -1,0 +1,1 @@
+ALTER TABLE "node_executions" ADD COLUMN "queued_ms" integer DEFAULT 0 NOT NULL;
