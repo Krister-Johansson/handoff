@@ -11,6 +11,7 @@ import { moveItemAction } from "@/app/projects/actions";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -415,6 +416,9 @@ type RowLabelProps = {
   flags: FlagContext;
   onToggle: () => void;
   onSchedule: (item: PlanItem) => void;
+  /** The size popover is open, as E on the task's focused bar asks. */
+  sizeOpen: boolean;
+  onSizeOpenChange: (open: boolean) => void;
 };
 
 /** A task's status pill, or an epic's or a story's kind badge; nothing on the Unparented heading. */
@@ -443,7 +447,7 @@ function tasksOf(item: PlanItem): PlanTask[] {
 }
 
 /** The fixed left cell of a row: chevron, status pill or kind badge, number and title with a task's warning icon, then the menu. */
-function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule }: RowLabelProps) {
+function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, sizeOpen, onSizeOpenChange }: RowLabelProps) {
   const { item, task } = row;
   const sizing = use(Sizing);
   return (
@@ -470,7 +474,7 @@ function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule }:
       </div>
       {task && sizing && (
         <div className="flex min-w-0 items-center justify-end pr-7">
-          <SizeChip task={task} />
+          <SizeChip task={task} open={sizeOpen} onOpenChange={onSizeOpenChange} />
         </div>
       )}
     </div>
@@ -522,6 +526,49 @@ function Unscheduled({ groups, undated, onSchedule }: { groups: UnscheduledGroup
         </CollapsibleContent>
       </section>
     </Collapsible>
+  );
+}
+
+/** The keys of a focused bar that moves, under the chart. */
+function KeyHint({ issue, sized }: { issue: number; sized: boolean }) {
+  return (
+    <div role="group" aria-label={`Keys for bar #${issue}`} className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t px-3.5 py-2 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1.5 font-medium text-foreground">
+        <KeyboardIcon aria-hidden className="size-3.5" />
+        Bar #{issue}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <KbdGroup>
+          <Kbd>←</Kbd>
+          <Kbd>→</Kbd>
+        </KbdGroup>
+        Move a day
+      </span>
+      {sized && (
+        <>
+          <span className="flex items-center gap-1.5">
+            <KbdGroup>
+              <Kbd>⇧</Kbd>
+              <Kbd>←</Kbd>
+              <Kbd>→</Kbd>
+            </KbdGroup>
+            Manual estimate one hour less or more
+          </span>
+          <span className="flex items-center gap-1.5">
+            <Kbd>E</Kbd>
+            Size and estimate
+          </span>
+        </>
+      )}
+      <span className="flex items-center gap-1.5">
+        <Kbd>Enter</Kbd>
+        Open on GitHub
+      </span>
+      <span className="flex items-center gap-1.5">
+        <Kbd>Esc</Kbd>
+        Put it back
+      </span>
+    </div>
   );
 }
 
@@ -674,8 +721,15 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
     const bar: DragBar = { issue: task.number, dayWidth, hourWidth: sizing ? dayWidth / sizing.capacity : dayWidth, hours };
     const moving = drag?.issue === task.number && draft && dragged ? draft : undefined;
     const before = saved.get(task.number)?.planned;
+    const props = barProps(bar);
     return {
-      bar: barProps(bar),
+      bar: {
+        ...props,
+        onBlur: () => {
+          props.onBlur();
+          setFocused(undefined);
+        },
+      },
       end: hours !== undefined ? endProps(bar) : undefined,
       origin: moving && before ? barBox(scale, before, sizing?.capacity) : undefined,
       tip: moving && dragged ? moveTip(move, dragged, drag!, moving, drag!.via) : undefined,
@@ -806,6 +860,8 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                       flags={flags}
                       onToggle={() => rowsOpen.toggle(row.key)}
                       onSchedule={setScheduling}
+                      sizeOpen={row.task !== undefined && sizeOpen === row.task.number}
+                      onSizeOpenChange={(open) => !open && setSizeOpen(undefined)}
                     />
                     <div role="gridcell" className={cn("relative flex-1 border-b", hovered !== undefined && !isRelated && "[&_[data-bar]]:opacity-35")} style={{ minWidth: scale.width }}>
                       {entry && <PlannedBar row={row} entry={entry} scale={scale} todayX={todayX} ctx={ctx} move={row.task && moveOf(row.task, entry)} />}
@@ -857,6 +913,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
           </button>
         )}
       </div>
+      {focused !== undefined && <KeyHint issue={focused} sized={!!sizing && saved.get(focused)?.planned?.hours !== undefined} />}
       <Unscheduled groups={unscheduled} undated={timeline.items.every((i) => !i.planned)} onSchedule={setScheduling} />
       <ScheduleDialog projectId={projectId} item={scheduling} notes={scheduling ? scheduleNotes(scheduling, items, entries) : []} onOpenChange={(open) => !open && setScheduling(undefined)} />
     </div>

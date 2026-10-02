@@ -662,3 +662,58 @@ test("a drop before a blocker ends is allowed with the warning", async () => {
   expect(container.querySelector('[data-arrow="142-143"]')).toHaveAttribute("data-early", "false");
   expect(leftOf(barOf(143))).toBe(OCT_1 + DAY);
 });
+
+test("Done and Running bars do not drag", () => {
+  renderSized();
+  for (const n of [141, 142]) {
+    const bar = barOf(n);
+    const left = leftOf(bar);
+    expect(bar.querySelector("[data-end]")).toBeNull();
+    fireEvent.pointerDown(bar, { pointerId: 1, button: 0, clientX: 500 });
+    fireEvent.pointerMove(bar, { pointerId: 1, clientX: 500 + 2 * DAY });
+    expect(dragTip()).not.toBeInTheDocument();
+    expect(leftOf(bar)).toBe(left);
+    fireEvent.pointerUp(bar, { pointerId: 1, clientX: 500 + 2 * DAY });
+    fireEvent.keyDown(bar, { key: "ArrowRight" });
+    expect(dragTip()).not.toBeInTheDocument();
+    expect(bar).not.toHaveAttribute("aria-keyshortcuts");
+  }
+  // A Ready task moves.
+  expect(barOf(143)).toHaveAttribute("aria-keyshortcuts");
+  expect(actions.moveItemAction).not.toHaveBeenCalled();
+});
+
+test("arrows move a focused bar a day and Shift with an arrow changes its estimate, with one save after the last key", async () => {
+  renderSized();
+  const bar = barOf(146);
+  act(() => bar.focus());
+  const keys = screen.getByRole("group", { name: "Keys for bar #146" });
+  expect(keys).toHaveTextContent("Move a day");
+  expect(keys).toHaveTextContent("Manual estimate one hour less or more");
+  expect(keys).toHaveTextContent("Size and estimate");
+  expect(keys).toHaveTextContent("Put it back");
+
+  fireEvent.keyDown(bar, { key: "ArrowRight" });
+  expect(dragTip()).toHaveTextContent("Sun Oct 4M, forecast ~50m. Saves when you stop pressing keys.");
+  fireEvent.keyDown(bar, { key: "ArrowRight" });
+  // From M's 50 minutes, an hour more is 2h.
+  fireEvent.keyDown(bar, { key: "ArrowRight", shiftKey: true });
+  expect(dragTip()).toHaveTextContent("Mon Oct 5Manual estimate 2h. Its size is M. Saves when you stop pressing keys.");
+  expect(leftOf(bar)).toBe(OCT_1 + 4 * DAY);
+  expect(widthOf(bar)).toBe(32);
+  expect(actions.moveItemAction).not.toHaveBeenCalled();
+
+  await waitFor(() => expect(actions.moveItemAction).toHaveBeenCalledWith({ projectId: "p1", issue: 146, start: "2026-10-05", target: "2026-10-05", estimate: 2 }), { timeout: 2000 });
+  expect(await screen.findByText("Moved #146 to Oct 5")).toBeInTheDocument();
+  expect(screen.getByText("Saved to GitHub. Manual estimate 2h.")).toBeInTheDocument();
+  expect(actions.moveItemAction).toHaveBeenCalledTimes(1);
+
+  // Escape puts back a move that is not saved yet; E opens the size popover.
+  fireEvent.keyDown(bar, { key: "ArrowLeft" });
+  fireEvent.keyDown(bar, { key: "Escape" });
+  expect(dragTip()).not.toBeInTheDocument();
+  fireEvent.keyDown(bar, { key: "e" });
+  expect(await screen.findByRole("dialog", { name: "Size and estimate of #146" })).toBeInTheDocument();
+  await new Promise((r) => setTimeout(r, 900));
+  expect(actions.moveItemAction).toHaveBeenCalledTimes(1);
+});
