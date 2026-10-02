@@ -1,3 +1,4 @@
+import type { OpenPage } from "./run-page-tool";
 import { planUiTool, UiToolError } from "./ui-tools";
 
 /** What a UI tool call did in the page: the text for the model, and for a navigation, what the panel says. */
@@ -34,7 +35,10 @@ async function pageShown(href: string, before: { path: string; heading: HTMLElem
  * Runs one of the catalog's UI tools in the page. A navigation pushes the route, waits for the page,
  * moves focus to its heading and says where it went; where_am_i describes the open page.
  */
-export async function runUiTool(call: { name: string; args: unknown }, push: (href: string) => void, timeoutMs = 10_000): Promise<UiToolOutcome> {
+export async function runUiTool(
+  call: { name: string; args: unknown },
+  { push, timeoutMs = 10_000 }: { push: (href: string) => void; page?: () => OpenPage | undefined; timeoutMs?: number },
+): Promise<UiToolOutcome> {
   let plan;
   try {
     plan = planUiTool(call.name, call.args, window.location.origin);

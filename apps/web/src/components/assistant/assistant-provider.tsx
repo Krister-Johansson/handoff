@@ -219,7 +219,7 @@ export function AssistantProvider({
           if (event.type === "ui_call") {
             // UI tools run here, in the page, while the conversation stays on screen.
             const turn = turnId.current;
-            void runUiTool(event, (href) => router.push(href)).then(async (outcome) => {
+            void runUiTool(event, { push: (href) => router.push(href) }).then(async (outcome) => {
               if (outcome.note) {
                 const note = { id: event.requestId, text: outcome.note };
                 setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? { ...m, notes: [...(m.notes ?? []), note] } : m)));
@@ -291,7 +291,7 @@ export function AssistantProvider({
       context,
       {
         approve: (call) => approveForAgent(call),
-        runUi: (call) => runUiTool(call, (href) => router.push(href)),
+        runUi: (call) => runUiTool(call, { push: (href) => router.push(href) }),
         activity: setAgentActivity,
       },
       { available, signal: controller.signal },
