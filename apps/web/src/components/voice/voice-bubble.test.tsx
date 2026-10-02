@@ -6,7 +6,7 @@ import { DEFAULT_VOICE_PREFS } from "@/lib/voice/prefs";
 import { createSpeaker } from "@/lib/voice/speaker";
 import type { RecognitionCtor } from "@/lib/voice/support";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
-import { FakeSpeechSynthesis, FakeUtterance } from "@/lib/voice/testing/fake-speech-synthesis";
+import { FakePlayer } from "@/lib/voice/testing/fake-player";
 import { VoiceBubble } from "./voice-bubble";
 import { VoiceHotkeys } from "./voice-hotkeys";
 import { VoiceProvider } from "./voice-provider";
@@ -14,18 +14,18 @@ import { VoiceProvider } from "./voice-provider";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => "/projects" }));
 
 let transport: FakeAssistantTransport;
-let synth: FakeSpeechSynthesis;
+let synth: FakePlayer;
 
 beforeEach(() => {
   FakeSpeechRecognition.reset();
   localStorage.clear();
   transport = new FakeAssistantTransport();
-  synth = new FakeSpeechSynthesis();
+  synth = new FakePlayer();
   Element.prototype.scrollIntoView = vi.fn();
 });
 
 function App({ available = true }: { available?: boolean }) {
-  const speaker = createSpeaker(synth as unknown as SpeechSynthesis, () => DEFAULT_VOICE_PREFS, (t) => new FakeUtterance(t) as unknown as SpeechSynthesisUtterance);
+  const speaker = createSpeaker(synth, () => DEFAULT_VOICE_PREFS);
   return (
     <AssistantProvider transport={transport} available={available}>
       <VoiceProvider support={{ recognition: FakeSpeechRecognition as unknown as RecognitionCtor, onDeviceCheck: true }} speaker={speaker}>
@@ -41,7 +41,7 @@ function App({ available = true }: { available?: boolean }) {
 
 const recognizer = () => FakeSpeechRecognition.instances.at(-1)!;
 const bubble = () => screen.getByRole("region", { name: "Voice assistant" });
-const said = () => synth.spoken.map((u) => u.text);
+const said = () => synth.spoken;
 
 /** Presses V and says `text` as one utterance. */
 async function ask(text: string) {

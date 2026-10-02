@@ -2,7 +2,7 @@ import { useSyncExternalStore } from "react";
 
 /** How this browser listens and speaks. Kept in localStorage; audio stays on the machine unless a switch says otherwise. */
 export type VoicePrefs = {
-  /** The recognition language, also used to pick a voice. */
+  /** The language spoken to the dashboard. */
   lang: string;
   /** Allow Chrome's server-based recognition, which sends audio to Google, when no on-device pack exists. */
   allowServerRecognition: boolean;
@@ -10,10 +10,9 @@ export type VoicePrefs = {
   speakNotifications: boolean;
   /** Also speak finished and merged runs, not only what needs the person. */
   speakFinished: boolean;
-  voiceURI: string | null;
   rate: number;
-  /** Allow voices that synthesize on a remote service. */
-  allowRemoteVoices: boolean;
+  /** The ElevenLabs voice; none means the dashboard's default voice. */
+  elevenLabsVoiceId: string | null;
 };
 
 export const VOICE_PREFS_KEY = "handoff.voice";
@@ -24,9 +23,8 @@ export const DEFAULT_VOICE_PREFS: VoicePrefs = {
   speakReplies: false,
   speakNotifications: false,
   speakFinished: false,
-  voiceURI: null,
   rate: 1,
-  allowRemoteVoices: false,
+  elevenLabsVoiceId: null,
 };
 
 export const MIN_RATE = 0.5;
@@ -50,9 +48,8 @@ export function readVoicePrefs(): VoicePrefs {
     speakReplies: bool(raw.speakReplies, d.speakReplies),
     speakNotifications: bool(raw.speakNotifications, d.speakNotifications),
     speakFinished: bool(raw.speakFinished, d.speakFinished),
-    voiceURI: typeof raw.voiceURI === "string" ? raw.voiceURI : d.voiceURI,
     rate: typeof raw.rate === "number" && Number.isFinite(raw.rate) ? Math.min(MAX_RATE, Math.max(MIN_RATE, raw.rate)) : d.rate,
-    allowRemoteVoices: bool(raw.allowRemoteVoices, d.allowRemoteVoices),
+    elevenLabsVoiceId: typeof raw.elevenLabsVoiceId === "string" && raw.elevenLabsVoiceId ? raw.elevenLabsVoiceId : d.elevenLabsVoiceId,
   };
 }
 

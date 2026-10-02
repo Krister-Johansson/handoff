@@ -14,6 +14,7 @@ import { WorkerSettings } from "@/components/settings/worker-settings";
 import { lastAgentConnection } from "@/server/agent-endpoint";
 import { lastAssistantModel } from "@/server/assistant/conversations";
 import { assistantState } from "@/server/assistant/settings";
+import { elevenLabsConfig, listElevenLabsVoices } from "@/server/voice/elevenlabs";
 import { AgentTokenStore, defaultAgentTokenFile } from "@/server/agent-token";
 import { workerSummary } from "@/server/workers";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -43,6 +44,17 @@ async function loadWorkers() {
   return { workers, queuedRuns, now: new Date() };
 }
 
+/** The ElevenLabs voices for the Voice tab, read with the key on the server; undefined without a key. */
+async function loadElevenLabsVoices() {
+  const { apiKey } = elevenLabsConfig();
+  if (!apiKey) return undefined;
+  try {
+    return { voices: await listElevenLabsVoices(apiKey) };
+  } catch (error) {
+    return { error: (error as Error).message };
+  }
+}
+
 /** A settings card: a title, what it is for, and the settings. */
 function Section({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
@@ -64,6 +76,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host") ?? "localhost:3000"}`;
   const token = tab === "agents" ? new AgentTokenStore(defaultAgentTokenFile()).read() : undefined;
   const worker = tab === "worker" ? await loadWorkers() : undefined;
+  const voice = tab === "voice" ? await loadElevenLabsVoices() : undefined;
   const assistant = tab === "assistant" ? { state: assistantState(), lastModel: await lastAssistantModel(getDb()) } : undefined;
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
@@ -87,7 +100,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           )}
           {tab === "voice" && (
             <Section title="Voice" description="Push to talk: the dashboard listens only after you press the microphone or V, and stops on Escape.">
-              <VoiceSettingsLoader />
+              <VoiceSettingsLoader {...(voice ? { elevenLabs: voice } : {})} />
             </Section>
           )}
           {tab === "agents" && (

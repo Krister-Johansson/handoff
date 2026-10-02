@@ -11,7 +11,6 @@ class OnDeviceRecognition {
 test("detectVoiceSupport finds the webkit-prefixed constructor", () => {
   const support = detectVoiceSupport({ webkitSpeechRecognition: Recognition } as never);
   expect(support.recognition).toBe(Recognition);
-  expect(support.synth).toBeUndefined();
 });
 
 test("detectVoiceSupport reports no on-device check when available() is missing", () => {
@@ -21,8 +20,6 @@ test("detectVoiceSupport reports no on-device check when available() is missing"
   expect(detectVoiceSupport({ SpeechRecognition: OnDeviceRecognition, webkitSpeechRecognition: Recognition } as never).recognition).toBe(OnDeviceRecognition);
 });
 
-test("detectVoiceSupport finds speech synthesis and reports nothing in a window without either", () => {
-  const synth = { getVoices: () => [] };
-  expect(detectVoiceSupport({ speechSynthesis: synth } as never)).toEqual({ synth, onDeviceCheck: false });
+test("detectVoiceSupport reports nothing in a window without recognition", () => {
   expect(detectVoiceSupport({} as never)).toEqual({ onDeviceCheck: false });
 });

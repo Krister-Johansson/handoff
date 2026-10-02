@@ -11,6 +11,7 @@ import { VoiceBubble } from "@/components/voice/voice-bubble";
 import { VoiceHotkeys } from "@/components/voice/voice-hotkeys";
 import { VoiceProvider } from "@/components/voice/voice-provider";
 import { assistantState } from "@/server/assistant/settings";
+import { elevenLabsConfig } from "@/server/voice/elevenlabs";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -33,7 +34,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
           <TooltipProvider>
             {/* The assistant lives in the root layout so its conversation stays on screen while pages change. */}
             <AssistantProvider available={assistant.available} offReason={assistant.reason ?? "no-token"}>
-              <VoiceProvider>
+              <VoiceProvider speechAvailable={Boolean(elevenLabsConfig().apiKey)}>
                 <SiteHeader />
                 <VoiceHotkeys />
                 {children}

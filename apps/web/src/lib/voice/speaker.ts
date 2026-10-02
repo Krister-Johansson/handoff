@@ -21,6 +21,15 @@ export type Speaker = {
   subscribe(listener: () => void): () => void;
 };
 
+/**
+ * Speaks one sentence and calls `end` or `error` once; the returned function cancels it. `prefetch`
+ * prepares the next sentence while this one plays, for engines that fetch audio.
+ */
+export type Player = {
+  play(sentence: string, prefs: VoicePrefs, handlers: { end(): void; error(message: string): void }): () => void;
+  prefetch?(sentence: string, prefs: VoicePrefs): void;
+};
+
 const RANK: Record<SpeechPriority, number> = { reply: 0, notification: 1, read: 2 };
 const ABBREVIATIONS = new Set(["e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "no", "fig"]);
 
@@ -71,33 +80,21 @@ export function spokenReply(text: string, max = 3): string {
   return sentences.length <= max ? sentences.join(" ") : `${sentences.slice(0, max).join(" ")} The rest is on screen.`;
 }
 
-/**
- * The voice to speak with: the stored one while it still exists (and is allowed), else a voice on
- * this machine for the language, else any voice on this machine. Remote voices only when allowed.
- */
-export function pickVoice(voices: SpeechSynthesisVoice[], prefs: VoicePrefs): SpeechSynthesisVoice | undefined {
-  const usable = voices.filter((v) => v.localService || prefs.allowRemoteVoices);
-  const stored = prefs.voiceURI ? usable.find((v) => v.voiceURI === prefs.voiceURI) : undefined;
-  if (stored) return stored;
-  const local = usable.filter((v) => v.localService);
-  return local.find((v) => v.lang === prefs.lang) ?? local[0] ?? usable.find((v) => v.lang === prefs.lang) ?? usable[0];
-}
-
 type Job = { priority: SpeechPriority; title?: string; sentences: string[]; next: number; seq: number };
 
 const IDLE: SpeakerState = { speaking: false, sentence: 0, total: 0 };
 
 /**
- * Speaks text one sentence at a time through speechSynthesis, so a stop is immediate and a higher
- * priority can go first between sentences. Nothing is spoken until speak() is called.
+ * Speaks text one sentence at a time through the player (ElevenLabs, through the dashboard), so a stop
+ * is immediate and a higher priority can go first between sentences, and fetches the next sentence
+ * while one plays. A sentence that cannot be spoken ends the speech with its reason. Nothing is spoken
+ * until speak() is called.
  */
-export function createSpeaker(
-  synth: SpeechSynthesis,
-  getPrefs: () => VoicePrefs,
-  makeUtterance: (text: string) => SpeechSynthesisUtterance = (text) => new SpeechSynthesisUtterance(text),
-): Speaker {
+export function createSpeaker(player: Player, getPrefs: () => VoicePrefs): Speaker {
   let jobs: Job[] = [];
-  let current: SpeechSynthesisUtterance | undefined;
+  let stopCurrent: (() => void) | undefined;
+  // Each sentence gets a number; a late end or error from an earlier one is ignored.
+  let sentenceNo = 0;
   let state: SpeakerState = IDLE;
   let seq = 0;
   const listeners = new Set<() => void>();
@@ -105,34 +102,31 @@ export function createSpeaker(
     state = next;
     for (const listener of listeners) listener();
   };
+  const pending = () => jobs.filter((j) => j.next < j.sentences.length).toSorted((a, b) => RANK[a.priority] - RANK[b.priority] || a.seq - b.seq);
 
   const next = () => {
     jobs = jobs.filter((j) => j.next < j.sentences.length);
-    const job = jobs.toSorted((a, b) => RANK[a.priority] - RANK[b.priority] || a.seq - b.seq)[0];
+    const job = pending()[0];
     if (!job) {
-      current = undefined;
+      stopCurrent = undefined;
       return set(IDLE);
     }
+    const mine = ++sentenceNo;
+    const alive = () => sentenceNo === mine;
     const prefs = getPrefs();
-    const voice = pickVoice(synth.getVoices(), prefs);
-    if (!voice) {
-      jobs = [];
-      current = undefined;
-      return set({ ...IDLE, error: `No local voice for ${prefs.lang}.` });
-    }
-    const utterance = makeUtterance(job.sentences[job.next++]!);
-    utterance.voice = voice;
-    utterance.lang = prefs.lang;
-    utterance.rate = prefs.rate;
-    const done = () => {
-      if (utterance !== current) return;
-      next();
-    };
-    utterance.onend = done;
-    utterance.onerror = done;
-    current = utterance;
+    const sentence = job.sentences[job.next++]!;
     set({ speaking: true, priority: job.priority, sentence: job.next, total: job.sentences.length, ...(job.title ? { title: job.title } : {}) });
-    synth.speak(utterance);
+    stopCurrent = player.play(sentence, prefs, {
+      end: () => alive() && next(),
+      error: (message) => {
+        if (!alive()) return;
+        jobs = [];
+        stopCurrent = undefined;
+        set({ ...IDLE, error: message });
+      },
+    });
+    const after = pending()[0];
+    if (after) player.prefetch?.(after.sentences[after.next]!, prefs);
   };
 
   return {
@@ -140,12 +134,14 @@ export function createSpeaker(
       const sentences = splitSentences(text);
       if (!sentences.length) return;
       jobs.push({ priority, sentences, next: 0, seq: seq++, ...(title ? { title } : {}) });
-      if (!current) next();
+      if (!state.speaking) next();
     },
     stop() {
+      sentenceNo++;
       jobs = [];
-      current = undefined;
-      synth.cancel();
+      const stopping = stopCurrent;
+      stopCurrent = undefined;
+      stopping?.();
       set(IDLE);
     },
     isSpeaking: () => state.speaking,

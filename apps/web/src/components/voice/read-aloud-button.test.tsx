@@ -3,18 +3,18 @@ import { beforeEach, expect, test } from "vitest";
 import { DEFAULT_VOICE_PREFS } from "@/lib/voice/prefs";
 import { createSpeaker } from "@/lib/voice/speaker";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
-import { FakeSpeechSynthesis, FakeUtterance } from "@/lib/voice/testing/fake-speech-synthesis";
+import { FakePlayer } from "@/lib/voice/testing/fake-player";
 import { ReadAloudButton } from "./read-aloud-button";
 import { VoiceTestApp } from "./testing/voice-test-app";
 
-let synth: FakeSpeechSynthesis;
-const speakerFor = () => createSpeaker(synth as unknown as SpeechSynthesis, () => DEFAULT_VOICE_PREFS, (t) => new FakeUtterance(t) as unknown as SpeechSynthesisUtterance);
+let synth: FakePlayer;
+const speakerFor = () => createSpeaker(synth, () => DEFAULT_VOICE_PREFS);
 const strip = () => screen.getByRole("status", { name: "Voice" });
 
 beforeEach(() => {
   FakeSpeechRecognition.reset();
   localStorage.clear();
-  synth = new FakeSpeechSynthesis();
+  synth = new FakePlayer();
 });
 
 const SUMMARY = "Add a CHANGELOG.md. The run is running. coder-1 failed: tests did not pass.";
@@ -26,7 +26,7 @@ test("Read aloud on the run page speaks the registered summary and the strip sho
     </VoiceTestApp>,
   );
   fireEvent.click(screen.getByRole("button", { name: "Read aloud" }));
-  expect(synth.spoken.map((u) => u.text)).toEqual(["Add a CHANGELOG.md."]);
+  expect(synth.spoken).toEqual(["Add a CHANGELOG.md."]);
   expect(strip()).toHaveTextContent("Reading: Run summary, sentence 1 of 3");
   act(() => synth.finishCurrent());
   expect(strip()).toHaveTextContent("Reading: Run summary, sentence 2 of 3");
