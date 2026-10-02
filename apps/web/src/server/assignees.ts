@@ -1,5 +1,5 @@
 import { and, asc, eq, events, inArray, projects, type Db, type DbExecutor } from "@handoff/db";
-import type { Assignable, GitHubPort, RepoRef } from "@handoff/github";
+import type { Assignable, Assignee, GitHubPort, RepoRef } from "@handoff/github";
 import { assignSkipReason } from "../lib/event-summary";
 
 /** What starting a run did to its issues' assignees: who it assigned, and why it assigned nobody to the others. */
@@ -58,7 +58,7 @@ export async function setIssueAssignees(
   projectId: string,
   issue: number,
   input: { logins: string[]; me?: boolean | undefined },
-): Promise<{ issue: number; assignees: string[] }> {
+): Promise<{ issue: number; assignees: Assignee[] }> {
   const { repo, gh } = await access(db, github, projectId);
   const me = input.me ? await gh.viewer() : undefined;
   if (input.me && !me) throw new Error(NO_USER);

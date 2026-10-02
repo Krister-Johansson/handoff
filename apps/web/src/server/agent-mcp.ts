@@ -199,7 +199,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     assign: async ({ project, issue, logins, me }: { project: string; issue: number; logins: string[]; me?: boolean }) => {
       const found = await findProject(db, project);
       const result = await setIssueAssignees(db, github, found.id, issue, { logins, me });
-      return { ...result, url: `https://github.com/${found.repoOwner}/${found.repoName}/issues/${issue}` };
+      return { issue: result.issue, assignees: result.assignees.map((a) => a.login), url: `https://github.com/${found.repoOwner}/${found.repoName}/issues/${issue}` };
     },
 
     list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {

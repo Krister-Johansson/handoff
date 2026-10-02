@@ -27,7 +27,7 @@ export async function assignStarter(db: Db, runId: string, github: GitHubPort | 
     try {
       if ((await github.getIssue(repo, issue)).assignees.length > 0) continue;
       const kept = await github.setAssignees(repo, issue, [login]);
-      written.push(kept.includes(login) ? { type: "issue.assigned", payload: { issue, login } } : skipped(issue, "not-assignable"));
+      written.push(kept.some((a) => a.login === login) ? { type: "issue.assigned", payload: { issue, login } } : skipped(issue, "not-assignable"));
     } catch (error) {
       written.push(skipped(issue, error instanceof Error ? error.message : String(error)));
     }
