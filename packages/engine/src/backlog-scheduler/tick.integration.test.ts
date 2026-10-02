@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { and, asc, eq, inArray, projects, projectSchedulers, runs, schedulerEvents, sql } from "@handoff/db";
+import { and, asc, eq, inArray, notifications, projects, projectSchedulers, runs, schedulerEvents, sql } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { startRun } from "../start-run.ts";
@@ -179,6 +179,47 @@ test("a refusal is recorded once per issue and reason", async () => {
   ]);
   expect((await p.row()).lastResult).toMatchObject({ state: "idle", reason: "all_skipped" });
   expect(await p.events("scheduler.idle")).toHaveLength(1);
+});
+
+test("three failed starts in a row pause the scheduler with the reason", async () => {
+  const p = await planned({ maxRuns: 2, graphName: "gone" });
+  await p.task("First");
+  await p.task("Second");
+  const listItems = vi.spyOn(p.plan, "listItems");
+
+  // Two failures, then a start: the count starts over.
+  listItems.mockRejectedValueOnce(new Error("GitHub said 502"));
+  await p.check();
+  await p.check();
+  expect((await p.row()).startFailures).toBe(2);
+  await db.update(projectSchedulers).set({ graphName: "g" }).where(eq(projectSchedulers.projectId, p.project.id));
+  await p.check();
+  expect((await p.row()).startFailures).toBe(0);
+  await p.planOf((await p.started())[0]!.id);
+
+  await db.update(projectSchedulers).set({ graphName: "gone" }).where(eq(projectSchedulers.projectId, p.project.id));
+  await p.check();
+  await p.check();
+  expect((await p.row()).pausedAt).toBeNull();
+  await p.check();
+  // Paused: further checks do nothing until a person resumes it.
+  await p.check();
+
+  const row = await p.row();
+  expect(row).toMatchObject({ pausedBy: "scheduler", pauseReason: "3 starts failed in a row. The last error: no graph named gone", startFailures: 3 });
+  expect(row.pausedAt).toBeInstanceOf(Date);
+  expect((await p.events("scheduler.start_failed")).map((e) => e.payload.error)).toEqual([
+    "GitHub said 502",
+    "no graph named gone",
+    "no graph named gone",
+    "no graph named gone",
+    "no graph named gone",
+  ]);
+  expect((await p.events("scheduler.paused")).map((e) => e.payload)).toEqual([{ by: "scheduler", reason: row.pauseReason }]);
+  expect(await db.select().from(notifications).where(eq(notifications.projectId, p.project.id))).toEqual([
+    expect.objectContaining({ tone: "danger", title: `${p.project.name}: the scheduler paused itself`, body: row.pauseReason, href: `/projects/${p.project.id}/plan` }),
+  ]);
+  expect(await p.started()).toHaveLength(1);
 });
 
 test("held is recorded once until the reasons change", async () => {
