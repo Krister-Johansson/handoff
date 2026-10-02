@@ -2,6 +2,9 @@ import { and, desc, eq, inArray, projects, projectSchedulers, runs, schedulerEve
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 import { startRun } from "../start-run.ts";
 import { candidates, type Candidate, type IssueRun, type Skipped } from "./candidates.ts";
+import { projectHolds, type Hold } from "./holds.ts";
+
+type ProjectRow = typeof projects.$inferSelect;
 
 export type CheckDeps = {
   db: Db;
@@ -11,23 +14,36 @@ export type CheckDeps = {
   owner: string;
 };
 
+/** Why a check that could start something started nothing. */
+export type IdleReason =
+  /** A run the scheduler started has no plan yet: its planner finishes before the next start. */
+  | { reason: "planning"; runId: string }
+  /** No open task in Ready. */
+  | { reason: "no_ready" }
+  /** Every Ready task was skipped, each with its reason. */
+  | { reason: "all_skipped" };
+
 /** What a check found, kept on the scheduler's row for the status reads. */
 export type CheckResult = {
-  state: "full" | "idle" | "running";
+  state: "held" | "full" | "idle" | "running";
+  holds: Hold[];
   active: number;
   maxRuns: number;
   started: { runId: string; issue: number }[];
   candidates: Candidate[];
   skipped: Skipped[];
+  reason?: IdleReason["reason"];
+  runId?: string;
 };
 
 const ACTIVE = ["queued", "running", "waiting"] as const;
+const isActive = (status: string) => (ACTIVE as readonly string[]).includes(status);
 const CHECK_EVERY = "60 seconds";
 
 /**
- * One check of a project's scheduler: counts the project's active runs, reads the plan once when
- * a slot is free, and starts the first candidate with the scheduler's graph. It records what it
- * found on the row and what it did as scheduler events.
+ * One check of a project's scheduler: stops on a hold, a full project or a run of its own still
+ * planning; otherwise reads the plan once and starts the first candidate with the scheduler's
+ * graph. It keeps what it found on the row and records what changed as scheduler events.
  */
 export async function checkProject(deps: CheckDeps, projectId: string): Promise<CheckResult | undefined> {
   const { db } = deps;
@@ -35,40 +51,60 @@ export async function checkProject(deps: CheckDeps, projectId: string): Promise<
   if (!row || !row.enabled || row.pausedAt) return undefined;
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) return undefined;
-  const active = await activeRuns(db, projectId);
-  const result: CheckResult = { state: "full", active, maxRuns: row.maxRuns, started: [], candidates: [], skipped: [] };
-  if (active < row.maxRuns && project.planProjectNumber !== null) {
-    const repo = { owner: project.repoOwner, name: project.repoName };
-    const items = await deps.projects.listItems(repo.owner, project.planProjectNumber, repo);
-    const found = candidates(items, await issueRuns(db, projectId), { order: row.order, skipLabel: row.skipLabel });
-    Object.assign(result, found, { state: "idle" });
-    const [first] = found.candidates;
-    if (first) {
-      const place = 1;
-      const run = await startRun(
-        db,
-        {
-          projectId,
-          graphName: row.graphName,
-          task: "",
-          issues: [first.number],
-          startedBy: "scheduler",
-          items,
-          events: [{ type: "run.scheduled", payload: { place, settings: settingsOf(row) } }],
-        },
-        { github: deps.github, projects: deps.projects },
-      );
-      result.started.push({ runId: run.id, issue: first.number });
-      result.state = "running";
-      await record(db, projectId, "scheduler.run_started", { runId: run.id, issue: first.number, place });
-    }
-  }
+  const previous = row.lastResult as CheckResult | null;
+  const result = await examine(deps, row, project);
+  await recordChanges(db, projectId, previous, result);
   await db
     .update(projectSchedulers)
     .set({ lastResult: result, lastCheckAt: sql`now()`, nextCheckAt: sql`now() + interval '${sql.raw(CHECK_EVERY)}'` })
     .where(eq(projectSchedulers.projectId, projectId));
   return result;
 }
+
+async function examine(deps: CheckDeps, row: ProjectSchedulerRow, project: ProjectRow): Promise<CheckResult> {
+  const { db } = deps;
+  const projectId = row.projectId;
+  const holds = await projectHolds(db, projectId);
+  const active = await activeRuns(db, projectId);
+  const result: CheckResult = { state: "held", holds, active, maxRuns: row.maxRuns, started: [], candidates: [], skipped: [] };
+  // A hold waits on a person, a full project has no slot, and a run still planning has no paths yet: none reads GitHub.
+  if (holds.length) return result;
+  if (active >= row.maxRuns || project.planProjectNumber === null) return { ...result, state: "full" };
+  const planning = await planningRun(db, projectId);
+  if (planning) return { ...result, state: "idle", reason: "planning", runId: planning };
+  const repo = { owner: project.repoOwner, name: project.repoName };
+  const items = await deps.projects.listItems(repo.owner, project.planProjectNumber, repo);
+  const found = candidates(items, await issueRuns(db, projectId), { order: row.order, skipLabel: row.skipLabel });
+  const [first] = found.candidates;
+  if (!first) return { ...result, ...found, state: "idle", reason: found.skipped.length ? "all_skipped" : "no_ready" };
+  const place = 1;
+  const run = await startRun(
+    db,
+    {
+      projectId,
+      graphName: row.graphName,
+      task: "",
+      issues: [first.number],
+      startedBy: "scheduler",
+      items,
+      events: [{ type: "run.scheduled", payload: { place, settings: settingsOf(row) } }],
+    },
+    { github: deps.github, projects: deps.projects },
+  );
+  await record(db, projectId, "scheduler.run_started", { runId: run.id, issue: first.number, place });
+  return { ...result, ...found, state: "running", started: [{ runId: run.id, issue: first.number }] };
+}
+
+/** Held and idle are recorded when they begin or their reasons change, not on every check. */
+async function recordChanges(db: DbExecutor, projectId: string, previous: CheckResult | null, result: CheckResult) {
+  if (result.state === "idle") {
+    const idle = idleOf(result);
+    if (previous?.state !== "idle" || !same(idleOf(previous), idle)) await record(db, projectId, "scheduler.idle", idle);
+  }
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const idleOf = (result: CheckResult) => (result.reason === "planning" ? { reason: result.reason, runId: result.runId } : { reason: result.reason });
 
 const settingsOf = (row: ProjectSchedulerRow) => ({ maxRuns: row.maxRuns, order: row.order, graphName: row.graphName, skipLabel: row.skipLabel });
 
@@ -85,6 +121,17 @@ async function activeRuns(db: DbExecutor, projectId: string): Promise<number> {
   return row?.n ?? 0;
 }
 
+/** The newest active run the scheduler started that has no plan yet. */
+async function planningRun(db: DbExecutor, projectId: string): Promise<string | undefined> {
+  const [row] = await db
+    .select({ id: runs.id })
+    .from(runs)
+    .where(and(eq(runs.projectId, projectId), eq(runs.startedBy, "scheduler"), inArray(runs.status, [...ACTIVE]), sql`${runs.state}->'plan' is null`))
+    .orderBy(desc(runs.createdAt))
+    .limit(1);
+  return row?.id;
+}
+
 /** The run that counts for each issue of the project: its active run when it has one, else its latest run. */
 async function issueRuns(db: DbExecutor, projectId: string): Promise<Map<number, IssueRun>> {
   const rows = await db.select({ id: runs.id, status: runs.status, issues: runs.issues }).from(runs).where(eq(runs.projectId, projectId)).orderBy(desc(runs.createdAt));
@@ -92,8 +139,7 @@ async function issueRuns(db: DbExecutor, projectId: string): Promise<Map<number,
   for (const run of rows) {
     for (const { number } of run.issues) {
       const known = result.get(number);
-      const isActive = (ACTIVE as readonly string[]).includes(run.status);
-      if (!known || (isActive && !(ACTIVE as readonly string[]).includes(known.status))) result.set(number, { id: run.id, status: run.status });
+      if (!known || (isActive(run.status) && !isActive(known.status))) result.set(number, { id: run.id, status: run.status });
     }
   }
   return result;

@@ -77,3 +77,66 @@ test("a check starts runs in order until max_runs runs are active", async () => 
   expect(types.slice(0, 2)).toEqual(["run.created", "run.scheduled"]);
   expect(events[1]!.payload).toEqual({ place: 1, settings: { maxRuns: 2, order: "project", graphName: "g", skipLabel: "human" } });
 });
+
+test("runs a person started count toward max_runs", async () => {
+  const p = await planned({ maxRuns: 2 });
+  const mine = await p.task("Started by hand");
+  const next = await p.task("Next for the scheduler");
+  await p.task("After that");
+  await startRun(db, { projectId: p.project.id, graphName: "g", task: "", issues: [mine], startedBy: "dashboard" }, { github: p.github, projects: p.plan });
+  // A run a person started without an issue counts too.
+  await startRun(db, { projectId: p.project.id, graphName: "g", task: "Tidy the README", startedBy: "claude-code" }, { github: p.github, projects: p.plan });
+  const listItems = vi.spyOn(p.plan, "listItems");
+
+  await p.check();
+
+  expect((await p.started()).map((r) => r.startedBy)).toEqual(["dashboard", "claude-code"]);
+  expect(listItems).not.toHaveBeenCalled();
+
+  // The person's run without an issue ends: one slot is free, and the scheduler takes the next task.
+  const [, untracked] = await p.started();
+  await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, untracked!.id));
+  await p.check();
+  expect((await p.started()).map((r) => [r.issue, r.startedBy])).toEqual([
+    [mine, "dashboard"],
+    [undefined, "claude-code"],
+    [next, "scheduler"],
+  ]);
+});
+
+test("a check with a hold starts nothing and reads nothing from GitHub", async () => {
+  const p = await planned({ maxRuns: 3 });
+  const broken = await p.task("Its run failed");
+  await p.task("Ready and free");
+  const failed = await startRun(db, { projectId: p.project.id, graphName: "g", task: "", issues: [broken], startedBy: "dashboard" }, { github: p.github, projects: p.plan });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, failed.id));
+  const reads = [vi.spyOn(p.plan, "listItems"), vi.spyOn(p.plan, "getProject"), vi.spyOn(p.github, "openBlockers"), vi.spyOn(p.github, "getIssue"), vi.spyOn(p.github, "listIssues")];
+
+  await p.check();
+
+  expect(await p.started()).toHaveLength(1);
+  for (const read of reads) expect(read).not.toHaveBeenCalled();
+  expect((await p.row()).lastResult).toMatchObject({ state: "held", holds: [{ kind: "failed", runId: failed.id }] });
+});
+
+test("a check starts no run while a run the scheduler started has no plan", async () => {
+  const p = await planned({ maxRuns: 3 });
+  const byHand = await p.task("Started by hand, not planned yet");
+  const first = await p.task("First");
+  const second = await p.task("Second");
+  // A person's run without a plan does not stop the scheduler: only its own runs plan one at a time.
+  await startRun(db, { projectId: p.project.id, graphName: "g", task: "", issues: [byHand], startedBy: "dashboard" }, { github: p.github, projects: p.plan });
+
+  await p.check();
+  const listItems = vi.spyOn(p.plan, "listItems");
+  await p.check();
+
+  expect((await p.started()).map((r) => r.issue)).toEqual([byHand, first]);
+  expect(listItems).not.toHaveBeenCalled();
+  expect((await p.row()).lastResult).toMatchObject({ state: "idle", reason: "planning", active: 2 });
+  expect((await p.events("scheduler.idle")).map((e) => e.payload)).toEqual([{ reason: "planning", runId: (await p.started())[1]!.id }]);
+
+  await p.planOf((await p.started())[1]!.id);
+  await p.check();
+  expect((await p.started()).map((r) => r.issue)).toEqual([byHand, first, second]);
+});
