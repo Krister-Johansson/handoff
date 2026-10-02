@@ -401,6 +401,19 @@ test("list_attention has permission prompts and a failed item can be dismissed",
   expect((await call("list_inbox", { project: "sandbox" })).failed_runs).toHaveLength(1);
 });
 
+test("get_project returns each graph's latest version", async () => {
+  await saveGraphVersion(db, { projectId, name: "linear", document: linear });
+  await saveGraphVersion(db, { projectId, name: "alt", document: linear });
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md", graph: "linear" });
+  const detail = await call("get_project", { project: "sandbox" });
+  expect(detail.graphs).toEqual([
+    { name: "alt", latest_version: 1 },
+    { name: "linear", latest_version: 2 },
+  ]);
+  // A run keeps the version it started on.
+  expect(detail.recent_runs).toEqual([expect.objectContaining({ id: run_id, graph: "linear", graph_version: 2 })]);
+});
+
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });

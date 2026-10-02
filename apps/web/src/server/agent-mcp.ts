@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
-import { and, asc, desc, eq, events, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
+import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
@@ -291,12 +291,29 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     get_project: async ({ project }: { project: string }) => {
       const detail = await getProjectDetail(db, (await findProject(db, project)).id);
       if (!detail) throw new Error(`There is no project ${project}.`);
+      const recent = detail.runs.slice(0, 10);
+      // Each run keeps the graph version it started on, which may be older than the graph's latest.
+      const versions = recent.length
+        ? await db
+            .select({ id: graphVersions.id, version: graphVersions.version, name: graphs.name })
+            .from(graphVersions)
+            .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+            .where(inArray(graphVersions.id, [...new Set(recent.map((r) => r.graphVersionId))]))
+        : [];
+      const versionOf = new Map(versions.map((v) => [v.id, v]));
       return {
         name: detail.project.name,
         repo: `${detail.project.repoOwner}/${detail.project.repoName}`,
-        graphs: detail.graphs.map((g) => g.name),
+        graphs: detail.graphs.map((g) => ({ name: g.name, latest_version: g.latestVersion })),
         default_graph: detail.defaultGraph ?? null,
-        recent_runs: detail.runs.slice(0, 10).map((r) => ({ id: r.id, task: r.task, status: r.status, url: url(runPath(detail.project.id, r.id)) })),
+        recent_runs: recent.map((r) => ({
+          id: r.id,
+          task: r.task,
+          status: r.status,
+          graph: versionOf.get(r.graphVersionId)?.name ?? null,
+          graph_version: versionOf.get(r.graphVersionId)?.version ?? null,
+          url: url(runPath(detail.project.id, r.id)),
+        })),
       };
     },
 
