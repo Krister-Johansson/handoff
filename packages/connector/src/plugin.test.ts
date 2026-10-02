@@ -33,6 +33,14 @@ test("the handoff skill shapes before it starts runs and names setup_plan, creat
   expect(readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8")).toContain("A plan on GitHub Projects");
 });
 
+test("the handoff skill schedules Start and Target only when the user asks to plan the timeline", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const shape = skill.indexOf("## Shape first");
+  const section = skill.slice(shape, skill.indexOf("\n## ", shape + 1));
+  expect(section).toMatch(/`schedule`[^\n]*Start[^\n]*Target/);
+  expect(section).toMatch(/only when the user asks/);
+});
+
 test("the plugin ships a setup skill that walks through setup_project", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
   expect(skill).toMatch(/^---\nname: handoff-setup\ndescription: /);

@@ -312,7 +312,7 @@ test("run_again over MCP sets the task to Running again", async () => {
 
 test("setup_plan creates the labels and the Project once, stores the number and is idempotent", async () => {
   const first = await call("setup_plan", { project: "sandbox" });
-  expect(first).toMatchObject({ created: true, project: { number: expect.any(Number), title: "sandbox plan", url: expect.stringContaining("/projects/") } });
+  expect(first).toMatchObject({ created: true, project: { number: expect.any(Number), title: "sandbox plan", url: expect.stringContaining("/projects/") }, added_date_fields: [] });
   expect([...(plan.labels.get("octo/sample") ?? [])].sort()).toEqual(["epic", "story", "task"]);
   const [stored] = await db.select().from(projects).where(eq(projects.id, projectId));
   expect(stored?.planProjectNumber).toBe(first.project.number);
@@ -328,6 +328,7 @@ test("setup_plan creates the labels and the Project once, stores the number and 
 async function roadmap() {
   const other = await plan.createProject("octo", { owner: "octo", name: "roadmap" }, "Roadmap");
   plan.plans.get("octo/roadmap")!.project.statusOptions = { Shaping: undefined, Ready: undefined, Running: undefined, "In review": undefined, Done: "opt-done" };
+  plan.plans.get("octo/roadmap")!.project.dateFields = { start: undefined, target: undefined };
   return other.number;
 }
 
@@ -340,10 +341,17 @@ test("list_github_projects lists the user's Projects, those linked to the reposi
   ]);
 });
 
-test("setup_plan with use adopts an existing Project: links it, adds the Status options it lacks and stores its number", async () => {
+test("setup_plan with use adopts an existing Project: links it, adds the Status options and date fields it lacks and stores its number", async () => {
   const other = await roadmap();
   const adopted = await call("setup_plan", { project: "sandbox", use: other });
-  expect(adopted).toMatchObject({ created: false, project: { number: other, title: "Roadmap" }, added_status_options: ["Shaping", "Ready", "Running", "In review"], missing_status_options: [] });
+  expect(adopted).toMatchObject({
+    created: false,
+    project: { number: other, title: "Roadmap" },
+    added_status_options: ["Shaping", "Ready", "Running", "In review"],
+    missing_status_options: [],
+    added_date_fields: ["Start", "Target"],
+  });
+  expect(plan.plans.get("octo/sample")!.project.dateFields).toEqual({ start: expect.any(String), target: expect.any(String) });
   const [stored] = await db.select().from(projects).where(eq(projects.id, projectId));
   expect(stored?.planProjectNumber).toBe(other);
   expect((await call("list_github_projects", { project: "sandbox" }))[0]).toMatchObject({ number: other, linked: true, missing_status_options: [] });
@@ -458,9 +466,10 @@ test("plan_issue adds an unplanned issue as a task under the given story", async
   expect((await call("plan_issue", { project: "sandbox", issue: 11 })).error).toMatch(/#11 is already in the plan/);
 });
 
-test("list_plan returns the tree with statuses and runs, wrapped as data", async () => {
+test("list_plan returns the tree with statuses, dates and runs, wrapped as data", async () => {
   const { epic, story } = await epicAndStory();
-  const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column.", blocked_by: [12] })).number as number;
+  const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column.", blocked_by: [12], start: "2026-10-06", target: "2026-10-09" }))
+    .number as number;
   github.issues.get(12)!.state = "closed";
   await call("move_to_ready", { project: "sandbox", issues: [task] });
   const { run_id } = await call("start_run", { project: "sandbox", issues: [task] });
@@ -488,7 +497,20 @@ test("list_plan returns the tree with statuses and runs, wrapped as data", async
             number: story,
             kind: "story",
             title: "Shaping tools",
-            tasks: [{ number: task, kind: "task", title: "Add the migration", status: "Running", blocked_by: [], run: { id: run_id, status: "queued", url: expect.stringContaining(`/runs/${run_id}`) }, pr: null }],
+            start: null,
+            target: null,
+            tasks: [
+              {
+                number: task,
+                kind: "task",
+                title: "Add the migration",
+                status: "Running",
+                start: "2026-10-06",
+                target: "2026-10-09",
+                blocked_by: [], run: { id: run_id, status: "queued", url: expect.stringContaining(`/runs/${run_id}`) },
+                pr: null,
+              },
+            ],
           },
         ],
         tasks: [],
@@ -497,6 +519,84 @@ test("list_plan returns the tree with statuses and runs, wrapped as data", async
     unplanned: [{ number: 11, title: "Issue 11" }],
   });
   expect((await call("list_plan", { project: "sandbox", epic: 999 })).epics).toEqual([]);
+});
+
+/** The Start and Target an issue has on the sandbox plan. */
+const datesOf = (issue: number) => {
+  const item = plan.itemsOf(repo).get(issue);
+  return { start: item?.start, target: item?.target };
+};
+
+test("schedule sets Start and Target on epics, stories and tasks and lists old and new dates in its summary", async () => {
+  const { epic, story } = await epicAndStory();
+  const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column." })).number as number;
+  plan.itemsOf(repo).get(task)!.start = "2026-10-01";
+
+  const result = await call("schedule", {
+    project: "sandbox",
+    items: [
+      { issue: epic, start: "2026-10-05", target: "2026-10-30" },
+      { issue: story, target: "2026-10-16" },
+      { issue: task, start: "2026-10-06", target: "2026-10-09" },
+    ],
+  });
+
+  expect([datesOf(epic), datesOf(story), datesOf(task)]).toEqual([
+    { start: "2026-10-05", target: "2026-10-30" },
+    { start: undefined, target: "2026-10-16" },
+    { start: "2026-10-06", target: "2026-10-09" },
+  ]);
+  expect(result.scheduled).toEqual([
+    { issue: epic, kind: "epic", title: "Project management", start: { from: null, to: "2026-10-05" }, target: { from: null, to: "2026-10-30" } },
+    { issue: story, kind: "story", title: "Shaping tools", target: { from: null, to: "2026-10-16" } },
+    { issue: task, kind: "task", title: "Add the migration", start: { from: "2026-10-01", to: "2026-10-06" }, target: { from: null, to: "2026-10-09" } },
+  ]);
+  expect(result.summary).toContain(`#${task} Add the migration: Start 2026-10-01 to 2026-10-06, Target none to 2026-10-09`);
+
+  // null clears a date.
+  await call("schedule", { project: "sandbox", items: [{ issue: task, start: null }] });
+  expect(datesOf(task)).toEqual({ start: undefined, target: "2026-10-09" });
+});
+
+test("schedule refuses a Target before its Start, a malformed date and an issue outside the Project", async () => {
+  const { story } = await epicAndStory();
+  const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column." })).number as number;
+  plan.itemsOf(repo).get(task)!.start = "2026-10-12";
+  const refused = async (items: unknown[]) => (await call("schedule", { project: "sandbox", items })).error as string;
+
+  // Each refusal changes nothing, not even the items before the one refused.
+  expect(await refused([{ issue: story, target: "2026-10-30" }, { issue: task, start: "2026-10-09", target: "2026-10-06" }])).toMatch(`#${task}: Target 2026-10-06 is before its Start 2026-10-09`);
+  // A Target alone is checked against the Start the task keeps.
+  expect(await refused([{ issue: task, target: "2026-10-06" }])).toMatch(`#${task}: Target 2026-10-06 is before its Start 2026-10-12`);
+  expect(await refused([{ issue: task, start: "10/06/2026" }])).toMatch(/start/i);
+  expect(await refused([{ issue: task, start: "2026-02-31" }])).toMatch(/start/i);
+  expect(await refused([{ issue: story, target: "2026-10-30" }, { issue: 11, start: "2026-10-06" }])).toMatch("#11 is not in the plan");
+  expect(datesOf(story)).toEqual({ start: undefined, target: undefined });
+  expect(datesOf(task)).toEqual({ start: "2026-10-12", target: undefined });
+});
+
+test("schedule on a Project without date fields names setup_plan", async () => {
+  const { story } = await epicAndStory();
+  plan.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
+  expect((await call("schedule", { project: "sandbox", items: [{ issue: story, target: "2026-10-30" }] })).error).toMatch(/no Start and Target date fields\. Run setup_plan/);
+  expect((await call("create_task", { project: "sandbox", story, title: "Dated", brief: "A brief.", start: "2026-10-06" })).error).toMatch(/setup_plan/);
+  expect([...plan.itemsOf(repo).values()].some((i) => i.start || i.target)).toBe(false);
+
+  // setup_plan adds the missing fields to the plan's Project, and schedule then works.
+  await call("setup_plan", { project: "sandbox" });
+  expect(await call("schedule", { project: "sandbox", items: [{ issue: story, target: "2026-10-30" }] })).toMatchObject({ scheduled: [{ issue: story }] });
+});
+
+test("create_task with start and target sets them", async () => {
+  const { story } = await epicAndStory();
+  const task = await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column.", start: "2026-10-06", target: "2026-10-09" });
+  expect(task).toMatchObject({ kind: "task", start: "2026-10-06", target: "2026-10-09" });
+  expect(datesOf(task.number)).toEqual({ start: "2026-10-06", target: "2026-10-09" });
+  const dated = await call("create_story", { project: "sandbox", epic: plan.parents.get(story), title: "Dates", acceptance: ["Bars show"], target: "2026-10-30" });
+  expect(datesOf(dated.number)).toEqual({ start: undefined, target: "2026-10-30" });
+  const count = github.issues.size;
+  expect((await call("create_task", { project: "sandbox", story, title: "Backwards", brief: "A brief.", start: "2026-10-09", target: "2026-10-06" })).error).toMatch(/Target 2026-10-06 is before its Start 2026-10-09/);
+  expect(github.issues.size).toBe(count);
 });
 
 test("every shaping tool refuses with the scope sentence when the Projects port is missing", async () => {
@@ -516,6 +616,7 @@ test("every shaping tool refuses with the scope sentence when the Projects port 
     ["move_to_ready", { issues: [3] }],
     ["move_to_shaping", { issues: [3] }],
     ["plan_issue", { issue: 11 }],
+    ["schedule", { items: [{ issue: 3, start: "2026-10-06" }] }],
   ];
   for (const [name, args] of calls) {
     const result = (await without.callTool({ name, arguments: { project: "sandbox", ...args } })) as { content: { text: string }[]; isError?: boolean };

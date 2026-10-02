@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
-import { runPath } from "@/lib/paths";
+import { planPath, runPath } from "@/lib/paths";
 import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
@@ -13,6 +13,7 @@ import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { deleteProject, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { linkDependencies } from "@/server/link-dependencies";
+import { addDateFields, schedule } from "@/server/shaping";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
 import { createGraphFromTemplate, createProject, deleteGraph, getGraphVersion, renameGraph, runAgain, saveGraphVersion, startRunFromGraph, TEMPLATES, type SaveResult, type TemplateName } from "@/server/graphs";
 
@@ -218,4 +219,34 @@ export async function linkDependenciesAction(input: { projectId: string }): Prom
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
+}
+
+const day = z.iso.date().nullable();
+const ScheduleSchema = z.object({ projectId: z.string().uuid(), issue: z.number().int().positive(), start: day, target: day });
+
+/** The schedule dialog's save: writes one item's Start and Target to the plan's GitHub Project; null clears a date. */
+export async function scheduleAction(input: z.input<typeof ScheduleSchema>): Promise<ActionState> {
+  const parsed = ScheduleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Give the dates as YYYY-MM-DD, or clear them." };
+  const { projectId, issue, start, target } = parsed.data;
+  try {
+    await schedule({ db: getDb(), github: getGitHub(), projects: getProjects() }, projectId, [{ issue, start, target }]);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(planPath(projectId));
+  return { ok: true };
+}
+
+/** The timeline banner's Add date fields: creates the Start and Target fields on the plan's GitHub Project. */
+export async function addDateFieldsAction(input: { projectId: string }): Promise<ActionState> {
+  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project has no plan to add dates to." };
+  try {
+    await addDateFields({ db: getDb(), github: getGitHub(), projects: getProjects() }, parsed.data.projectId);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(planPath(parsed.data.projectId));
+  return { ok: true };
 }

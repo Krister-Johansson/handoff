@@ -31,6 +31,15 @@ const spec = <I extends z.ZodRawShape>(s: ToolSpec<I>) => s as unknown as ToolSp
 const short = (id: unknown) => (typeof id === "string" ? id.slice(0, 8) : "?");
 const project = z.string().describe("Project name or id");
 const runId = z.string().describe("The run's id");
+/** A calendar day, YYYY-MM-DD, as the Project's Start and Target fields hold it. */
+const day = z.iso.date();
+
+/** A schedule item's dates for an approval card: "Start 2026-10-06, Target 2026-10-09", "clear Start", or "no change". */
+function datesText(dates: { start?: string | null | undefined; target?: string | null | undefined }) {
+  const part = (name: string, value: string | null | undefined) => (value === undefined ? [] : [value === null ? `clear ${name}` : `${name} ${value}`]);
+  const parts = [...part("Start", dates.start), ...part("Target", dates.target)];
+  return parts.length ? parts.join(", ") : "no change";
+}
 
 /** Every tool handoff offers to an agent, once: the source of truth for MCP, the assistant and WebMCP. */
 export const CATALOG: ToolSpec[] = [
@@ -314,7 +323,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_plan",
     title: "Show the plan",
     description:
-      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done), each task with its open blockers, latest run and pull request; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). With epic, only that epic.",
+      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done), each with its Start and Target dates, each task with its open blockers, latest run and pull request; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). With epic, only that epic.",
     input: z.object({ project, epic: z.number().int().positive().optional().describe("Only this epic, by issue number") }),
     kind: "data",
     confirm: false,
@@ -338,7 +347,7 @@ export const CATALOG: ToolSpec[] = [
     name: "setup_plan",
     title: "Set up the plan",
     description:
-      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done, linked to the repository. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it creates nothing, re-creates missing labels and reports Status options the Project lacks.",
+      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done and the date fields Start and Target, linked to the repository. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and date fields and reports Status options the Project lacks.",
     input: z.object({ project, use: z.number().int().positive().optional().describe("An existing Project's number to use instead of creating one") }),
     kind: "data",
     confirm: true,
@@ -347,8 +356,8 @@ export const CATALOG: ToolSpec[] = [
     idempotent: true,
     summarize: (a) =>
       a.use
-        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks), and add the labels epic, story and task`
-        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done, and the labels epic, story and task`,
+        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks) and the date fields Start and Target, and add the labels epic, story and task`
+        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done and the date fields Start and Target, and the labels epic, story and task`,
   }),
   spec({
     name: "create_epic",
@@ -372,13 +381,15 @@ export const CATALOG: ToolSpec[] = [
       epic: z.number().int().positive().describe("The epic's issue number"),
       title: z.string().min(3).describe("The story's title"),
       acceptance: z.array(z.string().min(1)).min(1).describe("Acceptance criteria, one sentence each"),
+      start: day.optional().describe("Start, YYYY-MM-DD, only when the person gave dates"),
+      target: day.optional().describe("Target, YYYY-MM-DD, only when the person gave dates"),
     }),
     kind: "data",
     confirm: true,
     readOnly: false,
     openWorld: true,
     idempotent: false,
-    summarize: (a) => `Create story '${a.title}' under epic #${a.epic} in ${a.project}`,
+    summarize: (a) => `Create story '${a.title}' under epic #${a.epic} in ${a.project}${a.start || a.target ? `, ${datesText(a)}` : ""}`,
   }),
   spec({
     name: "create_task",
@@ -392,13 +403,16 @@ export const CATALOG: ToolSpec[] = [
       brief: z.string().min(1).describe("The goal, where in the code, and how to tell it is done"),
       acceptance: z.array(z.string().min(1)).optional().describe("Acceptance criteria, one sentence each"),
       blocked_by: z.array(z.number().int().positive()).optional().describe("Issue numbers this task waits on"),
+      start: day.optional().describe("Start, YYYY-MM-DD, only when the person gave dates"),
+      target: day.optional().describe("Target, YYYY-MM-DD, only when the person gave dates"),
     }),
     kind: "data",
     confirm: true,
     readOnly: false,
     openWorld: true,
     idempotent: false,
-    summarize: (a) => `Create task '${a.title}' under story #${a.story} in ${a.project}${a.blocked_by?.length ? `, blocked by ${a.blocked_by.map((n) => `#${n}`).join(", ")}` : ""}`,
+    summarize: (a) =>
+      `Create task '${a.title}' under story #${a.story} in ${a.project}${a.blocked_by?.length ? `, blocked by ${a.blocked_by.map((n) => `#${n}`).join(", ")}` : ""}${a.start || a.target ? `, ${datesText(a)}` : ""}`,
   }),
   spec({
     name: "move_to_ready",
@@ -425,6 +439,30 @@ export const CATALOG: ToolSpec[] = [
     openWorld: true,
     idempotent: true,
     summarize: (a) => `Move task${a.issues.length === 1 ? "" : "s"} ${a.issues.map((n) => `#${n}`).join(", ")} back to Shaping in ${a.project}`,
+  }),
+  spec({
+    name: "schedule",
+    title: "Schedule plan items",
+    description:
+      "Sets, moves or clears the Start and Target dates of epics, stories and tasks of the project's plan on its GitHub Project, each item with its own dates, so one call can lay out a story's tasks one after another (work out the order from the blocked-by links in list_plan). A date is YYYY-MM-DD, null clears it and a date left out stays. Refuses a Target before its Start, an issue outside the plan and a Project without the Start and Target fields (setup_plan adds them), and then changes nothing. Propose dates only when the person asks to plan the timeline.",
+    input: z.object({
+      project,
+      items: z
+        .array(
+          z.object({
+            issue: z.number().int().positive().describe("The issue number of an epic, a story or a task"),
+            start: day.nullable().optional().describe("Start, YYYY-MM-DD; null clears it"),
+            target: day.nullable().optional().describe("Target, YYYY-MM-DD; null clears it"),
+          }),
+        )
+        .min(1),
+    }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    openWorld: true,
+    idempotent: true,
+    summarize: (a) => `Schedule in ${a.project}: ${a.items.map((i) => `#${i.issue} ${datesText(i)}`).join("; ")}`,
   }),
   spec({
     name: "plan_issue",

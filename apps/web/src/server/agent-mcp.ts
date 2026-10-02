@@ -11,7 +11,7 @@ import { createProject, getProjectDetail, listProjects, runAgain, startRunFromGr
 import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
-import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, setupPlan } from "./shaping";
+import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ScheduleItem } from "./shaping";
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import type { NotificationFilter } from "../lib/notifications";
@@ -32,7 +32,7 @@ const INSTRUCTIONS = `handoff runs graphs of coding agents on GitHub repositorie
 
 To work on issues: list_backlog, then start_run with the issue numbers (the task can stay empty), then get_run to follow the run. Every result links to the dashboard.
 
-A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. Each of these writes asks the person first.
+A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order. Each of these writes asks the person first.
 
 A run may stop to ask a question (a Human gate) or fail. Tell the user what it asks or why it failed. Answer a question only with the user's decision, and ask before cancelling a run; repairing re-runs the failed step.`;
 
@@ -329,7 +329,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       const projectId = (await findProject(db, project)).id;
       const view = await loadPlan(db, github, plan, projectId);
       if ("error" in view) throw new Error(view.reason === "no-plan" ? `${view.error} Set one up with setup_plan.` : view.error);
-      const item = (i: PlanItem) => ({ number: i.number, kind: i.kind ?? null, title: i.title, status: i.status ?? null, state: i.state, url: i.url });
+      const item = (i: PlanItem) => ({ number: i.number, kind: i.kind ?? null, title: i.title, status: i.status ?? null, state: i.state, url: i.url, start: i.start ?? null, target: i.target ?? null });
       const task = (t: PlanTask) => ({
         ...item(t),
         blocked_by: t.blockedBy,
@@ -358,10 +358,23 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     create_epic: async ({ project, title, goal }: { project: string; title: string; goal: string }) => createEpic(shaping, (await findProject(db, project)).id, { title, goal }),
 
-    create_story: async ({ project, ...input }: { project: string; epic: number; title: string; acceptance: string[] }) =>
+    create_story: async ({ project, ...input }: { project: string; epic: number; title: string; acceptance: string[]; start?: string; target?: string }) =>
       createStory(shaping, (await findProject(db, project)).id, input),
 
-    create_task: async ({ project, blocked_by, ...input }: { project: string; story: number; title: string; brief: string; acceptance?: string[]; blocked_by?: number[] }) =>
+    create_task: async ({
+      project,
+      blocked_by,
+      ...input
+    }: {
+      project: string;
+      story: number;
+      title: string;
+      brief: string;
+      acceptance?: string[];
+      blocked_by?: number[];
+      start?: string;
+      target?: string;
+    }) =>
       createTask(shaping, (await findProject(db, project)).id, { ...input, ...(blocked_by ? { blockedBy: blocked_by } : {}) }),
 
     move_to_ready: async ({ project, issues }: { project: string; issues: number[] }) => moveToReady(shaping, (await findProject(db, project)).id, issues),
@@ -370,6 +383,8 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     plan_issue: async ({ project, issue, story }: { project: string; issue: number; story?: number }) =>
       planIssue(shaping, (await findProject(db, project)).id, { issue, ...(story !== undefined ? { story } : {}) }),
+
+    schedule: async ({ project, items }: { project: string; items: ScheduleItem[] }) => schedule(shaping, (await findProject(db, project)).id, items),
 
     list_library: async () => {
       const { skills, mcp, agents, groups } = await listLibraryIndex(db);

@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: (path: string) => void env.redirec
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { runAgainAction, startRunAction } = await import("./actions");
+const { addDateFieldsAction, runAgainAction, scheduleAction, startRunAction } = await import("./actions");
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -36,7 +36,7 @@ async function readyTask() {
   await saveGraphVersion(db, { projectId: project.id, name: "linear", document: linear });
   const task = await plan.createIssue(repo, { project: number, title: "Add the migration", body: "Add the column.", labels: ["task"] });
   plan.itemsOf(repo).get(task.number)!.status = "Ready";
-  return { project, issue: task.number, statusOf: () => plan.getStatus(repo, number, task.number) };
+  return { project, plan, issue: task.number, statusOf: () => plan.getStatus(repo, number, task.number) };
 }
 
 const form = (fields: Record<string, string>) => {
@@ -62,4 +62,24 @@ test("running a cancelled run again sets its task to Running", async () => {
   expect(await runAgainAction({}, form({ runId: first!.id }))).toBeUndefined();
   expect(env.redirects).toHaveLength(2);
   expect(await statusOf()).toBe("Running");
+});
+
+test("the schedule dialog's save writes Start and Target through scheduleAction and refuses a Target before Start", async () => {
+  const { project, plan, issue } = await readyTask();
+  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: "2026-10-09" })).toEqual({ ok: true });
+  expect(plan.itemsOf(repo).get(issue)).toMatchObject({ start: "2026-10-06", target: "2026-10-09" });
+  // Clear empties a field.
+  expect(await scheduleAction({ projectId: project.id, issue, start: null, target: "2026-10-09" })).toEqual({ ok: true });
+  expect(plan.itemsOf(repo).get(issue)?.start).toBeUndefined();
+  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-12", target: "2026-10-09" })).toEqual({ ok: false, error: expect.stringContaining("before its Start") });
+  expect(await scheduleAction({ projectId: "not a project", issue, start: "2026-10-06", target: null })).toEqual({ ok: false, error: expect.any(String) });
+});
+
+test("Add date fields gives the plan's Project its Start and Target fields", async () => {
+  const { project, plan, issue } = await readyTask();
+  plan.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
+  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: null })).toEqual({ ok: false, error: expect.stringContaining("no Start and Target date fields") });
+  expect(await addDateFieldsAction({ projectId: project.id })).toEqual({ ok: true });
+  expect(plan.plans.get("octo/sample")!.project.dateFields).toEqual({ start: expect.any(String), target: expect.any(String) });
+  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: null })).toEqual({ ok: true });
 });

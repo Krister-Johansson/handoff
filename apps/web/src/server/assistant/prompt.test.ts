@@ -58,3 +58,8 @@ test("the system prompt tells the model what page_ tools are and to call where_a
   // The paragraph is static: the page itself travels in each message, never in the system prompt.
   expect(SYSTEM_PROMPT).not.toMatch(/page_show_view/);
 });
+
+test("the system prompt proposes dates with schedule only when the person asks to plan the timeline", () => {
+  const shaping = SYSTEM_PROMPT.split("\n\n").find((p) => p.includes("create_epic"));
+  expect(shaping).toMatch(/When the person asks to plan the timeline, schedule sets Start and Target dates/);
+});
