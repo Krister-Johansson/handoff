@@ -1,18 +1,26 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { CalendarIcon } from "lucide-react";
+import { use, useId, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { CalendarIcon, InfoIcon, LockIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
 import type { PlanTask } from "@/server/plan";
+import { moveItemAction } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { formatDuration } from "@/lib/plan/duration";
+import { durationIn, planMove, type MoveContext } from "@/lib/plan/move";
 
 import type { TimelineItem } from "@/lib/plan/schedule";
 import { COLUMN_TONE, taskColumn } from "@/lib/plan/task";
-import { chartRange, estimateFieldsGap, itemsOf, KIND_NAME, lacksDateFields, progressOf, scheduleNotes, spanText, stripDates } from "@/lib/plan/timeline-rows";
-import { addDays, defaultZoom, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
+import { chartRange, estimateFieldsGap, itemsOf, KIND_NAME, lacksDateFields, progressOf, scheduleNotes, spanText, stripDates, type ScheduleNote } from "@/lib/plan/timeline-rows";
+import { addDays, defaultZoom, shortDay, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
 
 import { cn } from "@/lib/utils";
+import { Sizing } from "./plan-context";
 import { KindBadge, StatusPill } from "./plan-status";
+import { SizeChip } from "./size-chip";
 import { IssueTitle } from "./plan-task-parts";
 import { ScheduleDialog } from "./schedule-dialog";
 import { FlagCard, type FlagContext } from "./timeline-flag-card";
@@ -56,17 +64,111 @@ function MiniBar({ row, entry, scale, todayX }: { row: ListRow; entry: TimelineI
   );
 }
 
+/** Where a task's Target comes from, as the Start field says it: "the M forecast, ~50m", "the manual estimate, 1.5d". */
+function sourceText(task: PlanTask, ctx: MoveContext): string {
+  const duration = durationIn(ctx, task)!;
+  const text = formatDuration(duration.hours, ctx.capacity!);
+  switch (duration.source) {
+    case "estimate":
+      return `the manual estimate, ${text}`;
+    case "proposal":
+      return `the proposed ${task.proposal?.size}, ~${text}`;
+    case "default":
+      return `the ${task.size} default, ~${text}`;
+    default:
+      return `the ${task.size} forecast, ~${text}`;
+  }
+}
+
+/**
+ * A sized task's Start under 640 px, where nothing drags: a button with the Start that opens a date field,
+ * and the Target that follows from the duration, after the tasks before it that day. Save writes both.
+ */
+function StartField({ projectId, task, ctx, notes }: { projectId: string; task: PlanTask; ctx: MoveContext; notes: ScheduleNote[] }) {
+  const id = useId();
+  const router = useRouter();
+  const start = ctx.entries.get(task.number)?.planned?.start ?? task.start;
+  const [open, setOpen] = useState(false);
+  const [day, setDay] = useState(start ?? "");
+  const [error, setError] = useState<string>();
+  const [pending, startTransition] = useTransition();
+  const plan = day ? planMove(ctx, task, { days: 0, place: day }) : undefined;
+  const save = () =>
+    plan &&
+    startTransition(async () => {
+      const result = await moveItemAction({ projectId, issue: task.number, start: plan.start, target: plan.target });
+      if (!result.ok) {
+        setError(result.error ?? "GitHub did not take the date.");
+        return;
+      }
+      setOpen(false);
+      router.refresh();
+    });
+  return (
+    <>
+      <Button
+        size="xs"
+        variant="outline"
+        className="ml-auto"
+        aria-expanded={open}
+        aria-label={`Start of #${task.number}, ${start ? shortDay(start) : "not set"}. Change`}
+        onClick={() => {
+          setOpen(!open);
+          setDay(start ?? "");
+          setError(undefined);
+        }}
+      >
+        <CalendarIcon data-icon="inline-start" />
+        {start ? `Start ${shortDay(start)}` : "Start"}
+      </Button>
+      {open && (
+        <div role="group" aria-label={`New start for #${task.number}`} className="flex basis-full flex-col gap-2 rounded-lg border bg-popover p-3 text-xs shadow-md">
+          <Field className="gap-1.5">
+            <FieldLabel htmlFor={id}>Start</FieldLabel>
+            <Input id={id} type="date" value={day} onChange={(e) => setDay(e.target.value)} />
+          </Field>
+          {plan?.target && (
+            <p className="flex items-start gap-1.5 text-muted-foreground">
+              <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+              Target follows from {sourceText(task, ctx)}: {shortDay(plan.target)}.
+            </p>
+          )}
+          {notes
+            .filter((n) => n.kind === "blocker")
+            .map((note) => (
+              <p key={note.text} className="flex items-start gap-1.5 text-muted-foreground">
+                <LockIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+                {note.text}
+              </p>
+            ))}
+          {error && <FieldError>{error}</FieldError>}
+          <div className="flex justify-end gap-2">
+            <Button size="sm" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button size="sm" disabled={!plan || pending} onClick={save}>
+              Save to GitHub
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 /**
  * The timeline under 640 px: one row per item in the tree's order with a mini bar, the dates as text
- * and the latest run's dates. There are no arrows; the warning icon after a task's title says what it
+ * and the latest run's dates. Nothing drags; a sized task has its size chip and a Start field instead. There are no arrows; the warning icon after a task's title says what it
  * waits on, and whether it is late or overdue.
 
  */
 export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, readAt, needsYou }: TimelineProps) {
+  const sizing = use(Sizing);
   const [scheduling, setScheduling] = useState<PlanItem>();
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
   const items = useMemo(() => itemsOf(epics, unparented), [epics, unparented]);
   const flags: FlagContext = { projectId, items, entries, needsYou };
+  const move: MoveContext = { capacity: sizing?.capacity, forecasts: sizing?.forecasts, items, entries };
   const range = chartRange(timeline);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
@@ -104,7 +206,10 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
                 )}
 
                 {row.task && <span>{latest ? `Run ${stripDates(latest)}` : "No runs"}</span>}
-                {entry.unscheduled && (
+                {row.task && sizing && <SizeChip task={row.task} />}
+                {row.task && durationIn(move, row.task) ? (
+                  <StartField projectId={projectId} task={row.task} ctx={move} notes={scheduleNotes(row.task, items, entries)} />
+                ) : entry.unscheduled && (
                   <Button size="xs" variant="outline" className="ml-auto" aria-label={`Schedule #${row.item.number} ${row.item.title}`} onClick={() => setScheduling(row.item)}>
                     <CalendarIcon data-icon="inline-start" />
                     Schedule
