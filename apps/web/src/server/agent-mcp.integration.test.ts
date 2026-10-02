@@ -674,3 +674,34 @@ test("start_scheduler refuses a project without a plan and names setup_plan", as
   expect(refused.error).toMatch(/^sandbox has no plan/);
   expect(await db.select().from(projectSchedulers)).toEqual([]);
 });
+
+/** The sandbox's GitHub Project, to give it a Priority field. */
+const sandboxProject = () => [...plan.plans.values()][0]!.project;
+const schedulerRow = async () => (await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId)))[0];
+const schedulerLog = async () =>
+  (await db.select({ type: schedulerEvents.type, payload: schedulerEvents.payload }).from(schedulerEvents).where(eq(schedulerEvents.projectId, projectId)).orderBy(schedulerEvents.id));
+
+test("start_scheduler stores max_runs, order and graph, and resumes a paused scheduler", async () => {
+  await withPlan();
+  sandboxProject().priorityOptions = ["P0", "P1"];
+  // First turned on, it takes the defaults: one run, Project order, the project's default graph.
+  expect(await call("start_scheduler", { project: "sandbox" })).toMatchObject({ state: "on", max_runs: 1, order: "project", graph: "linear" });
+  expect(await schedulerRow()).toMatchObject({ enabled: true, maxRuns: 1, order: "project", graphName: "linear", pausedAt: null });
+  await saveGraphVersion(db, { projectId, name: "fast", document: linear });
+
+  expect(await call("start_scheduler", { project: "sandbox", max_runs: 3, order: "priority", graph: "fast" })).toMatchObject({ state: "on", max_runs: 3, order: "priority", graph: "fast" });
+  expect(await schedulerRow()).toMatchObject({ enabled: true, maxRuns: 3, order: "priority", graphName: "fast" });
+  expect((await call("start_scheduler", { project: "sandbox", graph: "nope" })).error).toMatch(/sandbox has no graph nope/);
+
+  // Paused by itself after failed starts, it resumes with the stored settings and a clean count.
+  await db.update(projectSchedulers).set({ pausedAt: new Date(), pausedBy: "scheduler", pauseReason: "3 starts failed in a row.", startFailures: 3 }).where(eq(projectSchedulers.projectId, projectId));
+  expect(await call("start_scheduler", { project: "sandbox" })).toMatchObject({ state: "on", max_runs: 3, order: "priority", graph: "fast" });
+  expect(await schedulerRow()).toMatchObject({ enabled: true, pausedAt: null, pausedBy: null, pauseReason: null, startFailures: 0, maxRuns: 3, graphName: "fast" });
+
+  const settings = (maxRuns: number, order: string, graphName: string) => ({ maxRuns, order, graphName, skipLabel: "human" });
+  expect(await schedulerLog()).toEqual([
+    { type: "scheduler.started", payload: { by: "claude-code", settings: settings(1, "project", "linear") } },
+    { type: "scheduler.changed", payload: { by: "claude-code", from: settings(1, "project", "linear"), to: settings(3, "priority", "fast") } },
+    { type: "scheduler.resumed", payload: { by: "claude-code" } },
+  ]);
+});
