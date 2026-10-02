@@ -1,3 +1,4 @@
+import { appendEvents, type Db } from "@handoff/db";
 import type { PlanStatus, ProjectsPort } from "@handoff/github";
 
 /** A run event that says what a status write on the plan did: set, or skipped with the reason. */
@@ -34,4 +35,17 @@ export async function writePlanStatus(
       }
     }),
   );
+}
+
+/** writePlanStatus for a run outside a step (its start, its cancel), with the events appended to the run. */
+export async function recordPlanStatus(
+  db: Db,
+  runId: string,
+  projects: ProjectsPort | undefined,
+  project: PlannedProject,
+  issues: number[],
+  status: PlanStatus,
+): Promise<void> {
+  const written = await writePlanStatus(projects, project, issues, status);
+  if (written.length) await db.transaction((tx) => appendEvents(tx, runId, written));
 }

@@ -2,8 +2,8 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import planReview from "@handoff/core/fixtures/plan-review.graph.json" with { type: "json" };
 import { compileGraph, RunStateSchema, suggestProjectName, type CompileError, type LinkedIssue } from "@handoff/core";
-import { and, appendEvents, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
-import { writePlanStatus } from "@handoff/engine/plan-status";
+import { and, desc, eq, graphs, graphVersions, inArray, projects, runs, sql, type Db } from "@handoff/db";
+import { recordPlanStatus } from "@handoff/engine/plan-status";
 import { createRun } from "@handoff/engine/runs";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 
@@ -176,8 +176,7 @@ export async function startRunFromGraph(
   if (!task) throw new Error("Describe the task, or link at least one issue.");
   const run = await createRun(db, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
-  const written = await writePlanStatus(plan, project, issues.map((i) => i.number), "Running");
-  if (written.length) await db.transaction((tx) => appendEvents(tx, run.id, written));
+  await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");
   return run;
 }
 

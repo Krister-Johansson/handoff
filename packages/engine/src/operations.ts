@@ -3,7 +3,7 @@ import { appendEvents, events, nodeExecutions, permissionRequests, projects as p
 import type { RunState } from "@handoff/core";
 import type { ProjectsPort } from "@handoff/github";
 import { loadCompiledGraph } from "./graph-cache.ts";
-import { writePlanStatus } from "./plan-status.ts";
+import { recordPlanStatus } from "./plan-status.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
 import { createExecution } from "./scheduler/complete.ts";
 
@@ -63,8 +63,7 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
   await stopRunPreviews(db, runId);
   const [project] = await db.select().from(projectRows).where(eq(projectRows.id, cancelled.projectId));
   if (!project || project.planProjectNumber === null || cancelled.issues.length === 0) return;
-  const written = await writePlanStatus(opts.projects, project, await latestRunOf(db, cancelled), "Ready");
-  if (written.length) await db.transaction((tx) => appendEvents(tx, runId, written));
+  await recordPlanStatus(db, runId, opts.projects, project, await latestRunOf(db, cancelled), "Ready");
 }
 
 /** The run's issues it is the latest run of: a newer run that links an issue owns its status. */
