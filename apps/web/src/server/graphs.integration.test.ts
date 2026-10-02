@@ -403,6 +403,12 @@ describe("run again continues", () => {
     expect(cancelled.find((e) => e.type === "run.cancelled")?.payload).toEqual({ reason: `run again as ${again.id}` });
   });
 
+  test("run again refuses a run that was already run again, and names the run in its place", async () => {
+    const { first } = await failedWithWork();
+    const again = await runAgain(db, first.id);
+    await expect(runAgain(db, first.id)).rejects.toThrow(`was run again as ${again.id}`);
+  });
+
   test("run again refuses a blocked issue", async () => {
     const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
     await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });

@@ -179,7 +179,17 @@ export type RunAgainOptions = {
  */
 export async function runAgain(db: Db, runId: string, opts: RunAgainOptions = {}) {
   const [earlier] = await db
-    .select({ id: runs.id, projectId: runs.projectId, task: runs.task, status: runs.status, state: runs.state, size: runs.size, branchName: runs.branchName, graphName: graphs.name })
+    .select({
+      id: runs.id,
+      projectId: runs.projectId,
+      task: runs.task,
+      status: runs.status,
+      state: runs.state,
+      size: runs.size,
+      branchName: runs.branchName,
+      supersededBy: runs.supersededBy,
+      graphName: graphs.name,
+    })
     .from(runs)
     .innerJoin(graphVersions, eq(graphVersions.id, runs.graphVersionId))
     .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
@@ -188,6 +198,7 @@ export async function runAgain(db: Db, runId: string, opts: RunAgainOptions = {}
   if (earlier.status === "queued" || earlier.status === "running" || earlier.status === "waiting") {
     throw new Error(`The run is still ${earlier.status}.`);
   }
+  if (earlier.supersededBy) throw new Error(`The run was run again as ${earlier.supersededBy}. Run that one again instead.`);
   const issues = RunStateSchema.shape.issues.parse(earlier.state.issues) ?? [];
   const from = opts.from ?? (branchHasWork(earlier) ? "branch" : "scratch");
   const previousRun = from === "branch" ? previousRunOf(earlier) : undefined;
