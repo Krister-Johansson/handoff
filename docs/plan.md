@@ -90,7 +90,7 @@ packages/db/src/
   ops/events.ts          appendEvents(tx, runId, rows), listEventsAfter(runId, seq, limit)
   ops/repair.ts          repairNodeExecution(db, executionId, {note})
   migrate.ts             programmatic migrate()
-  testing/global-setup.ts  connects to TEST_DATABASE_URL, migrates, fails fast if Postgres is down
+  testing/global-setup.ts  starts a Postgres container (Testcontainers) unless TEST_DATABASE_URL is set, migrates, provides the URL to tests
   testing/reset.ts       truncate all tables
 packages/cli-adapter/src/
   types.ts               CliExecutor, CliRunRequest, CliRun, CliRunResult, CliEvent

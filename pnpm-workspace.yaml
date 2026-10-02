@@ -6,6 +6,9 @@ allowBuilds:
   sharp: false
   unrs-resolver: false
   esbuild: true
+  cpu-features: false
+  protobufjs: false
+  ssh2: false
 
 minimumReleaseAgeExclude:
   - '@next/env@16.3.7'
