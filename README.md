@@ -24,7 +24,7 @@ pnpm db:migrate
 Then fill in `.env`:
 
 1. **Claude.** Run `claude setup-token` and put the token in `CLAUDE_CODE_OAUTH_TOKEN`. It lasts a year. Do not set `ANTHROPIC_API_KEY`: handoff removes it from the Claude process so runs stay on your subscription.
-2. **GitHub.** For personal use, set `GITHUB_TOKEN` (the output of `gh auth token` works). For a team setup, create a GitHub App instead and set `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH`. The App needs read and write access to contents and pull requests, read access to checks and actions, and the events `pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment`, `check_suite`, `check_run` and `workflow_run`.
+2. **GitHub.** For personal use, set `GITHUB_TOKEN` (the output of `gh auth token` works). For a team setup, create a GitHub App instead and set `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH`. The App needs read and write access to contents and pull requests, read access to checks and actions, and the events `pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment`, `check_suite`, `check_run` and `workflow_run`. For the Plan's activity line, also give it read access to issues and the events `issues`, `sub_issues` and `issue_dependencies`. The Plan itself needs `GITHUB_TOKEN` even with an App (see The Plan).
 3. **Webhooks.** Set `GITHUB_WEBHOOK_SECRET` to a random string, for example the output of `openssl rand -hex 32`.
 
 The dashboard reads the same `.env` through `apps/web/.env.local`, which is a symlink to it.
@@ -71,6 +71,36 @@ To look around without GitHub or Claude, `pnpm demo` seeds a demo run with simul
 - **Recovery.** A failed node can be repaired in place from the inbox or with `pnpm handoff run repair`. Everything before it is kept. Rate limits are retried automatically with backoff.
 
 The library (**Library** in the dashboard) holds skills, MCP servers and subagents that nodes enable by name. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.
+
+## The Plan
+
+A project can keep a plan of epics, stories and tasks on GitHub. GitHub holds the whole plan. handoff stores one thing about it: the number of the GitHub Project that belongs to the handoff project.
+
+- **Hierarchy.** Epics, stories and tasks are issues in the project's repository. A story is a sub-issue of its epic and a task is a sub-issue of its story. The labels `epic`, `story` and `task` mark the kind.
+- **Status.** Each task has a Status on a GitHub Project (v2) that you own, with the options Shaping, Ready, Running, In review and Done. A closed issue counts as Done whatever its Status says.
+- **The Ready gate.** Of the issues in the Project, only open tasks in Ready that no run works on reach the backlog and `list_backlog`. Tasks blocked by an open issue are listed last, and a run will not start on them until the blocker closes. Epics and stories never run. Issues that are not in the Project stay in the backlog as unplanned and can still be started.
+- **Status from runs.** handoff sets Running when a run starts on a task, In review when the pull request opens, Done when it merges, and Ready again when you cancel the task's latest run. Each write is a `plan.status` event on the run. A write that cannot happen is a `plan.skipped` event and the run carries on.
+
+### The token
+
+The Plan needs `GITHUB_TOKEN` to be a classic token with the `project` scope. Add the scope and use the token:
+
+```bash
+gh auth refresh -s project
+GITHUB_TOKEN=$(gh auth token)   # put this value in .env
+```
+
+A fine-grained token cannot reach a Project owned by a user account. A GitHub App cannot either: GitHub has a Projects permission only for organizations, and no App permission covers a user's Projects. With only an App, or with a token that lacks the scope, the Plan page and the shaping tools say what is missing, and runs record `plan.skipped` instead of moving tasks.
+
+### Linking a Project
+
+Ask the assistant, or Claude Code with the handoff plugin, to set up the plan. That calls `setup_plan`, which shows an approval card first. It creates the labels `epic`, `story` and `task` if they are missing. With `use` and the number of one of your existing Projects, it links that Project to the repository and sets its Status options to Shaping, Ready, Running, In review and Done; the card names each option it renames or adds. Without `use`, it creates a Project called "<project name> plan" with those options and links it. Either way it stores the Project's number on the handoff project. Running it again on a project that has a plan checks the labels and fields and reports what it found.
+
+### Staying up to date
+
+GitHub sends no webhook when a card moves on a Project owned by a user account. The Plan page reads the Project each time it renders and refreshes itself every 30 seconds while the browser tab is visible. A change made on GitHub's board shows on the dashboard within 30 seconds.
+
+`pnpm dev:webhooks` also relays the repository's `issues`, `sub_issues` and `issue_dependencies` events. handoff stores them with every other delivery. They wake nothing; the Plan page uses the latest one for its "last GitHub activity" line.
 
 ## The assistant
 
