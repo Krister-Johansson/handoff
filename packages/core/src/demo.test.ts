@@ -11,6 +11,13 @@ test("a Demo node is a Claude step that reads the repository and drives a browse
   expect(portsOf("demo", {}).outputs.map((p) => [p.id, p.kind])).toEqual([["done", "continue"]]);
 });
 
+test("a Demo node set to UI changes also has a skipped port", () => {
+  expect(portsOf("demo", { when: "ui_changes" }).outputs.map((p) => [p.id, p.kind])).toEqual([
+    ["done", "continue"],
+    ["skipped", "continue"],
+  ]);
+});
+
 test("a demo's output is its screenshots, each with a caption and whether its criterion works", () => {
   const parsed = contractRegistry.demo_output.parse({
     summary: "Created a task and reloaded.",
@@ -34,4 +41,18 @@ test("a step given the running app is told where it runs and how to take screens
   expect(md).toContain("http://localhost:41000");
   expect(md).toContain("browser_take_screenshot");
   expect(md).toContain("copy the criterion word for word");
+});
+
+test("a step given the running app is told to report the browser console", () => {
+  const md = renderContextPacket({
+    task: "t",
+    nodeKey: "demo",
+    stateSlice: {},
+    repoPaths: [],
+    constraints: { ownedPaths: [], allowedTools: [], maxTurns: 10 },
+    outputContract: "demo_output",
+    app: { url: "http://localhost:41000" },
+  });
+  expect(md).toContain("browser_console_messages");
+  expect(md).toMatch(/unhandled rejection/i);
 });

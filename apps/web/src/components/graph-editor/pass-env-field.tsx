@@ -6,7 +6,17 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 
 /** Names of worker environment variables a command gets. The graph stores names, never values. */
-export function PassEnvField({ id, value, onChange }: { id: string; value: string[]; onChange: (names: string[]) => void }) {
+export function PassEnvField({
+  id,
+  value,
+  onChange,
+  description = "Passed from the worker's environment. The command gets PATH, HOME, locale and CI=true plus these.",
+}: {
+  id: string;
+  value: string[];
+  onChange: (names: string[]) => void;
+  description?: string;
+}) {
   const [problem, setProblem] = useState<string>();
   return (
     <Field data-invalid={problem ? true : undefined}>
@@ -24,7 +34,7 @@ export function PassEnvField({ id, value, onChange }: { id: string; value: strin
           if (!found) onChange(names);
         }}
       />
-      <FieldDescription>Passed from the worker&apos;s environment. The command gets PATH, HOME, locale and CI=true plus these.</FieldDescription>
+      <FieldDescription>{description}</FieldDescription>
       {problem && <FieldError>{problem}</FieldError>}
     </Field>
   );

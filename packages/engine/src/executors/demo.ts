@@ -1,10 +1,11 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { DemoOutputSchema } from "@handoff/core";
-import { screenshots, type Db } from "@handoff/db";
+import { DemoOutputSchema, LAUNCH_FILE, markNew, serverLogWarnings, uiPathsOf, type DemoWarning } from "@handoff/core";
+import { and, desc, eq, ne, nodeExecutions, runs, screenshots, sql, type Db } from "@handoff/db";
+import { changedFiles, isOwned } from "../contract/checks.ts";
 import type { MaterializedLibrary } from "../library/materialize.ts";
 import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
-import type { ExecutorOutcome, NodeExecutor } from "../types.ts";
+import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { cliNodeExecutor, type CliNodeOptions } from "./cli-node.ts";
 
 /** The Playwright MCP server, pinned so a release does not change the demo under a running project. */
@@ -28,6 +29,51 @@ function originsOf(url: string): string {
   return [...new Set([origin, origin.replace("//localhost", "//127.0.0.1")])].join(";");
 }
 
+const LISTED_FILES = 10;
+
+/**
+ * The warnings of the project's latest demo in another run, which this demo's warnings are compared
+ * with: a warning that was there before is not new. Undefined when the project has no such demo.
+ */
+async function previousDemoWarnings(db: Db, ctx: ExecutorContext): Promise<DemoWarning[] | undefined> {
+  const [row] = await db
+    .select({ output: nodeExecutions.output })
+    .from(nodeExecutions)
+    .innerJoin(runs, eq(runs.id, nodeExecutions.runId))
+    .where(
+      and(
+        eq(runs.projectId, ctx.project.id),
+        ne(runs.id, ctx.run.id),
+        eq(nodeExecutions.status, "passed"),
+        sql`jsonb_typeof(${nodeExecutions.output} -> 'warnings') = 'array'`,
+      ),
+    )
+    .orderBy(desc(nodeExecutions.finishedAt))
+    .limit(1);
+  return (row?.output as { warnings?: DemoWarning[] } | undefined)?.warnings;
+}
+
+/** The variable names a Demo node passes from the worker's environment to the seed command and the app. */
+export const passEnvOf = (config: Record<string, unknown>): string[] => (Array.isArray(config.passEnv) ? config.passEnv.filter((n): n is string => typeof n === "string") : []);
+
+/**
+ * Why a demo set to UI changes (`config.when: "ui_changes"`) has nothing to show, or undefined when it
+ * runs: the change touches no file under the project's UI paths. A demo runs for every change by default.
+ */
+async function skipReason(ctx: ExecutorContext, workdir: string): Promise<string | undefined> {
+  if (ctx.node.config.when !== "ui_changes") return undefined;
+  const paths = uiPathsOf(ctx.project.uiPaths);
+  const files = await changedFiles(workdir, ctx.run.baseBranch);
+  if (files.some((file) => isOwned(file, paths))) {
+    // A template demos UI changes; a repository that has not said how to start its app has no demo to give.
+    if (!existsSync(join(workdir, LAUNCH_FILE))) return `This repository has no ${LAUNCH_FILE}, so handoff cannot start the app to show the change. Add one to demo UI changes.`;
+    return undefined;
+  }
+  if (!files.length) return "The change has no files, so there is nothing new to show in the app.";
+  const listed = files.slice(0, LISTED_FILES).join(", ") + (files.length > LISTED_FILES ? ` and ${files.length - LISTED_FILES} more` : "");
+  return `The change touches no file under the project's UI paths (${paths.join(", ")}), so there is nothing new to show in the app. It changes ${listed}.`;
+}
+
 /**
  * A Demo node: starts the run's app, then has Claude walk through each acceptance criterion in a
  * headless browser (the Playwright MCP server, which can only reach the app) and take screenshots.
@@ -40,6 +86,11 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
     needsWorkdir: true,
     async execute(ctx): Promise<ExecutorOutcome> {
       if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "a demo needs the run's worktree" } };
+      const reason = await skipReason(ctx, ctx.workdir.path);
+      if (reason) {
+        ctx.emit("demo.skipped", { reason });
+        return { kind: "completed", output: { summary: reason, shots: [], skipped: true, reason } };
+      }
       let preview;
       try {
         preview = await startPreview(
@@ -51,6 +102,8 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
             nodeExecutionId: ctx.execution.id,
             signal: ctx.signal,
             note: (message) => ctx.emit("preview.note", { message }),
+            seedCommand: ctx.project.demoSeedCommand,
+            passEnv: passEnvOf(ctx.node.config),
             ...(options.docker ? { docker: options.docker } : {}),
           },
         );
@@ -76,7 +129,14 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
         });
         if (outcome.kind !== "completed") return outcome;
 
-        const output = DemoOutputSchema.parse(outcome.output);
+        // Only handoff skips a demo: whatever the agent says, it walked through the app.
+        const { skipped: _skipped, reason: _reason, warnings: _warnings, ...output } = DemoOutputSchema.parse(outcome.output);
+        const errors = output.console.filter((entry) => entry.level === "error");
+        if (errors.length) {
+          const count = errors.length === 1 ? "an error" : `${errors.length} errors`;
+          const message = `The browser console had ${count} while the demo walked through the app:\n${errors.map((e) => `- ${e.text}`).join("\n")}`;
+          return { kind: "failed", error: { code: "demo_console_errors", message, detail: { console: output.console } }, ...(outcome.cost ? { cost: outcome.cost } : {}) };
+        }
         const dir = join(options.artifactsRoot, ctx.run.id, ctx.execution.id);
         mkdirSync(dir, { recursive: true });
         const kept: typeof output.shots = [];
@@ -95,7 +155,9 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
             .returning({ id: screenshots.id });
           kept.push({ ...shot, artifactId: row!.id });
         }
-        return { ...outcome, output: { ...output, shots: kept } };
+        const current = [...serverLogWarnings(existsSync(preview.logPath) ? readFileSync(preview.logPath, "utf8") : ""), ...output.console.map((e) => ({ source: "console" as const, ...e }))];
+        const warnings = markNew(current, await previousDemoWarnings(options.db, ctx));
+        return { ...outcome, output: { ...output, shots: kept, warnings } };
       } finally {
         await stopStepPreviews(options.db, ctx.execution.id);
       }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { CheckIcon, ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, ExternalLinkIcon, ListChecksIcon, RotateCwIcon } from "lucide-react";
+import type { DemoWarning } from "@handoff/core";
 import { answerReviewAction, restartTryItAction } from "@/app/inbox/actions";
 import { Screenshot, type Shot } from "@/components/runs/screenshot";
 import { Tag } from "@/components/tag";
@@ -34,6 +35,8 @@ type Props = {
   acceptance: string[];
   preview: TryPreview;
   shots: Shot[];
+  /** The demo's warnings and errors from the server log and the browser console. */
+  warnings?: DemoWarning[] | undefined;
   answered?: Answered | undefined;
 };
 
@@ -129,6 +132,31 @@ function AppBar({ preview, readOnly, pending, error, onRestart }: { preview: Try
       </div>
       {!readOnly && preview.status === "failed" && <TerminalOutput text={preview.error ?? "The app did not start."} />}
       {error && <p className="text-sm text-danger">{error}</p>}
+    </section>
+  );
+}
+
+const SOURCE_NAMES: Record<DemoWarning["source"], string> = { server: "Server log", console: "Console" };
+
+/** The demo's warnings and errors from the server log and the browser console, the ones the project's previous demo did not have marked new. */
+function Warnings({ warnings }: { warnings: DemoWarning[] }) {
+  const fresh = warnings.filter((w) => w.new).length;
+  return (
+    <section aria-label="Warnings and errors" className={cn(CARD, "flex flex-col gap-2.5 px-5 py-4")}>
+      <header className="flex flex-wrap items-baseline gap-2">
+        <h2 className="text-sm font-medium">Warnings and errors from the demo</h2>
+        <span className="text-xs text-muted-foreground">{fresh ? `${fresh} new since the previous demo` : "None new since the previous demo"}</span>
+      </header>
+      <ul className="flex flex-col gap-1.5">
+        {warnings.map((w) => (
+          <li key={`${w.source}:${w.level}:${w.text}`} className="flex items-start gap-2 text-[13px]">
+            <Tag tone={w.level === "error" ? "danger" : "attention"}>{w.level === "error" ? "Error" : "Warning"}</Tag>
+            <Tag>{SOURCE_NAMES[w.source]}</Tag>
+            {w.new && <Tag tone="active">New</Tag>}
+            <span className={cn("min-w-0 flex-1 font-mono text-xs break-words whitespace-pre-wrap", !w.new && "text-muted-foreground")}>{w.text}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -314,7 +342,7 @@ function Submit({
  * working collapses it and moves on to the next one to check; one that does not work stays open for
  * what is wrong, which goes back to the coder.
  */
-export function TryReview({ questionId, runId, from, acceptance, preview, shots, answered }: Props) {
+export function TryReview({ questionId, runId, from, acceptance, preview, shots, warnings = [], answered }: Props) {
   const readOnly = answered !== undefined;
   const [checks, setChecks] = useState<Check[]>(() => answeredChecks(acceptance, answered));
   const [closed, setClosed] = useState<ReadonlySet<number>>(() => new Set(checks.flatMap((c, i) => (c.works === true ? [i] : []))));
@@ -450,6 +478,7 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
       current: acceptance.length ? current + 1 : null,
       criteria: acceptance.map((text, i) => ({ index: i + 1, text, works: checks[i]?.works ?? null, note: checks[i]?.note ?? "" })),
       note,
+      warnings,
       app: readOnly ? { status: "stopped" } : { status: preview.status, url: preview.url ?? null, error: preview.error ?? null },
       readOnly,
     }),
@@ -458,6 +487,7 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
   return (
     <div className="flex flex-col gap-4">
       <AppBar preview={preview} readOnly={readOnly} pending={restarting} error={restartError} onRestart={() => startRestart(async () => void (await restart()))} />
+      {warnings.length > 0 && <Warnings warnings={warnings} />}
       {acceptance.length > 0 && (
         <div className="sticky top-[60px] z-20 flex flex-wrap items-center gap-2 rounded-lg border bg-background/90 p-2 backdrop-blur-md">
           <CriterionMenu acceptance={acceptance} checks={checks} current={current} go={go} />

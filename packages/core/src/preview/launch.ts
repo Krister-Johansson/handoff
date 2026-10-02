@@ -29,6 +29,14 @@ export type LaunchFile = z.infer<typeof LaunchFileSchema>;
 /** Where a repository keeps its launch file, relative to its root. */
 export const LAUNCH_FILE = ".claude/launch.json";
 
+/** The configuration a project names for handoff's demos, such as its production build. */
+export const DEMO_CONFIGURATION = "handoff-demo";
+
+/** The configuration handoff starts: the one named handoff-demo when there is one, else the first. */
+export function demoConfiguration(launch: LaunchFile): LaunchConfiguration {
+  return launch.configurations.find((c) => c.name === DEMO_CONFIGURATION) ?? launch.configurations[0]!;
+}
+
 /** Parses a launch file, which may hold comments and trailing commas. Throws saying what is wrong. */
 export function parseLaunchFile(text: string): LaunchFile {
   const errors: ParseError[] = [];

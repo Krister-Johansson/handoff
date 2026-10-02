@@ -92,6 +92,19 @@ export const TesterOutputSchema = z.object({
   note: z.string().optional(),
 });
 
+/** A browser console message the demo agent read: an error, such as an unhandled rejection, or a warning. */
+export const ConsoleEntrySchema = z.object({ level: z.enum(["error", "warning"]), text: z.string().min(1) });
+
+/** A warning or error from the browser console or the app's server log, as the Try it gate shows it. */
+export const DemoWarningSchema = z.object({
+  source: z.enum(["console", "server"]),
+  level: z.enum(["error", "warning"]),
+  text: z.string(),
+  /** Not seen in the project's previous demo. */
+  new: z.boolean(),
+});
+export type DemoWarning = z.infer<typeof DemoWarningSchema>;
+
 /**
  * A Demo node's walk through the running app: screenshots, each with a caption and, when it shows an
  * acceptance criterion, whether that criterion works. `file` is the screenshot's name in the browser's
@@ -108,6 +121,14 @@ export const DemoOutputSchema = z.object({
       artifactId: z.string().optional(),
     }),
   ),
+  /** The browser console's errors and warnings while the agent walked through the app. An error fails the demo. */
+  console: z.array(ConsoleEntrySchema).default([]),
+  /** Set by handoff: the warnings and errors of the console and the app's server log, each marked new when the project's previous demo did not have it. */
+  warnings: z.array(DemoWarningSchema).optional(),
+  /** Set by handoff, never the agent: the demo did not run, since the change touches no UI path. */
+  skipped: z.literal(true).optional(),
+  /** Why the demo was skipped. */
+  reason: z.string().optional(),
 });
 export type DemoOutput = z.infer<typeof DemoOutputSchema>;
 

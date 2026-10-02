@@ -125,6 +125,28 @@ function TesterSettings({ config, setConfig }: { config: Record<string, unknown>
   );
 }
 
+function DemoSettings({ config, setConfig }: { config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void }) {
+  const passEnv = Array.isArray(config.passEnv) ? config.passEnv.filter((n): n is string => typeof n === "string") : [];
+  return (
+    <>
+      <Field>
+        <FieldLabel htmlFor="demo-when">When to demo</FieldLabel>
+        <NativeSelect id="demo-when" value={config.when === "ui_changes" ? "ui_changes" : "always"} onChange={(e) => setConfig({ when: e.target.value })}>
+          <NativeSelectOption value="always">For every change</NativeSelectOption>
+          <NativeSelectOption value="ui_changes">Only when the change touches the project&apos;s UI paths</NativeSelectOption>
+        </NativeSelect>
+        <FieldDescription>Only for UI changes, a change that touches no UI path leaves through skipped, so wire skipped past the Try it gate.</FieldDescription>
+      </Field>
+      <PassEnvField
+        id="demo-pass-env"
+        value={passEnv}
+        onChange={(names) => setConfig({ passEnv: names })}
+        description="Passed from the worker's environment to the seed command and the app, for a feature that needs a key. The graph keeps the names only."
+      />
+    </>
+  );
+}
+
 function KeyField({ node, dispatch, onSelect }: { node: FlowNode; dispatch: Dispatch<EditorAction>; onSelect: (nodeId: string) => void }) {
   const [key, setKey] = useState(node.id);
   const valid = /^[A-Za-z0-9_-]+$/.test(key);
@@ -280,9 +302,9 @@ function NodeInspector({
   );
 }
 
-const SETTINGS_TYPES = new Set<NodeType>(["tester", "pr", "merge", "human_gate"]);
+const SETTINGS_TYPES = new Set<NodeType>(["tester", "demo", "pr", "merge", "human_gate"]);
 
-/** What a Tester, Pull request, Merge or Human gate node is set up with. */
+/** What a Tester, Demo, Pull request, Merge or Human gate node is set up with. */
 function TypeSettings({
   node,
   graph,
@@ -301,6 +323,8 @@ function TypeSettings({
   return (
     <>
       {type === "tester" && <TesterSettings config={config} setConfig={setConfig} />}
+
+      {type === "demo" && <DemoSettings config={config} setConfig={setConfig} />}
 
       {type === "pr" && <PrSettings config={config} setConfig={setConfig} clearConfig={clearConfig} />}
 

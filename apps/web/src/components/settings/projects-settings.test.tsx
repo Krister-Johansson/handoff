@@ -80,6 +80,16 @@ test("the open project shows its teardown command and agent notes", () => {
   expect(detail("Agent notes")).toHaveTextContent("none");
 });
 
+test("the open project shows its demo seed command and UI paths, or that the defaults apply", () => {
+  render(<ProjectsSettings projects={[{ ...handoff, demoSeedCommand: "pnpm db:seed", uiPaths: ["apps/web/**", "packages/ui/**"] }, shop]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(detail("Demo seed command")).toHaveTextContent("pnpm db:seed");
+  expect(detail("UI paths")).toHaveTextContent("apps/web/** packages/ui/**");
+  fireEvent.click(screen.getByRole("button", { name: "Show example-shop" }));
+  expect(detail("Demo seed command")).toHaveTextContent("none");
+  expect(detail("UI paths")).toHaveTextContent("the defaults");
+});
+
 test("Add project opens the add form", async () => {
   const { unmount } = render(<ProjectsSettings projects={[handoff]} />);
   fireEvent.click(screen.getByRole("button", { name: "Add project" }));
