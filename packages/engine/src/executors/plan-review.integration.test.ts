@@ -50,9 +50,9 @@ test("a step's instructions reach its agent in the system prompt and the prompt"
   expect(cli.requests[0]!.prompt).toMatch(/instructions for this step/i);
 });
 
-test("a gate after a planner asks for a review of the plan and keeps the plan to show", async () => {
+test("a gate after a planner asks for a review of the plan, offers approve, changes and fix, and keeps the plan to show", async () => {
   const { question } = await planned();
-  expect(question).toMatchObject({ question: "Review the plan from planner", options: ["approve", "changes"], answer: null });
+  expect(question).toMatchObject({ question: "Review the plan from planner", options: ["approve", "changes", "fix"], answer: null });
   const review = (question.context as { review?: { from: string; kind: string; markdown: string } }).review;
   expect(review).toMatchObject({ from: "planner", kind: "plan" });
   expect(review?.markdown).toContain("Store todos in a JSON file and add a CLI.");

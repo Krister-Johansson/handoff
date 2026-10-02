@@ -251,11 +251,16 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "answer_question",
     title: "Answer a question",
-    description: "Answers a question a run asked, which lets it continue. Only answer with the user's decision.",
+    description:
+      "Answers a question a run asked, which lets it continue. The option must be one the question lists (get_run shows them): approve, changes or fix (approve once the comments are fixed) for a review. At a Try it gate, give criteria: a verdict for each acceptance criterion. Only answer with the user's decision.",
     input: z.object({
       question_id: z.string(),
-      answer: z.string().min(1),
-      option: z.string().optional().describe("One of the question's options, when it has them: approve or changes for a review"),
+      answer: z.string().min(1).optional().describe("The answer or note; required unless criteria answer a Try it gate"),
+      option: z.string().optional().describe("One of the question's options, when it has them"),
+      criteria: z
+        .array(z.object({ criterion: z.string(), works: z.boolean(), note: z.string().optional().describe("What is wrong, when it does not work") }))
+        .optional()
+        .describe("For a Try it gate: whether each acceptance criterion works. Any that does not sends the work back with its note."),
       comments: z
         .array(
           z.object({
@@ -273,7 +278,10 @@ export const CATALOG: ToolSpec[] = [
     confirm: true,
     readOnly: false,
     idempotent: false,
-    summarize: (a) => `Answer the question${a.option ? ` with ${a.option}` : ""}: ${a.answer}`,
+    summarize: (a) =>
+      a.criteria
+        ? `Answer the Try it gate: ${a.criteria.filter((c) => !c.works).length} of ${a.criteria.length} criteria do not work`
+        : `Answer the question${a.option ? ` with ${a.option}` : ""}: ${a.answer ?? ""}`,
   }),
   spec({
     name: "answer_permission",

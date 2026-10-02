@@ -121,6 +121,29 @@ function lastReviewOf(output: unknown) {
   return typeof o.verdict === "string" && Array.isArray(o.comments) ? { last_review: { verdict: o.verdict, comments: o.comments } } : {};
 }
 
+type CriterionVerdict = { criterion: string; works: boolean; note?: string | undefined };
+
+/**
+ * A Try it gate answered with a verdict per acceptance criterion, as its page answers it: what does not
+ * work goes back as a comment on that criterion, with changes; when everything works, approve.
+ */
+function tryItAnswer(context: unknown, criteria: CriterionVerdict[], note: string | undefined) {
+  const { reason, acceptance = [] } = (context ?? {}) as { reason?: string; acceptance?: string[] };
+  if (reason !== "try") throw new Error("criteria answer a Try it gate; this question takes an answer and an option.");
+  const listed = `The criteria: ${acceptance.map((c) => `"${c}"`).join(", ")}.`;
+  const unknown = criteria.find((c) => !acceptance.includes(c.criterion));
+  if (unknown) throw new Error(`There is no criterion "${unknown.criterion}". ${listed}`);
+  const missing = acceptance.filter((c) => !criteria.some((v) => v.criterion === c));
+  if (missing.length) throw new Error(`Give a verdict for every criterion; missing: ${missing.map((c) => `"${c}"`).join(", ")}.`);
+  const failing = criteria.filter((c) => !c.works);
+  const summary = failing.length === 0 ? "Every criterion works." : `${failing.length} of ${criteria.length} criteria ${failing.length === 1 ? "does" : "do"} not work.`;
+  return {
+    answer: note?.trim() || summary,
+    option: failing.length ? "changes" : "approve",
+    comments: failing.map((c): QuestionComment => ({ quote: c.criterion, body: c.note?.trim() || "Does not work." })),
+  };
+}
+
 const roundUsd = (usd: number) => Math.round(usd * 1e6) / 1e6;
 
 /**
@@ -409,7 +432,14 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { dismissed: true };
     },
 
-    answer_question: async ({ question_id, answer, option, comments }: { question_id: string; answer: string; option?: string; comments?: QuestionComment[] }) => {
+    answer_question: async ({ question_id, ...input }: { question_id: string; answer?: string; option?: string; comments?: QuestionComment[]; criteria?: CriterionVerdict[] }) => {
+      const [question] = await db.select({ options: questions.options, context: questions.context }).from(questions).where(eq(questions.id, question_id));
+      if (!question) throw new Error(`question ${question_id} not found`);
+      const { answer, option, comments } = input.criteria ? tryItAnswer(question.context, input.criteria, input.answer) : input;
+      if (!answer?.trim()) throw new Error("Give the answer.");
+      if (option !== undefined && !(question.options ?? []).includes(option)) {
+        throw new Error(question.options?.length ? `The question takes one of ${question.options.join(", ")}; "${option}" is not one of them.` : `The question has no options; answer it in words without "${option}".`);
+      }
       const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: actor });
       return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
     },

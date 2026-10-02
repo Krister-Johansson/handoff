@@ -340,6 +340,47 @@ test("get_run has the cost, the failure code and the answered gates", async () =
   ]);
 });
 
+test("a review gate lists approve, changes and fix, and answer_question refuses an option it does not list", async () => {
+  const runId = await startedRun();
+  const gate = await seedExecution(db, runId, { nodeKey: "code_gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const review = { from: "coder", kind: "code", markdown: "Adds the form." };
+  const [question] = await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Review the code from coder", options: ["approve", "changes", "fix"], context: { reason: "approval", review } }).returning();
+  expect((await call("get_run", { run_id: runId })).questions[0].options).toEqual(["approve", "changes", "fix"]);
+  expect(await call("answer_question", { question_id: question!.id, answer: "Ship it.", option: "merge" })).toEqual({ error: 'The question takes one of approve, changes, fix; "merge" is not one of them.' });
+  const [still] = await db.select().from(questions).where(eq(questions.id, question!.id));
+  expect(still?.answer).toBeNull();
+  expect(await call("answer_question", { question_id: question!.id, answer: "Rename the field, then it can go.", option: "fix" })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, question!.id)))[0]).toMatchObject({ option: "fix", answeredBy: "claude-code" });
+});
+
+test("answer_question takes a verdict per criterion at a Try it gate", async () => {
+  const runId = await startedRun();
+  const context = { reason: "try", acceptance: ["A user can create a task", "A task survives a reload"] };
+  let attempt = 0;
+  const ask = async () => {
+    const gate = await seedExecution(db, runId, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting", attempt: ++attempt });
+    return (await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Try the app.", options: ["approve", "changes"], context }).returning())[0]!;
+  };
+  const first = await ask();
+  const broken = [
+    { criterion: "A user can create a task", works: true },
+    { criterion: "A task survives a reload", works: false, note: "The list is empty after a reload." },
+  ];
+  expect(await call("answer_question", { question_id: first.id, criteria: broken })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, first.id)))[0]).toMatchObject({
+    option: "changes",
+    answer: "1 of 2 criteria does not work.",
+    comments: [{ quote: "A task survives a reload", body: "The list is empty after a reload." }],
+  });
+  const second = await ask();
+  expect(await call("answer_question", { question_id: second.id, criteria: broken.map((c) => ({ criterion: c.criterion, works: true })) })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, second.id)))[0]).toMatchObject({ option: "approve", answer: "Every criterion works.", comments: [] });
+  // Every criterion needs a verdict, and only the gate's criteria have one.
+  const third = await ask();
+  expect((await call("answer_question", { question_id: third.id, criteria: [{ criterion: "A user can create a task", works: true }] })).error).toMatch(/A task survives a reload/);
+  expect((await call("answer_question", { question_id: third.id, criteria: [...broken, { criterion: "It is fast", works: true }] })).error).toMatch(/It is fast/);
+});
+
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });
