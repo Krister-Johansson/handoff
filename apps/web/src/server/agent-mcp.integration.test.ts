@@ -199,7 +199,8 @@ test("a finished run can be dismissed from what needs attention; other items can
 test("a run stopped by a loop that ran out says so, asks for a decision, and goes on when given one", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   const [planner] = await db.select().from(nodeExecutions).where(eq(nodeExecutions.runId, run_id));
-  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.id, planner!.id));
+  const review = { verdict: "request_changes", comments: [{ path: "src/a.ts", line: 4, body: "The empty list still crashes.", severity: "blocking" }] };
+  await db.update(nodeExecutions).set({ status: "passed", output: review }).where(eq(nodeExecutions.id, planner!.id));
   await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
   await db.transaction((tx) =>
     appendEvents(tx, run_id, [
@@ -210,7 +211,8 @@ test("a run stopped by a loop that ran out says so, asks for a decision, and goe
   expect(await call("list_attention")).toEqual([
     expect.objectContaining({ id: `stuck:${run_id}`, kind: "failed", title: "sandbox: planner ran out of rounds", url: expect.stringMatching(new RegExp(`^${BASE}/projects/[0-9a-f-]+/runs/${run_id}$`)) }),
   ]);
-  expect((await call("get_run", { run_id })).stuck).toEqual({ node: "planner", loop: "planner->planner", attempts: 3 });
+  // The last review that wanted another round says why.
+  expect((await call("get_run", { run_id })).stuck).toEqual({ node: "planner", loop: "planner->planner", attempts: 3, last_review: review });
   expect(await call("resolve_loop", { run_id, action: "continue" })).toMatchObject({ resolved: "continue" });
   const steps = (await call("get_run", { run_id })).steps.map((s: { node: string }) => s.node);
   expect(steps).toEqual(["planner", "coder"]);
@@ -311,6 +313,31 @@ test("get_run on a Try it gate has the app URL, the criteria and the demo's note
     ],
     url: `${BASE}${runPath(projectId, runId)}/try/${question!.id}`,
   });
+});
+
+test("get_run has the cost, the failure code and the answered gates", async () => {
+  const runId = await startedRun();
+  await db.update(nodeExecutions).set({ status: "passed", costUsd: "0.250000" }).where(eq(nodeExecutions.runId, runId));
+  const gate = await seedExecution(db, runId, { nodeKey: "plan_gate", nodeType: "human_gate", executorKind: "human", status: "passed" });
+  const [answered] = await db
+    .insert(questions)
+    .values({ runId, nodeExecutionId: gate.id, question: "Review the plan from planner", options: ["approve", "changes", "fix"], answer: "Keep the API as it is.", option: "approve", answeredBy: "krister", answeredAt: new Date("2026-10-02T09:00:00Z") })
+    .returning();
+  await seedExecution(db, runId, {
+    nodeKey: "coder",
+    status: "failed",
+    costUsd: "1.500000",
+    finishedAt: new Date(),
+    error: { code: "cli_error_max_turns", message: "claude ended with error_max_turns", detail: { subtype: "error_max_turns", turns: 61, costUsd: 1.5, lastMessage: "Still wiring the form." } },
+  });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
+  const detail = await call("get_run", { run_id: runId });
+  expect(detail.cost_usd).toBe(1.75);
+  expect(detail.steps.map((s: { node: string; cost_usd: number | null }) => [s.node, s.cost_usd])).toEqual([["planner", 0.25], ["plan_gate", null], ["coder", 1.5]]);
+  expect(detail.failed).toEqual({ node: "coder", attempt: 1, code: "cli_error_max_turns", error: "claude ended with error_max_turns", subtype: "error_max_turns", turns: 61, cost_usd: 1.5, last_message: "Still wiring the form." });
+  expect(detail.answered).toEqual([
+    { id: answered!.id, node: "plan_gate", question: "Review the plan from planner", option: "approve", answer: "Keep the API as it is.", comments: [], answered_by: "krister", answered_at: "2026-10-02T09:00:00.000Z" },
+  ]);
 });
 
 test("answer_permission cannot always allow", async () => {

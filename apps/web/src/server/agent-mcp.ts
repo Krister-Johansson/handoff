@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
-import { and, asc, desc, eq, events, listLibraryIndex, nodeExecutions, permissionRequests, projects, type Db, type QuestionComment } from "@handoff/db";
+import { and, asc, desc, eq, events, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
@@ -115,12 +115,64 @@ function tryItOf(deps: HandoffMcpDeps, run: { id: string; projectId: string }, q
   };
 }
 
+/** The verdict and findings of a review that sent work back, as the run page shows them on a stuck loop. */
+function lastReviewOf(output: unknown) {
+  const o = (output ?? {}) as { verdict?: unknown; comments?: unknown };
+  return typeof o.verdict === "string" && Array.isArray(o.comments) ? { last_review: { verdict: o.verdict, comments: o.comments } } : {};
+}
+
+const roundUsd = (usd: number) => Math.round(usd * 1e6) / 1e6;
+
+/**
+ * A failed step as the agent reads it: the error's code and message, and for a Claude step how it
+ * ended, how many turns it took, what it cost and what it said last.
+ */
+function failureOf(failed: { nodeKey: string; attempt: number; error: unknown }) {
+  const error = (failed.error ?? {}) as { code?: string; detail?: { subtype?: unknown; turns?: unknown; costUsd?: unknown; lastMessage?: unknown } };
+  const detail = error.detail ?? {};
+  return {
+    node: failed.nodeKey,
+    attempt: failed.attempt,
+    code: error.code ?? null,
+    error: errorMessage(failed.error),
+    ...(typeof detail.subtype === "string" ? { subtype: detail.subtype } : {}),
+    ...(typeof detail.turns === "number" ? { turns: detail.turns } : {}),
+    ...(typeof detail.costUsd === "number" ? { cost_usd: roundUsd(detail.costUsd) } : {}),
+    ...(typeof detail.lastMessage === "string" ? { last_message: detail.lastMessage } : {}),
+  };
+}
+
+/** The run's answered questions, with the gate that asked each. */
+async function answeredGates(db: Db, runId: string) {
+  return db
+    .select({
+      id: questions.id,
+      nodeKey: nodeExecutions.nodeKey,
+      question: questions.question,
+      option: questions.option,
+      answer: questions.answer,
+      comments: questions.comments,
+      answeredBy: questions.answeredBy,
+      answeredAt: questions.answeredAt,
+    })
+    .from(questions)
+    .innerJoin(nodeExecutions, eq(nodeExecutions.id, questions.nodeExecutionId))
+    .where(and(eq(questions.runId, runId), isNotNull(questions.answer)))
+    .orderBy(asc(questions.answeredAt));
+}
+
 /** A run as the agent needs it: where it stands, its steps, PR, issues, open questions and failure. */
 async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const [stuck, prompts, demoSummary] = await Promise.all([stuckLoop(deps.db, run.id), pendingPermissions(deps.db, run.id), latestDemoSummary(deps.db, run.id)]);
+  const [stuck, prompts, demoSummary, answered] = await Promise.all([
+    stuckLoop(deps.db, run.id),
+    pendingPermissions(deps.db, run.id),
+    latestDemoSummary(deps.db, run.id),
+    answeredGates(deps.db, run.id),
+  ]);
+  const costs = executions.map((e) => (e.costUsd === null ? null : Number(e.costUsd)));
   return {
     id: run.id,
     project: project.name,
@@ -132,7 +184,9 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     branch: run.branchName,
     pr: run.prNumber ? { number: run.prNumber, url: `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` } : null,
     issues: run.issues.map((i) => ({ number: i.number, title: i.title, url: i.url })),
-    steps: executions.map((e) => ({
+    // What Claude cost over every step of the run, in US dollars.
+    cost_usd: roundUsd(costs.reduce<number>((sum, c) => sum + (c ?? 0), 0)),
+    steps: executions.map((e, i) => ({
       node: e.nodeKey,
       attempt: e.attempt,
       status: e.status,
@@ -140,6 +194,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
       finished_at: e.finishedAt?.toISOString() ?? null,
       // A step still running counts up to now, which is what decides between waiting and repairing.
       duration_seconds: e.startedAt ? Math.round(((e.finishedAt ?? new Date()).getTime() - e.startedAt.getTime()) / 1000) : null,
+      cost_usd: costs[i] ?? null,
     })),
     questions: openQuestions.map((q) => {
       const review = (q.context as { review?: { markdown?: string } }).review;
@@ -158,9 +213,20 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
       const { action, detail } = describePermission(p.toolName, p.input);
       return { id: p.id, node: p.nodeKey, attempt: p.attempt, tool: p.toolName, asks: action, detail, input: p.input, asked_at: p.createdAt.toISOString() };
     }),
-    failed: failed ? { node: failed.nodeKey, attempt: failed.attempt, error: errorMessage(failed.error) } : null,
+    failed: failed ? failureOf(failed) : null,
+    // What people decided at the run's gates, oldest first.
+    answered: answered.map((q) => ({
+      id: q.id,
+      node: q.nodeKey,
+      question: q.question,
+      option: q.option,
+      answer: q.answer,
+      comments: q.comments,
+      answered_by: q.answeredBy,
+      answered_at: q.answeredAt?.toISOString() ?? null,
+    })),
     // A loop that used all its attempts stops the run without a failed step; resolve_loop decides what next.
-    stuck: stuck ? { node: stuck.nodeKey, loop: stuck.edgeKey, attempts: stuck.attempts } : null,
+    stuck: stuck ? { node: stuck.nodeKey, loop: stuck.edgeKey, attempts: stuck.attempts, ...lastReviewOf(executions.find((e) => e.id === stuck.executionId)?.output) } : null,
   };
 }
 
