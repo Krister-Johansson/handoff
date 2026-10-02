@@ -6,7 +6,7 @@ import { toolSpec } from "@/lib/assistant/catalog";
 import { isPageToolName } from "@/lib/assistant/page-tools";
 import { runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
 import { pageDescriptor, runUiTool } from "@/lib/assistant/run-ui-tool";
-import { registerWebMcp } from "@/lib/assistant/webmcp";
+import { pageToolsOnWebMcp, registerWebMcp, type WebMcpHost } from "@/lib/assistant/webmcp";
 import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
 import type { AssistantPort, ChatMessage, PendingRequest, ReplyUpdate, ToolCallView } from "@/lib/assistant/port";
 import { httpTransport, type AssistantTransport, type ConversationSummary, type StoredMessage, type TurnStreamEvent } from "@/lib/assistant/transport";
@@ -167,11 +167,16 @@ export function AssistantProvider({
   const replyListeners = useRef(new Set<(reply: ReplyUpdate) => void>());
   const requestListeners = useRef(new Set<(request: PendingRequest) => void>());
   // The open page's tools. The last registration wins; removing one clears it only if it is still the open page.
+  // pageVersion changes with every registration and removal, so the page's WebMCP tools follow the open page.
   const pageRef = useRef<OpenPage | undefined>(undefined);
+  const [pageVersion, setPageVersion] = useState(0);
   const registerPage = useCallback<RegisterPage>((page) => {
     pageRef.current = page;
+    setPageVersion((v) => v + 1);
     return () => {
-      if (pageRef.current === page) pageRef.current = undefined;
+      if (pageRef.current !== page) return;
+      pageRef.current = undefined;
+      setPageVersion((v) => v + 1);
     };
   }, []);
   const openPage = useCallback(() => pageRef.current, []);
@@ -316,6 +321,7 @@ export function AssistantProvider({
       {
         approve: (call) => approveForAgent(call),
         runUi: (call) => runUiTool(call, { push: (href) => router.push(href), page: openPage }),
+        runPage: (call) => runPageTool(openPage(), call),
         activity: setAgentActivity,
       },
       { available, signal: controller.signal },
@@ -324,6 +330,29 @@ export function AssistantProvider({
     });
     return () => controller.abort();
   }, [available, webMcpEnabled, router, openPage]);
+
+  // WebMCP: the open page's tools register beside the catalog, and are replaced whenever a page registers or leaves.
+  // The set lives as long as the switch; navigating goes through an effect event, so a new router object does not replace it.
+  const pageWebMcp = useRef<ReturnType<typeof pageToolsOnWebMcp> | undefined>(undefined);
+  const navigate = useEffectEvent((href: string) => router.push(href));
+  useEffect(() => {
+    if (!webMcpEnabled) return;
+    const host: WebMcpHost = {
+      approve: (call) => approveForAgent(call),
+      runUi: (call) => runUiTool(call, { push: (href) => navigate(href), page: openPage }),
+      runPage: (call) => runPageTool(openPage(), call),
+      activity: setAgentActivity,
+    };
+    const pages = pageToolsOnWebMcp(document.modelContext, host, { available });
+    pageWebMcp.current = pages;
+    return () => {
+      pages.clear();
+      pageWebMcp.current = undefined;
+    };
+  }, [available, webMcpEnabled, openPage]);
+  useEffect(() => {
+    void pageWebMcp.current?.show(openPage());
+  }, [pageVersion, available, webMcpEnabled, openPage]);
 
   const port = useMemo<AssistantPort>(
     () => ({ available, status: streaming ? "streaming" : "idle", send, stop, onReply, onRequest, respond, composerRef, open, close, isOpen }),
