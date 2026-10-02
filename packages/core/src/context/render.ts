@@ -1,3 +1,5 @@
+import type { NodeMemory } from "../schema/run-state.ts";
+
 export type CheckResult = { kind: string; passed: boolean; detail: string; logTail?: string | undefined; durationMs?: number | undefined };
 
 /** A comment on code (path and line) or on a quoted part of a text such as a plan. */
@@ -40,6 +42,8 @@ export type ContextPacket = {
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
   humanAnswer?: string;
   repairNote?: string;
+  /** What earlier attempts of this step were told in this run: allowed files, operator notes, answers. */
+  memory?: NodeMemory;
   /** The base branch moved and now changes the same lines as this branch: the work is to merge it in. */
   conflict?: { base: string; baseSha: string; files: string[] };
 };
@@ -69,6 +73,22 @@ function renderConflict({ base, baseSha, files }: NonNullable<ContextPacket["con
     "If you cannot tell how two changes should combine, return status `needs_input` with a question that shows both sides, instead of guessing.",
     "",
   ];
+}
+
+/** What earlier attempts of the step were told, which still holds for this attempt. */
+function renderMemory({ extraPaths, notes, answers }: NodeMemory): string[] {
+  if (!extraPaths.length && !notes.length && !answers.length) return [];
+  const out = ["# Earlier in this run", "", "Earlier attempts of this step were told the following. It still holds for this attempt.", ""];
+  if (extraPaths.length) {
+    out.push("## Files outside the plan you may change", "", "An earlier attempt changed these with a reason. You may keep and change them without listing them in extraPaths again.", "");
+    out.push(...extraPaths.map((e) => `- \`${e.path}\`: ${e.reason}`), "");
+  }
+  if (notes.length) out.push("## Notes from the operator", "", ...notes.map((n) => `- ${n.note}`), "");
+  if (answers.length) {
+    out.push("## Answers to your questions", "", "A person answered these. Keep to the answers.", "");
+    out.push(...answers.map((a) => `- ${quoted(a.question)} ${a.option && a.option !== a.answer ? `${a.option}: ` : ""}${a.answer}`), "");
+  }
+  return out;
 }
 
 const LOG_TAIL_LINES = 80;
@@ -184,6 +204,7 @@ export function renderContextPacket(packet: ContextPacket): string {
     "Give the question a `summary` of at most 80 characters that names the decision. Notifications show the summary; the person reads the full `text` when they answer.",
     "",
   );
+  if (packet.memory) out.push(...renderMemory(packet.memory));
   if (packet.priorAttempt || packet.humanAnswer || packet.repairNote) {
     out.push("# Previous attempt", "");
     if (packet.priorAttempt?.summary) out.push(packet.priorAttempt.summary, "");

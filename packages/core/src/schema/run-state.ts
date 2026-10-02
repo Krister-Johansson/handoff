@@ -13,6 +13,19 @@ export const NodeResultSchema = z.object({
 export const LinkedIssueSchema = z.object({ number: z.number().int(), title: z.string(), url: z.string(), body: z.string() });
 export type LinkedIssue = z.infer<typeof LinkedIssueSchema>;
 
+/**
+ * What earlier attempts of one node were told in this run, so every later attempt is told it too: the
+ * files outside the plan it declared, the operator's repair notes, and a person's answers to its questions.
+ */
+export const NodeMemorySchema = z.object({
+  extraPaths: z.array(z.object({ path: z.string(), reason: z.string(), attempt: z.number().int() })).default([]),
+  notes: z.array(z.object({ note: z.string(), attempt: z.number().int() })).default([]),
+  answers: z
+    .array(z.object({ question: z.string(), answer: z.string(), option: z.string().optional(), answeredBy: z.string().optional(), attempt: z.number().int().optional() }))
+    .default([]),
+});
+export type NodeMemory = z.infer<typeof NodeMemorySchema>;
+
 export const RunStateSchema = z
   .object({
     task: z.string(),
@@ -23,6 +36,7 @@ export const RunStateSchema = z
     loops: z.record(z.string(), z.object({ attempts: z.number().int() })).default({}),
     nodes: z.record(z.string(), NodeResultSchema).default({}),
     human: z.record(z.string(), HumanAnswerSchema).default({}),
+    memory: z.record(z.string(), NodeMemorySchema).optional(),
   })
   .loose();
 
