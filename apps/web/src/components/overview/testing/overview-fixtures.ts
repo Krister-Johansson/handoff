@@ -13,6 +13,7 @@ export function run(overrides: Partial<OverviewRun> & { id: string; task: string
     projectId: "p1",
     issues: [],
     status: "running",
+    startedBy: null,
     branchName: "handoff/branch",
     prNumber: null,
     createdAt: minutesAgo(14),
