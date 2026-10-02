@@ -109,6 +109,30 @@ export function isOwned(file: string, patterns: string[]): boolean {
   return patterns.some((p) => (hasGlob(p) ? matchesGlob(file, p) : file === p || file.startsWith(`${p.replace(/\/$/, "")}/`)));
 }
 
+/** Files a package manager writes along with package.json, kept next to it or, in a workspace, at the root. */
+const LOCKFILES = new Set(["pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "bun.lock", "bun.lockb"]);
+const WORKSPACE_FILE = "pnpm-workspace.yaml";
+
+const dirOf = (file: string) => (file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "");
+const baseOf = (file: string) => file.slice(file.lastIndexOf("/") + 1);
+
+/**
+ * The changed files outside the allowed paths. Package manager files count as one unit with
+ * package.json: an owned package.json owns the lockfile in its directory, and any owned package.json
+ * owns the lockfiles and pnpm-workspace.yaml at the repository root, where a workspace keeps them.
+ */
+export function outsideOwned(files: string[], allowed: string[]): string[] {
+  const ownsAnyPackageJson =
+    isOwned("package.json", allowed) || allowed.some((p) => baseOf(p) === "package.json") || files.some((f) => baseOf(f) === "package.json" && isOwned(f, allowed));
+  return files.filter((file) => {
+    if (isOwned(file, allowed)) return false;
+    const dir = dirOf(file);
+    if (dir === "" && (LOCKFILES.has(file) || file === WORKSPACE_FILE)) return !ownsAnyPackageJson;
+    if (LOCKFILES.has(baseOf(file))) return !isOwned(`${dir}/package.json`, allowed);
+    return true;
+  });
+}
+
 function needWorkdir(check: DeterministicCheck, ctx: CheckContext): string {
   if (!ctx.workdir) throw new Error(`check ${check.kind} needs a workdir`);
   return ctx.workdir;
@@ -139,7 +163,7 @@ export async function runCheck(check: DeterministicCheck, ctx: CheckContext): Pr
       // Paths an earlier attempt of this node declared stay allowed: the branch still has them.
       const remembered = ctx.nodeKey ? memoryOf(ctx.state, ctx.nodeKey).extraPaths : [];
       const allowed = [...owned, ...[...remembered, ...extraPathsOf(ctx.output)].map((e) => e.path)];
-      const outside = files.filter((f) => !isOwned(f, allowed));
+      const outside = outsideOwned(files, allowed);
       return outside.length === 0
         ? done(true, `${files.length} changed files within owned paths`)
         : done(false, `files outside owned paths: ${outside.join(", ")}`);
