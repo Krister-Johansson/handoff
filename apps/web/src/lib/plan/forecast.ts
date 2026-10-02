@@ -1,6 +1,9 @@
 import type { PlanSize } from "@handoff/github";
 
-/** A finished run's times: wall time runs from its first claim to its end, nights included. */
+/**
+ * A finished run's times: wall time runs from its first claim to its end, nights included. A pull request
+ * in a manual merge queue waits on the person from when it joined the queue until they ask to merge it.
+ */
 export type ForecastRun = { startedAt: Date; finishedAt: Date; mergeQueuedAt: Date | null; mergeRequestedAt: Date | null };
 /** A question a Human gate asked; unanswered, it stays open until the run ends. */
 export type ForecastQuestion = { createdAt: Date; answeredAt: Date | null };
