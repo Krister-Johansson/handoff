@@ -94,19 +94,20 @@ A fine-grained token cannot reach a Project owned by a user account. A GitHub Ap
 
 ### Linking a Project
 
-Ask the assistant, or Claude Code with the handoff plugin, to set up the plan. That calls `setup_plan`, which shows an approval card first. It creates the labels `epic`, `story` and `task` if they are missing. With `use` and the number of one of your existing Projects, it links that Project to the repository and gives it the Status options Shaping, Ready, Running, In review and Done. An option whose name matches apart from case or an emoji is renamed, a missing one is added, and every other option stays, so no card loses its column. `list_github_projects` shows beforehand which options each of your Projects lacks, and the result of `setup_plan` names each option it renamed or added. Without `use`, it creates a Project called "<project name> plan" with those options and links it. Either way it stores the Project's number on the handoff project. Running it again on a project that has a plan checks the labels and fields and reports what it found.
+Ask the assistant, or Claude Code with the handoff plugin, to set up the plan. That calls `setup_plan`, which shows an approval card first. It creates the labels `epic`, `story` and `task` if they are missing. With `use` and the number of one of your existing Projects, it links that Project to the repository and gives it the Status options Shaping, Ready, Running, In review and Done. An option whose name matches apart from case or an emoji is renamed, a missing one is added, and every other option stays, so no card loses its column. `list_github_projects` shows beforehand which options each of your Projects lacks, and the result of `setup_plan` names each option it renamed or added. Without `use`, it creates a Project called "<project name> plan" with those options and links it. Both ways the Project gets the date fields Start and Target. GitHub's roadmap layout reads them once you pick them under "Date fields" in a Roadmap view; the API cannot set that. Either way it stores the Project's number on the handoff project. Running it again on a project that has a plan adds missing labels and date fields and reports what it found.
 
 ### Shaping
 
 The assistant and the Claude Code plugin shape the plan with these tools. Every one that writes to GitHub shows an approval card first, or the permission prompt in Claude Code.
 
-- `list_plan` shows the tree: epics, their stories, their tasks, each with its status, and each task with its open blockers, latest run and pull request, plus the open issues outside the plan.
+- `list_plan` shows the tree: epics, their stories, their tasks, each with its status and its Start and Target dates, and each task with its open blockers, latest run and pull request, plus the open issues outside the plan.
 - `create_epic` creates an issue labelled `epic` with its goal.
 - `create_story` creates a sub-issue of an epic labelled `story`, with its acceptance criteria as checkboxes.
 - `create_task` creates a sub-issue of a story labelled `task`, with its brief, optional criteria and the issues it is blocked by.
 - `plan_issue` brings an issue from outside the plan in as a task, optionally under a story.
 - `move_to_ready` moves tasks to Ready. It refuses an epic, a story, a closed issue and a task without a body.
 - `move_to_shaping` moves tasks back to Shaping. It refuses a task that an active run works on.
+- `schedule` sets, moves or clears the Start and Target dates of epics, stories and tasks, each with its own dates. It refuses a Target before its Start, a date not written YYYY-MM-DD, an issue outside the plan and a Project without the date fields, and then changes nothing. The assistant proposes dates only when you ask it to plan the timeline. `create_story` and `create_task` also take `start` and `target`.
 
 Everything created starts in Shaping. `setup_project` reports whether the plan is in place.
 
