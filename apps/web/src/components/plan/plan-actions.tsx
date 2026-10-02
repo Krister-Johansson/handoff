@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowRightIcon, ExternalLinkIcon, MoreHorizontalIcon, PlayIcon, Undo2Icon, WrenchIcon } from "lucide-react";
+import { ArrowRightIcon, CalendarIcon, ExternalLinkIcon, MoreHorizontalIcon, PlayIcon, Undo2Icon, WrenchIcon } from "lucide-react";
 import { moveToReadyAction, moveToShapingAction, planIssueAction } from "@/app/projects/actions";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
@@ -151,7 +151,20 @@ export function PlanItDialog({ issue, projectId, stories }: { issue: { number: n
  * failed run, and the menu with the same moves, Open on GitHub and Open run. `compact` keeps only the
  * menu, as on a board card.
  */
-export function TaskActions({ task, projectId, start, compact }: { task: PlanTask; projectId: string; start: StartRunContext; compact?: boolean }) {
+export function TaskActions({
+  task,
+  projectId,
+  start,
+  compact,
+  onSchedule,
+}: {
+  task: PlanTask;
+  projectId: string;
+  start: StartRunContext;
+  compact?: boolean;
+  /** Adds Schedule at the end of the menu, as the timeline does. */
+  onSchedule?: () => void;
+}) {
   const [move, setMove] = useState<Move>();
   const moves = movesOf(task);
   const column = taskColumn(task);
@@ -227,6 +240,17 @@ export function TaskActions({ task, projectId, start, compact }: { task: PlanTas
                     </DropdownMenuItem>
                   );
                 })}
+              </DropdownMenuGroup>
+            </>
+          )}
+          {onSchedule && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={onSchedule}>
+                  <CalendarIcon />
+                  Schedule
+                </DropdownMenuItem>
               </DropdownMenuGroup>
             </>
           )}

@@ -537,10 +537,11 @@ export const CATALOG: ToolSpec[] = [
     name: "go_to_plan",
     title: "Open the plan",
     description:
-      "Opens a project's Plan page: epics, stories and tasks from its GitHub Project, as a tree or a board, optionally narrowed to one epic (or the unplanned issues), some statuses, or tasks by their run.",
+      "Opens a project's Plan page: epics, stories and tasks from its GitHub Project, as a tree, a board or a timeline, optionally narrowed to one epic (or the unplanned issues), some statuses, or tasks by their run. The timeline takes a zoom.",
     input: z.object({
       project_id: z.string().describe("The project's id from list_projects"),
-      view: z.enum(["tree", "board"]).optional(),
+      view: z.enum(["tree", "board", "timeline"]).optional(),
+      zoom: z.enum(["weeks", "months"]).optional().describe("The timeline's zoom; it picks one from the dates when left out"),
       epic: z.union([z.number().int().positive(), z.literal("unplanned")]).optional().describe("An epic's issue number, or unplanned"),
       status: z.array(z.enum(["Shaping", "Ready", "Running", "In review", "Done"])).optional(),
       run: z.enum(["any", "active", "needs-you", "none"]).optional().describe("Tasks with an active run, whose run needs the person, or with no run"),
@@ -548,7 +549,7 @@ export const CATALOG: ToolSpec[] = [
     kind: "ui",
     confirm: false,
     readOnly: true,
-    summarize: (a) => `Open the plan of project ${short(a.project_id)}${a.view === "board" ? " as a board" : ""}${a.epic !== undefined ? `, epic ${a.epic === "unplanned" ? "unplanned" : `#${a.epic}`}` : ""}`,
+    summarize: (a) => `Open the plan of project ${short(a.project_id)}${a.view === "board" ? " as a board" : a.view === "timeline" ? " as a timeline" : ""}${a.epic !== undefined ? `, epic ${a.epic === "unplanned" ? "unplanned" : `#${a.epic}`}` : ""}`,
   }),
   spec({
     name: "go_to_run",

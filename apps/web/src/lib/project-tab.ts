@@ -1,3 +1,5 @@
+import { ZOOMS, type Zoom } from "./plan/timeline-scale";
+
 /** A project's pages under /projects/<id>, in the order the sidebar lists them. */
 export const PROJECT_SECTIONS = ["runs", "plan", "issues", "pulls", "graphs", "settings"] as const;
 export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
@@ -27,8 +29,14 @@ export function parseBacklogFilter(params: Record<string, string | string[] | un
 }
 
 /** The views of the Plan page. */
-export const PLAN_VIEWS = ["tree", "board"] as const;
+export const PLAN_VIEWS = ["tree", "board", "timeline"] as const;
 export type PlanViewName = (typeof PLAN_VIEWS)[number];
+
+/** The timeline's zoom from ?zoom=; undefined lets the timeline pick one from its range. */
+export function parseZoom(params: Record<string, string | string[] | undefined>): Zoom | undefined {
+  const zoom = params.zoom;
+  return typeof zoom === "string" && (ZOOMS as readonly string[]).includes(zoom) ? (zoom as Zoom) : undefined;
+}
 
 /** The Plan page view from ?view=; the tree unless another known view is asked for. */
 export function parsePlanView(params: Record<string, string | string[] | undefined>): PlanViewName {

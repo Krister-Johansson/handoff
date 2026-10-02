@@ -48,6 +48,13 @@ test("go_to_plan opens the tab with a view, an epic or a status", () => {
   expect(() => plan("go_to_plan", { project_id: "../settings" })).toThrow(/is not an id/);
 });
 
+test("go_to_plan opens the timeline view with a zoom", () => {
+  expect(plan("go_to_plan", { project_id: "p1", view: "timeline" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=timeline" });
+  expect(plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "months", epic: 12 })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=timeline&epic=12&zoom=months" });
+  expect(plan("go_to_plan", { project_id: "p1", view: "board", zoom: "months" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=board" });
+  expect(() => plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "days" })).toThrow(/not valid/);
+});
+
 test("the notifications, run, review and Try it tools open their pages, and an id that is not one is refused", () => {
   expect(plan("go_to_notifications", { filter: "unread" })).toEqual({ kind: "navigate", href: "/notifications?show=unread" });
   expect(plan("go_to_notifications", {})).toEqual({ kind: "navigate", href: "/notifications" });

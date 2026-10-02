@@ -1,6 +1,7 @@
 import type { PlanItem, PlanProject, PlanStatus } from "@handoff/github";
 import type { BacklogIssue, BacklogRun } from "@/server/backlog";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanStory, PlanTask, PlanView } from "@/server/plan";
+import { deriveSpans, type TimelineRun } from "@/lib/plan/schedule";
 
 export const REPO_URL = "https://github.com/o/r";
 
@@ -35,14 +36,14 @@ const progress = (tasks: PlanTask[]): PlanProgress => {
   return { done: byStatus.Done, total: tasks.length, byStatus, subIssues: { total: tasks.length, completed: byStatus.Done } };
 };
 
-export const story = (number: number, title: string, parent: number, tasks: PlanTask[]): PlanStory => ({
-  ...item(number, title, "story", { parent }),
+export const story = (number: number, title: string, parent: number, tasks: PlanTask[], over: Partial<PlanItem> = {}): PlanStory => ({
+  ...item(number, title, "story", { parent, ...over }),
   tasks: tasks.map((t) => ({ ...t, parent: t.parent ?? number })),
   progress: progress(tasks),
 });
 
-export const epic = (number: number, title: string, stories: PlanStory[], tasks: PlanTask[] = []): PlanEpic => ({
-  ...item(number, title, "epic"),
+export const epic = (number: number, title: string, stories: PlanStory[], tasks: PlanTask[] = [], over: Partial<PlanItem> = {}): PlanEpic => ({
+  ...item(number, title, "epic", over),
   stories,
   tasks,
   progress: progress([...stories.flatMap((s) => s.tasks), ...tasks]),
@@ -74,4 +75,10 @@ export function planView(epics: PlanEpic[], extra: { unparented?: PlanTask[]; un
   const board = { Shaping: [], Ready: [], Running: [], "In review": [], Done: [], Other: [] } as Record<PlanColumn, PlanTask[]>;
   for (const t of [...tasks].sort((a, b) => a.number - b.number)) board[t.state === "closed" ? "Done" : (t.status ?? "Other")].push(t);
   return { project: PROJECT, epics, unparented: extra.unparented ?? [], board, unplanned: extra.unplanned ?? [] };
+}
+
+/** The timeline loadPlan would derive for a view: every epic, story and task, the runs given, at `now`. */
+export function timelineOf(view: Pick<PlanView, "epics" | "unparented">, runs: TimelineRun[], now: Date) {
+  const items = [...view.epics.flatMap((e) => [e, ...e.stories, ...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...view.unparented];
+  return deriveSpans(items, runs, now);
 }

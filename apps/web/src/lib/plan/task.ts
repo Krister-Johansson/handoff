@@ -38,3 +38,13 @@ export const COLUMN_TONE: Record<PlanColumn, { pill: string; dot: string }> = {
   Done: { pill: "border-transparent bg-success-bg text-success", dot: "bg-success-dot" },
   Other: { pill: "border-border text-muted-foreground", dot: "bg-border" },
 };
+
+/** Each status's bar on the timeline: its colour at 70 percent with a border in the full colour. */
+export const BAR_TONE: Record<PlanColumn, string> = {
+  Shaping: "border-muted-foreground/60 bg-muted-foreground/35",
+  Ready: "border-active-dot bg-active-dot/70",
+  Running: "border-attention-dot bg-attention-dot/70",
+  "In review": "border-repaired-dot bg-repaired-dot/70",
+  Done: "border-success-dot bg-success-dot/70",
+  Other: "border-border bg-muted",
+};

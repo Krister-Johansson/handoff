@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import { parsePlanFilters } from "@/lib/plan/filters";
-import { parsePlanView } from "@/lib/project-tab";
+import { parsePlanView, parseZoom } from "@/lib/project-tab";
 import { projectCrumb } from "@/server/crumbs";
 import { getProjectDetail } from "@/server/graphs";
 import { loadPlan } from "@/server/plan";
@@ -26,7 +26,7 @@ async function loadPlanPage(projectId: string) {
   return { detail, plan, activity, signals, crumbs, readAt: Date.now() };
 }
 
-/** A project's plan from its GitHub Project: epics, stories and tasks as a tree or a board. */
+/** A project's plan from its GitHub Project: epics, stories and tasks as a tree, a board or a timeline. */
 export default async function PlanPage({
   params,
   searchParams,
@@ -83,6 +83,7 @@ export default async function PlanPage({
         project={project}
         plan={plan}
         view={parsePlanView(query)}
+        zoom={parseZoom(query)}
         filters={parsePlanFilters(query)}
         signals={signals}
         start={{ graphs: graphs.map((g) => g.name), graphName: project.isDemo ? undefined : defaultGraph }}
