@@ -171,9 +171,11 @@ test("a late, blocked or overdue task shows a warning icon after its title that 
   const overdue = within(label(/Task #56/)).getByRole("button", { name: "Overdue by 3 days" });
   expect(within(label(/Task #55/)).queryByRole("button", { name: /Overdue|Blocked|Late/ })).not.toBeInTheDocument();
 
-  // Focus shows the list in a tooltip.
+  // Focus opens the flags' card, with the Target it missed.
   fireEvent.focus(overdue);
-  expect(await screen.findByRole("tooltip")).toHaveTextContent("Overdue by 3 days");
+  const card = await screen.findByRole("group", { name: "Flags of #56 Approval cards" });
+  expect(within(card).getByRole("term")).toHaveTextContent("Overdue");
+  expect(within(card).getByRole("definition")).toHaveTextContent("Target was Sep 29, 3 days ago");
 
   // Both ends inside a collapsed epic: the arrow goes with them.
   fireEvent.click(within(row(/Epic #10/)).getByRole("button", { name: "Collapse Epic #10 Voice" }));
@@ -181,12 +183,78 @@ test("a late, blocked or overdue task shows a warning icon after its title that 
   expect(arrow(55, 57)).not.toBeNull();
 });
 
-test("one warning icon names every flag of a task, a run that waits on you among them", () => {
+test("one warning icon names every flag of a task, and its card links the run that waits on you and shows the active run's state", async () => {
   const waiting = planView([
     epic(12, "Project management", [story(41, "Shaping", 12, [task(56, "Approval cards", "Running", { start: "2026-09-24", target: "2026-09-29", run: run("r6", "waiting") })])]),
   ]);
   renderTimeline({ plan: waiting, zoom: "weeks", needsYou: ["r6"] });
-  expect(within(row(/Task #56/)).getByRole("button", { name: "Overdue by 3 days. Waiting on you" })).toBeInTheDocument();
+  const icon = within(row(/Task #56/)).getByRole("button", { name: "Overdue by 3 days. Waiting on you" });
+
+  fireEvent.focus(icon);
+  const card = await screen.findByRole("group", { name: "Flags of #56 Approval cards" });
+  expect(within(card).getAllByRole("term").map((t) => t.textContent)).toEqual(["Overdue", "Needs you", "Run"]);
+  expect(within(card).getByRole("link", { name: "See what the run waits on" })).toHaveAttribute("href", "/projects/p1/runs/r6");
+  expect(within(card).getByRole("link", { name: "Run r6, waiting" })).toHaveAttribute("href", "/projects/p1/runs/r6");
+});
+
+test("the warning icon opens a card on focus with each blocker's kind, title, status and state, linked to its issue, and Escape closes it", async () => {
+  const blocked = planView([
+    epic(12, "Project management", [
+      story(41, "Shaping", 12, [
+        task(52, "Projects port", "Done", { state: "closed" }),
+        task(55, "Shaping tools", "Running", { start: "2026-09-30", target: "2026-10-07" }),
+        task(57, "Add the migration", "Shaping", { start: "2026-10-01", target: "2026-10-09", blockers: [55, 52, 151], blockedBy: [55, 151] }),
+      ]),
+    ]),
+  ]);
+  renderTimeline({ plan: blocked, zoom: "weeks" });
+  const icon = within(row(/Task #57/)).getByRole("button", { name: "Late: waiting on #55, #151" });
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+
+  fireEvent.focus(icon);
+  const card = await screen.findByRole("group", { name: "Flags of #57 Add the migration" });
+  const blocker = (n: number) => within(card).getByRole("listitem", { name: new RegExp(`^#${n}\\b`) });
+  expect(within(card).getByRole("link", { name: "#57 Add the migration" })).toHaveAttribute("href", "/projects/p1/issues/57");
+  expect(within(card).getAllByRole("term").map((t) => t.textContent)).toEqual(["Late", "Blocked by"]);
+  expect(within(card).getAllByRole("definition")[0]).toHaveTextContent("Start was Oct 1; waits on #55, #151");
+
+  expect(within(blocker(55)).getByRole("link", { name: "#55 Shaping tools" })).toHaveAttribute("href", "/projects/p1/issues/55");
+  expect(within(blocker(55)).getByText("Task")).toBeInTheDocument();
+  expect(within(blocker(55)).getByText("Running")).toBeInTheDocument();
+  expect(within(blocker(55)).getByText("Open")).toBeInTheDocument();
+
+  expect(within(blocker(52)).getByRole("link", { name: "#52 Projects port" })).toHaveAttribute("href", "/projects/p1/issues/52");
+  expect(within(blocker(52)).getByText("Done")).toBeInTheDocument();
+  expect(within(blocker(52)).getByText("Closed")).toBeInTheDocument();
+
+  // #151 is not an item of the Project: its number, that it is outside the plan, and GitHub's open state.
+  expect(within(blocker(151)).getByRole("link", { name: "#151" })).toHaveAttribute("href", "/projects/p1/issues/151");
+  expect(within(blocker(151)).getByText("Outside the plan")).toBeInTheDocument();
+  expect(within(blocker(151)).getByText("Open")).toBeInTheDocument();
+
+  fireEvent.keyDown(icon, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("group", { name: /^Flags of/ })).not.toBeInTheDocument());
+});
+
+test("a task outside its window names the nearest dated story or epic in the card, with both spans", async () => {
+  const outside = planView([
+    epic(12, "Project management", [
+      story(41, "Shaping", 12, [task(55, "Shaping tools", "Running", { start: "2026-09-30", target: "2026-10-07" })], { start: "2026-10-01", target: "2026-10-05" }),
+      // A story without dates of its own: the epic's window is the one that counts.
+      story(42, "Context", 12, [task(59, "Part of section", "Ready", { start: "2026-10-20", target: "2026-10-22" })]),
+    ], [], { start: "2026-09-28", target: "2026-10-16" }),
+  ]);
+  renderTimeline({ plan: outside, zoom: "weeks" });
+
+  fireEvent.focus(within(row(/Task #55/)).getByRole("button", { name: "Outside story window" }));
+  const card = await screen.findByRole("group", { name: "Flags of #55 Shaping tools" });
+  expect(within(card).getByRole("term")).toHaveTextContent("Window");
+  expect(within(card).getByRole("definition")).toHaveTextContent("Sep 30 to Oct 7 leaves Story #41 Shaping, Oct 1 to Oct 5");
+
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+  fireEvent.focus(within(row(/Task #59/)).getByRole("button", { name: "Outside epic window" }));
+  const epicCard = await screen.findByRole("group", { name: "Flags of #59 Part of section" });
+  expect(within(epicCard).getByRole("definition")).toHaveTextContent("Oct 20 to Oct 22 leaves Epic #12 Project management, Sep 28 to Oct 16");
 });
 
 test("an unscheduled item appears in the Unscheduled block with a Schedule button", () => {
