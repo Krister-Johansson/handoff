@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "86931f26-1e64-4470-8638-113d06ecf1e4",
+  "id": "df17d67a-a1cc-4e1c-b12b-9cb09b97e807",
   "prevIds": [
     "b2e809a7-6bd9-44f5-ae88-6f8afa4646f6"
   ],
@@ -950,6 +950,19 @@
       "generated": null,
       "identity": null,
       "name": "started_by",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "runs"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "size",
       "entityType": "columns",
       "schema": "public",
       "table": "runs"
@@ -5146,6 +5159,13 @@
       "schema": "public",
       "table": "library_skills",
       "entityType": "uniques"
+    },
+    {
+      "value": "\"size\" in ('S', 'M', 'L')",
+      "name": "runs_size_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "runs"
     },
     {
       "value": "\"id\" = 1",

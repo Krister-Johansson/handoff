@@ -65,8 +65,10 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
   // Checked first so a taken task names its run rather than the Running status its run gave it; checked again under the lock.
   await refuseTaken(db, input.projectId, numbers);
   const issues = await linkIssues(input.issues ?? [], repo, github, plan);
+  let items: PlanItem[] | undefined;
   if (plan && project.planProjectNumber !== null && issues.length > 0 && !input.again) {
-    refuseUnready(input.items ?? (await plan.listItems(repo.owner, project.planProjectNumber, repo)), issues);
+    items = input.items ?? (await plan.listItems(repo.owner, project.planProjectNumber, repo));
+    refuseUnready(items, issues);
   }
   if (github) await refuseBlocked(github, repo, issues);
   const task = input.task.trim() || issues.map((i) => `#${i.number} ${i.title}`).join("\n");
@@ -76,7 +78,8 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
-    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, events: input.events });
+    const size = issues.length === 1 ? items?.find((item) => item.number === issues[0]!.number)?.size : undefined;
+    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events });
   });
   // The run owns its tasks now: they move to Running on the plan. A failed write is recorded and the run goes on.
   await recordPlanStatus(db, run.id, plan, project, issues.map((i) => i.number), "Running");

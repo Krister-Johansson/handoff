@@ -14,7 +14,7 @@ const slug = (text: string) =>
 /** Creates a queued run pinned to a graph version, with a pending execution for the start node. */
 export async function createRun(
   db: DbExecutor,
-  input: { projectId: string; graphVersionId: string; task: string; baseBranch?: string; branchName?: string; issues?: LinkedIssue[]; startedBy?: string | undefined; events?: NewEvent[] | undefined },
+  input: { projectId: string; graphVersionId: string; task: string; baseBranch?: string; branchName?: string; issues?: LinkedIssue[]; startedBy?: string | undefined; size?: "S" | "M" | "L" | undefined; events?: NewEvent[] | undefined },
 ): Promise<RunRow> {
   const graph = await loadCompiledGraph(db, input.graphVersionId);
   const [project] = await db.select().from(projects).where(eq(projects.id, input.projectId));
@@ -34,6 +34,7 @@ export async function createRun(
         baseBranch: input.baseBranch ?? project.defaultBranch,
         branchName: input.branchName ?? `handoff/${slug(input.task)}-${id.slice(0, 8)}`,
         startedBy: input.startedBy ?? null,
+        size: input.size ?? null,
       })
       .returning();
     const start = graph.node(graph.startNode);

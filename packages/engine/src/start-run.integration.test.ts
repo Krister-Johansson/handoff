@@ -98,3 +98,16 @@ test("a second start on a planned task its run moved to Running names the run, n
   const first = await start();
   await expect(start()).rejects.toThrow(`#${ready} is taken by run ${first.id}, which is queued.`);
 });
+
+test("startRun records the size of its single linked task from the items it read", async () => {
+  const { github, plan, number, project, task } = await planned();
+  await plan.ensureEstimateFields("octo", number);
+  const sized = await task("Sized M");
+  plan.itemsOf(repo).get(sized)!.size = "M";
+  const run = await startRun(db, { projectId: project.id, graphName: "g", task: "", issues: [sized], startedBy: "dashboard" }, { github, projects: plan });
+  expect(run.size).toBe("M");
+  // A later change of the task's size does not move the run.
+  plan.itemsOf(repo).get(sized)!.size = "L";
+  const [stored] = await db.select().from(runs).where(eq(runs.id, run.id));
+  expect(stored?.size).toBe("M");
+});
