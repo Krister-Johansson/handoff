@@ -45,6 +45,43 @@ async function failedRun(cli: FakeCliExecutor, workdirs: GitWorktreeProvider) {
   return { run: row, deps, failed: executions.find((e) => e.nodeKey === "coder")! };
 }
 
+/** Lands a commit on origin's main, as a pull request merged elsewhere would. */
+function mergeElsewhere(origin: string, file: string) {
+  const work = mkdtempSync(join(tmpdir(), "handoff-elsewhere-"));
+  git(work, "clone", "-q", origin, ".");
+  writeFileSync(join(work, file), "merged elsewhere\n");
+  git(work, "add", file);
+  git(work, "commit", "-qm", `add ${file}`);
+  git(work, "push", "-q", "origin", "main");
+}
+
+test("the first coder attempt starts on the latest base when the branch has no commits", async () => {
+  const origin = createOriginRepo();
+  const plannerOut = { plan: "p", steps: ["s"], ownedPaths: ["CHANGELOG.md"] };
+  let coderSaw: boolean | undefined;
+  const cli = new FakeCliExecutor([
+    async (request, options) => {
+      // The worktree exists now, on main as it was; main moves while the plan waits.
+      mergeElsewhere(origin, "LICENSE");
+      await options.onSessionId?.(request.session.id);
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: plannerOut, validated: plannerOut };
+    },
+    async (request, options) => {
+      coderSaw = existsSync(join(request.cwd, "LICENSE"));
+      await options.onSessionId?.(request.session.id);
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: outputs.coderDone, validated: outputs.coderDone };
+    },
+  ]);
+  const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+  const node = cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 });
+  const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
+  await drain(engineDeps(db, { planner: node, coder: node }, { workdirs }));
+  expect(coderSaw).toBe(true);
+  const { types } = await inspect(db, run.id);
+  expect(types).toContain("workdir.fast_forwarded");
+});
+
 test("a failed run keeps its worktree until it is repaired or cancelled", async () => {
   const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
   let sawEnv: boolean | undefined;

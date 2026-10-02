@@ -155,13 +155,14 @@ function CoderView({ data: { summary, question, filesChanged, commitSha, extraPa
   );
 }
 
-function TesterView({ data: { passed, command, exitCode, tail } }: { data: TesterOutput }) {
+function TesterView({ data: { passed, command, exitCode, tail, note } }: { data: TesterOutput }) {
   return (
     <Section title={passed ? "Tests passed" : "Tests failed"}>
       <div className="flex items-center gap-2 text-xs">
         <code className="font-mono">{command}</code>
         <span className="text-muted-foreground">exit {exitCode ?? "none"}</span>
       </div>
+      {note && <Log>{note}</Log>}
       {tail && <Log>{tail}</Log>}
     </Section>
   );

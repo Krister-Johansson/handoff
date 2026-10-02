@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { hostname } from "node:os";
 import { promisify } from "node:util";
 import { join } from "node:path";
@@ -25,13 +25,14 @@ import {
   type NewEvent,
   type NodeExecutionRow,
 } from "@handoff/db";
+import { shell } from "../contract/checks.ts";
 import { validateContract } from "../contract/validate.ts";
 import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary } from "../library/materialize.ts";
-import { SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
+import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
 import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
-import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider } from "../types.ts";
+import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider, WorkdirSpec } from "../types.ts";
 import { askAboutPaths, completeFailed, completePassed, failAndRetry, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
 export type EngineDeps = {
@@ -286,14 +287,12 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       outcome = { kind: "failed", error: { code: "no_executor", message: `no executor registered for node type ${node.type}` } };
     } else {
       if (typeof executor.needsWorkdir === "function" ? executor.needsWorkdir(node) : executor.needsWorkdir) {
-        workdir = await deps.workdirs.acquire({
-          runId: run.id,
-          remoteUrl: (deps.remoteUrl ?? defaultRemote)(project),
-          baseBranch: run.baseBranch,
-          branchName: run.branchName,
-        });
+        const spec = { runId: run.id, remoteUrl: (deps.remoteUrl ?? defaultRemote)(project), baseBranch: run.baseBranch, branchName: run.branchName };
+        const emit = (type: string, payload: unknown) => void buffer.push({ type, payload, nodeExecutionId: row.id });
+        workdir = await deps.workdirs.acquire(spec);
         if (run.worktreePath !== workdir.path) await db.update(runs).set({ worktreePath: workdir.path }).where(eq(runs.id, run.id));
-        if (project.setupCommand) await setUpWorkdir(workdir, project.setupCommand, (type, payload) => void buffer.push({ type, payload, nodeExecutionId: row.id }), controller.signal);
+        if (node.type === "coder" && row.attempt === 1) await fastForward(deps, spec, emit);
+        if (project.setupCommand) await setUpWorkdir(workdir, project.setupCommand, emit, controller.signal, runIdentity(run.id, workdir.path));
       }
       let library: MaterializedLibrary | undefined;
       if (graph.executorKind(node.key) === "cli") {
@@ -309,6 +308,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       // Where this node sends work back, so a reviewer's next round can read what that step changed.
       const sentBackTo = graph.outEdges(node.key).filter((e) => e.loop).map((e) => e.target);
       const packet = selectContext(node, state, row, sentBackTo);
+      if (workdir) packet.environment = { branch: run.branchName, setupCommand: project.setupCommand, ...(project.agentNotes ? { agentNotes: project.agentNotes } : {}) };
       if (library?.allowedTools.length) packet.constraints.allowedTools = [...new Set([...packet.constraints.allowedTools, ...library.allowedTools])];
       await db.update(nodeExecutions).set({ contextPacket: packet }).where(eq(nodeExecutions.id, row.id));
       outcome = await executor.execute({
@@ -379,6 +379,20 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
   await releaseIfFinished(deps, run.id, project);
 }
 
+/**
+ * Before the coder's first attempt, a branch with no commits of its own moves to the latest base, so
+ * the coder works on the newest main and not on main as it was when the planner started. A failure
+ * leaves the worktree where it was and is an event; the step goes on.
+ */
+async function fastForward(deps: EngineDeps, spec: WorkdirSpec, emit: (type: string, payload: unknown) => void) {
+  try {
+    const moved = await deps.workdirs.fastForward?.(spec);
+    if (moved) emit("workdir.fast_forwarded", { base: spec.baseBranch, ...moved });
+  } catch (error) {
+    emit("workdir.fast_forward_failed", { base: spec.baseBranch, error: redactSecrets(String(error)) });
+  }
+}
+
 const CONTINUE_NOTE =
   "Continue: the previous attempt ran out of turns. Its work is committed on this branch; read what it did with git, then finish the task from there.";
 
@@ -408,20 +422,49 @@ async function answeredPathsQuestion(db: Db, token: string) {
  */
 const RELEASING_RUN = new Set(["succeeded", "cancelled"]);
 
-/** Removes a run's worktree and forgets its path; the branch stays so a repair can re-create it. */
-export async function releaseWorktree(deps: Pick<EngineDeps, "db" | "workdirs" | "remoteUrl" | "log">, run: typeof runs.$inferSelect, project: typeof projects.$inferSelect) {
+const TEARDOWN_TIMEOUT_MS = 10 * 60_000;
+/** Runs this process is releasing now, so a slow teardown never runs twice for one worktree. */
+const releasing = new Set<string>();
+
+type ReleaseDeps = Pick<EngineDeps, "db" | "workdirs" | "remoteUrl" | "log">;
+
+/**
+ * Runs the project's teardown command in the worktree, where the setup command ran, with the run's
+ * identity, so it can drop what setup made for this run. Its result is an event; a failure never
+ * keeps the worktree.
+ */
+async function tearDown(deps: ReleaseDeps, run: typeof runs.$inferSelect, project: typeof projects.$inferSelect, spec: WorkdirSpec) {
+  const command = project.teardownCommand;
+  if (!command || !run.worktreePath || !existsSync(run.worktreePath)) return;
   try {
-    await deps.workdirs.release({
-      runId: run.id,
-      remoteUrl: (deps.remoteUrl ?? defaultRemote)(project),
-      baseBranch: run.baseBranch,
-      branchName: run.branchName,
-    });
+    const workdir = await deps.workdirs.acquire(spec);
+    const result = await shell(command, workdir.path, TEARDOWN_TIMEOUT_MS, workdir.container, [], undefined, runIdentity(run.id, workdir.path));
+    const failed = result.exitCode !== 0 || result.timedOut;
+    const payload = { command, exitCode: result.exitCode, timedOut: result.timedOut, ...(failed ? { output: result.output } : {}) };
+    await deps.db.transaction((tx) => appendEvents(tx, run.id, [{ type: "teardown.finished", payload }]));
+  } catch (error) {
+    deps.log?.("teardown failed", { runId: run.id, error: String(error) });
+  }
+}
+
+/**
+ * Removes a run's worktree and forgets its path; the branch stays so a repair can re-create it. The
+ * project's teardown command runs first. This is the one place a worktree is removed.
+ */
+export async function releaseWorktree(deps: ReleaseDeps, run: typeof runs.$inferSelect, project: typeof projects.$inferSelect) {
+  if (releasing.has(run.id)) return false;
+  releasing.add(run.id);
+  const spec = { runId: run.id, remoteUrl: (deps.remoteUrl ?? defaultRemote)(project), baseBranch: run.baseBranch, branchName: run.branchName };
+  try {
+    await tearDown(deps, run, project, spec);
+    await deps.workdirs.release(spec);
     await deps.db.update(runs).set({ worktreePath: null }).where(eq(runs.id, run.id));
     return true;
   } catch (error) {
     deps.log?.("workdir release failed", { runId: run.id, error: String(error) });
     return false;
+  } finally {
+    releasing.delete(run.id);
   }
 }
 

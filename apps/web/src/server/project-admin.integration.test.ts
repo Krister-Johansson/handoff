@@ -25,6 +25,18 @@ describe("updateProject", () => {
     expect(row).toMatchObject({ name: "renamed", defaultBranch: "trunk" });
   });
 
+  test("saves the teardown command and the agent notes, and clears them when empty", async () => {
+    const { project } = await projectWithRun();
+    const notes = "The database container is shared and already running.";
+    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", teardownCommand: " dropdb --if-exists app_test_$HANDOFF_RUN_SHORT ", agentNotes: notes });
+    const read = async () => (await db.select().from(projects).where(eq(projects.id, project.id)))[0];
+    expect(await read()).toMatchObject({ teardownCommand: "dropdb --if-exists app_test_$HANDOFF_RUN_SHORT", agentNotes: notes });
+    expect((await projectsForSettings(db, undefined))[0]).toMatchObject({ teardownCommand: "dropdb --if-exists app_test_$HANDOFF_RUN_SHORT", agentNotes: notes });
+    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", teardownCommand: "", agentNotes: "  " });
+    expect(await read()).toMatchObject({ teardownCommand: null, agentNotes: null });
+    await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", agentNotes: "x".repeat(4_001) })).rejects.toThrow(/4000/);
+  });
+
   test("refuses an invalid or taken name", async () => {
     const { project } = await projectWithRun();
     await createProject(db, { name: "other", repo: "octo/other", defaultBranch: "main" });

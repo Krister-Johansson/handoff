@@ -25,7 +25,9 @@ The worker runs the steps. Start it with `pnpm dev:worker` in the handoff checko
 
 ### A setup command
 
-Each run starts in a fresh worktree with no dependencies installed. Set the project's setup command on its Settings tab, for example `pnpm install` or `npm ci`. It runs once per worktree, before the first step that needs it.
+Each run starts in a fresh worktree with no dependencies installed. Set the project's setup command in Settings, Projects, for example `pnpm install --frozen-lockfile` or `npm ci`. It runs once per worktree, before the first step that needs it. It sees `HANDOFF_RUN_ID`, `HANDOFF_RUN_SHORT` and `HANDOFF_WORKTREE`, so tests that need their own database can name it per run, for example by copying `.env.example` to `.env` with the test database named after `HANDOFF_RUN_SHORT`. The teardown command, next to it, runs when handoff removes the worktree and drops what setup made.
+
+Agent notes, in the same form, are facts every agent step reads about the project's environment, such as "the database container is shared and already running". They are stored as plain text: never put secrets in them.
 
 ### CLAUDE.md
 

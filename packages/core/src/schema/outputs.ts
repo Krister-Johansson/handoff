@@ -63,6 +63,8 @@ export const TesterOutputSchema = z.object({
   command: z.string(),
   exitCode: z.number().int().nullable(),
   tail: z.string(),
+  /** Set when the command passed only on a retry: how the earlier run failed. */
+  note: z.string().optional(),
 });
 
 /**

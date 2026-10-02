@@ -66,6 +66,11 @@ export class DockerWorkdirProvider implements WorkdirProvider {
     return { ...workdir, container: name };
   }
 
+  /** The worktree lives on the host, so the host's git moves it. */
+  fastForward(spec: WorkdirSpec) {
+    return this.options.git.fastForward(spec);
+  }
+
   async release(spec: WorkdirSpec): Promise<void> {
     await run("docker", ["rm", "-f", this.containerName(spec.runId)]).catch(() => {});
     await this.options.git.release(spec);

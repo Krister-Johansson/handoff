@@ -50,12 +50,15 @@ export class ClaudeCliExecutor implements CliExecutor {
       ...(request.permissionPromptTool ? { permissionPromptTool: request.permissionPromptTool } : {}),
     });
 
-    const childEnv = buildClaudeEnv({
-      oauthToken: this.options.oauthToken,
-      configDir: this.options.configDir,
-      base: this.options.baseEnv ?? process.env,
-      passthrough: this.options.passthroughEnv ?? [],
-    });
+    const childEnv = {
+      ...request.env,
+      ...buildClaudeEnv({
+        oauthToken: this.options.oauthToken,
+        configDir: this.options.configDir,
+        base: this.options.baseEnv ?? process.env,
+        passthrough: this.options.passthroughEnv ?? [],
+      }),
+    };
     const launch = request.container
       ? dockerExec(request.container, request.cwd, childEnv, [this.options.command.file, ...this.options.command.prefixArgs, ...argv])
       : { file: this.options.command.file, args: [...this.options.command.prefixArgs, ...argv], env: childEnv };

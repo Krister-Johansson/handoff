@@ -125,6 +125,12 @@ describe("ClaudeCliExecutor", () => {
     expect(invocation?.cwd).toBe(realpath(request.cwd));
   });
 
+  test("the request's env, such as the run's identity, reaches the claude child", async () => {
+    const { executor, request, fake, onEvent } = setup({ lines: [lines.init(), lines.result({ structured_output: { status: "done", summary: "" } })] });
+    await executor.run({ ...request, env: { HANDOFF_RUN_SHORT: "5a998648" } }, { signal: new AbortController().signal, onEvent });
+    expect(fake.invocations()[0]?.env.HANDOFF_RUN_SHORT).toBe("5a998648");
+  });
+
   test("executor writes the context packet file and passes it with --append-system-prompt-file", async () => {
     const { executor, request, fake, onEvent } = setup({ lines: [lines.init(), lines.result({ structured_output: { status: "done", summary: "" } })] });
     await executor.run(request, { signal: new AbortController().signal, onEvent });

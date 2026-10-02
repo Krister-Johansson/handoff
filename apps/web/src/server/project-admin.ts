@@ -5,24 +5,42 @@ import { projectsAccessProblem } from "./plan.ts";
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
 const ACTIVE = ["queued", "running", "waiting"] as const;
 
-export async function updateProject(db: Db, projectId: string, input: { name: string; defaultBranch: string; setupCommand?: string }) {
+type ProjectEdit = { name: string; defaultBranch: string; setupCommand?: string; teardownCommand?: string; agentNotes?: string };
+
+/** A trimmed text, null when empty, refused over `max` characters; undefined leaves the column as it is. */
+function optionalText(value: string | undefined, max: number, what: string): string | null | undefined {
+  if (value === undefined) return undefined;
+  const text = value.trim() || null;
+  if (text && text.length > max) throw new Error(`Keep the ${what} under ${max} characters.`);
+  return text;
+}
+
+/**
+ * Renames a project and changes its default branch, setup and teardown commands and agent notes. Agent
+ * notes are free text every agent step reads, so they must never hold secrets.
+ */
+export async function updateProject(db: Db, projectId: string, input: ProjectEdit) {
   const name = input.name.trim();
   const defaultBranch = input.defaultBranch.trim();
   if (!PROJECT_NAME.test(name)) throw new Error("Project name: lowercase letters, digits and dashes.");
   if (!defaultBranch) throw new Error("Give the default branch runs start from.");
   const [taken] = await db.select({ id: projects.id }).from(projects).where(eq(projects.name, name));
   if (taken && taken.id !== projectId) throw new Error(`A project named ${name} already exists.`);
-  const setupCommand = input.setupCommand?.trim() || null;
-  if (setupCommand && setupCommand.length > 2_000) throw new Error("Keep the setup command under 2000 characters.");
-  await db.update(projects).set({ name, defaultBranch, ...(input.setupCommand !== undefined ? { setupCommand } : {}), updatedAt: new Date() }).where(eq(projects.id, projectId));
+  const optional = {
+    setupCommand: optionalText(input.setupCommand, 2_000, "setup command"),
+    teardownCommand: optionalText(input.teardownCommand, 2_000, "teardown command"),
+    agentNotes: optionalText(input.agentNotes, 4_000, "agent notes"),
+  };
+  const changed = Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined));
+  await db.update(projects).set({ name, defaultBranch, ...changed, updatedAt: new Date() }).where(eq(projects.id, projectId));
 }
 
 /** The GitHub Project that holds a project's plan; title and url are missing when GitHub cannot be read. */
 export type PlanLink = { number: number; title?: string; url?: string };
 
 /**
- * Every project as Settings, Projects lists it, by name: repository, default branch, setup command,
- * run count and the plan's GitHub Project. The Project's title and url are read from GitHub; without
+ * Every project as Settings, Projects lists it, by name: repository, default branch, setup and
+ * teardown commands, agent notes, run count and the plan's GitHub Project. The Project's title and url are read from GitHub; without
  * access, or when GitHub does not answer, the link keeps only its number.
  */
 export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined) {
@@ -34,6 +52,8 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
       repoName: projects.repoName,
       defaultBranch: projects.defaultBranch,
       setupCommand: projects.setupCommand,
+      teardownCommand: projects.teardownCommand,
+      agentNotes: projects.agentNotes,
       isDemo: projects.isDemo,
       planProjectNumber: projects.planProjectNumber,
       runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,

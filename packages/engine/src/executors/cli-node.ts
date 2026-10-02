@@ -7,6 +7,7 @@ import type { Db } from "@handoff/db";
 import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
+import { runIdentity } from "../workdir/setup.ts";
 
 /**
  * model and effort are the worker's defaults; a node's config.model and config.effort override them.
@@ -193,6 +194,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       const base: Omit<CliRunRequest, "prompt" | "session" | "maxTurns"> = {
         systemPrompt: renderContextPacket(ctx.packet),
         cwd: ctx.workdir.path,
+        env: runIdentity(ctx.run.id, ctx.workdir.path),
         ...(ctx.workdir.container ? { container: ctx.workdir.container } : {}),
         stagingDir: ctx.stagingDir,
         allowedTools: ctx.packet.constraints.allowedTools,
