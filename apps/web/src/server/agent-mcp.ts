@@ -78,12 +78,49 @@ async function pendingPermissions(db: Db, runId: string) {
     .orderBy(asc(permissionRequests.createdAt));
 }
 
+/** What the run's latest Demo step said it did, if one passed. */
+async function latestDemoSummary(db: Db, runId: string): Promise<string | null> {
+  const [demo] = await db
+    .select({ output: nodeExecutions.output })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.nodeType, "demo"), eq(nodeExecutions.status, "passed")))
+    .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
+    .limit(1);
+  const summary = (demo?.output as { summary?: unknown } | undefined)?.summary;
+  return typeof summary === "string" ? summary : null;
+}
+
+type TryContext = {
+  acceptance?: string[];
+  preview?: { url?: string; status?: string; error?: string };
+  shots?: { id: string; caption: string; works: boolean; criterion?: string }[];
+};
+
+/**
+ * A Try it gate as the agent answers it: the app's address while it runs, each acceptance criterion with
+ * what the demo's screenshots showed of it, and the page where a person can try it.
+ */
+function tryItOf(deps: HandoffMcpDeps, run: { id: string; projectId: string }, q: { id: string; context: unknown }, demoSummary: string | null) {
+  const { acceptance = [], preview, shots = [] } = q.context as TryContext;
+  const demo = (s: NonNullable<TryContext["shots"]>[number]) => ({ note: s.caption, works: s.works, screenshot_url: `${deps.baseUrl}/api/screenshots/${s.id}` });
+  const loose = shots.filter((s) => !s.criterion || !acceptance.includes(s.criterion));
+  return {
+    app_url: preview?.status === "running" ? (preview.url ?? null) : null,
+    app: preview?.status ?? "not_started",
+    ...(preview?.error ? { app_error: preview.error } : {}),
+    demo_summary: demoSummary,
+    criteria: acceptance.map((criterion) => ({ criterion, demo: shots.filter((s) => s.criterion === criterion).map(demo) })),
+    ...(loose.length ? { other_screenshots: loose.map(demo) } : {}),
+    url: `${deps.baseUrl}${tryPath(run.projectId, run.id, q.id)}`,
+  };
+}
+
 /** A run as the agent needs it: where it stands, its steps, PR, issues, open questions and failure. */
 async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const [stuck, prompts] = await Promise.all([stuckLoop(deps.db, run.id), pendingPermissions(deps.db, run.id)]);
+  const [stuck, prompts, demoSummary] = await Promise.all([stuckLoop(deps.db, run.id), pendingPermissions(deps.db, run.id), latestDemoSummary(deps.db, run.id)]);
   return {
     id: run.id,
     project: project.name,
@@ -113,6 +150,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
         options: q.options ?? [],
         // A review shows what to approve; the person can also comment on it in the dashboard.
         ...(review?.markdown ? { review: review.markdown, review_url: `${deps.baseUrl}${reviewPath(run.projectId, run.id, q.id)}` } : {}),
+        ...((q.context as { reason?: string }).reason === "try" ? { try: tryItOf(deps, run, q, demoSummary) } : {}),
       };
     }),
     // Each with its whole command, which notifications cut short; answer_permission answers it.

@@ -285,6 +285,34 @@ test("get_run lists a pending permission prompt with the full command", async ()
   expect(permissions).toEqual([{ id, node: "coder", attempt: 1, tool: "Bash", asks: "asks to run a command", detail: command, input: { command }, asked_at: expect.any(String) }]);
 });
 
+test("get_run on a Try it gate has the app URL, the criteria and the demo's notes", async () => {
+  const runId = await startedRun();
+  await seedExecution(db, runId, { nodeKey: "demo", nodeType: "demo", status: "passed", output: { summary: "Created a task and reloaded the page.", shots: [] } });
+  const gate = await seedExecution(db, runId, { nodeKey: "try", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  const context = {
+    reason: "try",
+    acceptance: ["A user can create a task", "A task survives a reload"],
+    preview: { id: "p1", url: "http://localhost:4123", status: "running" },
+    shots: [
+      { id: "s1", caption: "The new task in the list", works: true, criterion: "A user can create a task" },
+      { id: "s2", caption: "The list is empty after a reload", works: false, criterion: "A task survives a reload" },
+    ],
+  };
+  const [question] = await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Try the app and check each acceptance criterion.", options: ["approve", "changes"], context }).returning();
+  const [asked] = (await call("get_run", { run_id: runId })).questions;
+  expect(asked).toMatchObject({ id: question!.id, node: "try", options: ["approve", "changes"] });
+  expect(asked.try).toEqual({
+    app_url: "http://localhost:4123",
+    app: "running",
+    demo_summary: "Created a task and reloaded the page.",
+    criteria: [
+      { criterion: "A user can create a task", demo: [{ note: "The new task in the list", works: true, screenshot_url: `${BASE}/api/screenshots/s1` }] },
+      { criterion: "A task survives a reload", demo: [{ note: "The list is empty after a reload", works: false, screenshot_url: `${BASE}/api/screenshots/s2` }] },
+    ],
+    url: `${BASE}${runPath(projectId, runId)}/try/${question!.id}`,
+  });
+});
+
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });
