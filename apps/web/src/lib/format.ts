@@ -16,6 +16,15 @@ export function formatCost(usd: number | string | null | undefined): string {
   return `$${n.toFixed(2)}`;
 }
 
+/** How long something has gone on since a moment, briefly, in the largest whole unit: "11 min", "3 h", "2 d". */
+export function formatSince(since: Date, now: Date = new Date()): string {
+  const s = Math.max(0, Math.floor((now.getTime() - since.getTime()) / 1000));
+  if (s < 60) return "under a minute";
+  if (s < 3_600) return `${Math.floor(s / 60)} min`;
+  if (s < 86_400) return `${Math.floor(s / 3_600)} h`;
+  return `${Math.floor(s / 86_400)} d`;
+}
+
 /** How long ago a moment was, in the largest whole unit: "just now", "5 minutes ago", "3 days ago". */
 export function formatAgo(when: Date, now: Date = new Date()): string {
   const s = Math.max(0, Math.floor((now.getTime() - when.getTime()) / 1000));
