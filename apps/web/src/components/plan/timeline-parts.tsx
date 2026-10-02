@@ -29,7 +29,7 @@ import type { Timeline, TimelineItem } from "@/lib/plan/schedule";
 import type { PlanFilters } from "@/lib/plan/filters";
 import { BAR_TONE, taskColumn } from "@/lib/plan/task";
 import { chartRange } from "@/lib/plan/timeline-rows";
-import { defaultZoom, shortDay, timeScale, type Zoom } from "@/lib/plan/timeline-scale";
+import { defaultZoom, shortDay, timeScale, ZOOMS, type Zoom } from "@/lib/plan/timeline-scale";
 import { cn } from "@/lib/utils";
 import type { StartRunContext } from "./plan-actions";
 import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
@@ -101,7 +101,7 @@ function Legend() {
 }
 
 /**
- * The timeline's controls at the right end of the Plan toolbar: Today, Weeks or Months, and the Legend.
+ * The timeline's controls at the right end of the Plan toolbar: Today, Days, Weeks or Months, and the Legend.
  * Under 640 px, where the timeline is a list, the range it shows takes Today's place.
  */
 export function TimelineControls({
@@ -146,17 +146,18 @@ export function TimelineControls({
         onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: "timeline", zoom: v as Zoom }), { scroll: false })}
         aria-label="Zoom"
       >
-        <ToggleGroupItem value="weeks" className={SEGMENTED_ITEM}>
-          Weeks
-        </ToggleGroupItem>
-        <ToggleGroupItem value="months" className={SEGMENTED_ITEM}>
-          Months
-        </ToggleGroupItem>
+        {ZOOMS.map((z) => (
+          <ToggleGroupItem key={z} value={z} className={SEGMENTED_ITEM}>
+            {ZOOM_NAME[z]}
+          </ToggleGroupItem>
+        ))}
       </ToggleGroup>
       <Legend />
     </div>
   );
 }
+
+const ZOOM_NAME: Record<Zoom, string> = { days: "Days", weeks: "Weeks", months: "Months" };
 
 const numbers = (list: number[]) => list.map((n) => `#${n}`).join(", ");
 

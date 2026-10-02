@@ -2,10 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { TimelineRun } from "@/lib/plan/schedule";
+import type { Zoom } from "@/lib/plan/timeline-scale";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
+import { parseZoom } from "@/lib/project-tab";
 
 import { PlanTimeline } from "./plan-timeline";
+import { TimelineControls } from "./timeline-parts";
 import { Sizing } from "./plan-context";
 import { epic, planView, PROJECT, REPO_URL, run, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
 
@@ -54,7 +57,7 @@ const view = planView([
   ]),
 ]);
 
-function renderTimeline(over: { runs?: TimelineRun[]; zoom?: "weeks" | "months"; project?: typeof PROJECT; plan?: typeof view; needsYou?: string[] } = {}) {
+function renderTimeline(over: { runs?: TimelineRun[]; zoom?: Zoom; project?: typeof PROJECT; plan?: typeof view; needsYou?: string[] } = {}) {
   const plan = over.plan ?? view;
   return render(
     <PlanTimeline
@@ -455,4 +458,20 @@ test("timeline task rows and Unscheduled carry the size chip, and stories and ep
   expect(within(row(/Epic #12/)).getByTitle("1 hour 15 minutes over 2 tasks, forecasts")).toBeInTheDocument();
   const unscheduled = screen.getByRole("region", { name: "Unscheduled" });
   expect(within(unscheduled).getByRole("button", { name: "Size S, forecast 25m. Change the size or estimate of #58" })).toBeInTheDocument();
+});
+
+test("the Days zoom lives in the URL", () => {
+  const timeline = timelineOf(view, [], NOW);
+  const { unmount } = render(<TimelineControls projectId="p1" filters={parsePlanFilters({ epic: "12" })} timeline={timeline} zoom="weeks" narrow={false} onToday={() => {}} />, { wrapper: TooltipProvider });
+  const zoom = screen.getByRole("radiogroup", { name: "Zoom" });
+  expect(within(zoom).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Days", "Weeks", "Months"]);
+  fireEvent.click(within(zoom).getByRole("radio", { name: "Days" }));
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=timeline&epic=12&zoom=days", { scroll: false });
+  expect(parseZoom({ zoom: "days" })).toBe("days");
+  unmount();
+
+  // At Days a day is 96 px with its weekday: #57 starts Thursday Oct 1, four weeks after Monday Sep 7.
+  renderTimeline({ zoom: "days" });
+  expect(screen.getByText("Thu 1")).toBeInTheDocument();
+  expect(within(row(/Task #57/)).getByRole("link", { name: /^Task #57/ })).toHaveStyle({ left: `${24 * 96}px`, width: `${9 * 96}px` });
 });

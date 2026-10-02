@@ -2,8 +2,8 @@ import type { DaySpan } from "./schedule";
 
 /** How much time a column holds: a day of 96 px at Days, a day of 14 px at Weeks, a month of 120 px at Months. */
 export type Zoom = "days" | "weeks" | "months";
-/** The zooms the URL and the toolbar offer; Days joins them with the drag on the timeline. */
-export const ZOOMS: readonly Zoom[] = ["weeks", "months"];
+/** The zooms the URL, the toolbar and go_to_plan offer. */
+export const ZOOMS: readonly Zoom[] = ["days", "weeks", "months"];
 
 export const DAY_WIDTH = 14;
 export const DAYS_DAY_WIDTH = 96;

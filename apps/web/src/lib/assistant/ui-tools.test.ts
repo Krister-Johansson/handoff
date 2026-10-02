@@ -52,7 +52,8 @@ test("go_to_plan opens the timeline view with a zoom", () => {
   expect(plan("go_to_plan", { project_id: "p1", view: "timeline" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=timeline" });
   expect(plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "months", epic: 12 })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=timeline&epic=12&zoom=months" });
   expect(plan("go_to_plan", { project_id: "p1", view: "board", zoom: "months" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=board" });
-  expect(() => plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "days" })).toThrow(/not valid/);
+  expect(plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "days" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=timeline&zoom=days" });
+  expect(() => plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "hours" })).toThrow(/not valid/);
 });
 
 test("the notifications, run, review and Try it tools open their pages, and an id that is not one is refused", () => {
