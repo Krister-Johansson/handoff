@@ -135,6 +135,15 @@ test("Finished in the last day lists the runs that succeeded, with their merged 
   expect(row).toHaveTextContent("Done. PR #84 merged.");
 });
 
+test("Finished in the last day shows the five latest runs and links to the rest", () => {
+  const runs = Array.from({ length: 7 }, (_, i) => run({ id: `r${i}`, task: `#${i} Task ${i}`, status: "succeeded", finishedAt: minutesAgo(60 * (i + 1)) }));
+  show({ ...QUIET, finished: runs });
+  const finished = section("Finished in the last day");
+  expect(within(finished).getByRole("heading", { level: 2 })).toHaveTextContent("Finished in the last day7");
+  expect(within(finished).getAllByRole("listitem", { name: /^#/ }).map((r) => r.getAttribute("aria-labelledby"))).toEqual(["run-r0", "run-r1", "run-r2", "run-r3", "run-r4"]);
+  expect(within(finished).getByRole("link", { name: "2 more in Runs" })).toHaveAttribute("href", "/projects/p1/runs");
+});
+
 test("with no run finished in the last day, the section says so in one line", () => {
   show(QUIET);
   const finished = section("Finished in the last day");

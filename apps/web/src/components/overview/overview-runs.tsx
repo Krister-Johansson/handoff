@@ -77,29 +77,33 @@ function PrLink({ number, repoUrl }: { number: number; repoUrl: string }) {
  * One run: its task linking to the run page, its status, its pull request, cost and when, then what it
  * does now in its tone, and below that whatever the list adds (the steps so far).
  */
-function RunRow({ run, repoUrl, when, children }: { run: OverviewRun; repoUrl: string; when: string; children?: ReactNode }) {
+function RunRow({ run, repoUrl, when, aside, children }: { run: OverviewRun; repoUrl: string; when: string; aside?: ReactNode; children?: ReactNode }) {
   const titleId = `run-${run.id}`;
   const { now } = run.line;
   return (
-    <li aria-labelledby={titleId} className="flex min-w-0 flex-col gap-1.5 px-4 py-3">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1">
-        <Link id={titleId} href={runPath(run.projectId, run.id)} className="min-w-0 text-sm font-medium break-words hover:underline hover:underline-offset-3 max-sm:order-2 max-sm:basis-full">
-          {run.task}
-        </Link>
-        <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground tabular-nums max-sm:order-1">
-          <StatusBadge status={run.status} />
-          {run.prNumber !== null && <PrLink number={run.prNumber} repoUrl={repoUrl} />}
-          <span>{[run.line.costUsd ? formatCost(run.line.costUsd) : undefined, when].filter(Boolean).join(" · ")}</span>
-        </span>
-      </div>
+    <li aria-labelledby={titleId} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1.5 px-4 py-3">
+      <Link id={titleId} href={runPath(run.projectId, run.id)} className="min-w-0 text-sm font-medium break-words hover:underline hover:underline-offset-3">
+        {run.task}
+      </Link>
+      <span className="flex justify-end">
+        <StatusBadge status={run.status} />
+      </span>
       <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px]", TEXT[now.tone])}>
         {now.tone === "success" && <CheckIcon aria-hidden className="size-3.5" />}
         <span className="min-w-0">{now.text}</span>
-        {children}
+        {aside}
       </div>
+      <span className="flex items-center justify-end gap-2 pt-0.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+        {run.prNumber !== null && <PrLink number={run.prNumber} repoUrl={repoUrl} />}
+        <span>{[run.line.costUsd ? formatCost(run.line.costUsd) : undefined, when].filter(Boolean).join(" · ")}</span>
+      </span>
+      {children && <div className="col-span-2">{children}</div>}
     </li>
   );
 }
+
+/** A busy day finishes dozens of runs; the Overview shows the latest few and Runs holds the rest. */
+const FINISHED_SHOWN = 5;
 
 /** Runs that succeeded in the last day, the latest first, with their pull request and when they finished. */
 export function FinishedRuns({ runs, projectId, repoUrl, now }: { runs: OverviewRun[]; projectId: string; repoUrl: string; now: Date }) {
@@ -109,9 +113,16 @@ export function FinishedRuns({ runs, projectId, repoUrl, now }: { runs: Overview
         <OverviewEmpty icon={CheckIcon} title="No run finished in the last day" description="Runs that end show here for a day after they finish." />
       ) : (
         <OverviewList>
-          {runs.map((run) => (
+          {runs.slice(0, FINISHED_SHOWN).map((run) => (
             <RunRow key={run.id} run={run} repoUrl={repoUrl} when={formatAgo(run.finishedAt ?? run.createdAt, now)} />
           ))}
+          {runs.length > FINISHED_SHOWN && (
+            <li className="bg-muted/40 px-4 py-2.5 text-xs text-muted-foreground">
+              <Link href={`/projects/${projectId}/runs`} className="underline underline-offset-3 hover:text-foreground">
+                {runs.length - FINISHED_SHOWN} more in Runs
+              </Link>
+            </li>
+          )}
         </OverviewList>
       )}
     </OverviewSection>
@@ -127,11 +138,14 @@ export function RunningNow({ runs, projectId, repoUrl, now }: { runs: OverviewRu
       ) : (
         <OverviewList>
           {runs.map((run) => (
-            <RunRow key={run.id} run={run} repoUrl={repoUrl} when={formatAgo(run.createdAt, now)}>
-              {run.needsYou ? <NeedsYouChip /> : run.line.stepSince && <span className="text-muted-foreground">· {formatSince(run.line.stepSince, now)}</span>}
-              <span className="basis-full">
-                <StepTrail steps={run.line.steps} />
-              </span>
+            <RunRow
+              key={run.id}
+              run={run}
+              repoUrl={repoUrl}
+              when={formatAgo(run.createdAt, now)}
+              aside={run.needsYou ? <NeedsYouChip /> : run.line.stepSince && <span className="text-muted-foreground">· {formatSince(run.line.stepSince, now)}</span>}
+            >
+              {run.line.steps.length > 0 && <StepTrail steps={run.line.steps} />}
             </RunRow>
           ))}
         </OverviewList>
