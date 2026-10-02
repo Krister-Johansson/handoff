@@ -186,6 +186,38 @@ test("listItems reads Start and Target as YYYY-MM-DD and an iteration's title, s
   ]);
 });
 
+test("listItems reads Size as S, M or L and Estimate in hours, and another Size option or an Estimate of 0 as none", async () => {
+  const size = (name: string) => ({ __typename: "ProjectV2ItemFieldSingleSelectValue", name });
+  const estimate = (number: number) => ({ __typename: "ProjectV2ItemFieldNumberValue", number });
+  const { fetch } = fakeGraphql({
+    PlanItems: () =>
+      page(
+        [
+          { ...issueItem(50), size: size("S"), estimate: null },
+          { ...issueItem(51), size: size("M"), estimate: estimate(10.5) },
+          { ...issueItem(52), size: size("L"), estimate: estimate(0) },
+          // Project #1's own Size options are not handoff's sizes.
+          { ...issueItem(53), size: size("🦑 Large"), estimate: estimate(-2) },
+          { ...issueItem(54), size: null, estimate: estimate(3) },
+          // Fields named Size and Estimate of another type answer with another value type.
+          { ...issueItem(55), size: { __typename: "ProjectV2ItemFieldTextValue" }, estimate: { __typename: "ProjectV2ItemFieldTextValue" } },
+        ],
+        null,
+        false,
+      ),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("octo", 3, repo)).map((i) => [i.number, i.size, i.estimate])).toEqual([
+    [50, "S", undefined],
+    [51, "M", 10.5],
+    [52, "L", undefined],
+    [53, undefined, undefined],
+    [54, undefined, 3],
+    [55, undefined, undefined],
+  ]);
+});
+
 const statusField = {
   __typename: "ProjectV2SingleSelectField",
   id: "F_status",

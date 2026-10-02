@@ -39,7 +39,7 @@ import {
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
-import { kindOf, PLAN_KINDS, STATUS_OPTIONS, statusOf } from "./kinds.ts";
+import { kindOf, PLAN_KINDS, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
 import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanStatus, ProjectsPort, SetDatesResult, SetStatusResult } from "./types.ts";
 
@@ -436,6 +436,8 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
         item.iteration?.__typename === "ProjectV2ItemFieldIterationValue"
           ? { title: item.iteration.title, startDate: item.iteration.startDate, duration: item.iteration.duration }
           : undefined,
+      size: item.size?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? sizeOf(item.size.name) : undefined,
+      estimate: item.estimate?.__typename === "ProjectV2ItemFieldNumberValue" && item.estimate.number != null && item.estimate.number > 0 ? item.estimate.number : undefined,
     },
   ];
 }

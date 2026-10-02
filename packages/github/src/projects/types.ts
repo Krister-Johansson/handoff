@@ -1,8 +1,10 @@
 import type { RepoRef } from "../types.ts";
-import type { PLAN_KINDS, STATUS_OPTIONS } from "./kinds.ts";
+import type { PLAN_KINDS, PLAN_SIZES, STATUS_OPTIONS } from "./kinds.ts";
 
 export type PlanStatus = (typeof STATUS_OPTIONS)[number];
 export type PlanKind = (typeof PLAN_KINDS)[number];
+/** handoff's sizes, the options S, M and L of the Project's single select field named Size. */
+export type PlanSize = (typeof PLAN_SIZES)[number];
 
 /** An issue of the project's repository that is an item of its GitHub Project. */
 export type PlanItem = {
@@ -43,6 +45,10 @@ export type PlanItem = {
   target?: string | undefined;
   /** The item's iteration, when the Project has an iteration field named Iteration; read only. */
   iteration?: PlanIteration | undefined;
+  /** S, M or L from the Size field; undefined without a value, without the field, or for another option. */
+  size?: PlanSize | undefined;
+  /** Hours from the Estimate number field; undefined without a value, without the field, or at 0 or less. */
+  estimate?: number | undefined;
 };
 
 /** An iteration of a Project's iteration field: its title, first day (YYYY-MM-DD) and length in days. */
