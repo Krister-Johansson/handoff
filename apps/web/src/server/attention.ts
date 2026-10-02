@@ -1,8 +1,9 @@
 import { and, appendEvents, desc, eq, events, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
-import { brief, questionBrief } from "@handoff/core";
+import { brief, describePermission, questionBrief } from "@handoff/core";
 import { reviewPath, runPath } from "../lib/paths";
 import type { AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";
+import { allPendingPermissions } from "./permissions";
 
 /** Pull requests whose PR node still waits after CI finished, which only happens when it needs an approving review. */
 export async function waitingReviews(db: Db) {
@@ -30,7 +31,7 @@ export async function waitingReviews(db: Db) {
 
 /** Runs that reached a Finish node with notify on in the last day, and that nobody has dismissed. */
 async function finishedRuns(db: Db) {
-  const dismissed = sql`exists (select 1 from events d where d.run_id = ${runs.id} and d.type = 'attention.dismissed')`;
+  const dismissed = sql`exists (select 1 from events d where d.run_id = ${runs.id} and d.type = 'attention.dismissed' and d.payload->>'itemId' = 'finished:' || ${runs.id}::text)`;
   return db
     .select({ runId: runs.id, projectId: runs.projectId, task: runs.task, projectName: projects.name })
     .from(events)
@@ -53,29 +54,57 @@ export async function stuckRuns(db: Db) {
   return rows.filter((r) => r.failure?.reason === "loop_exhausted");
 }
 
-const FINISHED = /^finished:([0-9a-f-]{36})$/i;
+/** Items a person can take off the list: a finished run, and a failed or stuck run they have seen and will come back to. */
+const DISMISSABLE = /^(finished|failed|stuck):([0-9a-f-]{36})$/i;
 
 /**
- * Takes a finished run off what needs attention, as an event on that run. Only finished runs can be
- * dismissed: questions, failures and reviews leave the list when someone acts on them.
+ * Takes a finished, failed or stuck run off what needs attention, as an event on that run. A failed run
+ * still waits for a repair in the inbox; a new failure is a new item. Questions, permission prompts and
+ * reviews leave the list when someone answers them.
  */
 export async function dismissAttention(db: Db, itemId: string) {
-  const runId = FINISHED.exec(itemId)?.[1];
-  if (!runId) throw new Error("Only finished runs can be dismissed; the other items leave the list once someone acts on them.");
-  const [run] = await db.select({ id: runs.id }).from(runs).where(eq(runs.id, runId));
-  if (!run) throw new Error(`There is no run ${runId}.`);
-  await db.transaction((tx) => appendEvents(tx, runId, [{ type: "attention.dismissed", payload: { itemId } }]));
+  const match = DISMISSABLE.exec(itemId);
+  if (!match) throw new Error("Only finished and failed runs can be dismissed; questions, permission prompts and reviews leave the list once someone answers them.");
+  const [kind, id] = [match[1]!.toLowerCase(), match[2]!];
+  const [run] =
+    kind === "failed"
+      ? await db.select({ id: nodeExecutions.runId }).from(nodeExecutions).where(eq(nodeExecutions.id, id))
+      : await db.select({ id: runs.id }).from(runs).where(eq(runs.id, id));
+  if (!run) throw new Error(`There is no ${kind === "failed" ? "step" : "run"} ${id}.`);
+  await db.transaction((tx) => appendEvents(tx, run.id, [{ type: "attention.dismissed", payload: { itemId } }]));
+}
+
+/** The ids of failed and stuck items someone dismissed. */
+async function dismissedItems(db: Db): Promise<Set<string>> {
+  const rows = await db
+    .select({ itemId: sql<string>`${events.payload}->>'itemId'` })
+    .from(events)
+    .innerJoin(runs, eq(runs.id, events.runId))
+    .where(and(eq(events.type, "attention.dismissed"), eq(runs.status, "failed")));
+  return new Set(rows.map((r) => r.itemId));
 }
 
 /**
  * Everything that needs a person right now, one item per thing with a stable id, so the dashboard
- * can notify once per new item: open questions, failed runs awaiting repair, PRs waiting for review,
- * and runs that reached a Finish node with notify on, which need no action. Each item names its
+ * can notify once per new item: permission prompts, open questions, failed runs awaiting repair that
+ * nobody dismissed, PRs waiting for review, and runs that reached a Finish node with notify on, which
+ * need no action. Each item names its
  * project; with a project id, only that project's items.
  */
 export async function listAttention(db: Db, opts: { projectId?: string } = {}): Promise<AttentionItem[]> {
-  const [inbox, reviews, finished, stuck] = await Promise.all([listInbox(db), waitingReviews(db), finishedRuns(db), stuckRuns(db)]);
+  const [inbox, reviews, finished, stuck, permissions, dismissed] = await Promise.all([
+    listInbox(db),
+    waitingReviews(db),
+    finishedRuns(db),
+    stuckRuns(db),
+    allPendingPermissions(db),
+    dismissedItems(db),
+  ]);
   const items = [
+    ...permissions.map((p): AttentionItem => {
+      const { action, detail } = describePermission(p.toolName, p.input);
+      return { id: `permission:${p.id}`, kind: "permission", title: `${p.projectName}: ${p.nodeKey} ${action}`, body: brief(detail || p.task), href: runPath(p.projectId, p.runId), projectId: p.projectId };
+    }),
     ...inbox.questions.map((q): AttentionItem => {
       const review = (q.context as { review?: { from?: string; kind?: string } }).review;
       return review
@@ -101,5 +130,6 @@ export async function listAttention(db: Db, opts: { projectId?: string } = {}): 
     })),
     ...finished.map((f): AttentionItem => ({ id: `finished:${f.runId}`, kind: "finished", title: `${f.projectName}: run finished`, body: brief(f.task), href: runPath(f.projectId, f.runId), projectId: f.projectId })),
   ];
-  return opts.projectId ? items.filter((i) => i.projectId === opts.projectId) : items;
+  const shown = items.filter((i) => !dismissed.has(i.id));
+  return opts.projectId ? shown.filter((i) => i.projectId === opts.projectId) : shown;
 }

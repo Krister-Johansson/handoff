@@ -167,7 +167,8 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "get_run",
     title: "Show a run",
-    description: "Where a run stands: status, steps with their start, end and duration, PR, linked issues, open questions and the failed step.",
+    description:
+      "Where a run stands: status, cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue or the worker), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, and a stuck loop's last review.",
     input: z.object({ run_id: runId }),
     kind: "data",
     confirm: false,
@@ -190,7 +191,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_attention",
     title: "List what needs attention",
     description:
-      "Everything waiting on a person (questions from Human gates, failed runs, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).",
+      "Everything waiting on a person (permission prompts, questions from Human gates, failed runs nobody dismissed, pull requests waiting for review), plus runs that reached a Finish node with notify on in the last day (kind finished).",
     input: z.object({}),
     kind: "data",
     confirm: false,
@@ -239,9 +240,10 @@ export const CATALOG: ToolSpec[] = [
   }),
   spec({
     name: "dismiss_attention",
-    title: "Dismiss a finished run",
-    description: "Takes a finished run (an item of kind finished from list_attention) off the list once the user has seen it. Other items leave the list when someone acts on them.",
-    input: z.object({ item_id: z.string().describe("The item's id from list_attention, finished:<run id>") }),
+    title: "Dismiss a finished or failed run",
+    description:
+      "Takes a finished or failed run (an item of kind finished or failed from list_attention) off the list once the user has seen it. A failed run still waits for a repair in list_inbox. Questions and permission prompts leave the list when someone answers them.",
+    input: z.object({ item_id: z.string().describe("The item's id from list_attention: finished:<run id>, failed:<step id> or stuck:<run id>") }),
     kind: "data",
     confirm: false,
     readOnly: false,

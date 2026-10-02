@@ -187,13 +187,13 @@ test("get_run gives each step its start, end and duration, counting a running st
   expect(steps[1].duration_seconds).toBeGreaterThanOrEqual(90);
 });
 
-test("a finished run can be dismissed from what needs attention; other items cannot", async () => {
+test("a finished run can be dismissed from what needs attention; questions cannot", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.transaction((tx) => appendEvents(tx, run_id, [{ type: "run.finish", payload: { notify: true } }]));
   expect((await call("list_attention")).map((i: { id: string }) => i.id)).toEqual([`finished:${run_id}`]);
   expect(await call("dismiss_attention", { item_id: `finished:${run_id}` })).toEqual({ dismissed: true });
   expect(await call("list_attention")).toEqual([]);
-  expect(await call("dismiss_attention", { item_id: "question:abc" })).toEqual({ error: expect.stringMatching(/only finished runs/i) });
+  expect(await call("dismiss_attention", { item_id: "question:abc" })).toEqual({ error: expect.stringMatching(/only finished and failed runs/i) });
 });
 
 test("a run stopped by a loop that ran out says so, asks for a decision, and goes on when given one", async () => {
@@ -379,6 +379,26 @@ test("answer_question takes a verdict per criterion at a Try it gate", async () 
   const third = await ask();
   expect((await call("answer_question", { question_id: third.id, criteria: [{ criterion: "A user can create a task", works: true }] })).error).toMatch(/A task survives a reload/);
   expect((await call("answer_question", { question_id: third.id, criteria: [...broken, { criterion: "It is fast", works: true }] })).error).toMatch(/It is fast/);
+});
+
+test("list_attention has permission prompts and a failed item can be dismissed", async () => {
+  const runId = await startedRun();
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running", waitingOn: "permission" });
+  const id = "3f6b2a10-0000-4000-8000-000000000005";
+  await db.insert(permissionRequests).values({ id, runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "pnpm list react" } });
+  expect(await call("list_attention")).toEqual([
+    { id: `permission:${id}`, kind: "permission", title: "sandbox: coder asks to run a command", body: "pnpm list react", projectId, url: `${BASE}${runPath(projectId, runId)}` },
+  ]);
+
+  await call("answer_permission", { request_id: id, decision: "deny" });
+  await db.update(nodeExecutions).set({ status: "failed", error: { code: "x", message: "boom" } }).where(eq(nodeExecutions.id, coder.id));
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, runId));
+  const [failed] = await call("list_attention");
+  expect(failed).toMatchObject({ id: `failed:${coder.id}`, kind: "failed" });
+  expect(await call("dismiss_attention", { item_id: failed.id })).toEqual({ dismissed: true });
+  expect(await call("list_attention")).toEqual([]);
+  // The run still waits for a repair in the inbox; only the notice is gone.
+  expect((await call("list_inbox", { project: "sandbox" })).failed_runs).toHaveLength(1);
 });
 
 test("answer_permission cannot always allow", async () => {
