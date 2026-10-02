@@ -1,13 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { CircleXIcon, InfoIcon, LayersIcon, RepeatIcon, ShieldQuestionIcon, type LucideIcon } from "lucide-react";
+import { BanIcon, ChevronDownIcon, CircleXIcon, InfoIcon, LayersIcon, ListChecksIcon, LockIcon, RepeatIcon, ShieldQuestionIcon, TagIcon, type LucideIcon } from "lucide-react";
+import { releaseTaskAction } from "@/app/projects/scheduler-actions";
+import { StartRunDialog } from "@/components/projects/forms";
 import type { StartRunContext } from "@/components/plan/plan-actions";
 import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
+import { planPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
-import type { ActiveRunView, SchedulerCard } from "@/server/scheduler-card";
+import type { ActiveRunView, SchedulerCard, SkippedView } from "@/server/scheduler-card";
 import { SchedulerEvents } from "./scheduler-events";
 
 type Props = { project: { id: string; name: string }; card: SchedulerCard; start?: StartRunContext | undefined; now: Date };
@@ -91,6 +94,72 @@ export function NextUp({ next }: { next: SchedulerCard["next"] }) {
   );
 }
 
+/** The icon of a skip reason: a label, a blocker, a cancelled run, or anything else. */
+function reasonIcon(reason: string): LucideIcon {
+  if (reason.startsWith("labelled")) return TagIcon;
+  if (reason.startsWith("blocked")) return LockIcon;
+  if (reason.startsWith("cancelled")) return BanIcon;
+  return InfoIcon;
+}
+
+/** A skipped task whose run a person cancelled goes back to the scheduler only when a person says so. */
+function LetTakeIt({ projectId, issue }: { projectId: string; issue: number }) {
+  const [error, setError] = useState<string>();
+  const [pending, startTransition] = useTransition();
+  return (
+    <>
+      {error && <span className="text-xs text-danger">{error}</span>}
+      <Button
+        size="xs"
+        variant="ghost"
+        disabled={pending}
+        onClick={() =>
+          startTransition(async () => {
+            const result = await releaseTaskAction({ projectId, issue });
+            setError(result.ok ? undefined : result.error);
+          })
+        }
+      >
+        Let the scheduler take it
+      </Button>
+    </>
+  );
+}
+
+/** The Ready tasks the scheduler passes over, each with the reason. */
+export function SkippedList({ projectId, skipped, start }: { projectId: string; skipped: SkippedView[]; start?: StartRunContext | undefined }) {
+  return (
+    <ul aria-label="Skipped" className="flex flex-col divide-y border-t">
+      {skipped.map((task) => {
+        const Icon = reasonIcon(task.reason);
+        return (
+          <li key={task.number} className="grid min-h-8 grid-cols-[3rem_minmax(0,1fr)] items-center gap-x-3 gap-y-1 py-1 text-[13px] md:grid-cols-[3rem_minmax(0,1.4fr)_minmax(0,1fr)_auto]">
+            <span className="font-mono text-xs text-muted-foreground">#{task.number}</span>
+            <span className="min-w-0 truncate">{task.title}</span>
+            <span className="col-start-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:col-start-auto">
+              <Icon aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">{task.reason}</span>
+            </span>
+            <span className="col-start-2 flex items-center justify-end gap-1.5 md:col-start-auto">
+              {task.releasable && <LetTakeIt projectId={projectId} issue={task.number} />}
+              {task.releasable && start?.graphName && (
+                <StartRunDialog
+                  projectId={projectId}
+                  graphs={start.graphs}
+                  graphName={start.graphName}
+                  label="Start run"
+                  variant="outline"
+                  initialIssues={[{ number: task.number, title: task.title, url: "", labels: [], author: null, updatedAt: "", blockedBy: [] }]}
+                />
+              )}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /** The last three events, with All events. */
 function Recent({ project, card }: Props) {
   return (
@@ -116,8 +185,10 @@ function Recent({ project, card }: Props) {
 /** Running, or waiting on a run still planning: active runs, Next up and Recent side by side. */
 function Columns(props: Props) {
   const { card } = props;
+  const [showSkipped, setShowSkipped] = useState(false);
   const overlaps = new Map(card.status.overlapHeld.map((h) => [h.runId, h.text]));
   return (
+    <>
     <div className="grid gap-x-6 gap-y-4 px-3.5 pt-2.5 pb-3 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,0.9fr)]">
       <Column label="Active runs">
         {card.runs.length === 0 ? (
@@ -130,10 +201,58 @@ function Columns(props: Props) {
           </ul>
         )}
       </Column>
-      <Column label="Next up">
+      <Column
+        label="Next up"
+        action={
+          card.skipped.length > 0 && (
+            <Button size="xs" variant="ghost" className="text-muted-foreground" aria-expanded={showSkipped} onClick={() => setShowSkipped(!showSkipped)}>
+              {card.skipped.length} skipped
+              <ChevronDownIcon data-icon="inline-end" className={cn("transition-transform", showSkipped && "rotate-180")} />
+            </Button>
+          )
+        }
+      >
         <NextUp next={card.next} />
       </Column>
       <Recent {...props} />
+    </div>
+    {showSkipped && (
+      <div className="px-3.5 pb-2.5">
+        <SkippedList projectId={props.project.id} skipped={card.skipped} start={props.start} />
+      </div>
+    )}
+    </>
+  );
+}
+
+/** Idle with no Ready task: why, and where a person moves tasks to Ready. */
+function NoReady({ project }: Props) {
+  return (
+    <div className="flex flex-col gap-1.5 px-3.5 py-2.5">
+      <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[13px]">
+        <ListChecksIcon aria-hidden className="size-4 text-muted-foreground" />
+        No task is Ready. Move shaped tasks to Ready on the Plan.
+        <Button size="xs" variant="outline" asChild>
+          <Link href={planPath(project.id, { status: ["Shaping"] })}>Show Shaping tasks</Link>
+        </Button>
+      </p>
+      <p className="text-xs text-muted-foreground">Moving a task to Ready is a person&apos;s decision; the scheduler only starts Ready tasks.</p>
+    </div>
+  );
+}
+
+/** Idle with every Ready task skipped: the list open, each with its reason. */
+function AllSkipped({ project, card, start }: Props) {
+  return (
+    <div className="flex flex-col gap-2 px-3.5 py-2.5">
+      <p className="flex items-center gap-2.5 text-[13px]">
+        <ListChecksIcon aria-hidden className="size-4 text-muted-foreground" />
+        Every Ready task is skipped, each for the reason below.
+      </p>
+      <h3 className={cn(LABEL, "flex items-center gap-1.5")}>
+        Skipped <Tag tone="fill">{card.skipped.length}</Tag>
+      </h3>
+      <SkippedList projectId={project.id} skipped={card.skipped} start={start} />
     </div>
   );
 }
@@ -195,7 +314,18 @@ function Held(props: Props) {
 
 /** What the scheduler is doing, under the card's header. */
 export function SchedulerBody(props: Props) {
-  const { state } = props.card.status;
-  return <div className="border-t">{state === "held" ? <Held {...props} /> : <Columns {...props} />}</div>;
+  const { state, idle } = props.card.status;
+  const body = (() => {
+    if (state === "held") return <Held {...props} />;
+    if (state === "idle" && idle?.reason === "no_ready" && props.card.next.length === 0) return <NoReady {...props} />;
+    if (state === "idle" && idle?.reason === "all_skipped" && props.card.next.length === 0) return <AllSkipped {...props} />;
+    return (
+      <>
+        {state === "idle" && idle && <p className="px-3.5 pt-2.5 text-[13px] text-muted-foreground">{idle.text}</p>}
+        <Columns {...props} />
+      </>
+    );
+  })();
+  return <div className="border-t">{body}</div>;
 }
 

@@ -94,6 +94,41 @@ test("held lists each failed run and permission prompt with a link to its run, a
   expect(screen.getByText("Holds count every run of todooverkill, also runs a person started. Active runs go on.")).toBeInTheDocument();
 });
 
+test("idle says why and Next up lists the candidates with a Skipped disclosure", async () => {
+  const skipped = [
+    { number: 46, title: "F46 Screen reader pass (human task)", reason: "labelled human" },
+    { number: 66, title: "F52 Tasks service follow-ups", reason: "cancelled run; start it by hand", releasable: true as const },
+    { number: 142, title: "R2 Geist type", reason: "blocked by #141" },
+  ];
+  const { unmount } = show(cardOf({ status: { state: "idle", idle: { reason: "no_ready", text: "No task is Ready. Move shaped tasks to Ready on the Plan." } } }));
+  expect(screen.getByText("Idle")).toBeInTheDocument();
+  expect(screen.getByText("No task is Ready. Move shaped tasks to Ready on the Plan.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Show Shaping tasks" })).toHaveAttribute("href", `/projects/${PROJECT.id}/plan?status=Shaping`);
+  expect(screen.getByText("Moving a task to Ready is a person's decision; the scheduler only starts Ready tasks.")).toBeInTheDocument();
+  unmount();
+
+  // Every Ready task skipped: the list is open, each with its reason, and a cancelled one can go back to the scheduler.
+  const all = show(cardOf({ status: { state: "idle", idle: { reason: "all_skipped", text: "Every Ready task is skipped; skipped says why." } }, skipped }), { start: { graphs: ["master"], graphName: "master" } });
+  expect(screen.getByText("Every Ready task is skipped, each for the reason below.")).toBeInTheDocument();
+  const rows = within(screen.getByRole("list", { name: "Skipped" })).getAllByRole("listitem");
+  expect(rows.map((r) => r.textContent)).toEqual([
+    expect.stringContaining("labelled human"),
+    expect.stringContaining("cancelled run; start it by hand"),
+    expect.stringContaining("blocked by #141"),
+  ]);
+  expect(within(rows[0]!).queryByRole("button", { name: "Let the scheduler take it" })).not.toBeInTheDocument();
+  expect(within(rows[1]!).getByRole("button", { name: "Start run" })).toBeInTheDocument();
+  fireEvent.click(within(rows[1]!).getByRole("button", { name: "Let the scheduler take it" }));
+  await waitFor(() => expect(actions.releaseTaskAction).toHaveBeenCalledWith({ projectId: PROJECT.id, issue: 66 }));
+  all.unmount();
+
+  // Running with candidates: the skipped tasks wait behind a disclosure under Next up.
+  show(cardOf({ next: [{ number: 67, title: "F53 Shared localStorage store helper" }], skipped: skipped.slice(2) }));
+  expect(screen.queryByRole("list", { name: "Skipped" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "1 skipped" }));
+  expect(within(screen.getByRole("list", { name: "Skipped" })).getByText("blocked by #141")).toBeInTheDocument();
+});
+
 test("running shows active runs of max_runs and the Claude slots, with Pause", async () => {
   show(running);
   expect(screen.getByText("Running")).toBeInTheDocument();
