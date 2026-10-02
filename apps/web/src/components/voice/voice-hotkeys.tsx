@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useEffectEvent } from "react";
+import { useOptionalAssistant } from "@/components/assistant/assistant-provider";
 import { isTyping } from "@/lib/voice/is-typing";
 import { useVoice } from "./voice-provider";
 
@@ -10,6 +11,7 @@ import { useVoice } from "./voice-provider";
  */
 export function VoiceHotkeys() {
   const voice = useVoice();
+  const assistant = useOptionalAssistant();
   const onKey = useEffectEvent((e: KeyboardEvent) => {
     if (e.repeat) return;
     // Escape stops speech first; a second Escape stops listening.
@@ -28,8 +30,14 @@ export function VoiceHotkeys() {
     if (!voice.supported) return;
     if (e.code === "KeyM" && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       e.preventDefault();
-      voice.toggle();
-      return;
+      if (voice.state === "listening" || voice.state === "starting") return voice.stop();
+      // With the assistant panel open, the words go into its message box.
+      const composer = assistant?.isOpen ? assistant.composerRef.current : null;
+      if (composer) {
+        composer.focus();
+        return void voice.start("dictation");
+      }
+      return void voice.start("command");
     }
     if (e.key.toLowerCase() === "v" && !e.metaKey && !e.ctrlKey && !e.altKey && !isTyping(e.target)) {
       e.preventDefault();

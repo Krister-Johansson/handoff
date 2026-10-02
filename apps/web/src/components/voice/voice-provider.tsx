@@ -42,7 +42,8 @@ export type VoiceContextValue = {
   /** The last final transcript. */
   heard: { text: string; at: number } | undefined;
   languageName: string;
-  start(): Promise<void>;
+  /** Starts listening: dictation into a focused text field, else one command for the bubble, unless `mode` says which. */
+  start(mode?: ListenMode): Promise<void>;
   stop(): void;
   abort(): void;
   toggle(): void;
@@ -162,16 +163,19 @@ export function VoiceProvider({
     return setNotificationVoice((text) => sayWhenQuiet(text, "notification"));
   }, [speaker, sayWhenQuiet]);
 
-  const start = useCallback(async () => {
-    if (!supported) return;
-    // Never listen while speaking: asking to listen stops the speech first, so the microphone never hears the dashboard.
-    if (speaker?.isSpeaking()) speaker.stop();
-    const listenMode = isTyping(document.activeElement) ? "dictation" : "command";
-    // A question is asked in the bubble; dictation stays in its text field. A new question replaces the
-    // last one, unless an approval card waits for its spoken answer.
-    if (listenMode === "command") setBubble((b) => (b.approval ? { ...b, open: true, notice: undefined } : { open: true }));
-    await startInput(listenMode);
-  }, [speaker, startInput, supported]);
+  const start = useCallback(
+    async (requested?: ListenMode) => {
+      if (!supported) return;
+      // Never listen while speaking: asking to listen stops the speech first, so the microphone never hears the dashboard.
+      if (speaker?.isSpeaking()) speaker.stop();
+      const listenMode = requested ?? (isTyping(document.activeElement) ? "dictation" : "command");
+      // A question is asked in the bubble; dictation stays in its text field. A new question replaces the
+      // last one, unless an approval card waits for its spoken answer.
+      if (listenMode === "command") setBubble((b) => (b.approval ? { ...b, open: true, notice: undefined } : { open: true }));
+      await startInput(listenMode);
+    },
+    [speaker, startInput, supported],
+  );
   const toggle = useCallback(() => {
     if (state === "listening" || state === "starting") stop();
     else void start();

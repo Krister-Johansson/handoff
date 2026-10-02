@@ -1,12 +1,19 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, expect, test } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
+import { AssistantButton } from "@/components/assistant/assistant-button";
+import { AssistantProvider } from "@/components/assistant/assistant-provider";
+import { AssistantSheet } from "@/components/assistant/assistant-sheet";
+import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
 import { VoiceTestApp } from "./testing/voice-test-app";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => "/projects" }));
 
 const latest = () => FakeSpeechRecognition.instances.at(-1)!;
 beforeEach(() => {
   FakeSpeechRecognition.reset();
   localStorage.clear();
+  Element.prototype.scrollIntoView = vi.fn();
 });
 
 test("V toggles listening outside text fields and does nothing inside a textarea", async () => {
@@ -43,6 +50,32 @@ test("Ctrl+M opens the bubble", async () => {
   // A second Ctrl+M stops listening.
   ctrlM();
   expect(latest().stopped).toBe(true);
+});
+
+test("Ctrl+M with the panel open dictates into the composer", async () => {
+  render(
+    <AssistantProvider transport={new FakeAssistantTransport()} available>
+      <VoiceTestApp>
+        <AssistantButton />
+        <AssistantSheet />
+      </VoiceTestApp>
+    </AssistantProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  const composer = await screen.findByLabelText<HTMLTextAreaElement>("Message the assistant");
+  // Focus is on the page, not in the composer.
+  await waitFor(() => expect(composer).toHaveFocus());
+  composer.blur();
+  expect(ctrlM()).toBe(false);
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
+  expect(composer).toHaveFocus();
+  // Dictation keeps listening until stopped, and no bubble opens.
+  expect(latest()).toMatchObject({ continuous: true });
+  act(() => latest().emitStart());
+  expect(screen.queryByRole("region", { name: "Voice assistant" })).not.toBeInTheDocument();
+  expect(screen.getByRole("dialog", { name: "Assistant" })).toHaveTextContent("Dictating");
+  act(() => latest().emitResult("how is run 7f3a", true));
+  expect(composer.value).toBe("how is run 7f3a");
 });
 
 test("Escape stops listening and leaves an idle page alone", async () => {
