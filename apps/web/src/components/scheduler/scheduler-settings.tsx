@@ -99,7 +99,7 @@ function SettingsForm({ project, card, form }: { project: SchedulerProject; card
     <div className={cn(CARD_BODY, "flex flex-col gap-4")}>
       <SchedulerFields values={values} onChange={setValues} form={form} wide hints={{ maxRuns: "1 to 10. Runs a person starts count too.", noPriority: "Add a single select field named Priority to order by it." }} />
       <Field orientation="horizontal" className="items-center">
-        <FieldLabel htmlFor={`${id}-skip`} className="w-40 shrink-0">
+        <FieldLabel htmlFor={`${id}-skip`} className="w-40 flex-none!">
           Skips tasks labelled
         </FieldLabel>
         <Input id={`${id}-skip`} value={skipLabel} maxLength={50} onChange={(e) => setSkipLabel(e.target.value)} className="h-8 w-40 font-mono text-xs" />

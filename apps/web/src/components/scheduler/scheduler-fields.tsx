@@ -32,7 +32,8 @@ export function SchedulerFields({
   hints?: { maxRuns?: string; noPriority?: string };
 }) {
   const id = useId();
-  const label = wide ? "w-40 shrink-0" : "w-28 shrink-0";
+  // A horizontal Field lets its label grow; these keep one width so the controls line up.
+  const label = wide ? "w-40 flex-none!" : "w-28 flex-none!";
   const set = (patch: Partial<SchedulerValues>) => onChange({ ...values, ...patch });
   const noPriority = `GitHub Project #${form.planNumber ?? "?"} has no Priority field.${hints?.noPriority ? ` ${hints.noPriority}` : ""}`;
   return (
