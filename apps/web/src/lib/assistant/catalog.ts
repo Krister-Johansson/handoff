@@ -388,7 +388,7 @@ export const CATALOG: ToolSpec[] = [
     name: "setup_plan",
     title: "Set up the plan",
     description:
-      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done and the date fields Start and Target, linked to the repository. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and date fields and reports Status options the Project lacks.",
+      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done and the date fields Start and Target, a single select Size with S, M and L and a Number field Estimate, linked to the repository. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and fields (adding S, M and L to a Size field that lacks them) and reports Status options the Project lacks.",
     input: z.object({ project, use: z.number().int().positive().optional().describe("An existing Project's number to use instead of creating one") }),
     kind: "data",
     confirm: true,
@@ -397,8 +397,8 @@ export const CATALOG: ToolSpec[] = [
     idempotent: true,
     summarize: (a) =>
       a.use
-        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks) and the date fields Start and Target, and add the labels epic, story and task`
-        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done and the date fields Start and Target, and the labels epic, story and task`,
+        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks), the date fields Start and Target and the fields Size and Estimate, and add the labels epic, story and task`
+        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done, the date fields Start and Target and the fields Size and Estimate, and the labels epic, story and task`,
   }),
   spec({
     name: "create_epic",
