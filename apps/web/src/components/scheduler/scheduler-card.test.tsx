@@ -129,6 +129,46 @@ test("idle says why and Next up lists the candidates with a Skipped disclosure",
   expect(within(screen.getByRole("list", { name: "Skipped" })).getByText("blocked by #141")).toBeInTheDocument();
 });
 
+test("paused says who paused it, when and why, with Resume; a pause of its own reads as a failure", async () => {
+  const person = show(
+    cardOf({ status: { state: "paused", paused: { by: "person", reason: "Waiting for the redesign review", at: new Date("2026-10-02T18:12:00Z") } }, pausedFrom: "claude-code" }),
+  );
+  expect(screen.getByText("Paused")).toBeInTheDocument();
+  expect(screen.getByText("Paused by a person from Claude Code at 18:12: Waiting for the redesign review")).toBeInTheDocument();
+  expect(screen.getByText("Active runs go on. Nothing new starts until someone resumes.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Resume the scheduler of todooverkill" }));
+  await waitFor(() => expect(actions.resumeSchedulerAction).toHaveBeenCalledWith({ projectId: PROJECT.id }));
+  person.unmount();
+
+  const reason = "3 starts failed in a row. The last error: GitHub Project #5 of Krister-Johansson does not exist or GITHUB_TOKEN cannot see it.";
+  show(cardOf({ status: { state: "paused", paused: { by: "scheduler", reason, at: new Date("2026-10-02T19:20:00Z") } } }));
+  expect(screen.getByText("Paused")).toHaveAttribute("data-tone", "danger");
+  expect(screen.getByText("Paused itself at 19:20 after three failed starts.")).toBeInTheDocument();
+  expect(screen.getByText("Fix the cause, then resume.")).toBeInTheDocument();
+  expect(screen.getByText(reason)).toBeInTheDocument();
+});
+
+test("a check that failed shows its error under the header, and one not made yet says when it comes", () => {
+  show(cardOf({ status: { error: "GitHub did not answer.", checkedAt: null, nextCheckAt: new Date(NOW.getTime() + 9_000) } }));
+  expect(screen.getByText("The last check failed: GitHub did not answer.")).toBeInTheDocument();
+  expect(screen.getByText("Not checked yet; first check in about 10 s")).toBeInTheDocument();
+});
+
+test("the card starts open and remembers its fold per project", () => {
+  const first = show(running);
+  expect(screen.getByRole("list", { name: "Active runs" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Fold the scheduler" }));
+  expect(screen.queryByRole("list", { name: "Active runs" })).not.toBeInTheDocument();
+  first.unmount();
+
+  // The fold stays for this project after a reload, and another project's card starts open.
+  const again = show(running);
+  expect(screen.getByRole("button", { name: "Unfold the scheduler" })).toHaveAttribute("aria-expanded", "false");
+  again.unmount();
+  show(running, { project: { id: "other", name: "sandbox" } });
+  expect(screen.getByRole("list", { name: "Active runs" })).toBeInTheDocument();
+});
+
 test("running shows active runs of max_runs and the Claude slots, with Pause", async () => {
   show(running);
   expect(screen.getByText("Running")).toBeInTheDocument();

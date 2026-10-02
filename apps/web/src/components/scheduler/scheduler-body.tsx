@@ -2,7 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { BanIcon, ChevronDownIcon, CircleXIcon, InfoIcon, LayersIcon, ListChecksIcon, LockIcon, RepeatIcon, ShieldQuestionIcon, TagIcon, type LucideIcon } from "lucide-react";
+import { BanIcon, ChevronDownIcon, CircleAlertIcon, CirclePauseIcon, CircleXIcon, InfoIcon, LayersIcon, ListChecksIcon, LockIcon, RepeatIcon, ShieldQuestionIcon, TagIcon, type LucideIcon } from "lucide-react";
 import { releaseTaskAction } from "@/app/projects/scheduler-actions";
 import { StartRunDialog } from "@/components/projects/forms";
 import type { StartRunContext } from "@/components/plan/plan-actions";
@@ -225,6 +225,35 @@ function Columns(props: Props) {
   );
 }
 
+/** Where a person acted from, as the pause line says it. */
+const SOURCES: Record<string, string> = { dashboard: "the dashboard", "claude-code": "Claude Code", assistant: "the assistant", webmcp: "WebMCP", cli: "the CLI" };
+
+/** Paused: by whom, when and why. A pause of its own after failed starts shows the error it stopped on. */
+function Paused({ card }: Props) {
+  const paused = card.status.paused;
+  if (!paused) return null;
+  if (paused.by === "scheduler") {
+    return (
+      <div className="flex flex-col gap-2 px-3.5 py-2.5">
+        <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px]">
+          <CircleAlertIcon aria-hidden className="size-4 text-danger" />
+          <span>Paused itself at {time(paused.at)} after three failed starts.</span>
+          <span className="text-muted-foreground">Fix the cause, then resume.</span>
+        </p>
+        {paused.reason && <p className="rounded-md bg-danger-bg px-2.5 py-1.5 font-mono text-xs break-words text-danger">{paused.reason}</p>}
+      </div>
+    );
+  }
+  const from = card.pausedFrom ? ` from ${SOURCES[card.pausedFrom] ?? card.pausedFrom}` : "";
+  return (
+    <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3.5 py-2.5 text-[13px]">
+      <CirclePauseIcon aria-hidden className="size-4 text-muted-foreground" />
+      <span>{`Paused by a person${from} at ${time(paused.at)}${paused.reason ? `: ${paused.reason}` : ""}`}</span>
+      <span className="text-muted-foreground">Active runs go on. Nothing new starts until someone resumes.</span>
+    </p>
+  );
+}
+
 /** Idle with no Ready task: why, and where a person moves tasks to Ready. */
 function NoReady({ project }: Props) {
   return (
@@ -316,6 +345,7 @@ function Held(props: Props) {
 export function SchedulerBody(props: Props) {
   const { state, idle } = props.card.status;
   const body = (() => {
+    if (state === "paused") return <Paused {...props} />;
     if (state === "held") return <Held {...props} />;
     if (state === "idle" && idle?.reason === "no_ready" && props.card.next.length === 0) return <NoReady {...props} />;
     if (state === "idle" && idle?.reason === "all_skipped" && props.card.next.length === 0) return <AllSkipped {...props} />;
@@ -326,6 +356,17 @@ export function SchedulerBody(props: Props) {
       </>
     );
   })();
-  return <div className="border-t">{body}</div>;
+  const error = props.card.status.error;
+  return (
+    <div className="border-t">
+      {error && state !== "paused" && (
+        <p className="flex items-start gap-2 border-b bg-danger-bg px-3.5 py-2 text-xs text-danger">
+          <CircleAlertIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+          <span className="break-words">The last check failed: {error}</span>
+        </p>
+      )}
+      {body}
+    </div>
+  );
 }
 
