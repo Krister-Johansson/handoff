@@ -9,6 +9,7 @@ test("the side navigation links every section by ?tab= and marks the open one", 
   expect(links.map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
     ["Appearance", "/settings?tab=appearance"],
     ["Notifications", "/settings?tab=notifications"],
+    ["Voice", "/settings?tab=voice"],
     ["Claude Code", "/settings?tab=agents"],
     ["Assistant", "/settings?tab=assistant"],
     ["Worker", "/settings?tab=worker"],
