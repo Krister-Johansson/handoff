@@ -17,6 +17,7 @@ import { searchPlan, type SearchResult } from "@/lib/plan/search";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import type { PlanViewName } from "@/lib/project-tab";
 import type { StartRunContext } from "./plan-actions";
+import { Assigning, type AssignControl } from "./assignee-button";
 import { PlanBoard } from "./plan-board";
 import { PlanEmpty } from "./plan-empty";
 import { FilterChips, PlanFilters } from "./plan-filters";
@@ -82,11 +83,13 @@ type PlanTabProps = {
   /** When the page read GitHub, in epoch milliseconds. */
   readAt: number;
   activity: GitHubActivity | null;
-  /** The login of the token handoff uses: Me in the Assignee filter. Undefined with a GitHub App, which acts as no person. */
+  /** The login of the token handoff uses: Me in the Assignee filter and Assign me. Undefined with a GitHub App, which acts as no person. */
   me?: string | undefined;
+  /** How rows and cards assign people on GitHub; without it they only show who is assigned. */
+  assign?: Omit<AssignControl, "me"> | undefined;
 };
 
-type BodyProps = Omit<PlanTabProps, "activity" | "me"> & {
+type BodyProps = Omit<PlanTabProps, "activity" | "me" | "assign"> & {
   narrowed: NarrowedPlan;
   found: SearchResult;
   onClearSearch: () => void;
@@ -182,7 +185,7 @@ function firstIn(body: HTMLElement | null, match: boolean): HTMLElement | null {
  * board or the timeline narrowed by them, and at the bottom the latest change GitHub reported with the
  * refresh line. The search narrows the plan as it is loaded; it reads nothing from GitHub.
  */
-export function PlanTab({ activity, me, ...props }: PlanTabProps) {
+export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
   const { project, plan, view, zoom, filters, readAt, signals } = props;
   const voice = useOptionalVoice();
   const narrow = useNarrow();
@@ -195,6 +198,7 @@ export function PlanTab({ activity, me, ...props }: PlanTabProps) {
   const narrowed = useMemo(() => filterPlan(plan, filters, signals.needsYou, me), [plan, filters, signals.needsYou, me]);
   const found = useMemo(() => searchPlan(narrowed, query), [narrowed, query]);
   const people = useMemo(() => peopleOf(plan, me), [plan, me]);
+  const assigning = useMemo(() => assign && { ...assign, me }, [assign, me]);
   const current = { ...filters, q: query.trim() };
 
   // Voice owns Escape while it speaks or listens; the search keeps its text then.
@@ -211,41 +215,43 @@ export function PlanTab({ activity, me, ...props }: PlanTabProps) {
   };
 
   return (
-    <SearchQuery value={found.active ? query.trim() : ""}>
-      <div className="flex flex-col gap-3">
-        <PlanToolbar
-          projectId={project.id}
-          view={view}
-          filters={current}
-          expand={view !== "board" && <ExpandCollapse projectId={project.id} rows={rowsOf(narrowed, view)} searching={found.active} />}
-          search={
-            <PlanSearchField
-              value={query}
-              onChange={setQuery}
-              count={found.matches[view]}
-              hint={view !== "timeline"}
-              onLeave={() => firstIn(body.current, false)?.focus()}
-              onFirstMatch={() => firstIn(body.current, true)?.focus()}
-              className="max-w-90 min-w-36 flex-1 basis-40"
-            />
-          }
-          filterButtons={<PlanFilters projectId={project.id} view={view} filters={current} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
-          timeline={
-            view === "timeline" && (
-              <TimelineControls projectId={project.id} filters={current} timeline={timeline} zoom={zoom} narrow={narrow} onToday={() => todayRef.current?.()} />
-            )
-          }
-        />
-        <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} />
-        <div ref={body} onKeyDown={onBodyKeyDown}>
-          <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} timeline={timeline} todayRef={todayRef} />
+    <Assigning value={assigning}>
+      <SearchQuery value={found.active ? query.trim() : ""}>
+        <div className="flex flex-col gap-3">
+          <PlanToolbar
+            projectId={project.id}
+            view={view}
+            filters={current}
+            expand={view !== "board" && <ExpandCollapse projectId={project.id} rows={rowsOf(narrowed, view)} searching={found.active} />}
+            search={
+              <PlanSearchField
+                value={query}
+                onChange={setQuery}
+                count={found.matches[view]}
+                hint={view !== "timeline"}
+                onLeave={() => firstIn(body.current, false)?.focus()}
+                onFirstMatch={() => firstIn(body.current, true)?.focus()}
+                className="max-w-90 min-w-36 flex-1 basis-40"
+              />
+            }
+            filterButtons={<PlanFilters projectId={project.id} view={view} filters={current} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
+            timeline={
+              view === "timeline" && (
+                <TimelineControls projectId={project.id} filters={current} timeline={timeline} zoom={zoom} narrow={narrow} onToday={() => todayRef.current?.()} />
+              )
+            }
+          />
+          <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} />
+          <div ref={body} onKeyDown={onBodyKeyDown}>
+            <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} timeline={timeline} todayRef={todayRef} />
 
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>{activity && `Last from GitHub: ${activity.summary}, ${formatAgo(activity.receivedAt, new Date(readAt))}`}</span>
+            <PlanRefresher readAt={readAt} />
+          </div>
         </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-          <span>{activity && `Last from GitHub: ${activity.summary}, ${formatAgo(activity.receivedAt, new Date(readAt))}`}</span>
-          <PlanRefresher readAt={readAt} />
-        </div>
-      </div>
-    </SearchQuery>
+      </SearchQuery>
+    </Assigning>
   );
 }

@@ -152,7 +152,6 @@ export function TimelineControls({
   );
 }
 
-
 const numbers = (list: number[]) => list.map((n) => `#${n}`).join(", ");
 
 /**

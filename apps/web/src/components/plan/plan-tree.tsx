@@ -15,7 +15,9 @@ import { cn } from "@/lib/utils";
 import { PlanItDialog, TaskActions, type StartRunContext, type StoryChoice } from "./plan-actions";
 import { KindBadge, ProgressBar, StatusPill } from "./plan-status";
 import { taskColumn } from "@/lib/plan/task";
+import { AssigneeButton } from "./assignee-button";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
+
 import { matchesQuery } from "@/lib/plan/search";
 import { useSearchQuery } from "./plan-search";
 import { useRowsOpen } from "./use-collapsed";
@@ -126,6 +128,9 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
       <span className={RIGHT}>
         <RunCell task={task} projectId={ctx.projectId} needsYou={ctx.needsYou} />
         <PrLink task={task} repoUrl={ctx.repoUrl} />
+        <span className="flex min-w-6 justify-center">
+          <AssigneeButton task={task} />
+        </span>
         <TaskActions task={task} projectId={ctx.projectId} start={ctx} />
       </span>
     </TreeRow>
