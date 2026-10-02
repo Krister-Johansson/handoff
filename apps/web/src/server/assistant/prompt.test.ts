@@ -63,3 +63,9 @@ test("the system prompt proposes dates with schedule only when the person asks t
   const shaping = SYSTEM_PROMPT.split("\n\n").find((p) => p.includes("create_epic"));
   expect(shaping).toMatch(/When the person asks to plan the timeline, schedule sets Start and Target dates/);
 });
+
+test("the system prompt sizes tasks with set_size and lays out dates from sizes with arrange_plan and schedule", () => {
+  const shaping = SYSTEM_PROMPT.split("\n\n").find((p) => p.includes("create_epic"));
+  expect(shaping).toMatch(/set_size when the person sizes them/);
+  expect(shaping).toMatch(/arrange_plan[^.]*then[^.]*schedule/);
+});

@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
 import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
-import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
+import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
 import { projectReadiness } from "./readiness";
 import { assignmentOf, setIssueAssignees } from "./assignees";
@@ -13,10 +13,12 @@ import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
-import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setupPlan, type ScheduleItem } from "./shaping";
+import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSizes, setupPlan, type ScheduleItem, type SizesInput } from "./shaping";
 import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
+import { arrangeTimeline } from "../lib/plan/arrange";
 import type { Forecast } from "../lib/plan/forecast";
+import { canMove } from "../lib/plan/task";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
@@ -37,7 +39,7 @@ const INSTRUCTIONS = `handoff runs graphs of coding agents on GitHub repositorie
 
 To work on issues: list_backlog, then start_run with the issue numbers (the task can stay empty), then get_run to follow the run. Every result links to the dashboard.
 
-A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order. Each of these writes asks the person first.
+A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order. Size tasks with set_size when the person sizes them (S, M or L, or an estimate like 3h or 2d); with sized tasks, arrange_plan previews where the unscheduled ones fit from today, then one schedule call proposes those dates. Each of these writes asks the person first.
 
 Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, pause_scheduler stops new starts and stop_scheduler turns it off.
 
@@ -578,6 +580,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       blocked_by?: number[];
       start?: string;
       target?: string;
+      size?: PlanSize;
     }) =>
       createTask(shaping, (await findProject(db, project)).id, { ...input, ...(blocked_by ? { blockedBy: blocked_by } : {}) }),
 
@@ -589,6 +592,50 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       planIssue(shaping, (await findProject(db, project)).id, { issue, ...(story !== undefined ? { story } : {}) }),
 
     schedule: async ({ project, items }: { project: string; items: ScheduleItem[] }) => schedule(shaping, (await findProject(db, project)).id, items),
+
+    set_size: async ({ project, items }: { project: string; items: SizesInput[] }) => {
+      const changes = await setSizes(shaping, (await findProject(db, project)).id, items.map(({ issue, size, estimate }) => ({ issue, size, estimate })));
+      const sized = changes.map(({ item, issue, ...change }) => ({ issue, title: item.title, ...change }));
+      const none = (value: string | number | null) => (value === null ? "none" : typeof value === "number" ? `${value}h` : value);
+      const summary = sized
+        .map((s) => {
+          const moves = [
+            s.size && `size ${none(s.size.from)} to ${none(s.size.to)}`,
+            s.estimate && `estimate ${none(s.estimate.from)} to ${none(s.estimate.to)}`,
+            s.target && `Target ${none(s.target.from)} to ${s.target.to}`,
+          ].filter(Boolean);
+          return `#${s.issue} ${s.title}: ${moves.join(", ")}`;
+        })
+        .join("; ");
+      return { sized, summary };
+    },
+
+    arrange_plan: async ({ project, epic }: { project: string; epic?: number }) => {
+      const view = await loadPlan(db, github, plan, (await findProject(db, project)).id);
+      if ("error" in view) throw new Error(view.reason === "no-plan" ? `${view.error} Set one up with setup_plan.` : view.error);
+      const { timeline, capacity = 6 } = view;
+      if (!timeline) throw new Error("The plan has no timeline.");
+      // Only the tasks asked for are placed; every bar on the timeline, in any epic, is planned work.
+      const epics = view.epics.filter((e) => epic === undefined || e.number === epic);
+      if (epic !== undefined && !epics.length) throw new Error(`#${epic} is not an epic of the plan of ${project}.`);
+      const unscheduled = new Set(timeline.items.filter((i) => i.unscheduled).map((i) => i.number));
+      const tasks = [...epics.flatMap((e) => [...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...(epic === undefined ? view.unparented : [])].filter(
+        (t) => t.kind !== "story" && t.kind !== "epic" && unscheduled.has(t.number) && canMove(t),
+      );
+      const byNumber = new Map(tasks.map((t) => [t.number, t]));
+      const arranged = arrangeTimeline(
+        tasks.map((t) => ({ number: t.number, hours: t.duration?.hours })),
+        timeline,
+        capacity,
+        timeline.today,
+      );
+      return {
+        today: timeline.today,
+        capacity_hours: capacity,
+        placements: arranged.placements.map((p) => ({ issue: p.issue, title: byNumber.get(p.issue)!.title, start: p.start, target: p.target, hours: byNumber.get(p.issue)!.duration!.hours })),
+        left_out: arranged.leftOut.map((l) => ({ issue: l.issue, title: byNumber.get(l.issue)!.title, reason: "needs a size" })),
+      };
+    },
 
     start_scheduler: async ({ project, max_runs, order, graph, skip_label }: { project: string; max_runs?: number; order?: "project" | "priority"; graph?: string; skip_label?: string | null }) => {
       const { id } = await findProject(db, project);
