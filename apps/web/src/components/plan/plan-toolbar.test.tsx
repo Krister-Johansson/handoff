@@ -83,3 +83,79 @@ test("without a token user the Assignee filter has no Me", () => {
   expect(within(group).queryByRole("radio", { name: "Me" })).not.toBeInTheDocument();
   expect(within(group).getByRole("radio", { name: "krister" })).toBeInTheDocument();
 });
+
+const searchBox = () => screen.getByRole("searchbox", { name: "Search the plan" });
+const treeRow = (name: RegExp) => within(screen.getByRole("tree")).getByRole("treeitem", { name });
+const collapsedRows = () => JSON.parse(localStorage.getItem("handoff.plan.collapsed.p1") ?? "[]") as string[];
+
+test("searching #58 keeps the task with its story and epic open, marks the match, counts it and writes ?q= after a pause", () => {
+  localStorage.setItem("handoff.plan.collapsed.p1", JSON.stringify(["e12", "s41"]));
+  const replaceState = vi.spyOn(window.history, "replaceState");
+  vi.useFakeTimers();
+  renderTab();
+  expect(screen.queryByRole("treeitem", { name: /Task #58/ })).not.toBeInTheDocument();
+
+  fireEvent.change(searchBox(), { target: { value: "#58" } });
+  expect(treeRow(/Epic #12/)).toHaveAttribute("aria-expanded", "true");
+  expect(treeRow(/Story #41/)).toHaveAttribute("aria-expanded", "true");
+  expect(within(treeRow(/Task #58/)).getByText("#58", { selector: "mark" })).toBeInTheDocument();
+  expect(screen.queryByRole("treeitem", { name: /Task #57/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("treeitem", { name: /Epic #10/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("treeitem", { name: /Unplanned/ })).not.toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("1 match");
+  expect(screen.getByText("5 more tasks in this epic do not match the search.")).toBeInTheDocument();
+  // The search opens rows for itself; the rows a person collapsed stay collapsed in the store.
+  expect(collapsedRows()).toEqual(["e12", "s41"]);
+
+  expect(replaceState).not.toHaveBeenCalled();
+  act(() => vi.advanceTimersByTime(150));
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/projects/p1/plan?q=%2358");
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+  expect(searchBox()).toHaveValue("");
+  expect(treeRow(/Epic #12/)).toHaveAttribute("aria-expanded", "false");
+  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  act(() => vi.advanceTimersByTime(150));
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/projects/p1/plan");
+  replaceState.mockRestore();
+});
+
+test("the search starts from ?q=, says when nothing matches, and the board shows No match in its empty columns", () => {
+  const { unmount } = renderTab({ filters: parsePlanFilters({ q: "deploy" }) });
+  expect(searchBox()).toHaveValue("deploy");
+  expect(screen.getByRole("status")).toHaveTextContent("No match");
+  expect(screen.getByText('No match for "deploy"')).toBeInTheDocument();
+  expect(screen.getByText("Search looks at the numbers and titles of epics, stories, tasks and unplanned issues.")).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Clear search" })).toHaveLength(2);
+  unmount();
+
+  renderTab({ view: "board", filters: parsePlanFilters({ q: "voice" }) });
+  // A card shows when its task, its story or its epic matches.
+  expect(within(screen.getByRole("region", { name: "Ready" })).getAllByRole("listitem").map((c) => c.getAttribute("aria-label"))).toEqual(["#72 Picker with local voices first"]);
+  expect(within(screen.getByRole("region", { name: "Running" })).getByText("No match")).toBeInTheDocument();
+  expect(screen.getByRole("status")).toHaveTextContent("1 match");
+});
+
+test("/ focuses the search; Escape clears it, then moves to the tree; Enter goes to the first match and Escape there keeps it in view", () => {
+  localStorage.setItem("handoff.plan.collapsed.p1", JSON.stringify(["e12", "s41"]));
+  renderTab();
+  fireEvent.keyDown(document.body, { key: "/" });
+  expect(searchBox()).toHaveFocus();
+
+  fireEvent.change(searchBox(), { target: { value: "voice" } });
+  fireEvent.keyDown(searchBox(), { key: "Escape" });
+  expect(searchBox()).toHaveValue("");
+  expect(searchBox()).toHaveFocus();
+  fireEvent.keyDown(searchBox(), { key: "Escape" });
+  expect(treeRow(/Epic #12/)).toHaveFocus();
+
+  fireEvent.change(searchBox(), { target: { value: "#58" } });
+  fireEvent.keyDown(searchBox(), { key: "Enter" });
+  expect(treeRow(/Task #58/)).toHaveFocus();
+
+  // Escape on a row clears the search, keeps focus there, and saves its epic and story open.
+  fireEvent.keyDown(treeRow(/Task #58/), { key: "Escape" });
+  expect(searchBox()).toHaveValue("");
+  expect(treeRow(/Task #58/)).toHaveFocus();
+  expect(collapsedRows()).toEqual([]);
+});

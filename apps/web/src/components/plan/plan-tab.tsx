@@ -1,16 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import Link from "next/link";
+import { SearchXIcon } from "lucide-react";
 import type { PlanColumn, PlanView } from "@/server/plan";
 import type { PlanSignals } from "@/server/plan-signals";
 import type { GitHubActivity } from "@/server/plan-activity";
+import { useOptionalVoice } from "@/components/voice/voice-provider";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { formatAgo } from "@/lib/format";
 import { planPath } from "@/lib/paths";
 import { filterPlan, isFiltered, type NarrowedPlan, type PlanFilters as Filters } from "@/lib/plan/filters";
 import { deriveSpans } from "@/lib/plan/schedule";
+import { searchPlan, type SearchResult } from "@/lib/plan/search";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import type { PlanViewName } from "@/lib/project-tab";
 import type { StartRunContext } from "./plan-actions";
@@ -18,9 +21,14 @@ import { PlanBoard } from "./plan-board";
 import { PlanEmpty } from "./plan-empty";
 import { FilterChips, PlanFilters } from "./plan-filters";
 import { PlanRefresher } from "./plan-refresher";
+import { PlanSearchField, SearchQuery } from "./plan-search";
 import { PlanTimeline } from "./plan-timeline";
 import { PlanToolbar } from "./plan-toolbar";
 import { PlanTree } from "./plan-tree";
+import { useCollapsed } from "./use-collapsed";
+
+/** How long the search waits after the last key before it writes ?q= to the URL. */
+const URL_DELAY = 150;
 
 /** Filters that leave nothing to show, with the way back to the whole plan. */
 function NoMatches({ projectId, view, q }: { projectId: string; view: PlanViewName; q: string }) {
@@ -40,12 +48,33 @@ function NoMatches({ projectId, view, q }: { projectId: string; view: PlanViewNa
   );
 }
 
+/** A search that finds nothing in the view, with the way back. */
+function NoSearchMatch({ q, onClear }: { q: string; onClear: () => void }) {
+  return (
+    <Empty className="rounded-lg border py-10">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <SearchXIcon />
+        </EmptyMedia>
+        <EmptyTitle>No match for &quot;{q}&quot;</EmptyTitle>
+        <EmptyDescription>Search looks at the numbers and titles of epics, stories, tasks and unplanned issues.</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button variant="outline" size="sm" onClick={onClear}>
+          Clear search
+        </Button>
+      </EmptyContent>
+    </Empty>
+  );
+}
+
 type PlanTabProps = {
   project: { id: string; name: string; repoOwner: string; repoName: string };
   plan: PlanView;
   view: PlanViewName;
   /** The timeline's zoom from ?zoom=; undefined lets the timeline pick one. */
   zoom?: Zoom | undefined;
+  /** The filters and the search from the URL. */
   filters: Filters;
   signals: PlanSignals;
   start: StartRunContext;
@@ -56,35 +85,50 @@ type PlanTabProps = {
   me?: string | undefined;
 };
 
-type BodyProps = Omit<PlanTabProps, "activity" | "me" | "filters"> & { filters: Filters; narrowed: NarrowedPlan };
+type BodyProps = Omit<PlanTabProps, "activity" | "me"> & { narrowed: NarrowedPlan; found: SearchResult; onClearSearch: () => void };
 
-/** The chosen view of the plan narrowed by the filters, or what to say when there is nothing to show. */
-function PlanBody({ project, plan, view, zoom, filters, narrowed, signals, start, readAt }: BodyProps) {
+/** The chosen view of the plan narrowed by the filters and the search, or what to say when there is nothing to show. */
+function PlanBody({ project, plan, view, zoom, filters, narrowed, found, signals, start, readAt, onClearSearch }: BodyProps) {
   if (plan.epics.length === 0 && plan.unparented.length === 0 && plan.unplanned.length === 0) {
     return <PlanEmpty reason="empty" project={{ id: project.id, name: project.name, repo: `${project.repoOwner}/${project.repoName}` }} />;
   }
   const shared = { projectId: project.id, repoUrl: `https://github.com/${project.repoOwner}/${project.repoName}`, needsYou: signals.needsYou, skipped: signals.skipped, ...start };
   // The board shows its columns whatever the filters leave; the timeline has no place for unplanned issues.
-  const shown = narrowed.epics.length + narrowed.unparented.length + (view === "timeline" ? 0 : narrowed.unplanned.length);
-  if (view !== "board" && shown === 0 && isFiltered(filters)) return <NoMatches projectId={project.id} view={view} q={filters.q} />;
+  const count = (p: Pick<NarrowedPlan, "epics" | "unparented" | "unplanned">) => p.epics.length + p.unparented.length + (view === "timeline" ? 0 : p.unplanned.length);
+  if (view !== "board" && count(narrowed) === 0 && isFiltered(filters)) return <NoMatches projectId={project.id} view={view} q={filters.q} />;
+  if (found.active && (view === "board" ? found.matches.board : count(found)) === 0) return <NoSearchMatch q={filters.q.trim()} onClear={onClearSearch} />;
+  const shown = found.active ? found : narrowed;
   switch (view) {
     case "board":
-      return <PlanBoard {...shared} project={plan.project} board={narrowed.board} epics={plan.epics} now={readAt} />;
+      return <PlanBoard {...shared} project={plan.project} board={shown.board} epics={plan.epics} now={readAt} searching={found.active} />;
     case "timeline":
       return (
         <PlanTimeline
           {...shared}
           project={plan.project}
-          epics={narrowed.epics}
-          unparented={narrowed.unparented}
+          epics={shown.epics}
+          unparented={shown.unparented}
           timeline={plan.timeline ?? deriveSpans([], [], new Date(readAt))}
           zoom={zoom}
           filters={filters}
           readAt={readAt}
         />
       );
-    default:
-      return <PlanTree {...shared} epics={narrowed.epics} unparented={narrowed.unparented} unplanned={narrowed.unplanned} hidden={narrowed.hidden} />;
+    default: {
+      const filtered = Object.keys(narrowed.hidden).length > 0;
+      const hidden = found.active ? Object.fromEntries(found.epics.map((e) => [e.number, (narrowed.hidden[e.number] ?? 0) + (found.hidden[e.number] ?? 0)])) : narrowed.hidden;
+      return (
+        <PlanTree
+          {...shared}
+          epics={shown.epics}
+          unparented={shown.unparented}
+          unplanned={shown.unplanned}
+          hidden={hidden}
+          hiddenBy={found.active ? (filtered ? "filters and search" : "search") : "filters"}
+          searchOpen={found.active ? found.open : undefined}
+        />
+      );
+    }
   }
 }
 
@@ -94,31 +138,86 @@ function peopleOf(plan: PlanView, me: string | undefined): string[] {
   return [...logins].filter((l) => l.toLowerCase() !== me?.toLowerCase()).toSorted((a, b) => a.localeCompare(b));
 }
 
+/** The search text, with ?q= written to the URL a moment after the last key so a link or a refresh keeps it. */
+function useSearchText(initial: string, url: (q: string) => string) {
+  const [text, setText] = useState(initial);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const change = (next: string) => {
+    setText(next);
+    clearTimeout(timer.current);
+    // The native history API keeps the page as it is: the search narrows what is loaded and reads nothing new.
+    timer.current = setTimeout(() => window.history.replaceState(null, "", url(next.trim())), URL_DELAY);
+  };
+  return [text, change] as const;
+}
+
+/** The first element to focus in the plan: the first match, or the row or card the plan would focus first. */
+function firstIn(body: HTMLElement | null, match: boolean): HTMLElement | null {
+  if (!body) return null;
+  const tree = match ? body.querySelector<HTMLElement>("[role=tree] [role=treeitem][data-match]") : body.querySelector<HTMLElement>('[role=tree] [role=treeitem][tabindex="0"]');
+  return tree ?? body.querySelector<HTMLElement>(match ? "[data-match] a[data-title], a[data-title]" : "a[data-title]");
+}
+
 /**
  * The Plan page under its header: the toolbar with the view, the search and the filters, the tree, the
  * board or the timeline narrowed by them, and at the bottom the latest change GitHub reported with the
- * refresh line.
+ * refresh line. The search narrows the plan as it is loaded; it reads nothing from GitHub.
  */
 export function PlanTab({ activity, me, ...props }: PlanTabProps) {
-  const { project, plan, view, filters, readAt, signals } = props;
+  const { project, plan, view, zoom, filters, readAt, signals } = props;
+  const voice = useOptionalVoice();
+  const collapsed = useCollapsed(project.id);
+  const body = useRef<HTMLDivElement>(null);
+  const [query, setQuery] = useSearchText(filters.q, (q) => planPath(project.id, { view, ...filters, q, zoom }));
   const counts = Object.fromEntries(Object.entries(plan.board).map(([c, tasks]) => [c, tasks.length])) as Record<PlanColumn, number>;
   const narrowed = useMemo(() => filterPlan(plan, filters, signals.needsYou, me), [plan, filters, signals.needsYou, me]);
+  const found = useMemo(() => searchPlan(narrowed, query), [narrowed, query]);
   const people = useMemo(() => peopleOf(plan, me), [plan, me]);
+  const current = { ...filters, q: query.trim() };
+
+  // Voice owns Escape while it speaks or listens; the search keeps its text then.
+  const voiceBusy = !!voice && (voice.speech.speaking || voice.state === "listening" || voice.state === "starting" || voice.bubble.open);
+  /** Escape on a row or a card during a search: clears it and keeps that item in view, its epic and story saved open. */
+  const onBodyKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Escape" || !found.active || voiceBusy || e.defaultPrevented) return;
+    const keys: string[] = [];
+    for (let row = (e.target as HTMLElement).closest<HTMLElement>("[role=treeitem]"); row; row = row.parentElement?.closest<HTMLElement>("[role=treeitem]") ?? null) {
+      if (row.dataset.key && /^(e|s)\d+$|^unparented$|^unplanned$/.test(row.dataset.key)) keys.push(row.dataset.key);
+    }
+    if (keys.length) collapsed.expand(keys);
+    setQuery("");
+  };
 
   return (
-    <div className="flex flex-col gap-3">
-      <PlanToolbar
-        projectId={project.id}
-        view={view}
-        filters={filters}
-        filterButtons={<PlanFilters projectId={project.id} view={view} filters={filters} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
-      />
-      <FilterChips projectId={project.id} view={view} filters={filters} epics={plan.epics} />
-      <PlanBody {...props} narrowed={narrowed} />
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>{activity && `Last from GitHub: ${activity.summary}, ${formatAgo(activity.receivedAt, new Date(readAt))}`}</span>
-        <PlanRefresher readAt={readAt} />
+    <SearchQuery value={found.active ? query.trim() : ""}>
+      <div className="flex flex-col gap-3">
+        <PlanToolbar
+          projectId={project.id}
+          view={view}
+          filters={current}
+          search={
+            <PlanSearchField
+              value={query}
+              onChange={setQuery}
+              count={found.matches[view]}
+              hint={view !== "timeline"}
+              onLeave={() => firstIn(body.current, false)?.focus()}
+              onFirstMatch={() => firstIn(body.current, true)?.focus()}
+              className="max-w-90 min-w-36 flex-1 basis-40"
+            />
+          }
+          filterButtons={<PlanFilters projectId={project.id} view={view} filters={current} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
+        />
+        <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} />
+        <div ref={body} onKeyDown={onBodyKeyDown}>
+          <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>{activity && `Last from GitHub: ${activity.summary}, ${formatAgo(activity.receivedAt, new Date(readAt))}`}</span>
+          <PlanRefresher readAt={readAt} />
+        </div>
       </div>
-    </div>
+    </SearchQuery>
   );
 }
