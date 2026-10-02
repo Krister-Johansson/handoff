@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import type { Overview } from "@/server/overview";
 import { ProjectOverview } from "./project-overview";
-import { EMPTY_INBOX, minutesAgo, NOW, QUIET, run } from "./testing/overview-fixtures";
+import { EMPTY_INBOX, minutesAgo, NOW, progress, QUIET, run, task } from "./testing/overview-fixtures";
 
 vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), repairAction: vi.fn(), cancelAction: vi.fn(), resolveLoopAction: vi.fn(), answerPermissionAction: vi.fn() }));
 vi.mock("@/app/projects/actions", () => ({ requestMergeAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), listGitHubProjectsAction: vi.fn(), setupPlanAction: vi.fn() }));
@@ -141,6 +141,48 @@ test("with no run finished in the last day, the section says so in one line", ()
   expect(within(finished).getByRole("heading", { level: 2 })).toHaveTextContent(/^Finished in the last day$/);
   expect(within(finished).getByText("No run finished in the last day")).toBeInTheDocument();
   expect(within(finished).getByText("Runs that end show here for a day after they finish.")).toBeInTheDocument();
+});
+
+test("Features in progress shows each epic's progress and counts by status, and only its tasks running or in review", () => {
+  if (QUIET.work.kind !== "plan") throw new Error("expected the plan");
+  show({
+    ...QUIET,
+    work: {
+      ...QUIET.work,
+      features: [
+        {
+          number: 12,
+          title: "Project management",
+          url: "https://github.com/Krister-Johansson/handoff/issues/12",
+          progress: progress({ Done: 3, "In review": 1, Running: 2, Ready: 1, Shaping: 1 }),
+          tasks: [
+            { ...task(54, "Status writes from runs", { status: "In review", prNumbers: [88] }), needsYou: false },
+            { ...task(55, "Shaping tools in the catalog", { status: "Running", run: { id: "r55", status: "running", prNumber: null } }), needsYou: false },
+            { ...task(56, "Approval card summaries for shaping", { status: "Running", run: { id: "r56", status: "waiting", prNumber: null } }), needsYou: true },
+          ],
+        },
+      ],
+    },
+  });
+  const features = section("Features in progress");
+  expect(within(features).getByRole("heading", { level: 2 })).toHaveTextContent("Features in progress1");
+  expect(within(features).getByRole("link", { name: "Open the plan" })).toHaveAttribute("href", "/projects/p1/plan");
+  const epic = within(features).getByRole("listitem", { name: /Project management/ });
+  expect(within(epic).getByRole("link", { name: "Project management" })).toHaveAttribute("href", "https://github.com/Krister-Johansson/handoff/issues/12");
+  expect(epic).toHaveTextContent("3 of 8 done");
+  expect(within(epic).getByRole("img", { name: "3 Done, 1 In review, 2 Running, 1 Ready, 1 Shaping" })).toBeInTheDocument();
+  const rows = within(epic).getAllByRole("listitem");
+  expect(rows.map((r) => within(r).getByRole("link", { name: /^#\d+/ }).textContent)).toEqual(["#54 Status writes from runs", "#55 Shaping tools in the catalog", "#56 Approval card summaries for shaping"]);
+  expect(within(rows[0]!).getByRole("link", { name: "PR #88" })).toBeInTheDocument();
+  expect(within(rows[1]!).getByRole("link", { name: "running" })).toHaveAttribute("href", "/projects/p1/runs/r55");
+  expect(within(rows[2]!).getByRole("link", { name: "Needs you" })).toHaveAttribute("href", "#needs-you");
+});
+
+test("with no epic moving, Features in progress says so in one line", () => {
+  show(QUIET);
+  const features = section("Features in progress");
+  expect(within(features).getByRole("heading", { level: 2 })).toHaveTextContent(/^Features in progress$/);
+  expect(within(features).getByText("No feature in progress")).toBeInTheDocument();
 });
 
 test("with nothing waiting, Needs you keeps its heading without a count and says so in one line", () => {
