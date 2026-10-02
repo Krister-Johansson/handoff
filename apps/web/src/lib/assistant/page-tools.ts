@@ -6,6 +6,9 @@ import type { ToolSpec } from "./catalog";
 export const PAGE_KINDS = ["run", "try", "code_review", "plan_review", "graph_editor", "inbox"] as const;
 export type PageKind = (typeof PAGE_KINDS)[number];
 
+/** Whether a tool name belongs to a page: every page tool, and no catalog tool, starts with page_. */
+export const isPageToolName = (name: string) => name.startsWith("page_");
+
 /**
  * A tool of the open page: it runs in the browser, against what the page holds now (its view, its
  * drafts), through the handler the page binds with usePageTools. Names start with page_.

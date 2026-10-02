@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { toolSpec } from "@/lib/assistant/catalog";
-import type { OpenPage } from "@/lib/assistant/run-page-tool";
+import { isPageToolName } from "@/lib/assistant/page-tools";
+import { runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
 import { runUiTool } from "@/lib/assistant/run-ui-tool";
 import { registerWebMcp } from "@/lib/assistant/webmcp";
 import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
@@ -236,9 +237,12 @@ export function AssistantProvider({
             for (const listener of requestListeners.current) listener(request);
           }
           if (event.type === "ui_call") {
-            // UI tools run here, in the page, while the conversation stays on screen.
+            // UI tools run here, in the page, while the conversation stays on screen; page tools run in the page that is open now.
             const turn = turnId.current;
-            void runUiTool(event, { push: (href) => router.push(href), page: openPage }).then(async (outcome) => {
+            const running: Promise<{ text: string; isError: boolean; note?: string }> = isPageToolName(event.name)
+              ? runPageTool(openPage(), event)
+              : runUiTool(event, { push: (href) => router.push(href), page: openPage });
+            void running.then(async (outcome) => {
               if (outcome.note) {
                 const note = { id: event.requestId, text: outcome.note };
                 setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? { ...m, notes: [...(m.notes ?? []), note] } : m)));

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import type { AssistantPort, PendingRequest } from "@/lib/assistant/port";
 import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
@@ -114,6 +114,19 @@ test("usePageTools registers a page's tools while the component is mounted and r
   leavePage();
   const elsewhere = await whereAmI(transport, "w2");
   expect(elsewhere.page).toBeUndefined();
+});
+
+test("a ui_call for a page tool runs in the page and its answer goes back to the turn", async () => {
+  const { transport, port, leavePage } = setupWithPage();
+  await startTurn(transport, port);
+  act(() => transport.emit({ type: "ui_call", requestId: "u1", name: "page_show_view", args: { view: "graph" } }));
+  await waitFor(() => expect(screen.getByText("Showing graph")).toBeInTheDocument());
+  await waitFor(() => expect(transport.uiReplies).toEqual([{ turnId: "t1", requestId: "u1", text: "Showing the graph view.", isError: false }]));
+
+  leavePage();
+  act(() => transport.emit({ type: "ui_call", requestId: "u2", name: "page_show_view", args: { view: "events" } }));
+  await waitFor(() => expect(transport.uiReplies).toHaveLength(2));
+  expect(transport.uiReplies[1]).toMatchObject({ requestId: "u2", isError: true, text: expect.stringMatching(/^The page changed: .*\(a page without tools\)\. page_show_view is not available here\./) });
 });
 
 test("onRequest delivers approval requests and respond answers them", async () => {
