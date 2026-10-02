@@ -176,6 +176,39 @@ function findFile(files: DiffFile[], which: { path?: string | undefined; index?:
   return which.index - 1;
 }
 
+/** The line numbers a file shows on one side, as runs of consecutive lines. */
+function runsOn(file: DiffFile, side: Side) {
+  const numbers = [...new Set(file.hunks.flatMap((h) => h.lines.flatMap((l) => numberOn(l, side) ?? [])))].sort((a, b) => a - b);
+  const runs: [number, number][] = [];
+  for (const n of numbers) {
+    const last = runs.at(-1);
+    if (last && n === last[1] + 1) last[1] = n;
+    else runs.push([n, n]);
+  }
+  return runs;
+}
+
+const runsText = (runs: [number, number][]) => runs.map(([a, b]) => (a === b ? `${a}` : `${a} to ${b}`)).join(", ");
+
+/**
+ * The lines a page tool comments on, checked against what the file shows on that side; throws a
+ * refusal that names the lines there are.
+ */
+function checkLines(file: DiffFile, side: Side, line: number, endLine: number) {
+  const runs = runsOn(file, side);
+  if (!runs.length) throw new Error(`${file.path} has no ${side} lines to comment on.`);
+  if (endLine < line) throw new Error(`endLine ${endLine} comes before line ${line}.`);
+  const missing = [line, endLine].find((n) => !runs.some(([a, b]) => n >= a && n <= b));
+  if (missing === undefined) return;
+  const range = runs.length === 1 ? `run from ${runs[0]![0]} to ${runs[0]![1]}` : `shown are ${runsText(runs)}`;
+  throw new Error(`${file.path} has no ${side} line ${missing}. Its ${side} lines ${range}.`);
+}
+
+/** How a tool's answer names the lines of a comment. */
+const linesText = (side: Side, line: number, endLine: number | undefined) =>
+  `${side === "old" ? "old " : ""}${endLine !== undefined && endLine !== line ? `lines ${line} to ${endLine}` : `line ${line}`}`;
+const commentCount = (n: number) => `${n} ${n === 1 ? "comment" : "comments"} drafted`;
+
 /** Which files count as viewed: the saved marks, overridden by what the person clicks on this page. */
 function useViewed(runId: string, files: DiffFile[], views: View[], earlier: EarlierRound[], enabled: boolean) {
   const initial = useMemo(() => {
@@ -257,12 +290,21 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
       },
       page_expand_files: undefined,
       page_mark_viewed: undefined,
-      page_comment_on_lines: undefined,
+      page_comment_on_lines: readOnly
+        ? undefined
+        : ({ path, line, endLine, side = "new", body }) => {
+            const file = files[findFile(files, { path })]!;
+            checkLines(file, side, line, endLine ?? line);
+            const comment: LineComment = { path, side, line, ...(endLine !== undefined && endLine !== line ? { endLine } : {}), quote: quoteOf(file, side, line, endLine ?? line), body };
+            draft.setComments((list) => [...list, comment]);
+            setOpen(path, true);
+            return `Drafted a comment on ${linesText(side, line, comment.endLine)} of ${path}. ${commentCount(comments.length + 1)}.`;
+          },
       page_remove_line_comment: undefined,
       page_set_note: undefined,
       page_submit_review: undefined,
     },
-    () => ({ questionId, runId, from, current: files.length ? current + 1 : null, mode, layout }),
+    () => ({ questionId, runId, from, current: files.length ? current + 1 : null, mode, layout, comments }),
   );
 
   return (

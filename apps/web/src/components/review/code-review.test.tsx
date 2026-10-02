@@ -412,3 +412,30 @@ test("page_set_diff_view switches mode and layout", async () => {
   expect(screen.getByRole("radio", { name: "Unified" })).toBeChecked();
   expect((await whereAmI()).page?.state.data).toMatchObject({ mode: "changes", layout: "unified" });
 });
+
+test("page_comment_on_lines adds a draft comment with the quoted code, and a line outside the file is refused with its range", async () => {
+  const { call, whereAmI } = await withAssistant();
+  expect(await call("page_comment_on_lines", { path: "src/a.ts", line: 9, endLine: 11, body: "Explain this." })).toEqual({
+    text: "Drafted a comment on lines 9 to 11 of src/a.ts. 1 comment drafted.",
+    isError: false,
+  });
+  expect(within(fileA()).getByText("Explain this.")).toBeInTheDocument();
+  expect(screen.getByText("1 comment drafted")).toBeInTheDocument();
+  expect(await call("page_comment_on_lines", { path: "src/a.ts", line: 10, side: "old", body: "Why remove it?" })).toEqual({
+    text: "Drafted a comment on old line 10 of src/a.ts. 2 comments drafted.",
+    isError: false,
+  });
+  expect((await whereAmI()).page?.state.data).toMatchObject({
+    comments: [
+      { path: "src/a.ts", side: "new", line: 9, endLine: 11, quote: "line 9\nnew 10\nline 11", body: "Explain this." },
+      { path: "src/a.ts", side: "old", line: 10, quote: "old 10", body: "Why remove it?" },
+    ],
+  });
+
+  expect(await call("page_comment_on_lines", { path: "src/a.ts", line: 25, body: "Here?" })).toEqual({ text: "src/a.ts has no new line 25. Its new lines run from 1 to 20.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "src/b.ts", line: 1, endLine: 3, body: "Here?" })).toEqual({ text: "src/b.ts has no new line 3. Its new lines run from 1 to 2.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "src/b.ts", line: 1, side: "old", body: "Here?" })).toEqual({ text: "src/b.ts has no old lines to comment on.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "pnpm-lock.yaml", line: 1, body: "Here?" })).toEqual({ text: "pnpm-lock.yaml has no new lines to comment on.", isError: true });
+  expect(await call("page_comment_on_lines", { path: "src/c.ts", line: 1, body: "Here?" })).toMatchObject({ text: expect.stringContaining("src/c.ts is not in this review."), isError: true });
+  expect(screen.getByText("2 comments drafted")).toBeInTheDocument();
+});
