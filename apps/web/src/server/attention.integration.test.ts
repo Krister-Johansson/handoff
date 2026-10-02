@@ -36,11 +36,28 @@ test("questions, failed runs and pull requests waiting for review each become on
   expect(items).toHaveLength(3);
   expect(items).toEqual(
     expect.arrayContaining([
-      { id: `question:${question!.id}`, kind: "question", title: "sandbox: gate asks a question", body: "Which license?", href: `/projects/${project.id}/runs/${asking.id}` },
-      { id: `failed:${coder.id}`, kind: "failed", title: "sandbox: run failed at coder", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${failed.id}` },
-      { id: `review:${pr.id}:7`, kind: "review", title: "sandbox: PR #7 waits for your review", body: "Add usage docs", href: `/projects/${project.id}/runs/${review.id}` },
+      { id: `question:${question!.id}`, kind: "question", title: "sandbox: gate asks a question", body: "Which license?", href: `/projects/${project.id}/runs/${asking.id}`, projectId: project.id },
+      { id: `failed:${coder.id}`, kind: "failed", title: "sandbox: run failed at coder", body: "Add a CHANGELOG.md", href: `/projects/${project.id}/runs/${failed.id}`, projectId: project.id },
+      { id: `review:${pr.id}:7`, kind: "review", title: "sandbox: PR #7 waits for your review", body: "Add usage docs", href: `/projects/${project.id}/runs/${review.id}`, projectId: project.id },
     ]),
   );
+});
+
+test("each item carries its project, and a project id narrows the list to that project's items", async () => {
+  const ours = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  const theirs = await createProject(db, { name: "elsewhere", repo: "octo/other", defaultBranch: "main" });
+  const failedIn = async (projectId: string, task: string) => {
+    await saveGraphVersion(db, { projectId, name: "g", document: linear });
+    const run = await startRunFromGraph(db, { projectId, graphName: "g", task });
+    const coder = await seedExecution(db, run.id, { nodeKey: "coder", status: "failed" });
+    await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+    return coder;
+  };
+  const mine = await failedIn(ours.id, "Add a CHANGELOG.md");
+  await failedIn(theirs.id, "Rename the package");
+
+  expect((await listAttention(db)).map((i) => i.projectId).sort()).toEqual([ours.id, theirs.id].sort());
+  expect(await listAttention(db, { projectId: ours.id })).toEqual([expect.objectContaining({ id: `failed:${mine.id}`, projectId: ours.id, body: "Add a CHANGELOG.md" })]);
 });
 
 test("a question is told by its summary, or cut short when it has none", async () => {
@@ -70,7 +87,7 @@ test("a review at a human gate says what needs approval and links to the review 
     .returning();
   await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
   expect(await listAttention(db)).toEqual([
-    { id: `question:${question!.id}`, kind: "question", title: "sandbox: the plan from planner needs your approval", body: "Build a todo app", href: `/projects/${project.id}/runs/${run.id}/review/${question!.id}` },
+    { id: `question:${question!.id}`, kind: "question", title: "sandbox: the plan from planner needs your approval", body: "Build a todo app", href: `/projects/${project.id}/runs/${run.id}/review/${question!.id}`, projectId: project.id },
   ]);
 });
 
@@ -86,5 +103,5 @@ test("a run that reached a Finish node with notify on is listed as finished for 
   await db.execute(sql`update events set created_at = now() - interval '2 days' where run_id = ${old.id}`);
   for (const run of [done, quiet, old]) await db.update(runs).set({ status: "succeeded" }).where(eq(runs.id, run.id));
 
-  expect(await listAttention(db)).toEqual([{ id: `finished:${done.id}`, kind: "finished", title: "sandbox: run finished", body: "Add a truncate helper", href: `/projects/${project.id}/runs/${done.id}` }]);
+  expect(await listAttention(db)).toEqual([{ id: `finished:${done.id}`, kind: "finished", title: "sandbox: run finished", body: "Add a truncate helper", href: `/projects/${project.id}/runs/${done.id}`, projectId: project.id }]);
 });

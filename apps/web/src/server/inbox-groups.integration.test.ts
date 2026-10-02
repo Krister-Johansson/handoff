@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, nodeExecutions, questions, runs } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, permissionRequests, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
 import { inboxGroups } from "./inbox-groups";
@@ -101,4 +101,31 @@ test("the first pull request in each project's merge queue, waiting for a person
 
   await db.update(runs).set({ mergeRequestedAt: new Date() }).where(eq(runs.id, first.id));
   expect((await inboxGroups(db)).readyToMerge).toEqual([]);
+});
+
+test("narrowed to a project, the inbox holds only that project's items, permission requests included", async () => {
+  const { project, start } = await setUp();
+  const other = await createProject(db, { name: "elsewhere", repo: "octo/other", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: other.id, name: "g", document: linear });
+
+  const ours = await start("Pick a license");
+  const ask = await seedExecution(db, ours.id, { nodeKey: "ask", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId: ours.id, nodeExecutionId: ask.id, question: "Which license?", context: { reason: "needs_input" } });
+  const coder = await seedExecution(db, ours.id, { nodeKey: "coder", status: "running" });
+  await db.insert(permissionRequests).values({ id: crypto.randomUUID(), runId: ours.id, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "pnpm test" } });
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, ours.id));
+
+  const theirs = await startRunFromGraph(db, { projectId: other.id, graphName: "g", task: "Pick a name" });
+  const theirAsk = await seedExecution(db, theirs.id, { nodeKey: "ask", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+  await db.insert(questions).values({ runId: theirs.id, nodeExecutionId: theirAsk.id, question: "Which name?", context: { reason: "needs_input" } });
+  const broken = await startRunFromGraph(db, { projectId: other.id, graphName: "g", task: "Broken" });
+  await seedExecution(db, broken.id, { nodeKey: "coder", status: "failed" });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, broken.id));
+
+  const groups = await inboxGroups(db, { projectId: project.id });
+  expect(groups.questions.map((q) => q.question)).toEqual(["Which license?"]);
+  expect(groups.permissions.map((p) => [p.runId, p.toolName])).toEqual([[ours.id, "Bash"]]);
+  expect(groups.failedRuns).toEqual([]);
+  expect(groups.count).toBe(2);
+  expect((await inboxGroups(db)).count).toBe(4);
 });
