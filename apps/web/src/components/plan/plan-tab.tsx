@@ -6,6 +6,7 @@ import { SearchXIcon } from "lucide-react";
 import type { PlanColumn, PlanView } from "@/server/plan";
 import type { PlanSignals } from "@/server/plan-signals";
 import type { GitHubActivity } from "@/server/plan-activity";
+import { IssuePages } from "@/components/issues/issue-pages";
 import { useOptionalVoice } from "@/components/voice/voice-provider";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
@@ -249,7 +250,9 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
           />
           <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} />
           <div ref={body} onKeyDown={onBodyKeyDown}>
-            <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} timeline={timeline} todayRef={todayRef} />
+            <IssuePages projectId={project.id}>
+              <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} timeline={timeline} todayRef={todayRef} />
+            </IssuePages>
 
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">

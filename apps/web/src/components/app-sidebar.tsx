@@ -20,6 +20,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { ProjectSwitcher, type SidebarProject } from "@/components/project-switcher";
+import { useProjectSection } from "@/components/sidebar-section";
 import { WorkerStatusView } from "@/components/worker-status-view";
 import { lastProject, rememberProject } from "@/lib/last-project";
 import { projectAt, projectPath } from "@/lib/paths";
@@ -100,6 +101,7 @@ export function AppSidebar({
 }) {
   const pathname = usePathname() ?? "/";
   const at = projectAt(pathname);
+  const section = useProjectSection(pathname);
   const { state, isMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
   // The layout read the cookie once; projects opened since then in this tab count as well.
@@ -113,7 +115,7 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <ProjectSwitcher projects={projects} project={project} section={at?.section} />
+        <ProjectSwitcher projects={projects} project={project} section={section} />
       </SidebarHeader>
       <SidebarContent>
         {project && (
@@ -122,7 +124,7 @@ export function AppSidebar({
             <nav aria-label="Project">
               <SidebarMenu className="gap-0.5">
                 {PROJECT_ITEMS.map((item) => (
-                  <NavItem key={item.label} href={projectPath(project.id, item.section)} label={item.label} icon={item.icon} current={at?.projectId === project.id && at.section === item.section}>
+                  <NavItem key={item.label} href={projectPath(project.id, item.section)} label={item.label} icon={item.icon} current={at?.projectId === project.id && section === item.section}>
                     {item.section === "runs" && project.activeRuns > 0 && <SidebarMenuBadge className="text-muted-foreground">{project.activeRuns}</SidebarMenuBadge>}
                   </NavItem>
                 ))}

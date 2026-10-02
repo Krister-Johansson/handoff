@@ -1,5 +1,6 @@
-import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNull, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { GitHubReadError, type GitHubPort, type IssueComment, type IssueDetail, type IssueRef, type PlanProject, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
+import type { StoryChoice } from "../components/plan/plan-actions";
 import { reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
 import { waitingRuns } from "./overview";
@@ -30,6 +31,8 @@ export type IssueRun = {
   needsYou: boolean;
   /** The oldest open review or question, which the row offers to open. */
   waitingOn: RunWait | null;
+  /** The login this run's start assigned to the issue, when it had no assignee then. */
+  assigned: string | null;
 };
 
 /** Where the page sits in the sidebar: Plan for an item of the plan, Issues for any other issue. */
@@ -40,7 +43,14 @@ export type IssueKind = "task" | "story" | "epic" | "issue";
 export type IssueLink = IssueRef & { status: PlanStatus | undefined };
 
 /** Where an issue outside the plan stands: why, when the project's plan cannot be read or there is none. */
-export type Unplanned = { planned: false; reason: PlanUnavailable["reason"] | undefined; error: string | undefined; project: PlanProject | undefined };
+export type Unplanned = {
+  planned: false;
+  reason: PlanUnavailable["reason"] | undefined;
+  error: string | undefined;
+  project: PlanProject | undefined;
+  /** The plan's stories, which Plan it offers to put the issue under. */
+  stories: StoryChoice[];
+};
 
 /** A story or an epic a plan item is part of, with its progress over all its tasks. */
 export type PlanParent = { kind: "story" | "epic"; number: number; title: string; url: string; progress: PlanProgress };
@@ -147,8 +157,8 @@ export async function loadIssuePage(
   ]);
   const place: IssuePlace =
     "reason" in planned
-      ? { planned: false, reason: planned.reason, error: planned.error, project: undefined }
-      : (placeIn(planned, number, { waiting, order }) ?? { planned: false, reason: undefined, error: undefined, project: planned.project });
+      ? { planned: false, reason: planned.reason, error: planned.error, project: undefined, stories: [] }
+      : (placeIn(planned, number, { waiting, order }) ?? { planned: false, reason: undefined, error: undefined, project: planned.project, stories: storiesOf(planned) });
   const statusOf = new Map("reason" in planned ? [] : planItems(planned).map((i) => [i.number, i.status] as const));
   const link = (ref: IssueRef): IssueLink => ({ ...ref, status: statusOf.get(ref.number) });
   const pulls = await Promise.all(pullNumbers(place, opts.runs ?? (await issueRuns(db, projectId, number))).slice(0, MAX_PULLS).map((n) => pullOf(github, repo, n)));
@@ -212,6 +222,10 @@ function pullNumbers(place: IssuePlace, runsOf: IssueRun[]): number[] {
         : [...place.item.stories.flatMap((s) => s.tasks), ...place.item.tasks].flatMap(ofTask);
   return [...new Set(numbers)];
 }
+
+/** The plan's open stories with their epics' titles, for Plan it's picker. */
+const storiesOf = (view: PlanView): StoryChoice[] =>
+  view.epics.flatMap((epic) => epic.stories.filter((s) => s.state === "open").map((s) => ({ number: s.number, title: s.title, epic: epic.title })));
 
 /** Every item of a plan once: epics, their stories, and every task. */
 function planItems(view: PlanView): (PlanEpic | PlanStory | PlanTask)[] {
@@ -303,7 +317,7 @@ export async function issueRuns(db: Db, projectId: string, number: number): Prom
     .orderBy(desc(runs.createdAt));
   if (rows.length === 0) return [];
   const ids = rows.map((r) => r.id);
-  const [lines, open, groups] = await Promise.all([
+  const [lines, open, groups, assignedBy] = await Promise.all([
     runLines(db, ids),
     db
       .select({ id: questions.id, runId: questions.runId, question: questions.question, context: questions.context })
@@ -311,7 +325,12 @@ export async function issueRuns(db: Db, projectId: string, number: number): Prom
       .where(and(inArray(questions.runId, ids), isNull(questions.answer)))
       .orderBy(asc(questions.createdAt)),
     inboxGroups(db, { projectId }),
+    db
+      .select({ runId: events.runId, payload: events.payload })
+      .from(events)
+      .where(and(inArray(events.runId, ids), eq(events.type, "issue.assigned"))),
   ]);
+  const assignedIn = new Map(assignedBy.flatMap((e) => ((e.payload as { issue?: number }).issue === number ? [[e.runId, String((e.payload as { login?: string }).login)] as const] : [])));
   const waiting = waitingRuns({ ...groups, failedRuns: groups.failedRuns.map((f) => ({ ...f, error: f.error ?? null })) });
   return rows.flatMap(({ issues, ...run }) => {
     const line = lines.get(run.id);
@@ -324,6 +343,6 @@ export async function issueRuns(db: Db, projectId: string, number: number): Prom
         : { kind: "question", text: asked.question, href: context.reason === "try" ? tryPath(projectId, run.id, asked.id) : runPath(projectId, run.id) }
       : null;
     const issueTitle = issues.find((i) => i.number === number)?.title ?? "";
-    return [{ ...run, issueTitle, line, needsYou: waiting.has(run.id), waitingOn }];
+    return [{ ...run, issueTitle, line, needsYou: waiting.has(run.id), waitingOn, assigned: assignedIn.get(run.id) ?? null }];
   });
 }

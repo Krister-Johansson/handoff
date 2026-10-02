@@ -3,6 +3,7 @@ import { CircleDotIcon, ListTodoIcon } from "lucide-react";
 import { StartRunDialog } from "@/components/projects/forms";
 import { BlockedChip } from "@/components/plan/plan-task-parts";
 import { StatusPill } from "@/components/plan/plan-status";
+import { issuePath } from "@/lib/paths";
 import type { ReadyTask } from "@/server/overview";
 import type { OverviewStart } from "./project-overview";
 import { OverviewEmpty, OverviewList, OverviewSection } from "./overview-section";
@@ -48,9 +49,9 @@ export function ReadyToStart({ ready, unplannedToDo, projectId, repoUrl, start }
             <li key={task.number} aria-labelledby={`ready-${task.number}`} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2.5">
               <StatusPill column="Ready" />
               <div className="flex min-w-0 flex-1 flex-col">
-                <a id={`ready-${task.number}`} href={task.url} className="truncate text-[13px] font-medium hover:underline hover:underline-offset-3" title={task.title}>
+                <Link id={`ready-${task.number}`} href={issuePath(projectId, task.number)} className="truncate text-[13px] font-medium hover:underline hover:underline-offset-3" title={task.title}>
                   <span className="font-mono text-xs font-normal text-muted-foreground">#{task.number}</span> {task.title}
-                </a>
+                </Link>
                 {task.epic && <span className="truncate text-xs text-muted-foreground">{task.epic}</span>}
               </div>
               <span className="ml-auto shrink-0">

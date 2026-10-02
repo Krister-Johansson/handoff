@@ -2,7 +2,7 @@ import Link from "next/link";
 import { GitPullRequestIcon, LayersIcon } from "lucide-react";
 import { KindBadge, StatusPill } from "@/components/plan/plan-status";
 import { StatusBadge } from "@/components/runs/status-badge";
-import { runPath } from "@/lib/paths";
+import { issuePath, runPath } from "@/lib/paths";
 import { COLUMN_TONE, hasActiveRun, prNumberOf } from "@/lib/plan/task";
 import { cn } from "@/lib/utils";
 import type { OverviewFeature, OverviewTask } from "@/server/overview";
@@ -62,9 +62,9 @@ function Feature({ feature, projectId, repoUrl }: { feature: OverviewFeature; pr
         <div className="flex min-w-0 items-center gap-2">
           <KindBadge kind="epic" />
           <span className="font-mono text-xs text-muted-foreground">#{feature.number}</span>
-          <a id={titleId} href={feature.url} className="min-w-0 truncate text-sm font-semibold hover:underline hover:underline-offset-3">
+          <Link id={titleId} href={issuePath(projectId, feature.number)} className="min-w-0 truncate text-sm font-semibold hover:underline hover:underline-offset-3">
             {feature.title}
-          </a>
+          </Link>
           <span className="ml-auto shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
             {feature.progress.done} of {feature.progress.total} done
           </span>
@@ -75,9 +75,9 @@ function Feature({ feature, projectId, repoUrl }: { feature: OverviewFeature; pr
         {feature.tasks.map((task) => (
           <li key={task.number} className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5 px-4 py-2">
             <StatusPill column={task.status ?? "Other"} spinning={task.status === "Running" && hasActiveRun(task) && !task.needsYou} />
-            <a href={task.url} className="min-w-0 flex-1 truncate text-[13px] hover:underline hover:underline-offset-3" title={task.title}>
+            <Link href={issuePath(projectId, task.number)} className="min-w-0 flex-1 truncate text-[13px] hover:underline hover:underline-offset-3" title={task.title}>
               <span className="font-mono text-xs text-muted-foreground">#{task.number}</span> {task.title}
-            </a>
+            </Link>
             <span className="ml-auto shrink-0">
               <TaskEnd task={task} projectId={projectId} repoUrl={repoUrl} />
             </span>

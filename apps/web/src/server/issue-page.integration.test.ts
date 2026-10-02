@@ -54,6 +54,8 @@ test("issueRuns lists every run on the issue newest first, with its graph, branc
     ["coder", "waiting"],
   ]);
   expect(listed[1]).toMatchObject({ status: "cancelled", needsYou: false, waitingOn: null });
+  // The first start found #16 with nobody assigned and assigned the token's user; the second found it assigned.
+  expect(listed.map((r) => r.assigned)).toEqual([null, "octocat"]);
 });
 
 test("an issue outside the plan reads with its facts, blockers, the issues it blocks, its comments and the token's user, under Issues", async () => {
@@ -191,6 +193,18 @@ test("the pull requests of an issue come from its runs and GitHub's links, each 
   const storyPage = await loadIssuePage(db, github, plan, p.id, story);
   if (storyPage.state !== "found") throw new Error(storyPage.state);
   expect(storyPage.pulls.map((x) => x.number)).toEqual([pr.number, linked.number]);
+});
+
+test("an open issue outside a project's plan offers the plan's stories, each with its epic, for Plan it", async () => {
+  const { project: p, github, plan, story, other } = await planned();
+  github.issues.set(40, { number: 40, title: "A bug found by hand", url: url(40), body: "", state: "open" });
+  const page = await loadIssuePage(db, github, plan, p.id, 40);
+  if (page.state !== "found" || page.place.planned) throw new Error("not unplanned");
+  expect(page).toMatchObject({ section: "issues", kind: "issue", place: { planned: false, project: { title: "todooverkill plan" } } });
+  expect(page.place.stories).toEqual([
+    { number: story, title: "Board interactions", epic: "Finish Milestone 1" },
+    { number: other, title: "Labels end to end", epic: "Finish Milestone 1" },
+  ]);
 });
 
 test("a number GitHub does not know is not found, a pull request's number says so, and an unreachable GitHub keeps the title the latest run linked", async () => {

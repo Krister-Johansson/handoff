@@ -52,3 +52,14 @@ export function runStatusFromEvent(type: string): string | undefined {
     >
   )[type];
 }
+
+/** The text colour of each tone, for a run's "what it does now" line. */
+export const TONE_TEXT: Record<StatusTone, string> = {
+  success: "text-success",
+  active: "text-active",
+  attention: "text-attention",
+  danger: "text-danger",
+  repaired: "text-repaired",
+  neutral: "text-muted-foreground",
+  muted: "text-muted-foreground",
+};
