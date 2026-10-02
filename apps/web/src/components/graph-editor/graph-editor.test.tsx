@@ -82,3 +82,12 @@ test("Restore in the drawer closes it and loads that version onto the canvas, un
   expect(screen.getByText("Old planner")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("button", { name: "Save as v5" })).toBeEnabled());
 });
+
+test("the inspector keeps the Graph help and no longer lists the versions", () => {
+  renderEditor();
+  const inspector = screen.getByRole("complementary", { name: "Inspector" });
+  expect(inspector).toHaveTextContent("Select a node or an edge to edit it");
+  expect(within(inspector).queryByText(/history/i)).not.toBeInTheDocument();
+  expect(within(inspector).queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
+  expect(within(inspector).queryByText("v4")).not.toBeInTheDocument();
+});

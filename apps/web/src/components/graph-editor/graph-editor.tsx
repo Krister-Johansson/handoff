@@ -271,23 +271,6 @@ function Editor({ projectId, graphName, version: initialVersion, document, libra
               <ScrollArea className="min-h-0 flex-1">
                 <div className="flex flex-col">
                   <Inspector graph={graph} selection={selection} library={library} dispatch={edit} onSelect={(nodeId) => setSelection({ nodeId })} />
-                  {!selection.nodeId && !selection.edgeId && (
-                    <InspectorSection title="History">
-                      {restoring !== undefined && <p className="text-xs text-muted-foreground">Showing v{restoring}. Save to make it the latest version.</p>}
-                      <ul className="flex flex-col gap-1 text-sm">
-                        {versions.map((v) => (
-                          <li key={v.version} className="flex items-center justify-between gap-2">
-                            <span className="tabular-nums">
-                              <span className="font-mono text-xs">v{v.version}</span> <span className="text-xs text-muted-foreground">{v.createdAt.slice(0, 16).replace("T", " ")}</span>
-                            </span>
-                            <Button variant="ghost" size="xs" disabled={pending || v.version === version} onClick={() => restore(v.version)}>
-                              {v.version === version ? "current" : "Restore"}
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
-                    </InspectorSection>
-                  )}
                   {(issues.length > 0 || saveError) && (
                     <InspectorSection title="Issues">
                       <ul className="flex flex-col gap-1 text-xs text-danger">
