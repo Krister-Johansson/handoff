@@ -273,6 +273,18 @@ test("answer_permission allows a pending request once and records who decided", 
   expect((await call("answer_permission", { request_id: "3f6b2a10-0000-4000-8000-000000000002", decision: "deny" })).error).toMatch(/already answered/);
 });
 
+test("get_run lists a pending permission prompt with the full command", async () => {
+  const runId = await startedRun();
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running", waitingOn: "permission" });
+  const command = `pnpm --filter @todo/web exec vitest run ${"src/components/very/long/path/to/a/test-file.test.tsx ".repeat(6)}--reporter verbose`;
+  const id = "3f6b2a10-0000-4000-8000-000000000003";
+  await db.insert(permissionRequests).values({ id, runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command } });
+  await db.insert(permissionRequests).values({ id: "3f6b2a10-0000-4000-8000-000000000004", runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "ls" }, status: "allowed" });
+  const { permissions } = await call("get_run", { run_id: runId });
+  expect(command.length).toBeGreaterThan(300);
+  expect(permissions).toEqual([{ id, node: "coder", attempt: 1, tool: "Bash", asks: "asks to run a command", detail: command, input: { command }, asked_at: expect.any(String) }]);
+});
+
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });

@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets } from "@handoff/core";
-import { and, desc, eq, events, listLibraryIndex, nodeExecutions, projects, type Db, type QuestionComment } from "@handoff/db";
+import { and, asc, desc, eq, events, listLibraryIndex, nodeExecutions, permissionRequests, projects, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanItem, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
@@ -68,12 +68,22 @@ async function findProject(db: Db, ref: string) {
 
 const errorMessage = (error: unknown) => (error && typeof error === "object" && "message" in error ? String((error as { message: unknown }).message) : undefined);
 
+/** The run's permission prompts that still wait for a person, oldest first. */
+async function pendingPermissions(db: Db, runId: string) {
+  return db
+    .select({ id: permissionRequests.id, toolName: permissionRequests.toolName, input: permissionRequests.input, createdAt: permissionRequests.createdAt, nodeKey: nodeExecutions.nodeKey, attempt: nodeExecutions.attempt })
+    .from(permissionRequests)
+    .innerJoin(nodeExecutions, eq(nodeExecutions.id, permissionRequests.nodeExecutionId))
+    .where(and(eq(permissionRequests.runId, runId), eq(permissionRequests.status, "pending")))
+    .orderBy(asc(permissionRequests.createdAt));
+}
+
 /** A run as the agent needs it: where it stands, its steps, PR, issues, open questions and failure. */
 async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const stuck = await stuckLoop(deps.db, run.id);
+  const [stuck, prompts] = await Promise.all([stuckLoop(deps.db, run.id), pendingPermissions(deps.db, run.id)]);
   return {
     id: run.id,
     project: project.name,
@@ -104,6 +114,11 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
         // A review shows what to approve; the person can also comment on it in the dashboard.
         ...(review?.markdown ? { review: review.markdown, review_url: `${deps.baseUrl}${reviewPath(run.projectId, run.id, q.id)}` } : {}),
       };
+    }),
+    // Each with its whole command, which notifications cut short; answer_permission answers it.
+    permissions: prompts.map((p) => {
+      const { action, detail } = describePermission(p.toolName, p.input);
+      return { id: p.id, node: p.nodeKey, attempt: p.attempt, tool: p.toolName, asks: action, detail, input: p.input, asked_at: p.createdAt.toISOString() };
     }),
     failed: failed ? { node: failed.nodeKey, attempt: failed.attempt, error: errorMessage(failed.error) } : null,
     // A loop that used all its attempts stops the run without a failed step; resolve_loop decides what next.
