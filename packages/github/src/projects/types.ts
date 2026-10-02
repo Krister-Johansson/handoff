@@ -1,4 +1,4 @@
-import type { RepoRef } from "../types.ts";
+import type { Assignee, RepoRef } from "../types.ts";
 import type { PLAN_KINDS, PLAN_SIZES, STATUS_OPTIONS } from "./kinds.ts";
 
 export type PlanStatus = (typeof STATUS_OPTIONS)[number];
@@ -19,7 +19,7 @@ export type PlanItem = {
   /** The parent issue's number. */
   parent: number | undefined;
   labels: string[];
-  assignees: string[];
+  assignees: Assignee[];
   subIssues: { total: number; completed: number };
   /** The open issues GitHub records as blocking this one. */
   blockedBy: number[];

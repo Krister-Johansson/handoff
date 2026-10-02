@@ -12,6 +12,8 @@ export type CandidateOptions = {
   priorityOptions?: string[] | undefined;
   /** Tasks with this label are left to a person; null or undefined skips none. */
   skipLabel?: string | null | undefined;
+  /** Cancelled runs whose task a person let the scheduler take again; their tasks are candidates. */
+  released?: ReadonlySet<string> | undefined;
 };
 
 export type Candidate = { number: number; title: string };
@@ -37,18 +39,18 @@ export function candidates(items: PlanItem[], runs: ReadonlyMap<number, IssueRun
     .sort((a, b) => a.rank - b.rank || a.position - b.position);
   for (const { item } of ordered) {
     if (item.kind !== "task" || item.status !== "Ready" || item.state !== "open") continue;
-    const reason = skipReason(item, runs.get(item.number), opts.skipLabel);
+    const reason = skipReason(item, runs.get(item.number), opts);
     if (reason) result.skipped.push({ number: item.number, title: item.title, reason });
     else result.candidates.push({ number: item.number, title: item.title });
   }
   return result;
 }
 
-function skipReason(item: PlanItem, run: IssueRun | undefined, skipLabel: string | null | undefined): string | undefined {
+function skipReason(item: PlanItem, run: IssueRun | undefined, { skipLabel, released }: CandidateOptions): string | undefined {
   if (skipLabel && item.labels.includes(skipLabel)) return `labelled ${skipLabel}`;
   if (item.blockedBy.length > 0) return `blocked by ${item.blockedBy.map((n) => `#${n}`).join(", ")}`;
   if (run && ACTIVE.includes(run.status)) return `taken by run ${run.id.slice(0, 8)}`;
   // Cancelling writes Ready back; a person who stopped a task decides when it runs again.
-  if (run?.status === "cancelled") return "cancelled run; start it by hand";
+  if (run?.status === "cancelled" && !released?.has(run.id)) return "cancelled run; start it by hand";
   return undefined;
 }

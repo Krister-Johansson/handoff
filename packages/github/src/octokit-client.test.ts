@@ -239,7 +239,7 @@ test("behindBy counts the base branch's commits the head does not have", async (
   expect(new URL(calls[0]!.url).pathname).toBe("/repos/octo/sample/compare/abc123...main");
 });
 
-test("getIssue reads an issue with its body, labels, assignees, author and times", async () => {
+test("getIssue reads an issue with its body, labels, assignees with their avatars, author and times", async () => {
   const { fetch } = fakeFetch({
     "GET /repos/octo/sample/issues/12": () => ({
       json: {
@@ -250,7 +250,7 @@ test("getIssue reads an issue with its body, labels, assignees, author and times
         state: "closed",
         state_reason: "completed",
         labels: [{ name: "task" }, "bug"],
-        assignees: [{ login: "ann" }, { login: "bob" }],
+        assignees: [{ login: "ann", avatar_url: "https://avatars.githubusercontent.com/u/1?v=4" }, { login: "bob", avatar_url: "https://avatars.githubusercontent.com/u/2?v=4" }],
         user: { login: "cat" },
         author_association: "OWNER",
         created_at: "2026-09-30T10:00:00Z",
@@ -267,7 +267,10 @@ test("getIssue reads an issue with its body, labels, assignees, author and times
     state: "closed",
     stateReason: "completed",
     labels: ["task", "bug"],
-    assignees: ["ann", "bob"],
+    assignees: [
+      { login: "ann", avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4" },
+      { login: "bob", avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4" },
+    ],
     author: "cat",
     authorAssociation: "OWNER",
     createdAt: "2026-09-30T10:00:00Z",
@@ -373,12 +376,12 @@ test("listAssignable lists who can be assigned issues in the repository, with th
   ]);
 });
 
-test("setAssignees replaces an issue's assignees and returns those GitHub kept", async () => {
+test("setAssignees replaces an issue's assignees and returns those GitHub kept, with their avatars", async () => {
   const { fetch, calls } = fakeFetch({
-    "PATCH /repos/octo/sample/issues/16": (body) => ({ json: { number: 16, assignees: (body as { assignees: string[] }).assignees.map((login) => ({ login })) } }),
+    "PATCH /repos/octo/sample/issues/16": (body) => ({ json: { number: 16, assignees: (body as { assignees: string[] }).assignees.map((login) => ({ login, avatar_url: `https://avatars.githubusercontent.com/${login}` })) } }),
   });
   const gh = OctokitGitHub.withToken("t", { fetch });
-  expect(await gh.setAssignees(repo, 16, ["ann"])).toEqual(["ann"]);
+  expect(await gh.setAssignees(repo, 16, ["ann"])).toEqual([{ login: "ann", avatarUrl: "https://avatars.githubusercontent.com/ann" }]);
   expect(await gh.setAssignees(repo, 16, [])).toEqual([]);
   expect(calls.map((c) => c.body)).toEqual([{ assignees: ["ann"] }, { assignees: [] }]);
 });

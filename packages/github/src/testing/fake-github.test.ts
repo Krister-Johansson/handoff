@@ -22,7 +22,7 @@ test("getIssue gives the facts a test set and GitHub's defaults for the rest", a
     state: "open",
     stateReason: null,
     labels: ["task"],
-    assignees: ["ann"],
+    assignees: [{ login: "ann", avatarUrl: "https://avatars.githubusercontent.com/ann" }],
     author: "cat",
     authorAssociation: "NONE",
     createdAt: "2026-09-30T10:00:00Z",
@@ -76,8 +76,8 @@ test("viewer is the token's user, undefined as a GitHub App, and setAssignees ke
 
   fake.assignable = [{ login: "ann", avatarUrl: "https://avatars/ann" }];
   expect(await fake.listAssignable(repo)).toEqual([{ login: "ann", avatarUrl: "https://avatars/ann" }]);
-  expect(await fake.setAssignees(repo, 16, ["ann", "stranger"])).toEqual(["ann"]);
-  expect((await fake.getIssue(repo, 16)).assignees).toEqual(["ann"]);
+  expect(await fake.setAssignees(repo, 16, ["ann", "stranger"])).toEqual([{ login: "ann", avatarUrl: "https://avatars/ann" }]);
+  expect((await fake.getIssue(repo, 16)).assignees).toEqual([{ login: "ann", avatarUrl: "https://avatars/ann" }]);
   expect(fake.assigned).toEqual([{ number: 16, logins: ["ann"] }]);
   expect(await fake.setAssignees(repo, 16, [])).toEqual([]);
 });

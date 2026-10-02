@@ -2,6 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { eq, events, projectSchedulers, runs, sql } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { cancelRun } from "@handoff/engine/operations";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 import { addEstimateFields, moveToReady, planIssue, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
@@ -39,7 +40,7 @@ test("plan_issue puts an issue whose run is active in Running and records it on 
   await setupPlan(deps, projectId);
   expect(await planIssue(deps, projectId, { issue: 11 })).toMatchObject({ number: 11, status: "Running" });
   expect(await statusOf(11)).toBe("Running");
-  expect(await planEvents(run.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "Running" } }]);
+  expect(await planEvents(run.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "Running", from: "Shaping" } }]);
 
   expect(await planIssue(deps, projectId, { issue: 12 })).toMatchObject({ number: 12, status: "Shaping" });
   expect(await statusOf(12)).toBe("Shaping");
@@ -51,7 +52,7 @@ test("plan_issue puts an issue whose active run has opened its pull request in I
   await setupPlan(deps, projectId);
   expect(await planIssue(deps, projectId, { issue: 11 })).toMatchObject({ number: 11, status: "In review" });
   expect(statusOf(11)).toBe("In review");
-  expect(await planEvents(run.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "In review" } }]);
+  expect(await planEvents(run.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "In review", from: "Shaping" } }]);
 });
 
 test("setup_plan taking over a Project sets the items active runs work on to the runs' Status and leaves the others", async () => {
@@ -74,8 +75,8 @@ test("setup_plan taking over a Project sets the items active runs work on to the
     ],
   });
   expect([statusOf(11), statusOf(12), statusOf(13)]).toEqual(["Running", "In review", "Shaping"]);
-  expect(await planEvents(running.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "Running" } }]);
-  expect(await planEvents(reviewing.id)).toEqual([{ type: "plan.status", payload: { issue: 12, status: "In review" } }]);
+  expect(await planEvents(running.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "Running", from: "Shaping" } }]);
+  expect(await planEvents(reviewing.id)).toEqual([{ type: "plan.status", payload: { issue: 12, status: "In review", from: "Running" } }]);
 });
 
 test("setup_plan again on a plan whose item landed in Shaping during its run sets it to Running", async () => {
@@ -88,7 +89,7 @@ test("setup_plan again on a plan whose item landed in Shaping during its run set
 
   expect(await setupPlan(deps, projectId)).toMatchObject({ created: false, statuses_from_runs: [{ issue: 11, status: "Running", run: run.id }] });
   expect([statusOf(11), statusOf(12)]).toEqual(["Running", "Shaping"]);
-  expect(await planEvents(run.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "Running" } }]);
+  expect(await planEvents(run.id)).toEqual([{ type: "plan.status", payload: { issue: 11, status: "Running", from: "Shaping" } }]);
   // Once the Status agrees with the run, setup_plan writes nothing more.
   expect(await setupPlan(deps, projectId)).toMatchObject({ statuses_from_runs: [] });
   expect(await planEvents(run.id)).toHaveLength(1);
@@ -110,6 +111,27 @@ test("plan_issue leaves an issue whose run ended in Shaping and writes nothing o
   expect(await planIssue(deps, projectId, { issue: 11 })).toMatchObject({ number: 11, status: "Shaping" });
   expect(statusOf(11)).toBe("Shaping");
   expect(await planEvents(run.id)).toEqual([]);
+});
+
+test("cancelling a run whose task plan_issue set to Running puts the task back in Shaping", async () => {
+  const run = await runBeforePlan([11]);
+  await setupPlan(deps, projectId);
+  await planIssue(deps, projectId, { issue: 11 });
+  await cancelRun(db, run.id, { projects: plan });
+  expect(statusOf(11)).toBe("Shaping");
+});
+
+test("cancelling a run whose task setup_plan set to Running puts the task back in the Status it had", async () => {
+  const run = await runBeforePlan([11, 12]);
+  const roadmap = await plan.createProject("octo", { owner: "octo", name: "roadmap" }, "Roadmap");
+  plan.plans.get("octo/roadmap")!.items = new Map([
+    [11, { status: "Shaping" }],
+    [12, { status: "Ready" }],
+  ]);
+  await setupPlan(deps, projectId, { use: roadmap.number });
+  expect([statusOf(11), statusOf(12)]).toEqual(["Running", "Running"]);
+  await cancelRun(db, run.id, { projects: plan });
+  expect([statusOf(11), statusOf(12)]).toEqual(["Shaping", "Ready"]);
 });
 
 test("moving tasks to Ready nudges the project's scheduler", async () => {

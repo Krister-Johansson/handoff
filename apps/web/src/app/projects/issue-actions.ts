@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import type { Assignee } from "@handoff/github";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import type { AssignablePerson } from "@/components/plan/plan-context";
@@ -47,7 +48,7 @@ export async function assignableAction(projectId: string): Promise<{ repo: strin
  */
 export async function planPeopleAction(projectId: string): Promise<AssignablePerson[]> {
   if (!z.string().uuid().safeParse(projectId).success) throw new Error("That project has no people to assign.");
-  return (await assignableUsers(getDb(), getGitHub(), projectId)).users.map((u) => ({ login: u.login }));
+  return (await assignableUsers(getDb(), getGitHub(), projectId)).users.map((u) => ({ login: u.login, avatarUrl: u.avatarUrl }));
 }
 
 /** The Plan's assignee control: replaces an issue's assignees on GitHub, plus the token's user with `me`. Bound to the project on the Plan page. */
@@ -61,7 +62,7 @@ export async function planAssignAction(projectId: string, issue: number, change:
 const AssignSchema =IssueSchema.extend({ logins: z.array(z.string().min(1)), me: z.boolean().optional() });
 
 /** The assignee picker and Assign me: replaces the issue's assignees on GitHub; the plan's Status stays. */
-export async function assignAction(input: z.input<typeof AssignSchema>): Promise<{ ok: true; assignees: string[] } | { ok: false; error: string }> {
+export async function assignAction(input: z.input<typeof AssignSchema>): Promise<{ ok: true; assignees: Assignee[] } | { ok: false; error: string }> {
   const parsed = AssignSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That issue cannot be assigned from here." };
   const { projectId, issue, logins, me } = parsed.data;

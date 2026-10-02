@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { eq, graphVersions, nodeExecutions, projects, runs } from "@handoff/db";
+import { appendEvents, eq, graphVersions, nodeExecutions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { runCli } from "./cli.ts";
@@ -128,6 +128,8 @@ test("handoff run cancel sets the run's task back to Ready on the plan", async (
   await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
   await runCli(["run", "--project", "scratch", "--graph", "linear", "--issue", String(task.number)], { db, out, github });
   const [run] = await db.select().from(runs);
+  // The move to Running a run started on a Ready task records; cancel puts back the Status it came from.
+  await db.transaction((tx) => appendEvents(tx, run!.id, [{ type: "plan.status", payload: { issue: task.number, status: "Running", from: "Ready" } }]));
   await runCli(["run", "cancel", run!.id], { db, out, github: null, projects: plan });
   expect(await plan.getStatus(repo, number, task.number)).toBe("Ready");
 });

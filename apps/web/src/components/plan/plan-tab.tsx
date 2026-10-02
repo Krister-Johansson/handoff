@@ -80,6 +80,8 @@ type PlanTabProps = {
   /** The filters and the search from the URL. */
   filters: Filters;
   signals: PlanSignals;
+  /** The scheduler's next tasks with their place in its order, for the tree's Next tags. */
+  next?: Record<number, number> | undefined;
   start: StartRunContext;
   /** When the page read GitHub, in epoch milliseconds. */
   readAt: number;
@@ -145,7 +147,7 @@ function PlanBody(props: BodyProps) {
       );
     default: {
       const { hidden, by } = hiddenTasks(narrowed, found);
-      return <PlanTree {...shared} epics={shown.epics} unparented={shown.unparented} unplanned={shown.unplanned} hidden={hidden} hiddenBy={by} searchOpen={searchOpen} />;
+      return <PlanTree {...shared} next={props.next} epics={shown.epics} unparented={shown.unparented} unplanned={shown.unplanned} hidden={hidden} hiddenBy={by} searchOpen={searchOpen} />;
     }
   }
 }
@@ -153,7 +155,7 @@ function PlanBody(props: BodyProps) {
 
 /** Everyone assigned to a task in the plan other than me, by login. */
 function peopleOf(plan: PlanView, me: string | undefined): string[] {
-  const logins = new Set(Object.values(plan.board).flatMap((tasks) => tasks.flatMap((t) => t.assignees)));
+  const logins = new Set(Object.values(plan.board).flatMap((tasks) => tasks.flatMap((t) => t.assignees.map((a) => a.login))));
   return [...logins].filter((l) => l.toLowerCase() !== me?.toLowerCase()).toSorted((a, b) => a.localeCompare(b));
 }
 

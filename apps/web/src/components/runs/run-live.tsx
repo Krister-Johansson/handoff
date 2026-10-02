@@ -22,6 +22,7 @@ import { runStatusFromEvent, statusFromEvent, type StatusTone } from "@/lib/stat
 import { loopEdgeKeys } from "@/lib/sent-back";
 import { triggeringEdges } from "@/lib/triggering-edges";
 import { cn } from "@/lib/utils";
+import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { QuestionCard, type QuestionItem } from "@/components/inbox/cards";
 import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
@@ -136,6 +137,31 @@ function RunNowAction({
   );
 }
 
+/** The run page's views, as its tabs name them. */
+const VIEWS = ["steps", "graph", "events"] as const;
+type RunView = (typeof VIEWS)[number];
+const isView = (value: string): value is RunView => (VIEWS as readonly string[]).includes(value);
+
+/** The sentence a refusal ends with, naming the node keys a page tool can take. */
+const stepsList = (keys: string[]) => (keys.length ? `The steps are ${keys.join(", ")}.` : "The run has no steps yet.");
+
+/**
+ * The execution a page tool names: an execution id, or a node key with its latest attempt or the
+ * attempt asked for. Throws a refusal that lists what there is to choose from.
+ */
+function findStep(executions: ExecutionView[], step: string, attempt?: number): ExecutionView {
+  const byId = executions.find((e) => e.id === step);
+  if (byId && attempt === undefined) return byId;
+  // With an attempt, an execution id stands for its node.
+  const key = byId?.nodeKey ?? step;
+  const ofNode = executions.filter((e) => e.nodeKey === key);
+  if (ofNode.length === 0) throw new Error(`No step has the key or id ${step}. ${stepsList([...new Set(executions.map((e) => e.nodeKey))])}`);
+  if (attempt === undefined) return ofNode.at(-1)!;
+  const match = ofNode.findLast((e) => e.attempt === attempt);
+  if (!match) throw new Error(`${key} has no attempt ${attempt}. Its attempts are ${ofNode.map((e) => e.attempt).join(", ")}.`);
+  return match;
+}
+
 type EventPayload = {
   nodeKey?: string;
   attempt?: number;
@@ -217,6 +243,7 @@ export function RunLive({
     [router, loopEdges],
   );
 
+  const [view, setView] = useState<RunView>("steps");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // A popped-out node shows in a large modal instead of the drawer; closing it goes back to the drawer.
   const [poppedOut, setPoppedOut] = useState(false);
@@ -247,6 +274,55 @@ export function RunLive({
   );
 
   const live = status === "queued" || status === "running" || status === "waiting";
+  // How a tool's answer names a node: its label, then its key.
+  const nodeName = (key: string) => `${labels[key] ?? key} (${key})`;
+
+  usePageTools<"run">(
+    "run",
+    {
+      page_show_view: ({ view }) => {
+        setView(view);
+        return `Showing the ${view} view.`;
+      },
+      page_open_step: ({ step, attempt }) => {
+        const execution = findStep(executions, step, attempt);
+        setSelectedId(execution.id);
+        return `Opened ${nodeName(execution.nodeKey)}, attempt ${execution.attempt}.`;
+      },
+      page_close_step: () => {
+        setSelectedId(null);
+        setPoppedOut(false);
+        return selected ? `Closed ${nodeName(selected.nodeKey)}.` : "No step was open.";
+      },
+      page_pop_out: ({ open }) => {
+        if (!selected) throw new Error("No step is open. Open one with page_open_step first.");
+        setPoppedOut(open);
+        return open ? `Popped out ${nodeName(selected.nodeKey)}.` : `Put ${nodeName(selected.nodeKey)} back in the drawer.`;
+      },
+      page_filter_events: ({ node, cli }) => {
+        if (node && !nodeKeys.includes(node)) throw new Error(`No step has the key ${node}. ${stepsList(nodeKeys)}`);
+        // A field left out keeps what the page shows; node null shows every node.
+        const nextNode = node === undefined ? nodeFilter : (node ?? "");
+        const nextCli = cli ?? showCli;
+        setNodeFilter(nextNode);
+        setShowCli(nextCli);
+        setView("events");
+        return `Showing the events of ${nextNode ? nodeName(nextNode) : "every node"}${nextCli ? ", with the Claude CLI's events" : ""}.`;
+      },
+    },
+    () => ({
+      runId,
+      projectId,
+      status,
+      view,
+      steps: executions.map((e) => ({ id: e.id, nodeKey: e.nodeKey, label: labels[e.nodeKey] ?? e.nodeKey, attempt: e.attempt, status: e.status })),
+      openStep: selected ? { id: selected.id, nodeKey: selected.nodeKey, attempt: selected.attempt } : null,
+      poppedOut: selected !== undefined && poppedOut,
+      events: { node: nodeFilter || null, cli: showCli },
+      // The ids answer_question and the other catalog tools take for what waits on a person here.
+      questions: questions.map((q) => ({ id: q.id, stepId: q.nodeExecutionId, nodeKey: q.nodeKey, reason: q.reason, question: q.question, options: q.options })),
+    }),
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -270,7 +346,7 @@ export function RunLive({
         </div>
       )}
       {children}
-      <Tabs defaultValue="steps" className="gap-6">
+      <Tabs value={view} onValueChange={(value) => isView(value) && setView(value)} className="gap-6">
         <TabsList variant="line">
           <TabsTrigger value="steps">Steps</TabsTrigger>
           <TabsTrigger value="graph">Graph</TabsTrigger>

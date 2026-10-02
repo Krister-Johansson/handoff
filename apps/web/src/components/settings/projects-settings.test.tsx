@@ -55,6 +55,21 @@ test("lists projects and expands one to show repository, branch, setup command a
   expect(within(detail("Plan on GitHub")).getByRole("button", { name: "Set up the plan" })).toBeInTheDocument();
 });
 
+test("a project with the scheduler on shows its active runs of max_runs", () => {
+  render(
+    <ProjectsSettings
+      projects={[
+        { ...handoff, scheduler: { state: "held", active: 1, maxRuns: 2 } },
+        { ...shop, scheduler: { state: "paused", active: 0, maxRuns: 1 } },
+        { ...shop, id: "p3", name: "demo" },
+      ]}
+    />,
+  );
+  expect(within(screen.getByRole("button", { name: "Show handoff" })).getByText("Scheduler held, 1 of 2")).toBeInTheDocument();
+  expect(within(screen.getByRole("button", { name: "Show example-shop" })).getByText("Scheduler paused")).toBeInTheDocument();
+  expect(within(screen.getByRole("button", { name: "Show demo" })).queryByText(/Scheduler/)).not.toBeInTheDocument();
+});
+
 test("the open project shows its teardown command and agent notes", () => {
   render(<ProjectsSettings projects={[{ ...handoff, teardownCommand: "dropdb app_test", agentNotes: "Postgres runs on 5433." }, shop]} />);
   fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));

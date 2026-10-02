@@ -355,3 +355,21 @@ test("held is recorded once until the reasons change", async () => {
   const held = (await p.events("scheduler.held")).map((e) => (e.payload.holds as { runId: string }[]).map((h) => h.runId));
   expect(held).toEqual([[first.id], [first.id, second.id], [third.id]]);
 });
+
+test("a task whose cancelled run a person released starts on the next check", async () => {
+  const p = await planned();
+  const issue = await p.task("Cancelled by a person");
+  const run = await startRun(db, { projectId: p.project.id, graphName: "g", task: "", issues: [issue], startedBy: "dashboard" }, { github: p.github, projects: p.plan });
+  // Cancelling writes Ready back.
+  await db.update(runs).set({ status: "cancelled" }).where(eq(runs.id, run.id));
+  p.plan.itemsOf(repo).get(issue)!.status = "Ready";
+
+  expect(await p.check()).toMatchObject({ state: "idle", reason: "all_skipped" });
+  // An older release of another run of the issue does not count; this run's does.
+  await db.insert(schedulerEvents).values({ projectId: p.project.id, type: "scheduler.released", payload: { issue, runId: "00000000-0000-0000-0000-000000000000", by: "dashboard" } });
+  await db.update(projectSchedulers).set({ nextCheckAt: sql`now()`, lastCheckAt: null }).where(eq(projectSchedulers.projectId, p.project.id));
+  expect(await p.check()).toMatchObject({ state: "idle", reason: "all_skipped" });
+  await db.insert(schedulerEvents).values({ projectId: p.project.id, type: "scheduler.released", payload: { issue, runId: run.id, by: "dashboard" } });
+
+  expect(await p.check()).toMatchObject({ state: "running", started: [{ issue }] });
+});

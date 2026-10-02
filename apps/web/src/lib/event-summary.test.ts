@@ -50,6 +50,12 @@ test("summarizes an overlap hold with the shared paths and the other run", () =>
   ).toBe("Waiting: shares apps/board, pnpm-lock.yaml with run 1a2b3c4d");
 });
 
+test("summarizes a run the scheduler started with its place in the order and the settings", () => {
+  expect(
+    summarizeEvent({ type: "run.scheduled", payload: { place: 1, settings: { maxRuns: 2, order: "project", graphName: "master", skipLabel: "human" } } }),
+  ).toBe("Started by the scheduler, 1st in order: up to 2 runs, Project order, graph master");
+});
+
 test("summarizes the assignment of a run's issue to the token's user and one that was skipped, with the reason", () => {
   expect(summarizeEvent({ type: "issue.assigned", payload: { issue: 16, login: "Krister-Johansson" } })).toBe("#16 assigned to Krister-Johansson");
   expect(summarizeEvent({ type: "issue.assign.skipped", payload: { issue: 16, reason: "no-user" } })).toBe(

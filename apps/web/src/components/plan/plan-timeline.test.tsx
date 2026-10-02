@@ -382,7 +382,10 @@ test("a Project without date fields shows the banner and Add date fields", async
   await waitFor(() => expect(actions.addDateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
   expect(await within(confirm).findByText("GitHub refused the field.")).toBeInTheDocument();
 
-  fireEvent.click(within(confirm).getByRole("button", { name: "Add date fields" }));
+  // The error shows before the first attempt's transition ends; the button stays disabled until it does.
+  const again = within(confirm).getByRole("button", { name: "Add date fields" });
+  await waitFor(() => expect(again).toBeEnabled());
+  fireEvent.click(again);
   await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
   expect(actions.addDateFieldsAction).toHaveBeenCalledTimes(2);
 });

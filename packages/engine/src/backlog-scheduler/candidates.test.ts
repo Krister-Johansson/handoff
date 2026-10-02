@@ -103,3 +103,17 @@ test("a task with the skip label is skipped with the reason, and no skip label s
   expect(skipping.skipped).toEqual([{ number: 1, title: "Task 1", reason: "labelled human" }]);
   expect(numbers(all.candidates)).toEqual([1, 2]);
 });
+
+test("a task whose cancelled run a person let the scheduler take is a candidate again", () => {
+  const cancelled = "11111111-0000-0000-0000-000000000000";
+  const items = [item(1), item(2, { position: 0 })];
+  const runs = new Map<number, IssueRun>([
+    [1, { id: cancelled, status: "cancelled" }],
+    [2, { id: "22222222-0000-0000-0000-000000000000", status: "cancelled" }],
+  ]);
+
+  const result = candidates(items, runs, { order: "project", released: new Set([cancelled]) });
+
+  expect(numbers(result.candidates)).toEqual([1]);
+  expect(result.skipped).toEqual([{ number: 2, title: "Task 2", reason: "cancelled run; start it by hand" }]);
+});

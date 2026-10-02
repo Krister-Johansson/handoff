@@ -60,7 +60,7 @@ export type IssueDetail = {
   /** Why a closed issue closed (completed, not_planned, duplicate); null while open or when GitHub does not say. */
   stateReason: string | null;
   labels: string[];
-  assignees: string[];
+  assignees: Assignee[];
   /** Who opened it; null for a deleted account. */
   author: string | null;
   /** GitHub's author association: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE and so on. */
@@ -82,8 +82,11 @@ export type IssueDependencies = { blockedBy: IssueRef[]; blocking: IssueRef[] };
 /** A comment on an issue, with GitHub's author association (OWNER, MEMBER, CONTRIBUTOR, NONE and so on). */
 export type IssueComment = { id: number; author: string | null; authorAssociation: string; createdAt: string; updatedAt: string; body: string; url: string };
 
+/** A person assigned an issue: the login and the URL of their GitHub avatar image. */
+export type Assignee = { login: string; avatarUrl: string };
+
 /** A person who can be assigned issues in a repository. */
-export type Assignable = { login: string; avatarUrl: string };
+export type Assignable = Assignee;
 
 export interface GitHubPort {
   /** Open issues of a repository (not pull requests), most recently updated first, up to 100. */
@@ -103,7 +106,7 @@ export interface GitHubPort {
   /** The people who can be assigned issues in the repository. */
   listAssignable(repo: RepoRef): Promise<Assignable[]>;
   /** Replaces an issue's assignees ([] clears them); returns the assignees GitHub kept, which drops logins it cannot assign. */
-  setAssignees(repo: RepoRef, number: number, logins: string[]): Promise<string[]>;
+  setAssignees(repo: RepoRef, number: number, logins: string[]): Promise<Assignee[]>;
   /** Records on GitHub that `issue` is blocked by `blocker`. */
   addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void>;
   /** Comments on an issue, then closes it as completed. */
