@@ -2,7 +2,17 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { CallToolRequestSchema, ErrorCode, ListToolsRequestSchema, McpError, type CallToolResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ListToolsRequestSchema,
+  McpError,
+  ReadResourceRequestSchema,
+  type CallToolResult,
+  type Tool,
+} from "@modelcontextprotocol/sdk/types.js";
 
 export type BridgeOptions = {
   /** The dashboard, such as http://localhost:3000. */
@@ -73,12 +83,14 @@ const stillWorking = (name: string) =>
 /**
  * The plugin's MCP server for Claude Code. It passes the dashboard's tools through from /api/mcp,
  * and as a Claude Code channel it pushes each new item that needs attention into the session.
+ * It also passes the dashboard's resources through: the ui:// views of MCP Apps, which a tool names in
+ * its _meta.ui.resourceUri and a host that renders MCP Apps reads with resources/read.
  */
 export function createBridge(options: BridgeOptions): Bridge {
   const url = options.url.replace(/\/$/, "");
   const server = new Server(
     { name: "handoff", version: "1.0.0" },
-    { capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } }, instructions: INSTRUCTIONS },
+    { capabilities: { tools: { listChanged: true }, resources: {}, experimental: { "claude/channel": {} } }, instructions: INSTRUCTIONS },
   );
 
   let upstream: Promise<Client> | undefined;
@@ -193,6 +205,32 @@ export function createBridge(options: BridgeOptions): Bridge {
       if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) return toolError(stillWorking(request.params.name));
       upstream = undefined;
       return toolError(explain(url, error));
+    }
+  });
+
+  // A dashboard that is down, or one from before it served resources, lists none.
+  server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+    try {
+      return await (await dashboard()).listResources(request.params);
+    } catch {
+      return { resources: [] };
+    }
+  });
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
+    try {
+      return await (await dashboard()).listResourceTemplates(request.params);
+    } catch {
+      return { resourceTemplates: [] };
+    }
+  });
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    try {
+      return await (await dashboard()).readResource(request.params);
+    } catch (error) {
+      // The dashboard's own answer, such as an unknown resource, goes back as it is.
+      if (error instanceof McpError) throw error;
+      upstream = undefined;
+      throw new McpError(ErrorCode.InternalError, explain(url, error));
     }
   });
 

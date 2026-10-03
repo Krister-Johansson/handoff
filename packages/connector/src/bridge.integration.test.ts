@@ -24,8 +24,10 @@ let bridge: Bridge | undefined;
 let slowStarted = false;
 let slowDone: Promise<void>;
 let releaseSlow: () => void = () => {};
+const RUN_CARD = "ui://handoff/run-card.html";
+const RUN_CARD_CONTENTS = [{ uri: RUN_CARD, mimeType: "text/html;profile=mcp-app", text: "<!doctype html><p>run</p>", _meta: { ui: { csp: { connectDomains: [] }, prefersBorder: false } } }];
 
-/** A stand-in for the dashboard's /api/mcp: bearer token "tok", an echo tool, a slow tool and list_attention. */
+/** A stand-in for the dashboard's /api/mcp: bearer token "tok", an echo tool, a slow tool, list_attention, and get_run with its run card. */
 beforeEach(async () => {
   items = [];
   added = [];
@@ -42,6 +44,11 @@ beforeEach(async () => {
     server.registerTool("get_project", { description: "A project.", inputSchema: { project: z.string().describe("Project name or id") } }, async ({ project }) => ({
       content: [{ type: "text", text: JSON.stringify({ name: project }) }],
     }));
+    // get_run links to its view as the dashboard's does: a ui:// resource of MCP Apps.
+    server.registerTool("get_run", { inputSchema: { run_id: z.string() }, _meta: { ui: { resourceUri: RUN_CARD } } }, async ({ run_id }) => ({
+      content: [{ type: "text", text: JSON.stringify({ id: run_id }) }],
+    }));
+    server.registerResource("Run card", RUN_CARD, { mimeType: "text/html;profile=mcp-app" }, async () => ({ contents: RUN_CARD_CONTENTS }));
     server.registerTool("add_project", { inputSchema: { repo: z.string() } }, async ({ repo }) => ({ content: [{ type: "text", text: JSON.stringify({ repo }) }] }));
     server.registerTool("list_runs", { inputSchema: { project: z.string().optional() } }, async ({ project }) => ({ content: [{ type: "text", text: JSON.stringify({ project: project ?? "all" }) }] }));
     server.registerTool("slow", {}, async () => {
@@ -89,8 +96,26 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 test("the dashboard's tools are passed through, and the bridge declares itself a channel", async () => {
   const { client } = await connect("tok");
   expect(client.getServerCapabilities()?.experimental).toEqual({ "claude/channel": {} });
-  expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["add_project", "current_project", "echo", "get_project", "list_attention", "list_projects", "list_runs", "slow"]);
+  expect((await client.listTools()).tools.map((t) => t.name).sort()).toEqual(["add_project", "current_project", "echo", "get_project", "get_run", "list_attention", "list_projects", "list_runs", "slow"]);
   expect(await client.callTool({ name: "echo", arguments: { text: "hi" } })).toMatchObject({ content: [{ type: "text", text: "echo hi" }] });
+});
+
+test("the dashboard's MCP Apps views pass through: the resources capability, the ui:// resource and the tool's _meta", async () => {
+  const { client } = await connect("tok");
+  expect(client.getServerCapabilities()?.resources).toEqual({});
+  const getRun = (await client.listTools()).tools.find((t) => t.name === "get_run");
+  expect(getRun?._meta).toEqual({ ui: { resourceUri: RUN_CARD } });
+  expect((await client.listResources()).resources).toEqual([{ uri: RUN_CARD, name: "Run card", mimeType: "text/html;profile=mcp-app" }]);
+  expect(await client.readResource({ uri: RUN_CARD })).toEqual({ contents: RUN_CARD_CONTENTS });
+  // The result is the dashboard's own, its text unchanged.
+  expect(await client.callTool({ name: "get_run", arguments: { run_id: "r1" } })).toEqual({ content: [{ type: "text", text: JSON.stringify({ id: "r1" }) }] });
+});
+
+test("while the dashboard is down, the resource list is empty and a read says what to fix", async () => {
+  down = true;
+  const { client } = await connect("tok");
+  expect((await client.listResources()).resources).toEqual([]);
+  await expect(client.readResource({ uri: RUN_CARD })).rejects.toThrow(/handoff is not reachable/);
 });
 
 test("each new item that needs attention is pushed once; what was there at the start is not", async () => {
@@ -163,6 +188,7 @@ test("the bundled plugin server runs on its own, the way the installed plugin st
   await client.connect(transport);
   try {
     expect((await client.callTool({ name: "echo", arguments: { text: "bundled" } })) as object).toMatchObject({ content: [{ text: "echo bundled" }] });
+    expect((await client.readResource({ uri: RUN_CARD })).contents).toEqual(RUN_CARD_CONTENTS);
     const { version } = JSON.parse(readFileSync(fileURLToPath(new URL("../../../plugins/handoff/.claude-plugin/plugin.json", import.meta.url)), "utf8"));
     expect(text(await client.callTool({ name: "current_project", arguments: {} }))).toMatchObject({ bridge: { version } });
   } finally {

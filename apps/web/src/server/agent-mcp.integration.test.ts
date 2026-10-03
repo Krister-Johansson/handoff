@@ -86,6 +86,43 @@ test("start_run starts a run on the default graph linked to the issues, and get_
   expect(detail).toMatchObject({ status: "queued", project: "sandbox", graph: "linear", issues: [{ number: 11 }], steps: [{ node: "planner", attempt: 1, status: "pending" }], pr: null, questions: [] });
 });
 
+test("get_run links to the run card, a ui:// resource served as one HTML document that loads nothing from elsewhere", async () => {
+  const { tools } = await client.listTools();
+  expect(tools.find((t) => t.name === "get_run")?._meta).toMatchObject({ ui: { resourceUri: "ui://handoff/run-card.html" } });
+  // The other tools have no view yet.
+  expect(tools.filter((t) => t._meta?.ui).map((t) => t.name)).toEqual(["get_run"]);
+  const { resources } = await client.listResources();
+  expect(resources).toEqual([expect.objectContaining({ uri: "ui://handoff/run-card.html", name: "Run card", mimeType: "text/html;profile=mcp-app" })]);
+  const { contents } = await client.readResource({ uri: "ui://handoff/run-card.html" });
+  expect(contents).toEqual([
+    {
+      uri: "ui://handoff/run-card.html",
+      mimeType: "text/html;profile=mcp-app",
+      text: expect.stringMatching(/^<!doctype html>/i),
+      _meta: { ui: { csp: { connectDomains: [], resourceDomains: [], frameDomains: [], baseUriDomains: [] }, prefersBorder: false } },
+    },
+  ]);
+});
+
+test("get_run's result stays one block of JSON text, which clients without MCP Apps show", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [11] });
+  const result = (await client.callTool({ name: "get_run", arguments: { run_id } })) as { content: { type: string; text: string }[]; structuredContent?: unknown };
+  expect(result.content).toHaveLength(1);
+  expect(result.content[0]).toEqual({ type: "text", text: JSON.stringify(JSON.parse(result.content[0]!.text), null, 2) });
+  expect(result.structuredContent).toBeUndefined();
+});
+
+test("the assistant's tools carry no view, since the dashboard draws its own cards", async () => {
+  const server = new McpServer({ name: "handoff", version: "1.0.0" });
+  registerDataTools(server, { db, github, projects: plan, baseUrl: BASE, actor: "assistant" }, { wrapUntrusted: true });
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const assistant = new Client({ name: "test", version: "1.0.0" });
+  await Promise.all([server.connect(serverSide), assistant.connect(clientSide)]);
+  const { tools } = await assistant.listTools();
+  expect(tools.find((t) => t.name === "get_run")?._meta).toBeUndefined();
+  await assistant.close();
+});
+
 test("start_run records claude-code as the starter", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", issues: [11] });
   const [run] = await db.select().from(runs).where(eq(runs.id, run_id));

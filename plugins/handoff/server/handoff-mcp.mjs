@@ -15517,7 +15517,7 @@ var StdioServerTransport = class {
 // plugins/handoff/.claude-plugin/plugin.json
 var plugin_default = {
   name: "handoff",
-  version: "0.17.0",
+  version: "0.18.0",
   description: "Drive handoff from Claude Code: shape a plan of epics, stories and tasks, see the backlog, start runs for issues, follow them and hear when a run needs you.",
   author: { name: "Krister Johansson" },
   userConfig: {
@@ -19524,7 +19524,7 @@ function createBridge(options) {
   const url2 = options.url.replace(/\/$/, "");
   const server = new Server(
     { name: "handoff", version: "1.0.0" },
-    { capabilities: { tools: { listChanged: true }, experimental: { "claude/channel": {} } }, instructions: INSTRUCTIONS }
+    { capabilities: { tools: { listChanged: true }, resources: {}, experimental: { "claude/channel": {} } }, instructions: INSTRUCTIONS }
   );
   let upstream;
   const dashboard = () => upstream ??= (async () => {
@@ -19609,6 +19609,29 @@ function createBridge(options) {
       if (error2 instanceof McpError && error2.code === ErrorCode.RequestTimeout) return toolError(stillWorking(request.params.name));
       upstream = void 0;
       return toolError(explain(url2, error2));
+    }
+  });
+  server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+    try {
+      return await (await dashboard()).listResources(request.params);
+    } catch {
+      return { resources: [] };
+    }
+  });
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
+    try {
+      return await (await dashboard()).listResourceTemplates(request.params);
+    } catch {
+      return { resourceTemplates: [] };
+    }
+  });
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    try {
+      return await (await dashboard()).readResource(request.params);
+    } catch (error2) {
+      if (error2 instanceof McpError) throw error2;
+      upstream = void 0;
+      throw new McpError(ErrorCode.InternalError, explain(url2, error2));
     }
   });
   const announceNewTools = async (client) => {
