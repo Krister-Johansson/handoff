@@ -1,3 +1,5 @@
+import type { PlanModeName } from "./project-tab";
+
 type SearchParams = Record<string, string | string[] | undefined>;
 
 /** The library's sections of Settings, one per kind. Subagents has its own tab, since `agents` is Claude Code. */
@@ -51,19 +53,25 @@ export function libraryRedirectPath(params: SearchParams): string {
 
 /**
  * The sections of a project's settings. Runs: Graphs and Default library. Plan: Plan mode (Flow or Timeline),
- * the Scheduler and Estimates (capacity, forecasts and plan budget). See PROJECT_SETTINGS_GROUPS in
- * components/settings/settings-nav.tsx.
+ * the Scheduler and Estimates (capacity, forecasts and plan budget; the plan budget only in a Flow project).
+ * See PROJECT_SETTINGS_GROUPS in components/settings/settings-nav.tsx.
  */
 export const PROJECT_SETTINGS_TABS = ["graphs", "library", "mode", "scheduler", "estimates"] as const;
 export type ProjectSettingsTab = (typeof PROJECT_SETTINGS_TABS)[number];
 
-export const PROJECT_SETTINGS_TAB_LABEL: Record<ProjectSettingsTab, string> = {
+const PROJECT_SETTINGS_TAB_LABEL: Record<ProjectSettingsTab, string> = {
   graphs: "Graphs",
   library: "Default library",
   mode: "Plan mode",
   scheduler: "Scheduler",
   estimates: "Estimates",
 };
+
+/**
+ * A project settings section's name, as the side menu and the trail show it. A Flow project has no capacity
+ * or forecasts, so its estimates section holds the plan budget only and takes that name.
+ */
+export const projectSettingsTabLabel = (tab: ProjectSettingsTab, mode: PlanModeName) => (tab === "estimates" && mode === "flow" ? "Plan budget" : PROJECT_SETTINGS_TAB_LABEL[tab]);
 
 /** The project settings tab from its search params; Graphs, the first section, unless another known tab is asked for. */
 export function parseProjectSettingsTab(params: SearchParams): ProjectSettingsTab {

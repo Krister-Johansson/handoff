@@ -48,23 +48,28 @@ function BlockedBy({ numbers, projectId }: { numbers: number[]; projectId: strin
   );
 }
 
-/** The dates on the header: a task's Start and Target, a story's span from its tasks when it has none of its own, an epic's own. */
+/**
+ * The dates on the header: a task's Start and Target, a story's span from its tasks when it has none of its own, an epic's own.
+ * None in a Flow project, which plans an order without dates.
+ */
 function datesOf(page: FoundIssue): string | undefined {
   const { place } = page;
-  if (!place.planned) return undefined;
+  if (!place.planned || page.planMode === "flow") return undefined;
   const own = spanText(place.item.start, place.item.target);
   if (own || place.kind !== "story") return own;
   const derived = place.timeline?.items.find((i) => i.number === place.item.number)?.derived;
   return derived ? `${spanText(derived.start, derived.end)}, from its tasks` : undefined;
 }
 
-/** The moves and the run the issue's status allows, in the Plan's order: the main one last. */
+/** The moves and the run the issue's status allows, in the Plan's order: the main one last. A Flow project has no Schedule. */
 function Actions({ page, project, start, runs }: { page: FoundIssue; project: ProjectRef; start: StartRunContext; runs: IssueRun[] }) {
   const { place, issue } = page;
   const openBlockers = page.blockedBy.filter((b) => b.state === "open").length;
   const startable = (ok: boolean) => ok && openBlockers === 0 && start.graphName !== undefined && issue.state === "open";
   const startRun = start.graphName !== undefined && <StartRunButton issue={issue} projectId={project.id} graphs={start.graphs} graphName={start.graphName} />;
-  const schedule = <ScheduleButton projectId={project.id} item={{ number: issue.number, title: issue.title, start: place.planned ? place.item.start : undefined, target: place.planned ? place.item.target : undefined }} />;
+  const schedule = page.planMode === "timeline" && (
+    <ScheduleButton projectId={project.id} item={{ number: issue.number, title: issue.title, start: place.planned ? place.item.start : undefined, target: place.planned ? place.item.target : undefined }} />
+  );
   if (!place.planned) {
     return (
       <>
@@ -146,7 +151,7 @@ function State({ state }: { state: "open" | "closed" }) {
 
 /**
  * Who and what: kind, number and title, then one wrapping line with its status, open or closed, its
- * open blockers, labels, assignees, dates and who opened it. Actions sit on the right.
+ * open blockers, labels, assignees, dates (in a Timeline project) and who opened it. Actions sit on the right.
  */
 export function IssueHeader({ page, project, start, runs }: { page: FoundIssue; project: ProjectRef; start: StartRunContext; runs: IssueRun[] }) {
   const { issue, kind } = page;

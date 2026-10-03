@@ -113,6 +113,45 @@ test("an epic shows its goal first, its stories collapsed with Expand all, its d
   expect(waiting).toHaveTextContent("blocks 2");
 });
 
+test("a Flow project's task shows no Start and Target and offers no Schedule", () => {
+  show(taskPage({ planMode: "flow" }), [waitingRun()]);
+  const header = screen.getByRole("banner", { name: "Task #16" });
+  expect(header).not.toHaveTextContent("Sep 30 to Oct 7");
+  expect(within(header).queryByRole("button", { name: "Schedule" })).not.toBeInTheDocument();
+  expect(header).toHaveTextContent("Opened by Krister-Johansson on Sep 30");
+});
+
+test("a Flow project's story shows no dates and offers Show in the plan without Schedule", () => {
+  const page = storyPage();
+  if (!page.place.planned || page.place.kind !== "story") throw new Error("not a story");
+  show({ ...page, planMode: "flow", place: { ...page.place, item: { ...page.place.item, start: "2026-09-30", target: "2026-10-09" } } });
+  const header = screen.getByRole("banner", { name: "Story #132" });
+  expect(header).not.toHaveTextContent("Sep 30 to Oct 9");
+  expect(within(header).queryByRole("button", { name: "Schedule" })).not.toBeInTheDocument();
+  expect(within(header).getByRole("link", { name: "Show in the plan" })).toBeInTheDocument();
+});
+
+test("a Flow project's epic shows no dates in its header or rail and offers no Schedule; what waits stays", () => {
+  show({ ...epicPage(), planMode: "flow" });
+  const header = screen.getByRole("banner", { name: "Epic #121" });
+  expect(header).not.toHaveTextContent("Sep 28 to Oct 30");
+  expect(within(header).queryByRole("button", { name: "Schedule" })).not.toBeInTheDocument();
+  const rail = screen.getByRole("complementary", { name: "Where #121 sits" });
+  expect(within(rail).queryByRole("region", { name: "Dates" })).not.toBeInTheDocument();
+  expect(within(rail).getByRole("region", { name: "Waiting" })).toHaveTextContent("#16 needs you");
+});
+
+test("a Timeline project's story and epic keep Schedule, their dates and the epic's Dates", () => {
+  const { unmount } = show(storyPage());
+  expect(within(screen.getByRole("banner", { name: "Story #132" })).getByRole("button", { name: "Schedule" })).toBeInTheDocument();
+  unmount();
+  show(epicPage());
+  const header = screen.getByRole("banner", { name: "Epic #121" });
+  expect(header).toHaveTextContent("Sep 28 to Oct 30");
+  expect(within(header).getByRole("button", { name: "Schedule" })).toBeInTheDocument();
+  expect(within(screen.getByRole("complementary", { name: "Where #121 sits" })).getByRole("region", { name: "Dates" })).toBeInTheDocument();
+});
+
 test("an issue outside the plan offers Plan it and Start run, says it is not in the plan, and that a cancelled run gave it back", () => {
   show(unplannedPage(), [waitingRun({ status: "cancelled", needsYou: false, waitingOn: null, assigned: null, line: { ...waitingRun().line, now: { tone: "muted", text: "Cancelled." } } })]);
   const header = screen.getByRole("banner", { name: "Issue #407" });

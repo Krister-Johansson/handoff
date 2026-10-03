@@ -165,15 +165,23 @@ function PlanBudgetForm({ projectId, planBudget }: { projectId: string; planBudg
   );
 }
 
+type EstimateSettingsProps = { projectId: string; planBudget: PlanBudget | null } & ({ mode: "timeline"; capacity: number; forecasts: Forecasts } | { mode: "flow" });
+
 /**
- * Project settings' Estimates: the capacity in hours a day, what each size usually takes from this project's
- * finished runs, and the plan budget. The page keys it on the stored values, so a save shows them again.
+ * Project settings' Estimates: in a Timeline project the capacity in hours a day, what each size usually takes
+ * from this project's finished runs, and the plan budget; in a Flow project, which has no hours, the plan budget
+ * only. The page keys it on the stored values, so a save shows them again.
  */
-export function EstimateSettings({ projectId, capacity, forecasts, planBudget }: { projectId: string; capacity: number; forecasts: Forecasts; planBudget: PlanBudget | null }) {
+export function EstimateSettings(props: EstimateSettingsProps) {
+  const { projectId, planBudget } = props;
   return (
     <>
-      <Capacity projectId={projectId} capacity={capacity} />
-      <ForecastTable forecasts={forecasts} />
+      {props.mode === "timeline" && (
+        <>
+          <Capacity projectId={projectId} capacity={props.capacity} />
+          <ForecastTable forecasts={props.forecasts} />
+        </>
+      )}
       <PlanBudgetForm projectId={projectId} planBudget={planBudget} />
     </>
   );

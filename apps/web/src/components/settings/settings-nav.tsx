@@ -21,7 +21,8 @@ import {
   WaypointsIcon,
   type LucideIcon,
 } from "lucide-react";
-import { PROJECT_SETTINGS_TAB_LABEL, projectSettingsPath, settingsPath, SETTINGS_TAB_LABEL, type ProjectSettingsTab, type SettingsTab } from "@/lib/settings-tab";
+import type { PlanModeName } from "@/lib/project-tab";
+import { projectSettingsPath, projectSettingsTabLabel, settingsPath, SETTINGS_TAB_LABEL, type ProjectSettingsTab, type SettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
 
 type MenuItem = { href: string; label: string; icon: LucideIcon; current: boolean };
@@ -140,11 +141,14 @@ const PROJECT_SETTINGS_GROUPS: { label: string; items: { tab: ProjectSettingsTab
   },
 ];
 
-/** The sections of a project's settings as a side menu, each link setting ?tab= as Settings does. */
-export function ProjectSettingsNav({ projectId, active }: { projectId: string; active: ProjectSettingsTab }) {
+/**
+ * The sections of a project's settings as a side menu, each link setting ?tab= as Settings does. A Flow
+ * project's estimates section is named Plan budget, the only card it holds there.
+ */
+export function ProjectSettingsNav({ projectId, mode, active }: { projectId: string; mode: PlanModeName; active: ProjectSettingsTab }) {
   const groups = PROJECT_SETTINGS_GROUPS.map((g) => ({
     label: g.label,
-    items: g.items.map(({ tab, icon }) => ({ href: projectSettingsPath(projectId, tab), label: PROJECT_SETTINGS_TAB_LABEL[tab], icon, current: tab === active })),
+    items: g.items.map(({ tab, icon }) => ({ href: projectSettingsPath(projectId, tab), label: projectSettingsTabLabel(tab, mode), icon, current: tab === active })),
   }));
   return <SideMenu label="Project settings sections" groups={groups} />;
 }

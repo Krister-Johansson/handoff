@@ -37,7 +37,8 @@ export type PlanView = {
   unplanned: BacklogIssue[];
   /**
    * Every item placed in time: planned and derived spans, each run's actual strip, late and overdue
-   * items and the dependency arrows. Optional so views built by hand need not name it; loadPlan sets it.
+   * items and the dependency arrows. Optional so views built by hand need not name it; loadPlan sets it
+   * for a project in Timeline mode only.
    */
   timeline?: Timeline | undefined;
   /** What each size usually takes in this project; loadPlan sets it. */
@@ -97,12 +98,14 @@ export async function loadPlan(
   const number = project.planProjectNumber;
   if (number === null) return { reason: "no-plan", error: "This project has no plan on GitHub yet." };
   const repo = { owner: project.repoOwner, name: project.repoName };
+  const flowMode = project.planMode === "flow";
   const [planProject, items, open, latest, projectRuns, proposals] = await Promise.all([
     plan.getProject(repo.owner, number),
     plan.listItems(repo.owner, number, repo),
     github.listIssues(repo),
     latestRuns(db, projectId),
-    timelineRuns(db, projectId),
+    // A Flow project has no timeline, so its runs' strips are not read.
+    flowMode ? [] : timelineRuns(db, projectId),
     latestProposals(db, projectId),
   ]);
   if (!planProject) return { reason: "unreachable", error: `GitHub Project #${number} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.` };
@@ -162,17 +165,17 @@ export async function loadPlan(
   const unplanned = open
     .filter((i) => !byNumber.has(i.number))
     .map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
-  const flow = project.planMode === "flow" ? await loadFlow(db, projectId, { items, priorityOptions: planProject.priorityOptions, forecasts }) : undefined;
+  // A Flow project gets the flow's input and no timeline: it shows no dates anywhere.
+  const flow = flowMode ? await loadFlow(db, projectId, { items, priorityOptions: planProject.priorityOptions, forecasts }) : undefined;
   return {
     project: planProject,
     epics,
     unparented,
     board,
     unplanned,
-    timeline: deriveSpans(items, projectRuns, opts.now ?? new Date(), { durations, capacity }),
+    ...(flow ? { flow } : { timeline: deriveSpans(items, projectRuns, opts.now ?? new Date(), { durations, capacity }) }),
     forecasts,
     capacity,
-    ...(flow ? { flow } : {}),
   };
 }
 

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNull, pro
 import { GitHubReadError, type GitHubPort, type IssueComment, type IssueDetail, type IssueRef, type PlanProject, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
 import type { StoryChoice } from "../components/plan/plan-actions";
 import { reviewPath, runPath, tryPath } from "../lib/paths";
+import type { PlanModeName } from "../lib/project-tab";
 import { inboxGroups } from "./inbox-groups";
 import { waitingRuns } from "./overview";
 import { loadPlan, type PlanEpic, type PlanProgress, type PlanStory, type PlanTask, type PlanUnavailable, type PlanView } from "./plan";
@@ -61,7 +62,7 @@ export type PlannedTask = { planned: true; kind: "task"; project: PlanProject; i
 /** A task under a story or an epic on the page, with whether its latest run waits on a person (the Needs you chip). */
 export type IssueTask = PlanTask & { needsYou: boolean };
 
-/** A story of the plan: its tasks in GitHub's sub-issue order, its epic, and the timeline of it and its tasks. */
+/** A story of the plan: its tasks in GitHub's sub-issue order, its epic, and the timeline of it and its tasks, none in a Flow project. */
 export type PlannedStory = {
   planned: true;
   kind: "story";
@@ -79,7 +80,7 @@ export type EpicWaiting = {
   blockers: { number: number; title: string; url: string; status: PlanStatus | undefined; blocks: number }[];
 };
 
-/** An epic of the plan: its stories in GitHub's sub-issue order, what waits, and the timeline of it and its stories. */
+/** An epic of the plan: its stories in GitHub's sub-issue order, what waits, and the timeline of it and its stories, none in a Flow project. */
 export type PlannedEpic = {
   planned: true;
   kind: "epic";
@@ -96,6 +97,8 @@ export type FoundIssue = {
   state: "found";
   section: IssueSection;
   kind: IssueKind;
+  /** The project's plan mode: a Flow project shows no Start, Target or timeline and offers no Schedule. */
+  planMode: PlanModeName;
   issue: IssueDetail;
   place: IssuePlace;
   /** Open ones first, then the closed ones, each group in GitHub's order. */
@@ -167,6 +170,7 @@ export async function loadIssuePage(
     state: "found",
     section: place.planned ? "plan" : "issues",
     kind: place.planned ? place.kind : "issue",
+    planMode: project.planMode,
     issue,
     place,
     blockedBy: openFirst(dependencies.blockedBy).map(link),

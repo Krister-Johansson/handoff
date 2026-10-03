@@ -89,12 +89,13 @@ const repo = { owner: "octo", name: "sample" };
 /**
  * todooverkill's epic #1 with story #2 and its tasks #3 (Running, blocked by #6 and the closed #7) and
  * #4 (Ready, blocked by #3), plus story #5 with its own task; GitHub keeps the story's tasks in the order 4, 3.
+ * The project plans in Timeline mode.
  */
 async function planned() {
   const { project: p, github, start } = await project({});
   const plan = new FakeProjects(github);
   const { number } = await plan.createProject("octo", repo, "todooverkill plan");
-  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, p.id));
+  await db.update(projects).set({ planProjectNumber: number, planMode: "timeline" }).where(eq(projects.id, p.id));
   const issue = async (title: string, labels: string[], parent?: number, blockedBy?: number[]) =>
     (await plan.createIssue(repo, { project: number, title, body: `${title} body`, labels, parent, blockedBy })).number;
   const status = (n: number, value: string) => {
@@ -169,6 +170,22 @@ test("an epic lists its stories in GitHub's order and what waits: the open block
     ],
   });
   expect(page.place.timeline?.items.map((i) => i.number).sort()).toEqual([epic, story, other].sort());
+  expect(page.planMode).toBe("timeline");
+});
+
+test("a Flow project's story and epic carry the plan mode and no timeline", async () => {
+  const { project: p, github, plan, epic, story } = await planned();
+  await db.update(projects).set({ planMode: "flow" }).where(eq(projects.id, p.id));
+
+  const storyPage = await loadIssuePage(db, github, plan, p.id, story);
+  if (storyPage.state !== "found" || !storyPage.place.planned || storyPage.place.kind !== "story") throw new Error("not a story");
+  expect(storyPage.planMode).toBe("flow");
+  expect(storyPage.place.timeline).toBeUndefined();
+
+  const epicPage = await loadIssuePage(db, github, plan, p.id, epic);
+  if (epicPage.state !== "found" || !epicPage.place.planned || epicPage.place.kind !== "epic") throw new Error("not an epic");
+  expect(epicPage.planMode).toBe("flow");
+  expect(epicPage.place.timeline).toBeUndefined();
 });
 
 test("the pull requests of an issue come from its runs and GitHub's links, each with its state, checks and review decision; a story's are its tasks'", async () => {

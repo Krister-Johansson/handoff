@@ -11,7 +11,7 @@ import { ProjectSettingsNav } from "@/components/settings/settings-nav";
 import { getDb } from "@/lib/db";
 import { getProjects } from "@/lib/github";
 import { PROJECTS_SETTINGS_PATH } from "@/lib/paths";
-import { parseProjectSettingsTab, PROJECT_SETTINGS_TAB_LABEL, projectSettingsPath, type ProjectSettingsTab } from "@/lib/settings-tab";
+import { parseProjectSettingsTab, projectSettingsPath, projectSettingsTabLabel, type ProjectSettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
 import { forecastsForSettings } from "@/server/forecasts";
 import { listProjectGraphs, TEMPLATES } from "@/server/graphs";
@@ -73,11 +73,16 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
       );
     }
     case "estimates": {
+      // A Flow project has no hours, so its section is the plan budget alone and reads no forecasts.
+      if (project.planMode === "flow") {
+        return <EstimateSettings key={JSON.stringify(project.planBudget)} mode="flow" projectId={project.id} planBudget={project.planBudget} />;
+      }
       const { capacity, forecasts } = await forecastsForSettings(getDb(), project.id, getProjects());
       return (
         <EstimateSettings
           // A save gives the section its stored values again.
           key={JSON.stringify([capacity, project.planBudget])}
+          mode="timeline"
           projectId={project.id}
           capacity={capacity}
           forecasts={forecasts}
@@ -90,7 +95,8 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
 
 /**
  * What a project's runs start from and how its plan is worked, one section at a time beside a side menu
- * as in Settings: Graphs and the Default library, then Plan mode, the Scheduler and Estimates. The repository, branch, setup
+ * as in Settings: Graphs and the Default library, then Plan mode, the Scheduler and Estimates (Plan budget in a
+ * Flow project). The repository, branch, setup
  * command and GitHub Project are managed in Settings, Projects.
  */
 export default async function ProjectSettingsPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -103,7 +109,7 @@ export default async function ProjectSettingsPage({ params, searchParams }: { pa
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 max-sm:px-4">
       <PageHeader
-        crumbs={[projectStep!, { label: "Project settings", href: projectSettingsPath(project.id) }, { label: PROJECT_SETTINGS_TAB_LABEL[tab] }]}
+        crumbs={[projectStep!, { label: "Project settings", href: projectSettingsPath(project.id) }, { label: projectSettingsTabLabel(tab, project.planMode) }]}
         title="Project settings"
         description={
           <>
@@ -116,7 +122,7 @@ export default async function ProjectSettingsPage({ params, searchParams }: { pa
         }
       />
       <div className="grid items-start gap-6 max-md:gap-3.5 md:grid-cols-[200px_minmax(0,1fr)]">
-        <ProjectSettingsNav projectId={project.id} active={tab} />
+        <ProjectSettingsNav projectId={project.id} mode={project.planMode} active={tab} />
         <div className="flex min-w-0 flex-col gap-4">
           {await openSection({ tab, detail })}
         </div>

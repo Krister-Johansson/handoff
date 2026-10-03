@@ -80,6 +80,7 @@ export function taskPage(over: Partial<FoundIssue> = {}): FoundIssue {
     state: "found",
     section: "plan",
     kind: "task",
+    planMode: "timeline",
     issue: issueDetail(16, "F16 Drag and drop on the board", {
       body: "`@dnd-kit` with pointer and keyboard sensors.\nDepends on: #15 (F15), #8 (F08)",
       labels: ["projects-tasks", "task"],
