@@ -102,8 +102,19 @@ test("the handoff skill says a Flow project has no dates and names arrange_plan 
   expect(readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8")).toMatch(/Flow project[^\n]*Size/);
 });
 
-test("the plugin is 0.16.0, whose tools follow the project's plan mode and add set_order", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.16.0");
+test("the plugin is 0.16.1, whose skills name arrange_plan's scope and the Graphs section of Project settings", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.16.1");
+});
+
+test("both skills send the user to Project settings, Graphs for a graph, and arrange_plan takes a story and issues in Timeline mode too", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const setup = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
+  for (const text of [skill, setup]) {
+    expect(text).not.toContain("Settings tab");
+    expect(text).toContain("Project settings, Graphs");
+  }
+  const dates = skill.split("\n").find((line) => line.includes("only in Timeline mode"));
+  expect(dates).toContain("`arrange_plan` (optionally for an epic, a story or some issues)");
 });
 
 test("the plugin ships a setup skill that walks through setup_project", () => {

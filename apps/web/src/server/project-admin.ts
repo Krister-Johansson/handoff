@@ -122,7 +122,7 @@ function fieldsOf(project: PlanProject): PlanFieldsPresent {
 
 /**
  * Every project as Settings, Projects lists it, by name: repository, default branch, setup and
- * teardown commands, agent notes, demo seed command, UI paths, run count and the plan's GitHub Project. The Project's title, url and fields are read from GitHub; without
+ * teardown commands, agent notes, demo seed command, UI paths, plan mode, run count and the plan's GitHub Project. The Project's title, url and fields are read from GitHub; without
  * access, or when GitHub does not answer, the link keeps only its number.
  */
 export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined) {
@@ -139,6 +139,7 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
       demoSeedCommand: projects.demoSeedCommand,
       uiPaths: projects.uiPaths,
       isDemo: projects.isDemo,
+      planMode: projects.planMode,
       planProjectNumber: projects.planProjectNumber,
       runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,
     })

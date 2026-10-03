@@ -30,6 +30,8 @@ type ModeOf = { name: string; planMode: PlanMode };
 export const MODE_REFUSALS = {
   /** schedule, Arrange by estimate and other date writes in a Flow project. */
   dates: (p: ModeOf) => `${p.name} plans in Flow mode: tasks have an order and blockers, no dates. Use arrange_plan and set_order, or a person can switch the plan mode in Project settings.`,
+  /** Adding the Start and Target fields to a Flow project's GitHub Project. */
+  dateFields: (p: ModeOf) => `${p.name} plans in Flow mode, which has no dates. Its Project needs no Start or Target field.`,
   /** Start and Target on a new story or task in a Flow project. */
   newDates: (p: ModeOf) => `${p.name} plans in Flow mode, which has no dates. Leave start and target out; set_order places the task.`,
   /** An estimate in hours in a Flow project. */

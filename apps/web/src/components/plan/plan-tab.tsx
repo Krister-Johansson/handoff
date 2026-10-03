@@ -229,8 +229,8 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
   const sizing = useMemo(() => {
     if (!plan.forecasts || plan.capacity === undefined) return undefined;
     const spans = new Map(timeline.items.map((i) => [i.number, i.planned]));
-    return { projectId: project.id, projectName: project.name, forecasts: plan.forecasts, capacity: plan.capacity, spanOf: (issue: number) => spans.get(issue) };
-  }, [plan.forecasts, plan.capacity, timeline.items, project.id, project.name]);
+    return { projectId: project.id, projectName: project.name, mode, forecasts: plan.forecasts, capacity: plan.capacity, spanOf: (issue: number) => spans.get(issue) };
+  }, [plan.forecasts, plan.capacity, timeline.items, project.id, project.name, mode]);
   const current = { ...filters, q: query.trim() };
 
   // Voice owns Escape while it speaks or listens; the search keeps its text then.

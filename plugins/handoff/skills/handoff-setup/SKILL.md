@@ -17,7 +17,7 @@ handoff runs a graph of agents on a GitHub repository: a planner, a coder, a tes
 
 ### A graph (required)
 
-A project needs a graph before it can run. The user creates it on the project's Settings tab in the dashboard, or imports a JSON file with `pnpm handoff graph import --project <name> --name <graph> <file.json>` from the handoff checkout. A graph that works well has: Start, a planner, a reviewer of the plan, a Human gate to approve the plan, a coder, a tester, a code review, a Human gate to approve the build, a Demo step, a Human gate in Try mode, the Pull request node and a Merge node.
+A project needs a graph before it can run. The user creates it in the dashboard under the project's Project settings, Graphs, or imports a JSON file with `pnpm handoff graph import --project <name> --name <graph> <file.json>` from the handoff checkout. A graph that works well has: Start, a planner, a reviewer of the plan, a Human gate to approve the plan, a coder, a tester, a code review, a Human gate to approve the build, a Demo step, a Human gate in Try mode, the Pull request node and a Merge node.
 
 ### A running worker (required)
 

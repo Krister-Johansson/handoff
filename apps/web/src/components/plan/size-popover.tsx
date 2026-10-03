@@ -42,10 +42,14 @@ function typedNote(text: string, task: PlanTask, value: SizeValue, sizing: Sizin
   return { hours: parsed.hours, note: `${hoursInWords(parsed.hours)}.${overrides}${targetNote(task, parsed.hours, sizing)}` };
 }
 
+/** What a size does in a Flow project, which has no hours: it only places the task's card. */
+const FLOW_SIZE = "In Flow the size sets a card's length and which slot frees first.";
+
 /**
  * The size popover of a task: S, M and L with this project's forecasts, the planner's proposal with Use,
  * then an optional manual estimate in hours or days with quick picks, and Use the forecast to clear it.
- * Picking a size or a quick pick saves at once; Enter saves a typed estimate.
+ * Picking a size or a quick pick saves at once; Enter saves a typed estimate. A Flow project has no hours,
+ * so its popover offers the sizes and the proposal only, with no forecasts, capacity or manual estimate.
  */
 export function SizePopover({
   task,
@@ -63,6 +67,7 @@ export function SizePopover({
 }) {
   const [text, setText] = useState("");
   const { forecasts, capacity } = sizing;
+  const flow = sizing.mode === "flow";
   const proposal = !value.size ? task.proposal : undefined;
   const shown = value.size ?? proposal?.size;
   const typed = typedNote(text, task, value, sizing);
@@ -74,7 +79,7 @@ export function SizePopover({
   };
 
   return (
-    <PopoverContent align="end" className="w-75 gap-0 p-0 text-[13px]" aria-label={`Size and estimate of #${task.number}`}>
+    <PopoverContent align="end" className="w-75 gap-0 p-0 text-[13px]" aria-label={flow ? `Size of #${task.number}` : `Size and estimate of #${task.number}`}>
       <div className="flex flex-col gap-2 p-3.5 pb-3">
         <h3 className="font-semibold">Size</h3>
         <div role="group" aria-label="Size" className="grid grid-cols-3 gap-1">
@@ -95,15 +100,21 @@ export function SizePopover({
                 )}
               >
                 <b className="font-mono text-[13px] font-semibold">{size}</b>
-                <span className={cn("text-[11px] text-muted-foreground", picked && "text-primary-foreground/70")}>
-                  ~{usually(forecast, capacity)}
-                  {forecast.source === "default" && " default"}
-                </span>
+                {!flow && (
+                  <span className={cn("text-[11px] text-muted-foreground", picked && "text-primary-foreground/70")}>
+                    ~{usually(forecast, capacity)}
+                    {forecast.source === "default" && " default"}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
-        {shown && <p className="text-xs leading-normal text-muted-foreground">{forecastSentence(forecasts[shown], capacity, sizing.projectName)}</p>}
+        {flow ? (
+          <p className="text-xs leading-normal text-muted-foreground">{FLOW_SIZE}</p>
+        ) : (
+          shown && <p className="text-xs leading-normal text-muted-foreground">{forecastSentence(forecasts[shown], capacity, sizing.projectName)}</p>
+        )}
         {proposal && (
           <div className="flex items-start gap-1.5 rounded-md border border-dashed border-input p-2 text-xs leading-snug text-foreground/80">
             <ListChecksIcon aria-hidden className="mt-px size-3.5 shrink-0 text-muted-foreground" />
@@ -116,45 +127,49 @@ export function SizePopover({
           </div>
         )}
       </div>
-      <div className="flex flex-col gap-2 border-t p-3.5 pb-3">
-        <div className="flex flex-col gap-0.5">
-          <h3 className="font-semibold">
-            Manual estimate <span className="ml-1 text-xs font-medium text-muted-foreground">optional</span>
-          </h3>
-          <p className="text-xs leading-normal text-muted-foreground">Overrides the forecast. Saved in hours to the Estimate field.</p>
+      {!flow && (
+        <div className="flex flex-col gap-2 border-t p-3.5 pb-3">
+          <div className="flex flex-col gap-0.5">
+            <h3 className="font-semibold">
+              Manual estimate <span className="ml-1 text-xs font-medium text-muted-foreground">optional</span>
+            </h3>
+            <p className="text-xs leading-normal text-muted-foreground">Overrides the forecast. Saved in hours to the Estimate field.</p>
+          </div>
+          <div role="group" aria-label="Estimate quick picks" className="grid grid-cols-6 gap-1">
+            {PICKS.map((pick) => {
+              const hours = (parseEstimate(pick, capacity) as { hours: number }).hours;
+              const picked = value.estimate === hours;
+              return (
+                <Button key={pick} size="xs" variant={picked ? "default" : "outline"} aria-pressed={picked} onClick={() => !picked && onSave({ estimate: hours })}>
+                  {pick}
+                </Button>
+              );
+            })}
+          </div>
+          <Input
+            aria-label="Manual estimate"
+            placeholder="5h or 1.5d"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            aria-invalid={typed !== undefined && "error" in typed}
+            className="h-8 bg-muted/40"
+          />
+          {typed && ("error" in typed ? <FieldError className="text-xs">{typed.error}</FieldError> : <p className="text-xs leading-normal text-muted-foreground">{typed.note}</p>)}
+          {!typed && value.estimate !== undefined && (
+            <p className="text-xs text-muted-foreground">Now {formatDuration(value.estimate, capacity)}, {hoursInWords(value.estimate)}.</p>
+          )}
         </div>
-        <div role="group" aria-label="Estimate quick picks" className="grid grid-cols-6 gap-1">
-          {PICKS.map((pick) => {
-            const hours = (parseEstimate(pick, capacity) as { hours: number }).hours;
-            const picked = value.estimate === hours;
-            return (
-              <Button key={pick} size="xs" variant={picked ? "default" : "outline"} aria-pressed={picked} onClick={() => !picked && onSave({ estimate: hours })}>
-                {pick}
-              </Button>
-            );
-          })}
-        </div>
-        <Input
-          aria-label="Manual estimate"
-          placeholder="5h or 1.5d"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          aria-invalid={typed !== undefined && "error" in typed}
-          className="h-8 bg-muted/40"
-        />
-        {typed && ("error" in typed ? <FieldError className="text-xs">{typed.error}</FieldError> : <p className="text-xs leading-normal text-muted-foreground">{typed.note}</p>)}
-        {!typed && value.estimate !== undefined && (
-          <p className="text-xs text-muted-foreground">Now {formatDuration(value.estimate, capacity)}, {hoursInWords(value.estimate)}.</p>
-        )}
-      </div>
+      )}
       {error && <FieldError className="border-t px-3.5 py-2 text-xs">{error}</FieldError>}
-      <div className="flex items-center justify-between border-t px-3.5 py-2 text-xs text-muted-foreground">
-        <Button variant="link" size="xs" className="h-auto px-0 text-foreground/80" disabled={value.estimate === undefined} onClick={() => onSave({ estimate: null })}>
-          Use the forecast
-        </Button>
-        <span>Enter saves</span>
-      </div>
+      {!flow && (
+        <div className="flex items-center justify-between border-t px-3.5 py-2 text-xs text-muted-foreground">
+          <Button variant="link" size="xs" className="h-auto px-0 text-foreground/80" disabled={value.estimate === undefined} onClick={() => onSave({ estimate: null })}>
+            Use the forecast
+          </Button>
+          <span>Enter saves</span>
+        </div>
+      )}
     </PopoverContent>
   );
 }

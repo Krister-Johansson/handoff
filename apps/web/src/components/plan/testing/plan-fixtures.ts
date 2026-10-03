@@ -132,6 +132,7 @@ export const flowRun = (issue: number, minute: number, done: number, total: numb
 export const sizingOf = (over: Partial<SizingControl> = {}): SizingControl => ({
   projectId: "p1",
   projectName: "todooverkill",
+  mode: "timeline",
   forecasts: FORECASTS,
   capacity: 6,
   spanOf: () => undefined,

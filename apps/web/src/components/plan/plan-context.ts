@@ -3,6 +3,7 @@
 import { createContext, use, useMemo, useState } from "react";
 import type { Forecasts } from "@/lib/plan/forecast";
 import type { PlannedSpan } from "@/lib/plan/schedule";
+import type { PlanModeName } from "@/lib/project-tab";
 
 /** The Plan page's search text, for the titles that mark what it found and the rows that say they match. */
 export const SearchQuery = createContext("");
@@ -33,6 +34,8 @@ export const Assigning = createContext<AssignControl | undefined>(undefined);
 export type SizingControl = {
   projectId: string;
   projectName: string;
+  /** The project's plan mode: a Flow project has sizes only, with no hours, capacity or manual estimate. */
+  mode: PlanModeName;
   forecasts: Forecasts;
   capacity: number;
   spanOf: (issue: number) => PlannedSpan | undefined;

@@ -476,7 +476,7 @@ export async function unpinAction(input: z.input<typeof PlanTaskSchema>): Promis
   return onPlan(parsed.data.projectId, (deps) => unpin(deps.db, parsed.data.projectId, parsed.data.issue));
 }
 
-/** Add the fields, on the timeline's banner and in Settings, Projects: creates Size and Estimate on the plan's GitHub Project. */
+/** Add the fields, on the timeline's banner and in Settings, Projects: creates Size and Estimate on the plan's GitHub Project, Size only in a Flow project. */
 export async function addEstimateFieldsAction(input: { projectId: string }): Promise<ActionState> {
   const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
   if (!parsed.success) return { ok: false, error: "That project has no plan to add fields to." };
