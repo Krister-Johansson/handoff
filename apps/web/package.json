@@ -18,6 +18,7 @@
     "@handoff/db": "workspace:*",
     "@handoff/engine": "workspace:*",
     "@handoff/github": "workspace:*",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.31.0",
     "@uiw/react-codemirror": "4.25.12",
     "@xyflow/react": "12.12.0",

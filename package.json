@@ -28,6 +28,7 @@
     "docker:runner": "docker build -f docker/runner.Dockerfile -t handoff-runner:2.1.285 docker",
     "demo:reset": "pnpm --filter @handoff/worker demo --reset",
     "dev:webhooks": "sh scripts/forward-webhooks.sh",
+    "build:mcp-apps": "tsx scripts/build-mcp-apps.ts",
     "build:plugin": "esbuild packages/connector/src/main.ts --bundle --platform=node --format=esm --target=node20 --legal-comments=none --outfile=plugins/handoff/server/handoff-mcp.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\""
   },
   "devDependencies": {

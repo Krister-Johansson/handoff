@@ -30,6 +30,7 @@ import { inboxGroups } from "./inbox-groups";
 import { checkText } from "../lib/scheduler-text";
 import { getScheduler, pauseScheduler, startScheduler, stopScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
+import { appMetaOf, registerAppResources } from "./mcp-apps";
 
 /**
  * `actor` is who answers through these tools, recorded on questions and permission requests: claude-code by default.
@@ -875,14 +876,15 @@ function resultOf(spec: ToolSpec, value: unknown, wrapUntrusted: boolean) {
 /**
  * Registers the catalog's data tools on an MCP server, each calling the same server functions the
  * dashboard uses. `wrapUntrusted` marks results that carry text from runs or GitHub as data, for the
- * dashboard's assistant.
+ * dashboard's assistant. `apps` links the tools that have an MCP Apps view to it; their results stay the same.
  */
-export function registerDataTools(server: McpServer, deps: HandoffMcpDeps, options: { wrapUntrusted?: boolean } = {}) {
+export function registerDataTools(server: McpServer, deps: HandoffMcpDeps, options: { wrapUntrusted?: boolean; apps?: boolean } = {}) {
   const handlers = handlersFor(deps);
   for (const spec of CATALOG.filter((t) => t.kind === "data")) {
     const handler = handlers[spec.name] as ((args: unknown) => Promise<unknown>) | undefined;
     if (!handler) throw new Error(`The catalog's tool ${spec.name} has no handler.`);
-    server.registerTool(spec.name, { title: spec.title, description: spec.description, inputSchema: spec.input.shape, annotations: annotationsOf(spec) }, (args: unknown) =>
+    const _meta = options.apps ? appMetaOf(spec.name) : undefined;
+    server.registerTool(spec.name, { title: spec.title, description: spec.description, inputSchema: spec.input.shape, annotations: annotationsOf(spec), ...(_meta ? { _meta } : {}) }, (args: unknown) =>
       tool(async () => resultOf(spec, await handler(args), options.wrapUntrusted ?? false)),
     );
   }
@@ -900,11 +902,13 @@ export async function runTool(deps: HandoffMcpDeps, name: string, args: unknown)
 
 /**
  * handoff's operations as MCP tools, for an agent such as the user's Claude Code session. The catalog
- * says what each tool is.
+ * says what each tool is. get_run also has a view for hosts that render MCP Apps, registered for every client:
+ * its text result is what the others show.
  */
 export function createHandoffMcpServer(deps: HandoffMcpDeps): McpServer {
   const server = new McpServer({ name: "handoff", version: "1.0.0" }, { instructions: INSTRUCTIONS });
-  registerDataTools(server, deps);
+  registerDataTools(server, deps, { apps: true });
+  registerAppResources(server);
   return server;
 }
 
