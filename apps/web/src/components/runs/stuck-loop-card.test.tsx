@@ -40,5 +40,7 @@ test("a refused decision stops working and says why", async () => {
   fireEvent.click(chosen);
   expect(await screen.findByText("The graph no longer has code_review-1->coder-1.")).toBeInTheDocument();
   expect(chosen).not.toHaveAttribute("aria-busy");
-  expect(chosen).toBeEnabled();
+  // The error and the cleared choice commit before the transition ends, so the buttons stay disabled
+  // until the pending flag drops in a later render.
+  await waitFor(() => expect(chosen).toBeEnabled());
 });
