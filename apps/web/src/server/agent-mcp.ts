@@ -324,6 +324,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         repo: `${detail.project.repoOwner}/${detail.project.repoName}`,
         graphs: detail.graphs.map((g) => ({ name: g.name, latest_version: g.latestVersion })),
         default_graph: detail.defaultGraph ?? null,
+        plan_mode: detail.project.planMode,
         recent_runs: recent.map((r) => ({
           id: r.id,
           task: r.task,

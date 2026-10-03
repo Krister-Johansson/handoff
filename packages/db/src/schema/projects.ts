@@ -5,6 +5,10 @@ import { githubInstallations } from "./github-installations.ts";
 
 export type ProjectLibrary = { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
 
+/** How a project plans its work: Flow orders tasks without dates; Timeline gives them dates and estimates. */
+export const PLAN_MODES = ["flow", "timeline"] as const;
+export type PlanMode = (typeof PLAN_MODES)[number];
+
 export const projects = pgTable(
   "projects",
   {
@@ -36,8 +40,16 @@ export const projects = pgTable(
     planProjectNumber: integer("plan_project_number"),
     /** The person's hours of work a day on the plan's timeline: a task's duration over it gives its bar in days. */
     planHoursPerDay: numeric("plan_hours_per_day", { precision: 4, scale: 1, mode: "number" }).notNull().default(6),
+    /**
+     * Flow or Timeline. Only a person changes it, in Project settings. Projects that existed before the column
+     * plan in Timeline; a project added after it starts in Flow.
+     */
+    planMode: text("plan_mode").$type<PlanMode>().notNull().default("flow"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [check("projects_plan_hours_per_day_check", sql`${t.planHoursPerDay} between 1 and 24`)],
+  (t) => [
+    check("projects_plan_hours_per_day_check", sql`${t.planHoursPerDay} between 1 and 24`),
+    check("projects_plan_mode_check", sql`${t.planMode} in ('flow', 'timeline')`),
+  ],
 );

@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { DefaultLibrary } from "@/components/projects/default-library";
 import { NewGraphDialog } from "@/components/projects/forms";
 import { GraphList } from "@/components/projects/graph-list";
+import { PlanModeSettings } from "@/components/projects/plan-mode-settings";
 import { CARD_BODY, SectionCard } from "@/components/section-card";
 import { SchedulerSettings } from "@/components/scheduler/scheduler-settings";
 import { EstimateSettings } from "@/components/settings/estimate-settings";
@@ -49,6 +50,9 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
       );
     case "library":
       return <DefaultLibrary key={JSON.stringify(project.library)} projectId={project.id} available={await libraryChoices(getDb())} initial={project.library} />;
+    case "mode":
+      // A save gives the section its stored mode again.
+      return <PlanModeSettings key={project.planMode} projectId={project.id} initial={project.planMode} />;
     case "scheduler": {
       if (project.isDemo) {
         return (
@@ -86,7 +90,7 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
 
 /**
  * What a project's runs start from and how its plan is worked, one section at a time beside a side menu
- * as in Settings: Graphs and the Default library, then the Scheduler and Estimates. The repository, branch, setup
+ * as in Settings: Graphs and the Default library, then Plan mode, the Scheduler and Estimates. The repository, branch, setup
  * command and GitHub Project are managed in Settings, Projects.
  */
 export default async function ProjectSettingsPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
