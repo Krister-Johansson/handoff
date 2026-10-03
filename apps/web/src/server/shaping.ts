@@ -16,10 +16,11 @@ import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import { recordPlanStatus } from "@handoff/engine/plan-status";
 import { parseEstimate } from "../lib/plan/duration.ts";
 import { durationOf } from "../lib/plan/forecast.ts";
-import { sizedBars } from "../lib/plan/schedule.ts";
+import { sizedBars, type PlannedSpan } from "../lib/plan/schedule.ts";
 import { latestRuns, type BacklogRun } from "./backlog.ts";
 import { latestProposals, loadForecasts, type Proposal } from "./forecasts.ts";
 import { projectsAccessProblem } from "./plan.ts";
+import { MODE_REFUSALS, refuseInMode, type PlanMode } from "./plan-mode.ts";
 
 /**
  * Shaping a project's plan on GitHub Projects: setting the plan up, creating epics, stories and tasks,
@@ -65,6 +66,8 @@ export async function listGitHubProjects(deps: ShapingDeps, projectId: string) {
  * existing Project of the user instead of creating one. With a number already stored it creates
  * nothing: it re-creates missing labels and reports Status options the Project lacks. An adopted or
  * stored Project's items that active runs work on get the Status each run owns (statuses_from_runs).
+ * A project in Flow mode plans without dates or hours, so its Project gets the Size field and no Start,
+ * Target or Estimate field.
  */
 export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { use?: number } = {}) {
   const { project, plan, repo } = await shapingAccess(deps, projectId);
@@ -76,13 +79,14 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
   const store = (number: number) => deps.db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
 
   // The Start and Target date fields a Project lacks, created; the roadmap layout reads them once a person picks them.
-  // Size and Estimate likewise, with S, M and L added to a Size field that lacks them.
+  // Size and Estimate likewise, with S, M and L added to a Size field that lacks them. A Flow project gets Size only.
+  const flow = project.planMode === "flow";
   const dateFields = async (found: PlanProject) => {
-    const missing = DATE_FIELDS.filter(([key]) => !found.dateFields?.[key]).map(([, name]) => name);
+    const missing = flow ? [] : DATE_FIELDS.filter(([key]) => !found.dateFields?.[key]).map(([, name]) => name);
     if (missing.length) await plan.ensureDateFields(repo.owner, found.number);
-    const missingEstimate = missingEstimateFields(found);
-    if (missingEstimate.length) await plan.ensureEstimateFields(repo.owner, found.number);
-    return { added_date_fields: missing, added_estimate_fields: missingEstimate, roadmap: ROADMAP_NOTE };
+    const missingEstimate = missingEstimateFields(found, project.planMode);
+    if (missingEstimate.length) await plan.ensureEstimateFields(repo.owner, found.number, { estimate: !flow });
+    return { added_date_fields: missing, added_estimate_fields: missingEstimate, ...(flow ? {} : { roadmap: ROADMAP_NOTE }) };
   };
 
   if (stored !== null) {
@@ -105,7 +109,7 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
       ...(await dateFields(adopted.project)),
     };
   }
-  const created = await plan.createProject(repo.owner, repo, `${project.name} plan`);
+  const created = await plan.createProject(repo.owner, repo, `${project.name} plan`, { dateFields: !flow });
   await store(created.number);
   // A new Project has no items yet, so no run's Status to write.
   return { created: true, project: projectSummary(created), missing_status_options: missingOptions(created), statuses_from_runs: [], ...(await dateFields(created)) };
@@ -135,9 +139,13 @@ type NewDates = { start?: string | undefined; target?: string | undefined };
 /** The dates given, without the keys left out. */
 const datesOf = ({ start, target }: NewDates) => ({ ...(start ? { start } : {}), ...(target ? { target } : {}) });
 
-/** Refuses new dates before the issue is created: a malformed date, a Target before its Start, a Project without the date fields. */
+/**
+ * Refuses new dates before the issue is created: any date in a Flow project, a malformed date, a Target before its
+ * Start, a Project without the date fields.
+ */
 async function checkNewDates(planned: Planned, dates: NewDates) {
   if (!dates.start && !dates.target) return;
+  refuseInMode(planned.project, "flow", MODE_REFUSALS.newDates);
   checkDates("The new issue", dates.start, dates.target);
   await requireDateFields(planned);
 }
@@ -152,7 +160,8 @@ export async function createEpic(deps: ShapingDeps, projectId: string, input: { 
 /** A story: a sub-issue of an epic labelled story, its acceptance criteria as checkboxes, in Shaping. */
 export async function createStory(deps: ShapingDeps, projectId: string, input: { epic: number; title: string; acceptance: string[] } & NewDates) {
   const planned = await plannedProject(deps, projectId);
-  await Promise.all([parentOf(planned, input.epic, "epic"), checkNewDates(planned, input)]);
+  await checkNewDates(planned, input);
+  await parentOf(planned, input.epic, "epic");
   const body = `## Acceptance criteria\n\n${checkboxes(input.acceptance)}`;
   const created = await planned.plan.createIssue(planned.repo, { project: planned.number, title: input.title, body, labels: ["story"], parent: input.epic, ...datesOf(input) });
   return { ...created, kind: "story" as const, status: "Shaping" as const, parent: input.epic, ...datesOf(input) };
@@ -170,9 +179,10 @@ export async function createTask(
 ) {
   const planned = await plannedProject(deps, projectId);
   const sizeFields = async () => {
-    if (input.size) requireEstimateFields(await planned.plan.getProject(planned.repo.owner, planned.number), planned.number);
+    if (input.size) requireEstimateFields(await planned.plan.getProject(planned.repo.owner, planned.number), planned.number, planned.project.planMode);
   };
-  await Promise.all([parentOf(planned, input.story, "story"), checkNewDates(planned, input), sizeFields()]);
+  await checkNewDates(planned, input);
+  await Promise.all([parentOf(planned, input.story, "story"), sizeFields()]);
   const criteria = input.acceptance?.length ? `\n\n## Acceptance criteria\n\n${checkboxes(input.acceptance)}` : "";
   const blockedBy = input.blockedBy ?? [];
   const created = await planned.plan.createIssue(planned.repo, {
@@ -329,11 +339,11 @@ export async function addDateFields(deps: ShapingDeps, projectId: string) {
   return { date_fields: await plan.ensureDateFields(repo.owner, number), roadmap: ROADMAP_NOTE };
 }
 
-/** The Size and Estimate fields a Project lacks: a Size field without S, M or L counts as missing. */
-function missingEstimateFields(project: PlanProject): ("Size" | "Estimate")[] {
+/** The Size and Estimate fields a Project lacks: a Size field without S, M or L counts as missing. A Flow project needs no Estimate. */
+function missingEstimateFields(project: PlanProject, mode: PlanMode): ("Size" | "Estimate")[] {
   const fields = project.estimateFields;
   const size = fields?.size && PLAN_SIZES.every((s) => fields.size?.options[s]);
-  return [...(size ? [] : (["Size"] as const)), ...(fields?.estimate ? [] : (["Estimate"] as const))];
+  return [...(size ? [] : (["Size"] as const)), ...(fields?.estimate || mode === "flow" ? [] : (["Estimate"] as const))];
 }
 
 /** Gives the plan's Project its Size and Estimate fields when it lacks them, as the timeline's banner asks. */
@@ -359,10 +369,11 @@ function estimateHours(issue: number, estimate: number | string | null | undefin
   return parsed.hours;
 }
 
-/** Refuses before any write when the plan's Project lacks the Size or the Estimate field. */
-function requireEstimateFields(found: PlanProject | undefined, number: number) {
+/** Refuses before any write when the plan's Project lacks the Size or the Estimate field; a Flow project needs Size only. */
+function requireEstimateFields(found: PlanProject | undefined, number: number, mode: PlanMode) {
   const fields = found?.estimateFields;
-  if (!fields?.size || !fields.estimate) {
+  if (mode === "flow" && !fields?.size) throw new Error(`GitHub Project #${number} has no Size field. Run setup_plan to add it.`);
+  if (mode === "timeline" && (!fields?.size || !fields.estimate)) {
     throw new Error(`GitHub Project #${number} has no Size and no Estimate field. Add them with Add the fields on the Plan timeline, or run setup_plan.`);
   }
 }
@@ -379,7 +390,8 @@ const UNSIZED: Record<Exclude<SetFieldsResult, "set">, string> = {
  * the day its new duration ends, after the hours of the tasks before it on its first day. Every task is checked
  * before anything is written, and the writes go out together. Refuses an issue outside the plan, a story or an
  * epic (they sum their tasks), an estimate it cannot read or outside 0 to 1000 hours and a Project without the
- * fields, and then writes nothing. Returns what changed for each task.
+ * fields, and then writes nothing. Returns what changed for each task. A Flow project has no hours or dates: it
+ * refuses an estimate and leaves every Target as it is.
  */
 export async function setSizes(deps: ShapingDeps, projectId: string, inputs: SizesInput[]) {
   if (!inputs.length) throw new Error("Give at least one task to size.");
@@ -389,6 +401,7 @@ export async function setSizes(deps: ShapingDeps, projectId: string, inputs: Siz
     seen.add(issue);
   }
   const { plan, repo, number, project } = await plannedProject(deps, projectId);
+  if (inputs.some((input) => input.estimate !== undefined)) refuseInMode(project, "flow", MODE_REFUSALS.estimate);
   const estimates = inputs.map((input) => estimateHours(input.issue, input.estimate, project.planHoursPerDay));
   const [items, found, proposals] = await Promise.all([plan.listItems(repo.owner, number, repo), plan.getProject(repo.owner, number), latestProposals(deps.db, project.id)]);
   const byNumber = new Map(items.map((i) => [i.number, i]));
@@ -400,16 +413,17 @@ export async function setSizes(deps: ShapingDeps, projectId: string, inputs: Siz
     const estimate = estimates[k] === undefined ? undefined : estimates[k] || null;
     return { input, item, estimate };
   });
-  requireEstimateFields(found, number);
+  requireEstimateFields(found, number, project.planMode);
 
-  // The Targets follow from every change at once, so tasks sized together on one day stack in order.
+  // The Targets follow from every change at once, so tasks sized together on one day stack in order. A Flow
+  // project reads no dates, so the Targets it kept from Timeline mode stay.
   const changed = new Map(
     changes.map(({ input, item, estimate }) => [
       item.number,
       { ...item, size: input.size === undefined ? item.size : (input.size ?? undefined), estimate: estimate === undefined ? item.estimate : (estimate ?? undefined) },
     ]),
   );
-  const bars = await followingBars(deps.db, project.id, items.map((i) => changed.get(i.number) ?? i), proposals);
+  const bars = project.planMode === "flow" ? new Map<number, PlannedSpan>() : await followingBars(deps.db, project.id, items.map((i) => changed.get(i.number) ?? i), proposals);
   const writes = changes.map(({ input, item, estimate }) => {
     const target = item.start ? bars.get(item.number)?.end : undefined;
     const fields: PlanFields = {
@@ -521,6 +535,7 @@ export async function schedule(deps: ShapingDeps, projectId: string, items: Sche
   }
   const planned = await plannedProject(deps, projectId);
   const { plan, repo, number, project } = planned;
+  refuseInMode(project, "flow", MODE_REFUSALS.dates);
   const [inPlan] = await Promise.all([plan.listItems(repo.owner, number, repo), requireDateFields(planned)]);
   const byNumber = new Map(inPlan.map((i) => [i.number, i]));
   const changes = items.map((change) => {

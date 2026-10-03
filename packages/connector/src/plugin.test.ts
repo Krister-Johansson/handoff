@@ -90,8 +90,20 @@ test("the handoff skill says a code review sends its Fix now findings with answe
   expect(skill).toMatch(/`answer_question`[^\n]*`fix_now`[^\n]*`findings`/);
 });
 
-test("the plugin is 0.15.0, whose get_project returns the plan mode", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.15.0");
+test("the handoff skill says a Flow project has no dates and names arrange_plan and set_order", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const shape = skill.indexOf("## Shape first");
+  const section = skill.slice(shape, skill.indexOf("\n## ", shape + 1));
+  const flow = section.split("\n").find((line) => line.includes("Flow mode"));
+  expect(flow).toMatch(/no dates/);
+  expect(flow).toMatch(/`arrange_plan`[^\n]*`set_order`/);
+  expect(flow).toMatch(/`set_order`[^\n]*`pin`/);
+  expect(section).toMatch(/`get_project`[^\n]*plan mode|plan mode[^\n]*`get_project`/);
+  expect(readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8")).toMatch(/Flow project[^\n]*Size/);
+});
+
+test("the plugin is 0.16.0, whose tools follow the project's plan mode and add set_order", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.16.0");
 });
 
 test("the plugin ships a setup skill that walks through setup_project", () => {

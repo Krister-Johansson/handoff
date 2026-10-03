@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fillPlaces, placeMoves } from "../plan/flow-order";
 import { pageToolSpec, type PageToolSpec } from "./page-tools";
 
 /**
@@ -64,6 +65,34 @@ function sizeText(item: SizeItem) {
     ...part("estimate", item.estimate, item.was?.estimate_hours, item.was?.estimate_hours !== undefined),
   ];
   return `#${item.issue} ${parts.join(", ")}`;
+}
+
+/** set_order's arguments, as its approval card reads them. */
+type OrderArgs = { project: string; order: number[]; pin?: number[] | undefined; unpin?: number[] | undefined; was?: number[] | undefined };
+
+/**
+ * set_order's approval sentence. With `was`, the order it read, each task that moves with its old and new place
+ * and each pin change: "#74 Next 3 to Next 1, pinned; #61 stays Next 2, pinned". Without it, the new relative
+ * order and the pin changes.
+ */
+function orderText(a: OrderArgs) {
+  const pin = new Set(a.pin ?? []);
+  const unpin = new Set(a.unpin ?? []);
+  const mark = (n: number) => [...(pin.has(n) ? ["pinned"] : []), ...(unpin.has(n) ? ["unpinned"] : [])].map((m) => `, ${m}`).join("");
+  if (!a.was) {
+    const changes = [...(pin.size ? [`pin ${[...pin].map((n) => `#${n}`).join(", ")}`] : []), ...(unpin.size ? [`unpin ${[...unpin].map((n) => `#${n}`).join(", ")}`] : [])];
+    return `Order in ${a.project}: ${a.order.map((n) => `#${n}`).join(", ")} in that order${changes.map((c) => `; ${c}`).join("")}`;
+  }
+  const after = fillPlaces(a.was, a.order);
+  const moves = placeMoves(a.was, after);
+  const moved = new Set(moves.map((m) => m.issue));
+  const stays = [...new Set([...pin, ...unpin])].filter((n) => !moved.has(n));
+  const placeOf = new Map(after.map((n, index) => [n, index + 1]));
+  const parts = [
+    ...moves.map((m) => `#${m.issue} Next ${m.from} to Next ${m.to}${mark(m.issue)}`),
+    ...stays.map((n) => (placeOf.has(n) ? `#${n} stays Next ${placeOf.get(n)}${mark(n)}` : `#${n}${mark(n)}`)),
+  ];
+  return `Order in ${a.project}: ${parts.length ? parts.join("; ") : "no change"}`;
 }
 
 /**
@@ -417,7 +446,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_plan",
     title: "Show the plan",
     description:
-      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done), each with its Start and Target dates, each task with its open blockers, latest run and pull request, its Size (S, M or L), its Estimate in hours, the size its planner proposed and its duration in hours with where it comes from; the project's capacity in hours a day and each size's forecast from its finished runs; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). With epic, only that epic.",
+      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done), each task with its open blockers, latest run and pull request, its Size (S, M or L) and the size its planner proposed; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). mode says how the project plans. In Timeline mode each item has its Start and Target dates, each task its Estimate in hours and its duration in hours with where it comes from, with the project's capacity in hours a day and each size's forecast from its finished runs. In Flow mode there are no dates or hours: queue is the order the scheduler starts tasks in (Ready tasks, then Shaping tasks), lanes is how many runs it holds at once, held says why it waits, and each task has its place in the queue, its lane, whether it is pinned, waits_for (blockers it is placed before or that are outside the order), after (the blocker its lane waits for), skipped (why the scheduler passes it over) and, while it runs, progress in graph steps and waits_on. With epic, only that epic.",
     input: z.object({ project, epic: z.number().int().positive().optional().describe("Only this epic, by issue number") }),
     kind: "data",
     confirm: false,
@@ -441,7 +470,7 @@ export const CATALOG: ToolSpec[] = [
     name: "setup_plan",
     title: "Set up the plan",
     description:
-      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done and the date fields Start and Target, a single select Size with S, M and L and a Number field Estimate, linked to the repository. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and fields (adding S, M and L to a Size field that lacks them) and reports Status options the Project lacks.",
+      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done and a single select Size with S, M and L, linked to the repository; in Timeline mode also the date fields Start and Target and a Number field Estimate, which a Flow project does not use. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and fields (adding S, M and L to a Size field that lacks them) and reports Status options the Project lacks.",
     input: z.object({ project, use: z.number().int().positive().optional().describe("An existing Project's number to use instead of creating one") }),
     kind: "data",
     confirm: true,
@@ -450,8 +479,8 @@ export const CATALOG: ToolSpec[] = [
     idempotent: true,
     summarize: (a) =>
       a.use
-        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks), the date fields Start and Target and the fields Size and Estimate, and add the labels epic, story and task`
-        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done, the date fields Start and Target and the fields Size and Estimate, and the labels epic, story and task`,
+        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks) and the field Size (in Timeline mode also Start, Target and Estimate), and add the labels epic, story and task`
+        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done and the field Size (in Timeline mode also Start, Target and Estimate), and the labels epic, story and task`,
   }),
   spec({
     name: "create_epic",
@@ -475,8 +504,8 @@ export const CATALOG: ToolSpec[] = [
       epic: z.number().int().positive().describe("The epic's issue number"),
       title: z.string().min(3).describe("The story's title"),
       acceptance: z.array(z.string().min(1)).min(1).describe("Acceptance criteria, one sentence each"),
-      start: day.optional().describe("Start, YYYY-MM-DD, only when the person gave dates"),
-      target: day.optional().describe("Target, YYYY-MM-DD, only when the person gave dates"),
+      start: day.optional().describe("Start, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
+      target: day.optional().describe("Target, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
     }),
     kind: "data",
     confirm: true,
@@ -489,7 +518,7 @@ export const CATALOG: ToolSpec[] = [
     name: "create_task",
     title: "Create a task",
     description:
-      "Creates a task under a story of the project's plan: a sub-issue of the story labelled task, in Shaping. The brief is the body the agents read: the goal, where in the code, and how to tell it is done. blocked_by links issues that must close first. A task reaches the backlog once move_to_ready moves it to Ready.",
+      "Creates a task under a story of the project's plan: a sub-issue of the story labelled task, in Shaping. The brief is the body the agents read: the goal, where in the code, and how to tell it is done. blocked_by links issues that must close first. A task reaches the backlog once move_to_ready moves it to Ready. A Flow project refuses start and target: set_order places the task in the order instead.",
     input: z.object({
       project,
       story: z.number().int().positive().describe("The story's issue number"),
@@ -497,8 +526,8 @@ export const CATALOG: ToolSpec[] = [
       brief: z.string().min(1).describe("The goal, where in the code, and how to tell it is done"),
       acceptance: z.array(z.string().min(1)).optional().describe("Acceptance criteria, one sentence each"),
       blocked_by: z.array(z.number().int().positive()).optional().describe("Issue numbers this task waits on"),
-      start: day.optional().describe("Start, YYYY-MM-DD, only when the person gave dates"),
-      target: day.optional().describe("Target, YYYY-MM-DD, only when the person gave dates"),
+      start: day.optional().describe("Start, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
+      target: day.optional().describe("Target, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
       size: z.enum(["S", "M", "L"]).optional().describe("S, M or L, when the person sized the task"),
     }),
     kind: "data",
@@ -539,7 +568,7 @@ export const CATALOG: ToolSpec[] = [
     name: "schedule",
     title: "Schedule plan items",
     description:
-      "Sets, moves or clears the Start and Target dates of epics, stories and tasks of the project's plan on its GitHub Project, each item with its own dates, so one call can lay out a story's tasks one after another (work out the order from the blocked-by links in list_plan). A date is YYYY-MM-DD, null clears it and a date left out stays. Refuses a Target before its Start, an issue outside the plan and a Project without the Start and Target fields (setup_plan adds them), and then changes nothing. Propose dates only when the person asks to plan the timeline.",
+      "Sets, moves or clears the Start and Target dates of epics, stories and tasks of the project's plan on its GitHub Project, each item with its own dates, so one call can lay out a story's tasks one after another (work out the order from the blocked-by links in list_plan). A date is YYYY-MM-DD, null clears it and a date left out stays. Refuses a Target before its Start, an issue outside the plan and a Project without the Start and Target fields (setup_plan adds them), and then changes nothing. Propose dates only when the person asks to plan the timeline. Only for a Timeline project: a Flow project has no dates and refuses it; order its tasks with arrange_plan and set_order.",
     input: z.object({
       project,
       items: z
@@ -563,7 +592,7 @@ export const CATALOG: ToolSpec[] = [
     name: "set_size",
     title: "Size tasks",
     description:
-      "Sets or clears the Size (S, M or L) and the manual Estimate of tasks of the project's plan on its GitHub Project. An estimate is hours or days, like 3h or 2d (a day is the project's capacity in hours, which list_plan gives), or a number of hours; it overrides the size's forecast, and 0 or null clears it. A task with a Start gets the Target its new duration ends on. Give was with the size and estimate list_plan shows now, so the approval card names old and new values. Refuses an epic or a story (they sum their tasks), an issue outside the plan, an estimate it cannot read and a Project without the Size and Estimate fields (setup_plan adds them), and then changes nothing. Size tasks when the person sizes them.",
+      "Sets or clears the Size (S, M or L) and the manual Estimate of tasks of the project's plan on its GitHub Project. An estimate is hours or days, like 3h or 2d (a day is the project's capacity in hours, which list_plan gives), or a number of hours; it overrides the size's forecast, and 0 or null clears it. A task with a Start gets the Target its new duration ends on. Give was with the size and estimate list_plan shows now, so the approval card names old and new values. Refuses an epic or a story (they sum their tasks), an issue outside the plan, an estimate it cannot read and a Project without the Size and Estimate fields (setup_plan adds them), and then changes nothing. Size tasks when the person sizes them. A Flow project has no hours: it takes sizes only, refuses an estimate and changes no date.",
     input: z.object({
       project,
       items: z
@@ -591,15 +620,42 @@ export const CATALOG: ToolSpec[] = [
   }),
   spec({
     name: "arrange_plan",
-    title: "Arrange by estimate",
+    title: "Arrange the plan",
     description:
-      "A preview of the plan's unscheduled tasks laid out by their size or estimate, as the timeline's Arrange by estimate does: from today, in blocked-by order, filling each day up to the project's capacity after the work already planned, a task never before its blockers end. Each placed task has its Start, Target and hours; tasks without a size or an estimate are left out with the reason. Tasks with dates stay where they are. With epic, only that epic's tasks are placed, while every planned task still counts. Writes nothing: propose the dates with schedule, one call, when the person asks to plan the timeline.",
-    input: z.object({ project, epic: z.number().int().positive().optional().describe("Only this epic's tasks, by issue number") }),
+      "A preview that writes nothing, by the project's plan mode. In a Flow project it is the Plan page's Optimize: the order of the queue for the earliest finish on the scheduler's lanes (blockers first, then the longest chain, the most work unblocked, Priority and the larger size), with pinned tasks and tasks outside the scope kept in their places. It returns was (the order now), the moves with each task's old and new place, the pinned tasks it kept, the new queue with each task's lane, and the tasks still placed before a blocker; propose it with one set_order call, giving was. It never pins or unpins. In a Timeline project it is Arrange by estimate: the unscheduled tasks laid out by their size or estimate from today, in blocked-by order, filling each day up to the project's capacity after the work already planned, a task never before its blockers end; each placed task has its Start, Target and hours, and tasks without a size or an estimate are left out with the reason; propose the dates with schedule, one call, when the person asks to plan the timeline. With epic, story or issues (epics, stories or tasks), only the tasks inside them are arranged, while every other task still counts.",
+    input: z.object({
+      project,
+      epic: z.number().int().positive().optional().describe("Only this epic's tasks, by issue number"),
+      story: z.number().int().positive().optional().describe("Only this story's tasks, by issue number"),
+      issues: z.array(z.number().int().positive()).optional().describe("Only these epics, stories and tasks, and the tasks inside them"),
+    }),
     kind: "data",
     confirm: false,
     readOnly: true,
     untrusted: true,
-    summarize: (a) => `Arrange the unscheduled tasks${a.epic ? ` of epic #${a.epic}` : ""} in ${a.project} by estimate`,
+    summarize: (a) => {
+      const scope = [...(a.epic ? [`epic #${a.epic}`] : []), ...(a.story ? [`story #${a.story}`] : []), ...(a.issues?.length ? [a.issues.map((n) => `#${n}`).join(", ")] : [])];
+      return `Arrange the plan of ${a.project}${scope.length ? ` for ${scope.join(" and ")}` : ""}`;
+    },
+  }),
+  spec({
+    name: "set_order",
+    title: "Set the order",
+    description:
+      "Writes a new order of a Flow project's tasks to Project order on GitHub, the order the scheduler starts Ready tasks in. order lists tasks of the queue (list_plan's queue) in their new order; they fill the places they hold now, and every other task keeps its place. Give was with the queue as list_plan or arrange_plan returned it, so the approval card names old and new places and a queue that changed since is refused. pin pins tasks at their new place, only when the person asks for a task's place to stay; unpin removes pins. Refuses a Timeline project (use schedule), a scheduler that starts by Priority (switch it to Project order with start_scheduler first), a task outside the queue, a Shaping task in a Ready task's place (Shaping tasks follow every Ready task), and a pinned task that would move unless unpin names it, and then writes nothing. A task may be placed before its blocker: it then waits for it, and the result lists it.",
+    input: z.object({
+      project,
+      order: z.array(z.number().int().positive()).min(1).describe("Tasks of the queue in their new order"),
+      was: z.array(z.number().int().positive()).optional().describe("The queue as list_plan or arrange_plan returned it, for the approval card and to refuse a stale order"),
+      pin: z.array(z.number().int().positive()).optional().describe("Tasks to pin at their new place, when the person asks for their place to stay"),
+      unpin: z.array(z.number().int().positive()).optional().describe("Pinned tasks to unpin, which lets them move"),
+    }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    openWorld: true,
+    idempotent: true,
+    summarize: (a) => orderText(a),
   }),
   spec({
     name: "plan_issue",
@@ -720,10 +776,10 @@ export const CATALOG: ToolSpec[] = [
     name: "go_to_plan",
     title: "Open the plan",
     description:
-      "Opens a project's Plan page: epics, stories and tasks from its GitHub Project, as a tree, a board or a timeline, optionally narrowed to one epic (or the unplanned issues), some statuses, or tasks by their run. The timeline takes a zoom.",
+      "Opens a project's Plan page: epics, stories and tasks from its GitHub Project, as a tree, a board, or the view of its plan mode (flow in a Flow project, timeline in a Timeline project; get_project says which), optionally narrowed to one epic (or the unplanned issues), some statuses, or tasks by their run. The timeline takes a zoom.",
     input: z.object({
       project_id: z.string().describe("The project's id from list_projects"),
-      view: z.enum(["tree", "board", "timeline"]).optional(),
+      view: z.enum(["tree", "board", "flow", "timeline"]).optional(),
       zoom: z.enum(["days", "weeks", "months"]).optional().describe("The timeline's zoom: days at 96 px a day for dragging, weeks or months; it picks one from the dates when left out"),
       epic: z.union([z.number().int().positive(), z.literal("unplanned")]).optional().describe("An epic's issue number, or unplanned"),
       status: z.array(z.enum(["Shaping", "Ready", "Running", "In review", "Done"])).optional(),
@@ -732,7 +788,7 @@ export const CATALOG: ToolSpec[] = [
     kind: "ui",
     confirm: false,
     readOnly: true,
-    summarize: (a) => `Open the plan of project ${short(a.project_id)}${a.view === "board" ? " as a board" : a.view === "timeline" ? " as a timeline" : ""}${a.epic !== undefined ? `, epic ${a.epic === "unplanned" ? "unplanned" : `#${a.epic}`}` : ""}`,
+    summarize: (a) => `Open the plan of project ${short(a.project_id)}${a.view === "board" ? " as a board" : a.view === "timeline" ? " as a timeline" : a.view === "flow" ? " as a flow" : ""}${a.epic !== undefined ? `, epic ${a.epic === "unplanned" ? "unplanned" : `#${a.epic}`}` : ""}`,
   }),
   spec({
     name: "go_to_run",

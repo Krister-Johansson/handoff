@@ -60,11 +60,26 @@ function dashboardHref(path: string, origin: string): string {
   return `${pathname}${url.search}${url.hash}`;
 }
 
+/** What the caller knows of the project a call names: its name and plan mode. */
+export type UiToolContext = { project?: { name: string; planMode: "flow" | "timeline" } | undefined };
+
+/** The Plan page's view that belongs to the other plan mode: a Flow project has no timeline, a Timeline project no flow. */
+function refuseOtherModeView(view: string | undefined, project: UiToolContext["project"]) {
+  if (!project) return;
+  if (project.planMode === "flow" && view === "timeline") {
+    throw new UiToolError(`${project.name} plans in Flow mode, so its Plan page shows Flow, not a timeline. Use go_to_plan with view flow.`);
+  }
+  if (project.planMode === "timeline" && view === "flow") {
+    throw new UiToolError(`${project.name} plans in Timeline mode, so its Plan page shows a timeline, not Flow. Use go_to_plan with view timeline.`);
+  }
+}
+
 /**
  * What a UI tool call does in the page, from the arguments the model sent. It checks the arguments
- * against the catalog and builds only addresses of this dashboard, the way its pages read them.
+ * against the catalog and builds only addresses of this dashboard, the way its pages read them. With the
+ * project the call names in `context`, go_to_plan refuses the view of the other plan mode.
  */
-export function planUiTool(name: string, args: unknown, origin: string): UiPlan {
+export function planUiTool(name: string, args: unknown, origin: string, context: UiToolContext = {}): UiPlan {
   const spec = toolSpec(name);
   if (spec.kind !== "ui") throw new UiToolError(`${name} is not a UI tool.`);
   const parsed = spec.input.safeParse(args ?? {});
@@ -92,8 +107,10 @@ export function planUiTool(name: string, args: unknown, origin: string): UiPlan 
       return navigate(`/projects/${id(a.project_id!, "project")}/${a.tab}${search ? `?${search}` : ""}`);
     }
     case "go_to_plan": {
-      const p = parsed.data as { project_id: string; view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; zoom?: Zoom };
-      return navigate(planPath(id(p.project_id, "project"), p));
+      const p = parsed.data as { project_id: string; view?: PlanViewName | "flow"; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; zoom?: Zoom };
+      refuseOtherModeView(p.view, context.project);
+      // planPath writes any view but the tree as ?view=, so flow opens as the Plan page reads it.
+      return navigate(planPath(id(p.project_id, "project"), { ...p, view: p.view as PlanViewName | undefined }));
     }
     case "go_to_run":
       return navigate(`/runs/${id(a.run_id!, "run")}`);

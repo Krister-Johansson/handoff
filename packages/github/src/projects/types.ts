@@ -146,8 +146,11 @@ export interface ProjectsPort {
    * (an emoji, extra spaces) and adding the missing ones. Other options stay, so no item loses its value.
    */
   adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject>;
-  /** Creates a user Project with handoff's Status options, linked to the repository. */
-  createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject>;
+  /**
+   * Creates a user Project with handoff's Status options, linked to the repository, and the Start and
+   * Target date fields unless `dateFields` is false, as for a project that plans in Flow mode.
+   */
+  createProject(login: string, repo: RepoRef, title: string, opts?: { dateFields?: boolean }): Promise<PlanProject>;
   /** Creates the kind labels epic, story and task on the repository when they are missing. */
   ensureLabels(repo: RepoRef): Promise<void>;
   /** Creates an issue with its labels, parent and blockers, adds it to the Project in Shaping, then sets its Start and Target when given. */
@@ -189,9 +192,10 @@ export interface ProjectsPort {
   /**
    * Creates the Size single select field with S, M and L and the Estimate number field on a user's
    * Project when missing, and adds S, M and L to an existing Size field after its own options, which
-   * keep their ids. Returns the ids. Throws when a field of that name exists with another type.
+   * keep their ids. Returns the ids. Throws when a field of that name exists with another type. With
+   * `estimate` false it leaves a missing Estimate field out, as for a project that plans in Flow mode.
    */
-  ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds>;
+  ensureEstimateFields(login: string, number: number, opts?: { estimate?: boolean }): Promise<PlanEstimateFieldIds>;
   /**
    * Moves items of a user's Project in Project order, one move after another in the order given, 20
    * moves a request after one read of the Project. Throws naming how many moved when GitHub refuses part

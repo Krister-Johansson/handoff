@@ -194,7 +194,7 @@ export class OctokitProjects implements ProjectsPort {
     return { project: { number: project.number, url: project.url, title: project.title, statusOptions: ids, dateFields: dateFieldIds(project) }, renamed, added };
   }
 
-  async createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject> {
+  async createProject(login: string, repo: RepoRef, title: string, opts: { dateFields?: boolean } = {}): Promise<PlanProject> {
     const ids = await this.octokit.graphql<PlanOwnerIdsQuery>(PlanOwnerIdsDocument.toString(), { login, owner: repo.owner, name: repo.name });
     if (!ids.user || !ids.repository) throw new Error(`user ${login} or repository ${repo.owner}/${repo.name} not found`);
     const created = await this.octokit.graphql<CreatePlanProjectMutation>(CreatePlanProjectDocument.toString(), { ownerId: ids.user.id, title });
@@ -207,7 +207,10 @@ export class OctokitProjects implements ProjectsPort {
       name === "Done" && done ? { id: done.id, name, color: done.color, description: done.description } : { name, ...STATUS_STYLE[name] },
     );
     const updated = await this.octokit.graphql<SetStatusOptionsMutation>(SetStatusOptionsDocument.toString(), { fieldId: field.id, options });
-    const dateFields = { start: await this.createDateField(project.id, "start"), target: await this.createDateField(project.id, "target") };
+    const dateFields =
+      opts.dateFields === false
+        ? { start: undefined, target: undefined }
+        : { start: await this.createDateField(project.id, "start"), target: await this.createDateField(project.id, "target") };
     await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: ids.repository.id });
     return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(updated.updateProjectV2Field?.projectV2Field)), dateFields };
   }
@@ -273,7 +276,7 @@ export class OctokitProjects implements ProjectsPort {
     return ids;
   }
 
-  async ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds> {
+  async ensureEstimateFields(login: string, number: number, opts: { estimate?: boolean } = {}): Promise<PlanEstimateFieldIds> {
     const project = await this.projectNode(login, number);
     if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
     const ids = estimateFieldIds(project);
@@ -282,7 +285,7 @@ export class OctokitProjects implements ProjectsPort {
     if (project.estimate && !ids.estimate) throw new Error(`GitHub Project #${number} has an Estimate field that is not a number field. Rename it on GitHub, then try again.`);
     const existing = project.size?.__typename === "ProjectV2SingleSelectField" ? project.size : undefined;
     const size = existing ? await this.addSizeOptions(existing) : await this.createSizeField(project.id);
-    const estimate = ids.estimate ?? (await this.createEstimateField(project.id));
+    const estimate = ids.estimate ?? (opts.estimate === false ? undefined : await this.createEstimateField(project.id));
     return { size, estimate };
   }
 

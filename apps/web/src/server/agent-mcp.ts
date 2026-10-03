@@ -1,9 +1,14 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
-import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
+import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, planPins, projects, questions, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
-import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
+import { loadPlan, type PlanProgress, type PlanTask, type PlanView } from "./plan";
+import { writeOrder } from "./flow-order";
+import { MODE_REFUSALS, refuseInMode } from "./plan-mode";
+import { layoutFlow, reorderFlow, type FlowInput } from "../lib/plan/flow";
+import { fillPlaces, placeMoves, ruleBreaks } from "../lib/plan/flow-order";
+import { optimize } from "../lib/plan/optimize";
 import { projectReadiness } from "./readiness";
 import { assignmentOf, setIssueAssignees } from "./assignees";
 import { dismissAttention, listAttention } from "./attention";
@@ -39,7 +44,7 @@ const INSTRUCTIONS = `handoff runs graphs of coding agents on GitHub repositorie
 
 To work on issues: list_backlog, then start_run with the issue numbers (the task can stay empty), then get_run to follow the run. Every result links to the dashboard.
 
-A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order. Size tasks with set_size when the person sizes them (S, M or L, or an estimate like 3h or 2d); with sized tasks, arrange_plan previews where the unscheduled ones fit from today, then one schedule call proposes those dates. Each of these writes asks the person first.
+A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. Size tasks with set_size when the person sizes them (S, M or L). A project plans in Flow mode or Timeline mode: get_project and list_plan say which, and only a person switches it in Project settings. In Flow mode the plan is an order of tasks and their blockers and never dates or hours: set the blockers with create_task's blocked_by, preview the order with arrange_plan, and write it with one set_order call, pinning a task only when the person asks for its place to stay. In Timeline mode a task can also take an estimate like 3h or 2d. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order; with sized tasks, arrange_plan previews where the unscheduled ones fit from today, then one schedule call proposes those dates. Each of these writes asks the person first.
 
 Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, pause_scheduler stops new starts and stop_scheduler turns it off.
 
@@ -271,6 +276,100 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
   };
 }
 
+const sameList = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((n, index) => n === b[index]);
+
+/** Why a Flow order tool refuses while the scheduler starts tasks by Priority (docs/plans/flow.md, Decision 3). */
+const byPriority = (name: string, tool: string) =>
+  `The scheduler of ${name} starts tasks by Priority, so the order does not decide what starts next. Switch it to Project order with start_scheduler and order project, then call ${tool} again.`;
+
+/** What arrange_plan narrows to: an epic, a story, or epics, stories and tasks by number. */
+type ScopeArgs = { epic?: number; story?: number; issues?: number[] };
+
+/**
+ * The tasks inside the epic, story and issues asked for, as ticking them in the tree does: an epic or a story
+ * brings its tasks. Undefined when nothing is asked for, which is the whole plan. Refuses a number the plan
+ * does not hold, or an epic or story that is not one.
+ */
+function scopeOf(view: PlanView, name: string, { epic, story, issues = [] }: ScopeArgs): Set<number> | undefined {
+  if (epic === undefined && story === undefined && issues.length === 0) return undefined;
+  const epics = new Map(view.epics.map((e) => [e.number, [...e.stories.flatMap((s) => s.tasks), ...e.tasks]]));
+  const stories = new Map(view.epics.flatMap((e) => e.stories.map((s) => [s.number, s.tasks] as const)));
+  const tasks = new Set([...epics.values()].flat().concat(view.unparented).map((t) => t.number));
+  if (epic !== undefined && !epics.has(epic)) throw new Error(`#${epic} is not an epic of the plan of ${name}.`);
+  if (story !== undefined && !stories.has(story)) throw new Error(`#${story} is not a story of the plan of ${name}.`);
+  const scope = new Set<number>();
+  for (const n of [...(epic !== undefined ? [epic] : []), ...(story !== undefined ? [story] : []), ...issues]) {
+    const inside = epics.get(n) ?? stories.get(n);
+    if (inside) for (const t of inside) scope.add(t.number);
+    else if (tasks.has(n)) scope.add(n);
+    else throw new Error(`#${n} is not in the plan of ${name}. list_plan shows its epics, stories and tasks.`);
+  }
+  return scope;
+}
+
+/**
+ * The Flow as list_plan gives it (docs/plans/flow.md, Decision 12): the fields of each task (its place in the
+ * queue, lane, pin, what it waits for, why the scheduler skips it, and a running task's steps and what it
+ * waits on) and the top's lanes, order, holds and queue.
+ */
+function flowFieldsOf(input: FlowInput) {
+  const flow = layoutFlow(input);
+  const placeOf = new Map(flow.queue.map((n, index) => [n, index + 1]));
+  const cardOf = new Map(flow.cards.map((c) => [c.issue, c]));
+  const tagsOf = new Map(flow.rows.map((r) => [r.issue, r.tags]));
+  const breaksOf = new Map(flow.breaks.map((b) => [b.issue, b.waitsFor]));
+  return {
+    top: { lanes: input.lanes, order: input.order, held: flow.held, queue: flow.queue },
+    of: (n: number) => {
+      const card = cardOf.get(n);
+      const tags = tagsOf.get(n) ?? [];
+      const outside = tags.flatMap((t) => /^Waits for #(\d+), not in the order$/.exec(t)?.slice(1).map(Number) ?? []);
+      const skipped = tags.find((t) => t.startsWith("Skipped: "));
+      const running = card?.kind === "running" ? card : undefined;
+      return {
+        place: placeOf.get(n) ?? null,
+        lane: card?.lane ?? null,
+        pinned: input.pins.has(n),
+        waits_for: [...(breaksOf.get(n) ?? []), ...outside],
+        after: card?.after ?? null,
+        skipped: skipped ? skipped.slice("Skipped: ".length) : null,
+        progress: running?.progress ?? null,
+        waits_on: running?.waitsOn ?? null,
+      };
+    },
+  };
+}
+
+/**
+ * arrange_plan in a Flow project: the Plan page's Optimize over the scope, as a preview that writes nothing and
+ * never pins. It returns the order now, the moves, the pinned tasks kept, the new queue with each task's lane
+ * and the tasks still placed before a blocker, with a summary to put to the person.
+ */
+function arrangeFlow(input: FlowInput, scope: Set<number> | undefined, name: string) {
+  if (input.order === "priority") throw new Error(byPriority(name, "arrange_plan"));
+  const before = layoutFlow(input);
+  const result = optimize({ queue: before.queue, tasks: input.tasks, minutes: input.minutes, priorityOptions: input.priorityOptions, pins: input.pins, scope });
+  const after = layoutFlow(reorderFlow(input, result.queue));
+  const titles = new Map(input.tasks.map((t) => [t.number, t.title]));
+  const titleOf = (n: number) => titles.get(n) ?? null;
+  const laneOf = new Map(after.cards.map((c) => [c.issue, c.lane]));
+  const moves = result.moved.map((m) => ({ issue: m.issue, title: titleOf(m.issue), from: m.from, to: m.to }));
+  const kept = result.kept.map((n) => ({ issue: n, title: titleOf(n), place: result.queue.indexOf(n) + 1 }));
+  const summary = [
+    moves.length ? `${moves.map((m) => `#${m.issue} from Next ${m.from} to Next ${m.to}`).join("; ")}.` : "Nothing moves.",
+    ...kept.map((k) => `#${k.issue} is pinned and stays Next ${k.place}.`),
+  ].join(" ");
+  return {
+    mode: "flow" as const,
+    was: before.queue,
+    moves,
+    kept,
+    queue: result.queue.map((n, index) => ({ issue: n, title: titleOf(n), place: index + 1, lane: laneOf.get(n) ?? null })),
+    waits_for: after.breaks.map((b) => ({ issue: b.issue, waits_for: b.waitsFor })),
+    summary,
+  };
+}
+
 /**
  * handoff's operations as MCP tools, for an agent such as the user's Claude Code session. Each tool
  * calls the same server functions the dashboard uses.
@@ -285,6 +384,12 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
   const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
   const url = (href: string) => `${baseUrl}${href}`;
   const shaping = { db, github, projects: plan };
+  /** The project's plan as the Plan page loads it, or the sentence that says why it cannot be read. */
+  const planView = async (projectId: string) => {
+    const view = await loadPlan(db, github, plan, projectId);
+    if ("error" in view) throw new Error(view.reason === "no-plan" ? `${view.error} Set one up with setup_plan.` : view.error);
+    return view;
+  };
 
   return {
     list_projects: async () =>
@@ -545,25 +650,39 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     list_plan: async ({ project, epic }: { project: string; epic?: number }) => {
       const projectId = (await findProject(db, project)).id;
-      const view = await loadPlan(db, github, plan, projectId);
-      if ("error" in view) throw new Error(view.reason === "no-plan" ? `${view.error} Set one up with setup_plan.` : view.error);
-      const item = (i: PlanItem) => ({ number: i.number, kind: i.kind ?? null, title: i.title, status: i.status ?? null, state: i.state, url: i.url, start: i.start ?? null, target: i.target ?? null });
+      const view = await planView(projectId);
+      // A Flow project has no dates or hours: its tasks have places in the queue and lanes instead.
+      const flow = view.flow ? flowFieldsOf(view.flow) : undefined;
+      const item = (i: PlanItem) => ({
+        number: i.number,
+        kind: i.kind ?? null,
+        title: i.title,
+        status: i.status ?? null,
+        state: i.state,
+        url: i.url,
+        ...(flow ? {} : { start: i.start ?? null, target: i.target ?? null }),
+      });
       const task = (t: PlanTask) => ({
         ...item(t),
         blocked_by: t.blockedBy,
         run: t.run ? { id: t.run.id, status: t.run.status, url: url(runPath(projectId, t.run.id)) } : null,
         pr: t.run?.prNumber ?? t.prNumbers[0] ?? null,
         size: t.size ?? null,
-        estimate_hours: t.estimate ?? null,
+        ...(flow ? {} : { estimate_hours: t.estimate ?? null }),
         proposal: t.proposal ? { size: t.proposal.size, run_id: t.proposal.runId } : null,
-        duration: t.duration ?? null,
+        ...(flow ? flow.of(t.number) : { duration: t.duration ?? null }),
       });
       const progress = (p: PlanProgress) => `${p.done} of ${p.total} done`;
       const forecast = (f: Forecast) => ({ source: f.source, minutes: f.minutes, parts: f.parts, cost_usd: f.costUsd, runs: f.runs, measured_minutes: f.measuredMinutes });
       return {
+        mode: flow ? "flow" : "timeline",
         project: { number: view.project.number, title: view.project.title, url: view.project.url },
-        capacity_hours: view.capacity ?? null,
-        forecasts: view.forecasts ? { S: forecast(view.forecasts.S), M: forecast(view.forecasts.M), L: forecast(view.forecasts.L) } : null,
+        ...(flow
+          ? flow.top
+          : {
+              capacity_hours: view.capacity ?? null,
+              forecasts: view.forecasts ? { S: forecast(view.forecasts.S), M: forecast(view.forecasts.M), L: forecast(view.forecasts.L) } : null,
+            }),
         epics: view.epics
           .filter((e) => epic === undefined || e.number === epic)
           .map((e) => ({
@@ -629,17 +748,17 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { sized, summary };
     },
 
-    arrange_plan: async ({ project, epic }: { project: string; epic?: number }) => {
-      const view = await loadPlan(db, github, plan, (await findProject(db, project)).id);
-      if ("error" in view) throw new Error(view.reason === "no-plan" ? `${view.error} Set one up with setup_plan.` : view.error);
+    arrange_plan: async ({ project, ...asked }: { project: string } & ScopeArgs) => {
+      const found = await findProject(db, project);
+      const view = await planView(found.id);
+      const scope = scopeOf(view, found.name, asked);
+      if (view.flow) return arrangeFlow(view.flow, scope, found.name);
       const { timeline, capacity = 6 } = view;
       if (!timeline) throw new Error("The plan has no timeline.");
       // Only the tasks asked for are placed; every bar on the timeline, in any epic, is planned work.
-      const epics = view.epics.filter((e) => epic === undefined || e.number === epic);
-      if (epic !== undefined && !epics.length) throw new Error(`#${epic} is not an epic of the plan of ${project}.`);
       const unscheduled = new Set(timeline.items.filter((i) => i.unscheduled).map((i) => i.number));
-      const tasks = [...epics.flatMap((e) => [...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...(epic === undefined ? view.unparented : [])].filter(
-        (t) => t.kind !== "story" && t.kind !== "epic" && unscheduled.has(t.number) && canMove(t),
+      const tasks = [...view.epics.flatMap((e) => [...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...view.unparented].filter(
+        (t) => t.kind !== "story" && t.kind !== "epic" && unscheduled.has(t.number) && canMove(t) && (scope === undefined || scope.has(t.number)),
       );
       const byNumber = new Map(tasks.map((t) => [t.number, t]));
       const arranged = arrangeTimeline(
@@ -653,6 +772,46 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         capacity_hours: capacity,
         placements: arranged.placements.map((p) => ({ issue: p.issue, title: byNumber.get(p.issue)!.title, start: p.start, target: p.target, hours: byNumber.get(p.issue)!.duration!.hours })),
         left_out: arranged.leftOut.map((l) => ({ issue: l.issue, title: byNumber.get(l.issue)!.title, reason: "needs a size" })),
+      };
+    },
+
+    set_order: async ({ project, order, was, pin = [], unpin = [] }: { project: string; order: number[]; was?: number[]; pin?: number[]; unpin?: number[] }) => {
+      const found = await findProject(db, project);
+      refuseInMode(found, "timeline", MODE_REFUSALS.order);
+      const input = (await planView(found.id)).flow;
+      if (!input) throw new Error(MODE_REFUSALS.order(found));
+      if (input.order === "priority") throw new Error(byPriority(found.name, "set_order"));
+      const queue = layoutFlow(input).queue;
+      if (was && !sameList(was, queue)) throw new Error("The order changed on GitHub since it was read. Read it again with list_plan or arrange_plan.");
+      const twice = order.find((n, index) => order.indexOf(n) !== index);
+      if (twice !== undefined) throw new Error(`#${twice} appears twice in order. Give each task once.`);
+      const inQueue = new Set(queue);
+      const outside = [...order, ...pin].find((n) => !inQueue.has(n));
+      if (outside !== undefined) throw new Error(`#${outside} is not in the order, which holds the open tasks in Ready and Shaping that no run works on. list_plan shows it as queue.`);
+      const next = fillPlaces(queue, order);
+      // The scheduler starts no Shaping task, so the Flow keeps every Shaping task after the Ready ones.
+      const shaping = new Set(input.tasks.filter((t) => t.status === "Shaping").map((t) => t.number));
+      const crossed = next.find((n, index) => shaping.has(n) !== shaping.has(queue[index]!));
+      if (crossed !== undefined) {
+        throw new Error(`#${crossed} would take a place of the other group: Shaping tasks follow every Ready task. Order the Ready tasks and the Shaping tasks each among themselves.`);
+      }
+      const moved = placeMoves(queue, next);
+      const unpinning = new Set(unpin);
+      const held = moved.find((m) => input.pins.has(m.issue) && !unpinning.has(m.issue));
+      if (held) {
+        const [row] = await db.select({ by: planPins.pinnedBy }).from(planPins).where(and(eq(planPins.projectId, found.id), eq(planPins.issue, held.issue)));
+        throw new Error(`#${held.issue} is pinned by ${!row || row.by === "person" ? "a person" : row.by}. Arrange around it, or name it in unpin.`);
+      }
+      await writeOrder({ db, projects: plan }, found.id, { shown: queue, queue: next, pin, unpin, actor, reason: "set_order" });
+      const titleOf = new Map(input.tasks.map((t) => [t.number, t.title]));
+      const blockers = new Map(input.tasks.map((t) => [t.number, t.blockedBy]));
+      return {
+        moved: moved.map((m) => ({ issue: m.issue, title: titleOf.get(m.issue) ?? null, from: m.from, to: m.to })),
+        pinned: pin,
+        unpinned: unpin,
+        // A task placed before its blocker still waits for it; the Flow shows it with "Waits for".
+        waits_for: ruleBreaks(next, blockers).map((b) => ({ issue: b.issue, waits_for: b.waitsFor })),
+        url: url(planPath(found.id)),
       };
     },
 

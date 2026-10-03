@@ -168,14 +168,14 @@ export class FakeProjects implements ProjectsPort {
     return { project: structuredClone(plan.project), renamed: [], added };
   }
 
-  async createProject(login: string, repo: RepoRef, title: string): Promise<PlanProject> {
+  async createProject(login: string, repo: RepoRef, title: string, opts: { dateFields?: boolean } = {}): Promise<PlanProject> {
     const number = this.nextProject++;
     const project: PlanProject = {
       number,
       url: `https://github.com/users/${login}/projects/${number}`,
       title,
       statusOptions: { Shaping: "opt-shaping", Ready: "opt-ready", Running: "opt-running", "In review": "opt-in-review", Done: "opt-done" },
-      dateFields: { start: "field-start", target: "field-target" },
+      dateFields: opts.dateFields === false ? { start: undefined, target: undefined } : { start: "field-start", target: "field-target" },
     };
     this.plans.set(keyOf(repo), { login, project, items: new Map() });
     return structuredClone(project);
@@ -249,7 +249,7 @@ export class FakeProjects implements ProjectsPort {
     return checked;
   }
 
-  async ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds> {
+  async ensureEstimateFields(login: string, number: number, opts: { estimate?: boolean } = {}): Promise<PlanEstimateFieldIds> {
     const plan = [...this.plans.values()].find((p) => p.login === login && p.project.number === number);
     if (!plan) throw new Error(`GitHub Project #${number} of ${login} not found`);
     const current = plan.project.estimateFields;
@@ -259,7 +259,7 @@ export class FakeProjects implements ProjectsPort {
         id: current?.size?.id ?? "field-size",
         options: Object.fromEntries(PLAN_SIZES.map((s) => [s, options?.[s] ?? `opt-size-${s.toLowerCase()}`])) as NonNullable<PlanEstimateFieldIds["size"]>["options"],
       },
-      estimate: current?.estimate ?? "field-estimate",
+      estimate: current?.estimate ?? (opts.estimate === false ? undefined : "field-estimate"),
     };
     plan.project.estimateFields = fields;
     return structuredClone(fields);

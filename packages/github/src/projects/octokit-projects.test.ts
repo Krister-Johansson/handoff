@@ -356,6 +356,19 @@ test("createProject creates a user Project, renames the Status options keeping D
   expect(operations.at(-1)!.variables).toEqual({ projectId: "PVT_9", repositoryId: "R_sample" });
 });
 
+test("createProject without date fields creates no Start or Target field, for a project that plans in Flow mode", async () => {
+  const field = { __typename: "ProjectV2SingleSelectField", id: "F_status", options: [{ id: "o_done", name: "Done", color: "PURPLE", description: "Done" }] };
+  const { fetch, operations } = fakeGraphql({
+    PlanOwnerIds: () => ({ user: { id: "U_octo" }, repository: { id: "R_sample" } }),
+    CreatePlanProject: () => ({ createProjectV2: { projectV2: { id: "PVT_9", number: 9, url: "u", title: "sample plan", field } } }),
+    SetStatusOptions: () => ({ updateProjectV2Field: { projectV2Field: field } }),
+    LinkPlanRepository: () => ({ linkProjectV2ToRepository: { repository: { id: "R_sample" } } }),
+  });
+
+  expect(await port(fetch).createProject("octo", repo, "sample plan", { dateFields: false })).toMatchObject({ number: 9, dateFields: { start: undefined, target: undefined } });
+  expect(operations.map((o) => o.operation)).toEqual(["PlanOwnerIds", "CreatePlanProject", "SetStatusOptions", "LinkPlanRepository"]);
+});
+
 test("createIssue sends the parent, the labels and the blockers, and leaves the issue in Shaping", async () => {
   const { fetch, operations } = fakeGraphql({
     IssueCreateRefs: () => ({
@@ -1164,6 +1177,17 @@ test("ensureEstimateFields adds S, M and L to an existing Size field and keeps i
   operations.length = 0;
   await projects.ensureEstimateFields("octo", 1);
   expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
+test("ensureEstimateFields without the estimate creates only Size, for a project that plans in Flow mode", async () => {
+  const project: Record<string, unknown> = { ...planProject(5), url: "u", title: "t", size: null, estimate: null };
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: () => ({ user: { projectV2: project } }),
+    CreatePlanSizeField: (v) => ({ createProjectV2Field: { projectV2Field: sizeFieldFrom(v.options as { name: string }[]) } }),
+  });
+
+  expect(await port(fetch).ensureEstimateFields("octo", 5, { estimate: false })).toEqual({ size: { id: "F_size", options: { S: "o_S", M: "o_M", L: "o_L" } }, estimate: undefined });
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "CreatePlanSizeField"]);
 });
 
 test("ensureEstimateFields refuses a Size that is not a single select", async () => {

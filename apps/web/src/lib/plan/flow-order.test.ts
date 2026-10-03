@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { afterBlockers, blockersFirst, carryDependents, keepPins, moveTo, ruleBreaks } from "./flow-order";
+import { afterBlockers, blockersFirst, carryDependents, fillPlaces, keepPins, moveTo, placeMoves, ruleBreaks } from "./flow-order";
 
 test("next free slot puts the task right after its last blocker in the queue", () => {
   // #62 was dropped first. #61 and #58 block it, and #50 is running, so it is not in the queue.
@@ -68,4 +68,17 @@ test("keepPins puts each pinned task back at its place number", () => {
 
   // #6 moved to the front and pushed every task after it one place on.
   expect(keepPins(before, moveTo(before, 6, 0), pins)).toEqual([6, 2, 1, 3, 5, 4]);
+});
+
+test("fillPlaces puts the named tasks in their new order into the places they hold, and placeMoves lists each task whose place changed", () => {
+  // set_order names #74 and #60: they swap places, and #61 between them keeps its place.
+  const before = [60, 61, 74, 75];
+  const after = fillPlaces(before, [74, 60]);
+  expect(after).toEqual([74, 61, 60, 75]);
+  expect(placeMoves(before, after)).toEqual([
+    { issue: 74, from: 3, to: 1 },
+    { issue: 60, from: 1, to: 3 },
+  ]);
+  // A task named twice counts once, and a task outside the queue is left out.
+  expect(fillPlaces(before, [75, 75, 99, 61])).toEqual([60, 75, 74, 61]);
 });

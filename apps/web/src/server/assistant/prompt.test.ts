@@ -64,6 +64,13 @@ test("the system prompt proposes dates with schedule only when the person asks t
   expect(shaping).toMatch(/When the person asks to plan the timeline, schedule sets Start and Target dates/);
 });
 
+test("the system prompt says a Flow project has no dates and orders its tasks with arrange_plan and set_order", () => {
+  const modes = SYSTEM_PROMPT.split("\n\n").find((p) => p.includes("Flow mode"));
+  expect(modes).toMatch(/get_project and list_plan say which/);
+  expect(modes).toMatch(/In Flow mode[^.]*never dates/);
+  expect(modes).toMatch(/arrange_plan[^.]*set_order/);
+});
+
 test("the system prompt sizes tasks with set_size and lays out dates from sizes with arrange_plan and schedule", () => {
   const shaping = SYSTEM_PROMPT.split("\n\n").find((p) => p.includes("create_epic"));
   expect(shaping).toMatch(/set_size when the person sizes them/);
