@@ -6,6 +6,7 @@ import { epic, flowOf, flowRun, planView, REPO_URL, story, task } from "./testin
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn() }));
+vi.mock("@/app/projects/scheduler-actions", () => ({ switchToProjectOrderAction: vi.fn() }));
 
 const wide = window.matchMedia;
 beforeEach(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { BanIcon, GitPullRequestIcon, HandIcon, ListOrderedIcon, LockIcon, MoveHorizontalIcon, PauseIcon, PinIcon, Settings2Icon, TriangleAlertIcon, UserRoundIcon, WaypointsIcon } from "lucide-react";
 import type { PlanTask } from "@/server/plan";
@@ -88,6 +88,43 @@ export function PinSquare({ title }: { title?: string }) {
   );
 }
 
+const UNPIN = "Pinned by hand. Click to unpin.";
+
+/** The pin on a pinned card, as a button: a click unpins the task. It sits over the card, not inside its link. */
+export function PinButton({ issue, onUnpin, className, style }: { issue: number; onUnpin: (issue: number) => void; className?: string; style?: CSSProperties }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Unpin #${issue}`}
+      title={UNPIN}
+      onClick={() => onUnpin(issue)}
+      className={cn(
+        "inline-grid size-3.5 shrink-0 place-items-center rounded-[3px] bg-foreground text-background hover:bg-foreground/80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-2.5",
+        className,
+      )}
+      style={style}
+    >
+      <PinIcon aria-hidden />
+    </button>
+  );
+}
+
+/** The Pinned tag in a task's row, as a button: a click unpins the task. */
+export function PinnedTag({ issue, onUnpin }: { issue: number; onUnpin: (issue: number) => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Unpin #${issue}`}
+      title={UNPIN}
+      onClick={() => onUnpin(issue)}
+      className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-[5px] border border-transparent bg-secondary px-1.5 text-[10.5px] font-medium whitespace-nowrap text-secondary-foreground hover:bg-secondary/70 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-[11px]"
+    >
+      <PinIcon aria-hidden />
+      Pinned
+    </button>
+  );
+}
+
 /** A lane's number on a card, as a small square. */
 export function SlotSquare({ lane }: { lane: number }) {
   return (
@@ -144,7 +181,7 @@ function FlowLegend() {
       <Separator />
       <p className="flex gap-2 leading-snug text-muted-foreground">
         <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-        Length follows the size: S, M or L. Flow has no dates.
+        Length follows the size: S, M or L. Flow has no dates. Drag a Ready card to change the order; it stays pinned.
       </p>
     </LegendPopover>
   );

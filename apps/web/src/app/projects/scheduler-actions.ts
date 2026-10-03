@@ -5,7 +5,7 @@ import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { getProjects } from "@/lib/github";
 import { planPath, projectPath } from "@/lib/paths";
-import { pauseScheduler, releaseTask, startScheduler, stopScheduler } from "@/server/scheduler";
+import { pauseScheduler, releaseTask, startScheduler, stopScheduler, switchToProjectOrder } from "@/server/scheduler";
 
 export type SchedulerActionState = { ok: true } | { ok: false; error: string };
 
@@ -63,6 +63,11 @@ export async function resumeSchedulerAction(input: { projectId: string }): Promi
 
 export async function turnOffSchedulerAction(input: { projectId: string }): Promise<SchedulerActionState> {
   return act(Project, input, ({ projectId }) => stopScheduler(getDb(), projectId, ACTOR));
+}
+
+/** "Switch to Project order" after a drop on the Flow under Priority order: only the order changes. */
+export async function switchToProjectOrderAction(input: { projectId: string }): Promise<SchedulerActionState> {
+  return act(Project, input, ({ projectId }) => switchToProjectOrder(getDb(), projectId, ACTOR));
 }
 
 /** "Let the scheduler take it" on a task whose run a person cancelled. */

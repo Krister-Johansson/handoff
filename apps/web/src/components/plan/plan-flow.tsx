@@ -1,12 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { CheckIcon, HandIcon, LockIcon } from "lucide-react";
+import { startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useRouter } from "next/navigation";
+import { CheckIcon, HandIcon, LockIcon, TriangleAlertIcon } from "lucide-react";
+import { toast } from "sonner";
 import type { PlanItem } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
+import { unpinAction, writeOrderAction } from "@/app/projects/actions";
+import { switchToProjectOrderAction } from "@/app/projects/scheduler-actions";
 import { Tag } from "@/components/tag";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { layoutFlow, type Flow, type FlowCard, type FlowInput } from "@/lib/plan/flow";
+import { layoutFlow, reorderFlow, type Flow, type FlowCard, type FlowInput } from "@/lib/plan/flow";
+import { moveTo, ruleBreaks } from "@/lib/plan/flow-order";
 import { matchesQuery } from "@/lib/plan/search";
 import { DEFAULT_SIZE, lowerFirst, runsText, schedulerNote, type SchedulerBrief } from "@/lib/plan/flow-text";
 import { arrowPath, isHead, itemsOf, progressOf, rowLabel, tasksOf, timelineRows, type Placed, type TimelineRow } from "@/lib/plan/timeline-rows";
@@ -14,9 +19,12 @@ import { cn } from "@/lib/utils";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { useSearchQuery } from "./plan-context";
 import { PlanFlowList } from "./plan-flow-list";
-import { PinSquare, RowTag, SizeBox, SlotSquare } from "./flow-parts";
+import { PinButton, PinnedTag, PinSquare, RowTag, SizeBox, SlotSquare } from "./flow-parts";
+import { PriorityOrderDialog } from "./priority-order-dialog";
+import { RuleBreakDialog, type BreakChoice, type RuleBreakDrop } from "./rule-break-dialog";
 import { ItemMenu, RowLabel } from "./row-label";
 import { useNarrow } from "./timeline-parts";
+import { placeMove, useCardDrag, type CardMove, type CardPlace } from "./use-card-drag";
 import { useRowsOpen } from "./use-collapsed";
 
 /** What the Flow takes from the Plan page. */
@@ -50,7 +58,7 @@ const LONG_STEPS = 100;
 const SHORT_STEPS = 44;
 
 /** Where minutes from now sit on the order axis of a pane `width` wide: every card fits, Now after the work done. */
-function axisOf(flow: Flow, width: number) {
+function axisOf(flow: Pick<Flow, "cards" | "end">, width: number) {
   const from = Math.min(0, ...flow.cards.map((c) => c.start));
   const to = Math.max(flow.end, from + 1);
   const unit = (width - PAD_LEFT - PAD_RIGHT) / (to - from);
@@ -156,10 +164,37 @@ const CARD_TONE: Record<FlowCard["kind"], string> = {
   shaping: "border-dashed border-muted-foreground/60 bg-muted opacity-60",
 };
 
+const CARD =
+  "absolute z-[2] flex items-center gap-[5px] overflow-hidden rounded-[5px] border-[1.5px] px-1 text-[10.5px] font-medium whitespace-nowrap text-foreground tabular-nums focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none";
+
+/** What a card shows inside: a running card's done steps filled from the left, its slot, the hand while it waits on a person, its steps, and the pin on a card that does not drag. */
+function CardFace({ card, width, waiting }: { card: FlowCard; width: number; waiting: boolean }) {
+  const steps = stepsText(card, width);
+  const done = card.progress && card.progress.total > 0 ? card.progress.done / card.progress.total : 0;
+  return (
+    <>
+      {card.kind === "running" && done > 0 && <span aria-hidden className="absolute inset-y-0 left-0 bg-attention-dot/60" style={{ width: `${done * 100}%` }} />}
+      <span className="relative flex min-w-0 items-center gap-[5px] [&_svg]:size-[11px] [&_svg]:shrink-0">
+        {width >= 18 && <SlotSquare lane={card.lane} />}
+        {waiting && width >= SHORT_STEPS && <HandIcon aria-hidden />}
+        {steps && <span className="truncate">{steps}</span>}
+        {card.pinned && card.kind !== "next" && width >= PIN_WIDTH && <PinSquare title="Pinned by hand" />}
+      </span>
+    </>
+  );
+}
+
+/** What a card that drags spreads on its link, from useCardDrag. */
+type DragProps = ReturnType<ReturnType<typeof useCardDrag>["cardProps"]>;
+
+/** A card is wide enough for its pin when it is this wide. */
+const PIN_WIDTH = 38;
+
 /**
  * A task's card on its row: running in amber with its done steps filled from the left, Ready in blue, Shaping
  * faded, each with its slot. A run that waits on a person has a dashed ring; a task placed before its blocker a
- * red left edge. It opens the issue on GitHub.
+ * red left edge. It opens the issue on GitHub. A Ready card drags; while it moves it is lifted and the hover card
+ * stays closed. A pinned card's pin is a button beside the link that unpins it.
  */
 function CardView({
   card,
@@ -168,6 +203,10 @@ function CardView({
   axis,
   breaks,
   items,
+  drag,
+  lifted,
+  quiet,
+  onUnpin,
 }: {
   card: FlowCard;
   task: PlanItem;
@@ -175,47 +214,67 @@ function CardView({
   axis: Axis;
   breaks: ReadonlyMap<number, number[]>;
   items: ReadonlyMap<number, PlanItem>;
+  drag: DragProps | undefined;
+  lifted: boolean;
+  quiet: boolean;
+  onUnpin: (issue: number) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const { left, width } = boxOf(axis, card);
   const waiting = waitsOnYou(card);
-  const steps = stepsText(card, width);
-  const done = card.progress && card.progress.total > 0 ? card.progress.done / card.progress.total : 0;
+  const top = (row.height - CARD_HEIGHT) / 2;
+  // A Ready card's pin unpins it; a running card's pin is gone once the scheduler starts its run.
+  const pinButton = card.pinned && card.kind === "next" && width >= PIN_WIDTH;
   return (
-    <HoverCard openDelay={300} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <a
-          href={task.url}
-          data-card={card.kind}
-          data-waiting={waiting || undefined}
-          data-break={breaks.has(task.number) || undefined}
-          aria-label={cardName(card, task, breaks)}
-          className={cn(
-            "absolute z-[2] flex items-center gap-[5px] overflow-hidden rounded-[5px] border-[1.5px] px-1 text-[10.5px] font-medium whitespace-nowrap text-foreground tabular-nums",
-            "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none",
-            CARD_TONE[card.kind],
-            waiting && "border-dashed ring-[3px] ring-attention-dot/30",
-            breaks.has(task.number) && "border-l-[5px] border-l-danger-dot",
-          )}
-          style={{
-            left,
-            width,
-            top: (row.height - CARD_HEIGHT) / 2,
-            height: CARD_HEIGHT,
-          }}
-        >
-          {card.kind === "running" && done > 0 && <span aria-hidden className="absolute inset-y-0 left-0 bg-attention-dot/60" style={{ width: `${done * 100}%` }} />}
-          <span className="relative flex min-w-0 items-center gap-[5px] [&_svg]:size-[11px] [&_svg]:shrink-0">
-            {width >= 18 && <SlotSquare lane={card.lane} />}
-            {waiting && width >= SHORT_STEPS && <HandIcon aria-hidden />}
-            {steps && <span className="truncate">{steps}</span>}
-            {card.pinned && width >= 38 && <PinSquare title="Pinned by hand" />}
-          </span>
-        </a>
-      </HoverCardTrigger>
-      <HoverCardContent align="start" className="flex w-72 flex-col gap-2 text-xs">
-        <CardDetails card={card} task={task} items={items} />
-      </HoverCardContent>
-    </HoverCard>
+    <>
+      <HoverCard openDelay={300} closeDelay={100} open={open && !quiet} onOpenChange={setOpen}>
+        <HoverCardTrigger asChild>
+          <a
+            href={task.url}
+            data-card={card.kind}
+            data-waiting={waiting || undefined}
+            data-break={breaks.has(task.number) || undefined}
+            aria-label={cardName(card, task, breaks)}
+            {...drag}
+            className={cn(
+              CARD,
+              CARD_TONE[card.kind],
+              waiting && "border-dashed ring-[3px] ring-attention-dot/30",
+              breaks.has(task.number) && "border-l-[5px] border-l-danger-dot",
+              drag && "cursor-grab touch-none select-none hover:ring-1 hover:ring-foreground/60",
+              lifted && "z-[7] cursor-grabbing shadow-lg ring-1 ring-foreground/60",
+            )}
+            style={{ left, width, top, height: CARD_HEIGHT }}
+          >
+            <CardFace card={card} width={width} waiting={waiting} />
+          </a>
+        </HoverCardTrigger>
+        <HoverCardContent align="start" className="flex w-72 flex-col gap-2 text-xs">
+          <CardDetails card={card} task={task} items={items} />
+        </HoverCardContent>
+      </HoverCard>
+      {pinButton && <PinButton issue={task.number} onUnpin={onUnpin} className={cn("absolute", lifted ? "z-[8]" : "z-[3]")} style={{ left: left + width - 19, top: top + 4 }} />}
+    </>
+  );
+}
+
+/** What a moving card says: where it lands, which slot it takes and how many cards change slots, and a warning before a blocker. */
+function DragTip({ tip, left }: { tip: CardPlace["tip"]; left: number }) {
+  return (
+    <div
+      role="status"
+      className="pointer-events-none absolute top-[calc(50%+14px)] z-[12] flex flex-col gap-0.5 rounded-md border bg-popover px-2.5 py-1.5 text-[11.5px] leading-snug whitespace-nowrap text-muted-foreground shadow-md"
+      style={{ left: Math.max(0, left) }}
+    >
+      <b className="font-semibold text-foreground">{tip.title}</b>
+      {tip.line && <span>{tip.line}</span>}
+      {tip.warning && (
+        <span className="mt-0.5 flex items-center gap-1.5 font-medium text-danger">
+          <TriangleAlertIcon aria-hidden className="size-3" />
+          {tip.warning}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -268,6 +327,15 @@ function SpanCell({ item, cards, axis }: { item: PlanItem; cards: ReadonlyMap<nu
   );
 }
 
+/** How the cards drag: the props of a card that drags, the card that moves with its old box and tooltip, and the pin's unpin. */
+type CardDrag = {
+  propsOf: (card: FlowCard) => DragProps | undefined;
+  moving?: { issue: number; ghost: { left: number; width: number }; tip?: CardPlace["tip"] | undefined } | undefined;
+  /** While a card moves or a dialog asks about a drop, hover cards stay closed. */
+  quiet: boolean;
+  onUnpin: (issue: number) => void;
+};
+
 /** What a task's row shows on the axis: its card, with the wait before it; Done; or Not in the order. */
 function TaskCell({
   task,
@@ -278,6 +346,7 @@ function TaskCell({
   tags,
   breaks,
   items,
+  drag,
 }: {
   task: PlanTask;
   row: TimelineRow;
@@ -287,13 +356,24 @@ function TaskCell({
   tags: string[];
   breaks: ReadonlyMap<number, number[]>;
   items: ReadonlyMap<number, PlanItem>;
+  drag: CardDrag;
 }) {
   const card = cards.get(task.number);
+  const moving = drag.moving?.issue === task.number ? drag.moving : undefined;
   if (card) {
     return (
       <>
         {card.after !== undefined && <WaitBox card={card} flow={flow} axis={axis} row={row} />}
-        <CardView card={card} task={task} row={row} axis={axis} breaks={breaks} items={items} />
+        {moving && (
+          <span
+            aria-hidden
+            data-ghost
+            className="absolute z-[1] rounded-[5px] border-[1.5px] border-dashed border-muted-foreground bg-foreground/5"
+            style={{ ...moving.ghost, top: (row.height - CARD_HEIGHT) / 2, height: CARD_HEIGHT }}
+          />
+        )}
+        <CardView card={card} task={task} row={row} axis={axis} breaks={breaks} items={items} drag={drag.propsOf(card)} lifted={moving !== undefined} quiet={drag.quiet} onUnpin={drag.onUnpin} />
+        {moving?.tip && <DragTip tip={moving.tip} left={boxOf(axis, card).left} />}
       </>
     );
   }
@@ -322,7 +402,21 @@ function TaskCell({
 const ON_AXIS = new Set(["Done", "Not in the order", "Shaping"]);
 
 /** A Flow row's left cell: the tree's row with the task's size, and its tags under the title. */
-function FlowRowLabel({ row, tags, projectId, start, onToggle }: { row: TimelineRow; tags: string[]; projectId: string; start: StartRunContext; onToggle: () => void }) {
+function FlowRowLabel({
+  row,
+  tags,
+  projectId,
+  start,
+  onToggle,
+  onUnpin,
+}: {
+  row: TimelineRow;
+  tags: string[];
+  projectId: string;
+  start: StartRunContext;
+  onToggle: () => void;
+  onUnpin: (issue: number) => void;
+}) {
   const { item, task } = row;
   const shown = tags.filter((t) => !ON_AXIS.has(t));
   return (
@@ -335,9 +429,7 @@ function FlowRowLabel({ row, tags, projectId, start, onToggle }: { row: Timeline
       below={
         shown.length > 0 && (
           <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-            {shown.map((t) => (
-              <RowTag key={t} text={t} />
-            ))}
+            {shown.map((t) => (t === "Pinned" && task ? <PinnedTag key={t} issue={task.number} onUnpin={onUnpin} /> : <RowTag key={t} text={t} />))}
           </div>
         )
       }
@@ -470,25 +562,265 @@ function ArrowLayer({ arrows, width, height }: { arrows: FlowArrow[]; width: num
   );
 }
 
+const issuesText = (list: readonly number[]) => {
+  const named = list.map((n) => `#${n}`);
+  return named.length <= 1 ? (named[0] ?? "") : `${named.slice(0, -1).join(", ")} and ${named.at(-1)}`;
+};
+const sameList = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((n, i) => n === b[i]);
+
+/** A new order of the queue to write: the queue GitHub holds and the new one, the pins before and after, and the pin changes. */
+type OrderChange = {
+  issue: number;
+  shown: number[];
+  queue: number[];
+  before: ReadonlySet<number>;
+  pins: ReadonlySet<number>;
+  pin?: number[] | undefined;
+  unpin?: number[] | undefined;
+  /** Keep it here: the task stays where it was dropped, before the blockers it waits for. */
+  keep?: { waitsFor: number[] } | undefined;
+};
+
+/** A drop of `issue` that gives `queue`: the card is pinned at its new place. */
+const dropChange = (issue: number, shown: number[], queue: number[], pins: ReadonlySet<number>, keep?: OrderChange["keep"]): OrderChange => ({
+  issue,
+  shown,
+  queue,
+  before: pins,
+  pins: new Set([...pins, issue]),
+  pin: [issue],
+  keep,
+});
+
+/** The write that undoes a drop: the old order back, and the drop's pin removed unless the task was pinned before. */
+const undoOf = (c: OrderChange): OrderChange => ({
+  issue: c.issue,
+  shown: c.queue,
+  queue: c.shown,
+  before: c.pins,
+  pins: c.before,
+  unpin: c.before.has(c.issue) ? undefined : [c.issue],
+});
+
+/** What the page shows over loadPlan's input until the next read: the order and pins it saved, and Project order after a switch. */
+type Local = { input: FlowInput; queue?: number[] | undefined; pins?: ReadonlySet<number> | undefined; order?: "project" | undefined };
+
+/**
+ * The Flow's writes (docs/plans/flow.md, Decision 9), the timeline's useMoves pattern: a drop, a dialog's choice
+ * and their Undo write the queue's new order at once, with a saving toast, then one that names the move with
+ * Undo, or one that says GitHub refused it with Try again. The cards show the new order until the next read
+ * from GitHub, and go back when the write is refused. The pin on a card unpins it the same way.
+ */
+function useOrderWrites(projectId: string, input: FlowInput) {
+  const router = useRouter();
+  const [local, setLocal] = useState<Local>({ input });
+  const latest = useRef(input);
+  useEffect(() => {
+    latest.current = input;
+  });
+  const shown = useMemo(() => {
+    if (local.input !== input) return input;
+    const ordered = local.order ? { ...input, order: local.order } : input;
+    const moved = local.queue ? reorderFlow(ordered, local.queue) : ordered;
+    return local.pins ? { ...moved, pins: local.pins } : moved;
+  }, [input, local]);
+
+  const put = (patch: Omit<Local, "input">) => setLocal((s) => ({ ...(s.input === latest.current ? s : { input: latest.current }), ...patch }));
+
+  const save = (c: OrderChange, undo = false) => {
+    const n = c.issue;
+    const from = c.shown.indexOf(n) + 1;
+    const to = c.queue.indexOf(n) + 1;
+    const moved = `#${n} ${c.keep || from === to ? "stays at" : "moves to"} Next ${to}`;
+    const id = toast.loading("Saving the order to GitHub", { description: undo ? `#${n} goes back to Next ${to}` : moved });
+    put({ queue: c.queue, pins: c.pins });
+    startTransition(async () => {
+      const result = await writeOrderAction({
+        projectId,
+        shown: c.shown,
+        queue: c.queue,
+        ...(c.pin ? { pin: c.pin } : {}),
+        ...(c.unpin ? { unpin: c.unpin } : {}),
+        ...(c.keep ? { reason: "keep_here" as const } : {}),
+      });
+      if (!result.ok) {
+        put({ queue: c.shown, pins: c.before });
+        toast.error("GitHub did not take the order", {
+          id,
+          description: `#${n} is back at Next ${from}.${result.error ? ` ${result.error}` : ""}`,
+          action: { label: "Try again", onClick: () => save(c, undo) },
+        });
+        return;
+      }
+      startTransition(() => router.refresh());
+      if (undo) {
+        toast.success(`Put #${n} back at Next ${to}`, { id, description: "Saved to GitHub in Project order." });
+        return;
+      }
+      toast.success(moved, {
+        id,
+        description: c.keep ? `Pinned. It waits for ${issuesText(c.keep.waitsFor)}.` : `Saved to GitHub in Project order. #${n} is pinned.`,
+        action: { label: "Undo", onClick: () => save(undoOf(c), true) },
+      });
+    });
+  };
+
+  const unpin = (n: number) => {
+    const before = shown.pins;
+    put({ pins: new Set([...before].filter((p) => p !== n)) });
+    startTransition(async () => {
+      const result = await unpinAction({ projectId, issue: n });
+      if (!result.ok) {
+        put({ pins: before });
+        toast.error(`#${n} is still pinned`, { description: result.error });
+        return;
+      }
+      toast.success(`#${n} is unpinned`, { description: "It no longer keeps its place." });
+      startTransition(() => router.refresh());
+    });
+  };
+
+  /** "Switch to Project order": saves the scheduler's order, then runs `then`, the drop that asked for it. */
+  const switchToProject = (then: () => void) =>
+    startTransition(async () => {
+      const result = await switchToProjectOrderAction({ projectId });
+      if (!result.ok) {
+        toast.error("The scheduler still starts tasks by Priority", { description: result.error });
+        return;
+      }
+      put({ order: "project" });
+      then();
+    });
+
+  return { shown, save, unpin, switchToProject };
+}
+
+/** A drop that asks first: to switch to Project order, or where a task placed before its blocker goes. */
+type PendingDrop = {
+  kind: "priority" | "rule";
+  place: CardPlace;
+  /** The queue the drop was made in, and the queue GitHub holds, which differ under Priority order. */
+  base: number[];
+  shown: number[];
+  waitsFor: number[];
+};
+
+/**
+ * The drops on the Flow: a Ready card moves to a new place in the queue, pinned. Under Priority order a drop asks
+ * to switch to Project order first; a drop before an open blocker asks where the task goes. The card shows where
+ * it lands while it moves and while a dialog asks.
+ */
+function useFlowDrops(projectId: string, input: FlowInput, width: number) {
+  const writes = useOrderWrites(projectId, input);
+  const { shown } = writes;
+  const flow = useMemo(() => layoutFlow(shown), [shown]);
+  // A drag's pixels in minutes on the axis before the move, so the scale does not follow the preview.
+  const unit = axisOf(flow, width).unit;
+  const blockers = useMemo(() => new Map(shown.tasks.map((t) => [t.number, t.blockedBy] as const)), [shown]);
+  const [pending, setPending] = useState<PendingDrop>();
+
+  /** Saves a drop in Project order, or asks where it goes when it puts the task before an open blocker. */
+  const land = (place: CardPlace, base: number[], shownQueue: number[]) => {
+    const waits = ruleBreaks(moveTo(base, place.issue, place.index), blockers).find((b) => b.issue === place.issue);
+    if (waits) {
+      setPending({ kind: "rule", place, base, shown: shownQueue, waitsFor: waits.waitsFor });
+      return;
+    }
+    setPending(undefined);
+    writes.save(dropChange(place.issue, shownQueue, place.queue, shown.pins));
+  };
+
+  const onDrop = (move: CardMove) => {
+    const place = placeMove(shown, flow, move, unit);
+    if (!place || sameList(place.queue, flow.queue)) return;
+    if (shown.order === "priority") setPending({ kind: "priority", place, base: flow.queue, shown: flow.queue, waitsFor: [] });
+    else land(place, flow.queue, flow.queue);
+  };
+  const drag = useCardDrag({ onDrop });
+  const place = useMemo(() => (drag.move ? placeMove(shown, flow, drag.move, unit) : undefined), [drag.move, shown, flow, unit]);
+
+  const switchOrder = () => {
+    if (pending?.kind !== "priority") return;
+    const { place: dropped, base } = pending;
+    // GitHub's queue in Project order, which the switch makes the scheduler's.
+    const projectQueue = layoutFlow({ ...shown, order: "project" }).queue;
+    setPending(undefined);
+    writes.switchToProject(() => land(dropped, base, projectQueue));
+  };
+
+  const ruleDrop: RuleBreakDrop | undefined =
+    pending?.kind === "rule"
+      ? {
+          issue: pending.place.issue,
+          queue: pending.base,
+          index: pending.place.index,
+          waitsFor: pending.waitsFor,
+          pins: shown.pins,
+          blockers,
+          blocks: blocksOf(blockers),
+        }
+      : undefined;
+  const choose = (queue: number[], choice: BreakChoice) => {
+    if (pending?.kind !== "rule") return;
+    setPending(undefined);
+    writes.save(dropChange(pending.place.issue, pending.shown, queue, shown.pins, choice === "keep" ? { waitsFor: pending.waitsFor } : undefined));
+  };
+
+  return {
+    input: shown,
+    flow,
+    drag,
+    /** The card that moves, as it would land: while it drags, or while a dialog asks about its drop. */
+    place: place ?? pending?.place,
+    tip: place?.tip,
+    asking: pending !== undefined,
+    priority: pending?.kind === "priority",
+    ruleDrop,
+    switchOrder,
+    choose,
+    cancel: () => setPending(undefined),
+    unpin: writes.unpin,
+  };
+}
+
+/** Each task's open blockers turned around: the tasks each one blocks. */
+function blocksOf(blockers: ReadonlyMap<number, readonly number[]>): Map<number, number[]> {
+  const blocks = new Map<number, number[]>();
+  for (const [issue, list] of blockers) for (const b of list) blocks.set(b, [...(blocks.get(b) ?? []), issue]);
+  return blocks;
+}
+
 /**
  * The plan in order without dates (docs/plans/flow.md, Decisions 4 to 6 and 13): the tree's rows on the left,
  * and on the order axis each task's card on its row in the slot the scheduler would start it in, the slot
  * strips repeating every card, the Now line, the scheduler's hold, and arrows from each blocker to what it
- * blocks. Lengths follow the sizes and only decide which slot frees first.
+ * blocks. Lengths follow the sizes and only decide which slot frees first. A Ready card drags to a new place
+ * in the order (Decisions 8 to 10).
  */
-function FlowChart({ projectId, epics, unparented, flow: input, scheduler, graphs, graphName, searchOpen }: FlowProps) {
+function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graphs, graphName, searchOpen }: FlowProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const width = usePaneWidth(scroller);
   const rowsOpen = useRowsOpen(projectId, searchOpen);
   const q = useSearchQuery();
-  const flow = useMemo(() => layoutFlow(input), [input]);
-  const axis = axisOf(flow, width);
+  const drops = useFlowDrops(projectId, given, width);
+  const { input, place } = drops;
+  // While a card moves, the flow shows the order it would give, on an axis that fits both.
+  const flow = place?.flow ?? drops.flow;
+  const axis = axisOf(place ? { cards: [...drops.flow.cards, ...flow.cards], end: Math.max(drops.flow.end, flow.end) } : flow, width);
   const cards = new Map(flow.cards.map((c) => [c.issue, c]));
   const tags = new Map(flow.rows.map((r) => [r.issue, r.tags]));
   const breaks = new Map(flow.breaks.map((b) => [b.issue, b.waitsFor]));
   const items = new Map<number, PlanItem>([...input.tasks.map((t) => [t.number, t] as const), ...itemsOf(epics, unparented)]);
   const { rows, height } = timelineRows(epics, unparented, rowsOpen.isOpen, () => 0);
   const arrows = flowArrows(flow, rows, cards, axis, breaks);
+  const was = place && drops.flow.cards.find((c) => c.issue === place.issue);
+  const landed = place && cards.get(place.issue);
+  const drag: CardDrag = {
+    propsOf: (card) => (card.kind === "next" && !drops.asking ? drops.drag.cardProps(card.issue) : undefined),
+    moving: place && was ? { issue: place.issue, ghost: boxOf(axis, was), tip: drops.tip } : undefined,
+    quiet: place !== undefined,
+    onUnpin: drops.unpin,
+  };
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
@@ -503,6 +835,7 @@ function FlowChart({ projectId, epics, unparented, flow: input, scheduler, graph
               <Past width={axis.now} />
               <ArrowLayer arrows={arrows} width={axis.width} height={height} />
               <span className="absolute inset-y-0 z-[3] w-0.5 -translate-x-1/2 bg-foreground/85" style={{ left: axis.now }} />
+              {drops.tip && landed && <span data-drop-line className="absolute inset-y-0 z-[4] border-l-[1.5px] border-dashed border-foreground/60" style={{ left: axis.x(landed.start) }} />}
             </div>
             {rows.map((row) => (
               <div
@@ -514,10 +847,17 @@ function FlowChart({ projectId, epics, unparented, flow: input, scheduler, graph
                 className={cn("absolute inset-x-0 flex", isHead(row) && "bg-muted/50")}
                 style={{ top: row.top, height: row.height }}
               >
-                <FlowRowLabel row={row} tags={(row.task && tags.get(row.task.number)) ?? []} projectId={projectId} start={{ graphs, graphName }} onToggle={() => rowsOpen.toggle(row.key)} />
+                <FlowRowLabel
+                  row={row}
+                  tags={(row.task && tags.get(row.task.number)) ?? []}
+                  projectId={projectId}
+                  start={{ graphs, graphName }}
+                  onToggle={() => rowsOpen.toggle(row.key)}
+                  onUnpin={drops.unpin}
+                />
                 <div role="gridcell" className="relative flex-1 border-b" style={{ minWidth: axis.width }}>
                   {row.task ? (
-                    <TaskCell task={row.task} row={row} flow={flow} axis={axis} cards={cards} tags={tags.get(row.task.number) ?? []} breaks={breaks} items={items} />
+                    <TaskCell task={row.task} row={row} flow={flow} axis={axis} cards={cards} tags={tags.get(row.task.number) ?? []} breaks={breaks} items={items} drag={drag} />
                   ) : (
                     row.item && <SpanCell item={row.item} cards={cards} axis={axis} />
                   )}
@@ -527,6 +867,8 @@ function FlowChart({ projectId, epics, unparented, flow: input, scheduler, graph
           </div>
         </div>
       </div>
+      <PriorityOrderDialog open={drops.priority} onSwitch={drops.switchOrder} onCancel={drops.cancel} />
+      <RuleBreakDialog drop={drops.ruleDrop} titleOf={(n) => items.get(n)?.title} onMove={drops.choose} onCancel={drops.cancel} />
     </div>
   );
 }

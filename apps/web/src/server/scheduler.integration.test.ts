@@ -6,7 +6,7 @@ import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { reviewPath, runPath } from "../lib/paths";
 import { createProject, saveGraphVersion } from "./graphs";
 import { loadSchedulerCard, schedulerStates } from "./scheduler-card";
-import { pauseScheduler, releaseTask, startScheduler, stopScheduler } from "./scheduler";
+import { pauseScheduler, releaseTask, startScheduler, stopScheduler, switchToProjectOrder } from "./scheduler";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -79,6 +79,28 @@ test("saving settings while paused keeps the pause; only a resume resumes", asyn
   await startScheduler(deps(), projectId, {}, "dashboard");
   expect(await row()).toMatchObject({ maxRuns: 3, pausedAt: null, pauseReason: null });
   expect((await log()).map((e) => e.type)).toEqual(["scheduler.started", "scheduler.changed", "scheduler.resumed"]);
+});
+
+test("switching to Project order from a Flow drop changes only the order: an off scheduler stays off and a paused one paused", async () => {
+  await startScheduler(deps(), projectId, { maxRuns: 2 }, "dashboard");
+  await db.update(projectSchedulers).set({ order: "priority" }).where(eq(projectSchedulers.projectId, projectId));
+  await stopScheduler(db, projectId, "dashboard");
+
+  await switchToProjectOrder(db, projectId, "dashboard");
+  expect(await row()).toMatchObject({ enabled: false, order: "project", maxRuns: 2 });
+
+  await startScheduler(deps(), projectId, {}, "dashboard");
+  await db.update(projectSchedulers).set({ order: "priority", pausedAt: new Date(), pausedBy: "person", pauseReason: "Lunch" }).where(eq(projectSchedulers.projectId, projectId));
+  await switchToProjectOrder(db, projectId, "dashboard");
+  expect(await row()).toMatchObject({ enabled: true, order: "project", pauseReason: "Lunch", pausedAt: expect.any(Date) });
+  // Project order already: nothing more is recorded.
+  await switchToProjectOrder(db, projectId, "dashboard");
+
+  const changed = (await log()).filter((e) => e.type === "scheduler.changed").map((e) => [(e.payload.from as { order: string }).order, (e.payload.to as { order: string }).order, e.payload.by]);
+  expect(changed).toEqual([
+    ["priority", "project", "dashboard"],
+    ["priority", "project", "dashboard"],
+  ]);
 });
 
 /** A task on the plan with one run of the given status, as a person started it. */

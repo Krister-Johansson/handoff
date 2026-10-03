@@ -9,6 +9,7 @@ import { epic, flowOf, person, planView, run, story, task, timelineOf, unplanned
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), scheduleAction: vi.fn() }));
+vi.mock("@/app/projects/scheduler-actions", () => ({ switchToProjectOrderAction: vi.fn() }));
 
 beforeEach(() => localStorage.clear());
 afterEach(() => {
@@ -264,7 +265,7 @@ test("Flow mode links to the Plan mode settings", () => {
   for (const item of ["Running, steps done", "Waits on you", "Next in order", "Waits for a blocker", "Slot", "Pinned", "Blocks", "Placed before its blocker"]) {
     expect(within(legend).getByText(item)).toBeInTheDocument();
   }
-  expect(within(legend).getByText("Length follows the size: S, M or L. Flow has no dates.")).toBeInTheDocument();
+  expect(within(legend).getByText("Length follows the size: S, M or L. Flow has no dates. Drag a Ready card to change the order; it stays pinned.")).toBeInTheDocument();
   // The Timeline's own controls belong to a Timeline project.
   expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
   expect(screen.queryByRole("radiogroup", { name: "Zoom" })).not.toBeInTheDocument();
