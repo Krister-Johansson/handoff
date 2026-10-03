@@ -2,12 +2,16 @@ import type { PlanStatus } from "@handoff/github";
 import type { AssigneeFilter, RunFilter } from "./plan/filters";
 import type { Zoom } from "./plan/timeline-scale";
 import { PROJECT_SECTIONS, type PlanViewName, type ProjectSection } from "./project-tab";
+import type { RunsFilter } from "./run-status-filter";
 
 /** Settings, Projects: where projects are added, edited and deleted. */
 export const PROJECTS_SETTINGS_PATH = "/settings?tab=projects";
 
 /** A project's page: its Home page without a section, else the section's route. */
 export const projectPath = (projectId: string, section?: ProjectSection) => `/projects/${projectId}${section ? `/${section}` : ""}`;
+
+/** A project's Runs page: every run, or the runs one status filter lists. */
+export const runsPath = (projectId: string, status?: RunsFilter) => `/projects/${projectId}/runs${status ? `?status=${status}` : ""}`;
 
 /** A graph in its editor: its latest version, or the version given, such as the one a run is pinned to. */
 export const graphPath = (projectId: string, name: string, version?: number) =>

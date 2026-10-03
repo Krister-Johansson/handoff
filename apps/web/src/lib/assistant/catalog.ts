@@ -783,7 +783,7 @@ export const CATALOG: ToolSpec[] = [
     name: "set_project_tab",
     title: "Open a project page",
     description:
-      "Opens one of a project's pages: runs, plan, issues, pull requests (pulls), graphs (the Graphs section of project settings) or project settings. The issues page filters by todo, started or all; the pulls page by open, merged, closed, all or archived. The library is in the dashboard's Settings: go_to /settings?tab=skills, subagents, mcp or groups.",
+      "Opens one of a project's pages: runs, plan, issues, pull requests (pulls), graphs (the Graphs section of project settings) or project settings. The runs page filters by active (queued or running), waiting, failed or done (succeeded or cancelled), and lists every run without one; the issues page filters by todo, started or all; the pulls page by open, merged, closed, all or archived. The library is in the dashboard's Settings: go_to /settings?tab=skills, subagents, mcp or groups.",
     input: z.object({
       project_id: z.string().describe("The project's id from list_projects"),
       tab: z.enum(["runs", "plan", "issues", "pulls", "graphs", "settings"]),
