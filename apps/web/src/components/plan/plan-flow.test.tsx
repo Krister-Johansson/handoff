@@ -196,6 +196,114 @@ test("a held scheduler shows Held with its reasons", () => {
   expect(screen.queryByText(/^Held/)).not.toBeInTheDocument();
 });
 
+/*
+ * The design's plan in the flow's order: story #41 runs #55, #56, #58 and #57; story #43 #61, #60 and #62; story
+ * #18 #70, #72 and #74. #72 waits for #70, so the blocker arrow joins them and no then arrow does.
+ */
+const thenOf = (container: HTMLElement, from: number, to: number) => container.querySelector(`[data-then="${from}-${to}"]`);
+const arrowOf = (container: HTMLElement, from: number, to: number) => container.querySelector(`[data-arrow="${from}-${to}"]`);
+
+test("a then arrow joins #72 to #74 and is not drawn where a blocker arrow joins #70 to #72", () => {
+  const { container } = renderFlow();
+  expect(thenOf(container, 72, 74)).not.toBeNull();
+  expect(thenOf(container, 70, 72)).toBeNull();
+  expect(arrowOf(container, 70, 72)).not.toBeNull();
+  // Each story chains across slots in the flow's order, not the tree's: #60 comes before #62.
+  for (const [from, to] of [
+    [55, 56],
+    [56, 58],
+    [58, 57],
+    [61, 60],
+    [60, 62],
+  ] as const)
+    expect(thenOf(container, from, to)).not.toBeNull();
+  // A skipped task is no link in the chain.
+  expect(container.querySelector('[data-then$="-63"], [data-then$="-66"]')).toBeNull();
+  // A collapsed story shows no then arrows; its bar runs from its first card to its last.
+  fireEvent.click(within(rowOf("Story #18 Voice settings")).getByRole("button", { name: /Collapse/ }));
+  expect(thenOf(container, 72, 74)).toBeNull();
+  expect(thenOf(container, 61, 60)).not.toBeNull();
+});
+
+test("hovering a card marks its story's chain", async () => {
+  const { container } = renderFlow();
+  const card72 = cardOf(72);
+  fireEvent.pointerEnter(card72);
+
+  for (const n of [70, 72, 74]) expect(cardOf(n)).toHaveAttribute("data-chain", "true");
+  expect(cardOf(58)).toHaveAttribute("data-dimmed", "true");
+  expect(cardOf(58)).not.toHaveAttribute("data-chain");
+  // The chain's then arrow, and the blocker arrow that stands in for its then link, go to full strength.
+  expect(thenOf(container, 72, 74)).toHaveAttribute("data-lit", "true");
+  expect(arrowOf(container, 70, 72)).toHaveAttribute("data-lit", "true");
+  expect(arrowOf(container, 55, 57)).not.toHaveAttribute("data-lit");
+  expect(thenOf(container, 61, 60)).not.toHaveAttribute("data-lit");
+  // The story's rows in the tree take the hover tint.
+  expect(rowOf("Story #18 Voice settings")).toHaveAttribute("data-chain", "true");
+  expect(taskRow(74)).toHaveAttribute("data-chain", "true");
+  expect(taskRow(58)).not.toHaveAttribute("data-chain");
+
+  // The hover card says where the task sits in its story and what comes next.
+  const details = await screen.findByText("2 of 3 in #18 Voice settings");
+  expect(details.previousElementSibling).toHaveTextContent("Story");
+  expect(screen.getByText("#74 Voice errors in the transcript strip").previousElementSibling).toHaveTextContent("Then");
+
+  fireEvent.pointerLeave(card72);
+  expect(cardOf(58)).not.toHaveAttribute("data-dimmed");
+  expect(thenOf(container, 72, 74)).not.toHaveAttribute("data-lit");
+
+  // Keyboard focus on a card does the same.
+  act(() => cardOf(61).focus());
+  for (const n of [61, 60, 62]) expect(cardOf(n)).toHaveAttribute("data-chain", "true");
+  act(() => cardOf(61).blur());
+  expect(cardOf(61)).not.toHaveAttribute("data-chain");
+});
+
+test("the Legend switch hides then arrows and keeps blocker arrows", () => {
+  function WithControls(props: Props) {
+    const selection = useFlowSelectionState();
+    return (
+      <FlowSelection value={selection}>
+        <FlowControls projectId="p1" />
+        <PlanFlow {...props} />
+      </FlowSelection>
+    );
+  }
+  const props: Props = {
+    projectId: "p1",
+    repoUrl: REPO_URL,
+    epics: view.epics,
+    unparented: [],
+    flow: designFlow(),
+    scheduler: { state: "running", claudeSlots: 3 },
+    graphs: ["loop"],
+    graphName: "loop",
+  };
+  const show = () => render(<TooltipProvider><WithControls {...props} /></TooltipProvider>);
+  const { container, unmount } = show();
+
+  fireEvent.click(screen.getByRole("button", { name: "Legend" }));
+  const legend = screen.getByRole("dialog", { name: "Legend" });
+  expect(within(legend).getByText("Then, in its story")).toBeInTheDocument();
+  const order = within(legend).getByRole("switch", { name: "Show each story's order" });
+  // On by default.
+  expect(order).toBeChecked();
+  expect(thenOf(container, 72, 74)).not.toBeNull();
+
+  fireEvent.click(order);
+  expect(order).not.toBeChecked();
+  expect(container.querySelector("[data-then]")).toBeNull();
+  expect(arrowOf(container, 70, 72)).not.toBeNull();
+  unmount();
+
+  // The browser remembers the choice.
+  const again = show();
+  expect(again.container.querySelector("[data-then]")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Legend" }));
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Legend" })).getByRole("switch", { name: "Show each story's order" }));
+  expect(thenOf(again.container, 72, 74)).not.toBeNull();
+});
+
 /**
  * The design's plan with its toasts, for the drag. Its order is #57, #58, #61, #62, #60, #72 and #74. Timeouts
  * are fake: the keys' save, sonner's renders and auto close run on the fake clock, which only waitFor, findBy and

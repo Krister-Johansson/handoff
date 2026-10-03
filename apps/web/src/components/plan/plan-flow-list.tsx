@@ -6,8 +6,9 @@ import { Tag } from "@/components/tag";
 import { layoutFlow, type FlowCard } from "@/lib/plan/flow";
 import { runsText, schedulerNote } from "@/lib/plan/flow-text";
 import { taskColumn } from "@/lib/plan/task";
+import { chainPlace } from "@/lib/plan/story-order";
 import { itemsOf } from "@/lib/plan/timeline-rows";
-import { RowTag, SizeBox } from "./flow-parts";
+import { RowTag, SizeBox, ThenTag } from "./flow-parts";
 import type { FlowProps } from "./plan-flow";
 import { StatusPill } from "./plan-status";
 import { IssueTitle } from "./plan-task-parts";
@@ -21,7 +22,8 @@ const stepsOf = (card: FlowCard) => (card.progress && card.progress.total > 0 ? 
 /**
  * The Flow under 640 px (docs/plans/flow.md, open question 9): one list in order, the running tasks by slot,
  * then the order the scheduler starts tasks in, Ready then Shaping, then the skipped tasks. Each item has its
- * slot, its Next tag, a running task's steps and the row's tags. It does not reorder.
+ * slot, its Next tag, a running task's steps, the row's tags and a Then tag naming the next task of its story.
+ * It does not reorder.
  */
 export function PlanFlowList({ epics, unparented, flow: input, scheduler }: FlowProps) {
   const flow = useMemo(() => layoutFlow(input), [input]);
@@ -36,6 +38,7 @@ export function PlanFlowList({ epics, unparented, flow: input, scheduler }: Flow
     return item && item.kind !== "epic" && item.kind !== "story" ? [item as PlanTask] : [];
   });
   const note = schedulerNote(flow, scheduler);
+  const titles = new Map(input.tasks.map((t) => [t.number, t.title]));
 
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border bg-card">
@@ -54,6 +57,8 @@ export function PlanFlowList({ epics, unparented, flow: input, scheduler }: Flow
         {order.map((task) => {
           const card = cards.get(task.number);
           const steps = card && card.kind === "running" ? stepsOf(card) : undefined;
+          // The list draws no arrows, blocker or then, so each task names the next of its story.
+          const next = chainPlace(flow.chains, task.number)?.next;
           return (
             <li key={task.number} aria-label={`Task #${task.number} ${task.title}`} className="flex flex-col gap-1.5 border-b px-3.5 py-2.5 last:border-b-0">
               <div className="flex min-w-0 items-center gap-1.5">
@@ -73,6 +78,7 @@ export function PlanFlowList({ epics, unparented, flow: input, scheduler }: Flow
                 {listTags(tags.get(task.number) ?? []).map((t) => (
                   <RowTag key={t} text={t} />
                 ))}
+                {next !== undefined && <ThenTag issue={next} title={titles.get(next)} />}
               </div>
             </li>
           );

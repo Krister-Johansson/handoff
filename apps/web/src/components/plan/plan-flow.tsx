@@ -14,6 +14,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { layoutFlow, reorderFlow, type Flow, type FlowCard, type FlowInput } from "@/lib/plan/flow";
 import { moveTo, ruleBreaks } from "@/lib/plan/flow-order";
 import { matchesQuery } from "@/lib/plan/search";
+import { chainPlace, thenPath } from "@/lib/plan/story-order";
 import { optimize } from "@/lib/plan/optimize";
 import { isMixed, isTicked, scopeName, scopeOf, selectionTree, togglePick, type SelectionTree } from "@/lib/plan/selection";
 import { appliedSentence, DEFAULT_SIZE, lowerFirst, runsText, schedulerNote, tasksText, type SchedulerBrief } from "@/lib/plan/flow-text";
@@ -30,6 +31,7 @@ import { ItemMenu, RowLabel } from "./row-label";
 import { useNarrow } from "./timeline-parts";
 import { placeMove, useCardDrag, type CardMove, type CardPlace } from "./use-card-drag";
 import { useRowsOpen } from "./use-collapsed";
+import { useStoryOrder } from "./use-story-order";
 
 /** What the Flow takes from the Plan page. */
 export type FlowProps = StartRunContext & {
@@ -120,8 +122,17 @@ function stepsText(card: FlowCard, width: number): string | undefined {
   return width >= LONG_STEPS ? `${progress.done} of ${progress.total} steps` : `${progress.done}/${progress.total}`;
 }
 
-/** The hover card of a card: the task's size, its place, its slot, its steps and its blockers. */
-function CardDetails({ card, task, items }: { card: FlowCard; task: PlanItem; items: ReadonlyMap<number, PlanItem> }) {
+/** An issue as "#74 Voice errors in the transcript strip". */
+const issueText = (n: number, items: ReadonlyMap<number, PlanItem>) => {
+  const title = items.get(n)?.title;
+  return title ? `#${n} ${title}` : `#${n}`;
+};
+
+/** Where a card sits in its story's chain, for its hover card: "2 of 3" in the story, and the task after it. */
+type StoryPlace = { place: number; total: number; parent: number; next: number | undefined };
+
+/** The hover card of a card: the task's size, its place, its slot, its steps, its blockers, and its story's order. */
+function CardDetails({ card, task, items, story }: { card: FlowCard; task: PlanItem; items: ReadonlyMap<number, PlanItem>; story: StoryPlace | undefined }) {
   const place = card.kind === "running" ? "Running" : card.kind === "shaping" ? "Shaping, after every Ready task" : `Next ${card.next}${card.pinned ? ", pinned" : ""}`;
   return (
     <>
@@ -161,6 +172,18 @@ function CardDetails({ card, task, items }: { card: FlowCard; task: PlanItem; it
             </dd>
           </>
         )}
+        {story && (
+          <>
+            <dt className="text-muted-foreground">Story</dt>
+            <dd>{`${story.place} of ${story.total} in ${issueText(story.parent, items)}`}</dd>
+          </>
+        )}
+        {story?.next !== undefined && (
+          <>
+            <dt className="text-muted-foreground">Then</dt>
+            <dd>{issueText(story.next, items)}</dd>
+          </>
+        )}
       </dl>
     </>
   );
@@ -192,6 +215,34 @@ function CardFace({ card, width, waiting }: { card: FlowCard; width: number; wai
   );
 }
 
+/**
+ * The story chain of the hovered or focused card (issue #543): its cards light up and every other card fades.
+ * `lit` is undefined while no chain is lit.
+ */
+type CardHover = {
+  lit: ReadonlySet<number> | undefined;
+  hovered: number | undefined;
+  onHover: (issue: number | undefined) => void;
+  storyOf: (issue: number) => StoryPlace | undefined;
+};
+
+/**
+ * How a card shows the lit chain: full strength in it, faded out of it, a ring on the hovered card, and the
+ * handlers that light its own chain on hover and focus. Its blur goes with the drag's.
+ */
+function chainProps(hover: CardHover, issue: number) {
+  const lit = hover.lit?.has(issue) ?? false;
+  const dimmed = hover.lit !== undefined && !lit;
+  return {
+    "data-chain": lit || undefined,
+    "data-dimmed": dimmed || undefined,
+    onPointerEnter: () => hover.onHover(issue),
+    onPointerLeave: () => hover.onHover(undefined),
+    onFocus: () => hover.onHover(issue),
+    className: cn(lit && "opacity-100", lit && hover.hovered === issue && "ring-[1.5px] ring-foreground", dimmed && "opacity-30"),
+  };
+}
+
 /** What a card that drags spreads on its link, from useCardDrag. */
 type DragProps = ReturnType<ReturnType<typeof useCardDrag>["cardProps"]>;
 
@@ -202,7 +253,8 @@ const PIN_WIDTH = 38;
  * A task's card on its row: running in amber with its done steps filled from the left, Ready in blue, Shaping
  * faded, each with its slot. A run that waits on a person has a dashed ring; a task placed before its blocker a
  * red left edge. It opens the issue on GitHub. A Ready card drags; while it moves it is lifted and the hover card
- * stays closed. A pinned card's pin is a button beside the link that unpins it.
+ * stays closed. A pinned card's pin is a button beside the link that unpins it. Hovering or focusing a card
+ * lights up its story's chain.
  */
 function CardView({
   card,
@@ -216,6 +268,7 @@ function CardView({
   quiet,
   was,
   onUnpin,
+  hover,
 }: {
   card: FlowCard;
   task: PlanItem;
@@ -229,10 +282,13 @@ function CardView({
   /** In Optimize's preview, the Next place the card moves from. */
   was: number | undefined;
   onUnpin: (issue: number) => void;
+  /** How the hovered card's story lights this card. */
+  hover: CardHover;
 }) {
   const [open, setOpen] = useState(false);
   const { left, width } = boxOf(axis, card);
   const waiting = waitsOnYou(card);
+  const { className: chainLook, ...chain } = chainProps(hover, card.issue);
   const top = (row.height - CARD_HEIGHT) / 2;
   // A Ready card's pin unpins it; a running card's pin is gone once the scheduler starts its run.
   const pinButton = card.pinned && card.kind === "next" && width >= PIN_WIDTH;
@@ -247,7 +303,12 @@ function CardView({
             data-break={breaks.has(task.number) || undefined}
             data-preview={was !== undefined || undefined}
             aria-label={cardName(card, task, breaks, was)}
+            {...chain}
             {...drag}
+            onBlur={() => {
+              drag?.onBlur();
+              hover.onHover(undefined);
+            }}
             className={cn(
               CARD,
               CARD_TONE[card.kind],
@@ -255,6 +316,7 @@ function CardView({
               breaks.has(task.number) && "border-l-[5px] border-l-danger-dot",
               was !== undefined && "border-dashed ring-2 ring-active-dot/25",
               drag && "cursor-grab touch-none select-none hover:ring-1 hover:ring-foreground/60",
+              chainLook,
               lifted && "z-[7] cursor-grabbing shadow-lg ring-1 ring-foreground/60",
             )}
             style={{ left, width, top, height: CARD_HEIGHT }}
@@ -262,8 +324,8 @@ function CardView({
             <CardFace card={card} width={width} waiting={waiting} />
           </a>
         </HoverCardTrigger>
-        <HoverCardContent align="start" className="flex w-72 flex-col gap-2 text-xs">
-          <CardDetails card={card} task={task} items={items} />
+        <HoverCardContent align="start" className="flex w-[330px] flex-col gap-2 text-xs">
+          <CardDetails card={card} task={task} items={items} story={hover.storyOf(card.issue)} />
         </HoverCardContent>
       </HoverCard>
       {pinButton && <PinButton issue={task.number} onUnpin={onUnpin} className={cn("absolute", lifted ? "z-[8]" : "z-[3]")} style={{ left: left + width - 19, top: top + 4 }} />}
@@ -362,6 +424,7 @@ function TaskCell({
   breaks,
   items,
   drag,
+  hover,
 }: {
   task: PlanTask;
   row: TimelineRow;
@@ -372,6 +435,7 @@ function TaskCell({
   breaks: ReadonlyMap<number, number[]>;
   items: ReadonlyMap<number, PlanItem>;
   drag: CardDrag;
+  hover: CardHover;
 }) {
   const card = cards.get(task.number);
   const moving = drag.moving?.issue === task.number ? drag.moving : undefined;
@@ -401,6 +465,7 @@ function TaskCell({
           quiet={drag.quiet}
           was={card.kind === "next" ? drag.preview?.was.get(task.number) : undefined}
           onUnpin={drag.onUnpin}
+          hover={hover}
         />
         {moving?.tip && <DragTip tip={moving.tip} left={boxOf(axis, card).left} />}
       </>
@@ -551,12 +616,16 @@ type FlowArrow = {
   red: boolean;
   d: string;
   end: Placed;
+  /** It joins two cards of the lit chain. */
+  lit: boolean;
 };
 
-/** The arrows from a blocker's card end to the start of the card it blocks, red when the task is placed before it. */
-function flowArrows(flow: Flow, rows: TimelineRow[], cards: ReadonlyMap<number, FlowCard>, axis: Axis, breaks: ReadonlyMap<number, number[]>): FlowArrow[] {
+type ThenArrow = { from: number; to: number; d: string; head: string; lit: boolean };
+
+/** Where each card sits over the rows: its box on the axis and its row's middle; a card whose row is hidden has none. */
+function placer(rows: TimelineRow[], cards: ReadonlyMap<number, FlowCard>, axis: Axis) {
   const rowOf = new Map(rows.flatMap((r) => (r.task ? [[r.task.number, r] as const] : [])));
-  const place = (issue: number): Placed | undefined => {
+  return (issue: number): Placed | undefined => {
     const row = rowOf.get(issue);
     const card = cards.get(issue);
     if (!row || !card) return undefined;
@@ -569,6 +638,21 @@ function flowArrows(flow: Flow, rows: TimelineRow[], cards: ReadonlyMap<number, 
       y: row.top + row.height / 2,
     };
   };
+}
+
+/** The pairs of cards that follow each other in a chain, as "from-to". */
+const pairsOf = (issues: readonly number[]) => new Set(issues.slice(1).map((to, index) => `${issues[index]}-${to}`));
+
+/**
+ * The arrows from a blocker's card end to the start of the card it blocks, red when the task is placed before it.
+ * A blocker arrow between two cards that follow each other in the lit chain stands in for their then arrow and lights up with it.
+ */
+function flowArrows(
+  flow: Flow,
+  place: (issue: number) => Placed | undefined,
+  breaks: ReadonlyMap<number, number[]>,
+  lit: ReadonlySet<string>,
+): FlowArrow[] {
   // A task placed before its blocker: the arrow between them is red.
   const early = new Set([...breaks].flatMap(([issue, waitsFor]) => waitsFor.map((blocker) => `${blocker}-${issue}`)));
   return flow.arrows.flatMap(({ from, to }) => {
@@ -582,18 +666,55 @@ function flowArrows(flow: Flow, rows: TimelineRow[], cards: ReadonlyMap<number, 
         red: early.has(`${from}-${to}`),
         d: arrowPath(start, end),
         end,
+        lit: lit.has(`${from}-${to}`),
       },
     ];
   });
 }
 
-function ArrowLayer({ arrows, width, height }: { arrows: FlowArrow[]; width: number; height: number }) {
+/** The then arrows from each card to the next card of its story; a collapsed story's cards have no rows and so no arrows. */
+function thenArrows(flow: Flow, place: (issue: number) => Placed | undefined, lit: ReadonlySet<string>): ThenArrow[] {
+  return flow.then.flatMap(({ from, to }) => {
+    const start = place(from);
+    const end = place(to);
+    if (!start || !end) return [];
+    return [{ from, to, ...thenPath(start, end, CARD_HEIGHT / 2), lit: lit.has(`${from}-${to}`) }];
+  });
+}
+
+/** The blocker arrows, and the then arrows unless the Legend's switch hides them in this browser. */
+function useArrows(flow: Flow, place: (issue: number) => Placed | undefined, breaks: ReadonlyMap<number, number[]>, lit: ReadonlySet<string>) {
+  const [showThen] = useStoryOrder();
+  return { arrows: flowArrows(flow, place, breaks, lit), then: showThen ? thenArrows(flow, place, lit) : [] };
+}
+
+/**
+ * The blocker arrows, solid with a filled head, and the then arrows, lighter: 1 px, dashed, with a small open head.
+ * While a chain is lit, its arrows go to full strength and the rest fade.
+ */
+function ArrowLayer({ arrows, then, lighting, width, height }: { arrows: FlowArrow[]; then: ThenArrow[]; lighting: boolean; width: number; height: number }) {
   return (
     <svg aria-hidden className="absolute inset-0 z-[1] overflow-visible" width={width} height={height}>
       {arrows.map((a) => (
-        <g key={`${a.from}-${a.to}`} data-arrow={`${a.from}-${a.to}`} className={a.red ? "text-danger-dot" : "text-muted-foreground"}>
+        <g
+          key={`${a.from}-${a.to}`}
+          data-arrow={`${a.from}-${a.to}`}
+          data-lit={a.lit || undefined}
+          className={cn(a.red ? "text-danger-dot" : "text-muted-foreground", lighting && (a.lit ? !a.red && "text-foreground" : "opacity-25"))}
+        >
           <path d={a.d} fill="none" stroke="currentColor" strokeWidth={a.red ? 1.75 : 1.25} />
           <path d={`M${a.end.left} ${a.end.y} l-5 -3.5 v7 z`} fill="currentColor" />
+        </g>
+      ))}
+      {then.map((a) => (
+        <g
+          key={`${a.from}-${a.to}`}
+          data-then={`${a.from}-${a.to}`}
+          data-lit={a.lit || undefined}
+          className={cn("text-muted-foreground", lighting && (a.lit ? "text-foreground" : "opacity-25"))}
+        >
+          <path d={a.d} fill="none" stroke="currentColor" strokeWidth={a.lit ? 1.5 : 1} strokeDasharray="3 2.5" />
+          <path d={a.head} fill="none" stroke="currentColor" strokeWidth={a.lit ? 1.6 : 1.25} strokeLinecap="round" strokeLinejoin="round" />
         </g>
       ))}
     </svg>
@@ -879,6 +1000,37 @@ function useOptimizePreview(input: FlowInput, flow: Flow, selection: FlowSelecti
   }, [previewing, picks, input, flow, tree]);
 }
 
+/** A Flow row's marks and tint: a search match, a head row's shade, and the hover tint of the lit story's rows. */
+const rowLook = (row: TimelineRow, q: string, chained: boolean) => ({
+  "data-match": (row.item && matchesQuery(row.item, q)) || undefined,
+  "data-chain": chained || undefined,
+  className: cn("absolute inset-x-0 flex", isHead(row) && "bg-muted/50", chained && "bg-active-dot/8"),
+});
+
+/**
+ * The story chain of the hovered or focused card (issue #543), lit unless a card moves: the hover each card
+ * takes, the pairs of cards that follow each other in the chain, and whether a row is the story's or one of its tasks'.
+ */
+function useChainHover(flow: Flow, moving: boolean) {
+  const [hovered, setHovered] = useState<number>();
+  const chain = hovered !== undefined && !moving ? chainPlace(flow.chains, hovered)?.chain : undefined;
+  const hover: CardHover = {
+    lit: chain && new Set(chain.issues),
+    hovered,
+    onHover: setHovered,
+    storyOf: (issue) => {
+      const at = chainPlace(flow.chains, issue);
+      return at && { place: at.place, total: at.chain.issues.length, parent: at.chain.parent, next: at.next };
+    },
+  };
+  return {
+    hover,
+    litPairs: pairsOf(chain?.issues ?? []),
+    lighting: chain !== undefined,
+    inChain: (row: TimelineRow) => chain !== undefined && (row.item?.number === chain.parent || row.task?.parent === chain.parent),
+  };
+}
+
 /** Each task's open blockers turned around: the tasks each one blocks. */
 function blocksOf(blockers: ReadonlyMap<number, readonly number[]>): Map<number, number[]> {
   const blocks = new Map<number, number[]>();
@@ -889,9 +1041,10 @@ function blocksOf(blockers: ReadonlyMap<number, readonly number[]>): Map<number,
 /**
  * The plan in order without dates (docs/plans/flow.md, Decisions 4 to 6 and 13): the tree's rows on the left,
  * and on the order axis each task's card on its row in the slot the scheduler would start it in, the slot
- * strips repeating every card, the Now line, the scheduler's hold, and arrows from each blocker to what it
- * blocks. Lengths follow the sizes and only decide which slot frees first. A Ready card drags to a new place
- * in the order (Decisions 8 to 10).
+ * strips repeating every card, the Now line, the scheduler's hold, arrows from each blocker to what it blocks,
+ * and unless the Legend's switch hides them, then arrows from each card to the next of its story (issue #543).
+ * Lengths follow the sizes and only decide which slot frees first. A Ready card drags to a new place in the
+ * order (Decisions 8 to 10).
  */
 function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graphs, graphName, searchOpen }: FlowProps) {
   const scroller = useRef<HTMLDivElement>(null);
@@ -919,7 +1072,8 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
   const breaks = new Map(flow.breaks.map((b) => [b.issue, b.waitsFor]));
   const items = new Map<number, PlanItem>([...input.tasks.map((t) => [t.number, t] as const), ...itemsOf(epics, unparented)]);
   const { rows, height } = timelineRows(epics, unparented, rowsOpen.isOpen, () => 0);
-  const arrows = flowArrows(flow, rows, cards, axis, breaks);
+  const { hover, litPairs, lighting, inChain } = useChainHover(flow, place !== undefined);
+  const { arrows, then } = useArrows(flow, placer(rows, cards, axis), breaks, litPairs);
   const was = place && drops.flow.cards.find((c) => c.issue === place.issue);
   const landed = place && cards.get(place.issue);
   const drag: CardDrag = {
@@ -958,7 +1112,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
             {/* Under the rows, so the hatch and the arrows pass behind the cards; the Now line stays on top. */}
             <div aria-hidden className="pointer-events-none absolute inset-y-0" style={{ left: LABEL, width: axis.width }}>
               <Past width={axis.now} />
-              <ArrowLayer arrows={arrows} width={axis.width} height={height} />
+              <ArrowLayer arrows={arrows} then={then} lighting={lighting} width={axis.width} height={height} />
               <span className="absolute inset-y-0 z-[3] w-0.5 -translate-x-1/2 bg-foreground/85" style={{ left: axis.now }} />
               {drops.tip && landed && <span data-drop-line className="absolute inset-y-0 z-[4] border-l-[1.5px] border-dashed border-foreground/60" style={{ left: axis.x(landed.start) }} />}
             </div>
@@ -968,8 +1122,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
                 role="row"
                 aria-label={rowLabel(row)}
                 aria-expanded={row.expanded}
-                data-match={(row.item && matchesQuery(row.item, q)) || undefined}
-                className={cn("absolute inset-x-0 flex", isHead(row) && "bg-muted/50")}
+                {...rowLook(row, q, inChain(row))}
                 style={{ top: row.top, height: row.height }}
               >
                 <FlowRowLabel
@@ -984,7 +1137,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
                 />
                 <div role="gridcell" className="relative flex-1 border-b" style={{ minWidth: axis.width }}>
                   {row.task ? (
-                    <TaskCell task={row.task} row={row} flow={flow} axis={axis} cards={cards} tags={tags.get(row.task.number) ?? []} breaks={breaks} items={items} drag={drag} />
+                    <TaskCell task={row.task} row={row} flow={flow} axis={axis} cards={cards} tags={tags.get(row.task.number) ?? []} breaks={breaks} items={items} drag={drag} hover={hover} />
                   ) : (
                     row.item && <SpanCell item={row.item} cards={cards} axis={axis} />
                   )}

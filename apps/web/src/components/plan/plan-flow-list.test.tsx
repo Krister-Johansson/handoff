@@ -75,3 +75,46 @@ test("under 640 px the Flow is a list in order with lane and Next tags", () => {
   // The list does not reorder.
   expect(screen.queryByRole("button", { name: /Move/ })).not.toBeInTheDocument();
 });
+
+test("under 640 px each task names the next task of its story in a Then tag", () => {
+  const view = planView([
+    epic(12, "Project management", [
+      story(41, "Shaping with the assistant", 12, [
+        task(55, "Shaping tools", "Running", { size: "L" }),
+        task(56, "Approval cards", "Running", { size: "S" }),
+        task(57, "Add the migration", "Ready", { size: "S", blockedBy: [55] }),
+        task(58, "Plan page tree and board", "Ready", { size: "M" }),
+        task(63, "Release notes", "Ready", { size: "S", labels: ["task", "human"] }),
+        task(64, "Board filters", "Shaping", { size: "S" }),
+      ]),
+    ]),
+  ]);
+  render(
+    <TooltipProvider>
+      <PlanFlow
+        projectId="p1"
+        repoUrl={REPO_URL}
+        epics={view.epics}
+        unparented={[]}
+        flow={flowOf(view, { lanes: 2, runs: [flowRun(55, 0, 3, 7), flowRun(56, 5, 5, 7)] })}
+        scheduler={{ state: "running", claudeSlots: 2 }}
+        graphs={["loop"]}
+        graphName="loop"
+      />
+    </TooltipProvider>,
+  );
+
+  const item = (n: number) => within(screen.getByRole("list", { name: "Flow" })).getByRole("listitem", { name: new RegExp(`^Task #${n} `) });
+  // The flow's order: #55 and #56 run, #58 takes the slot #56 frees, #57 waits for #55, and Shaping #64 comes last.
+  const then = within(item(55)).getByText("Then #56");
+  expect(then).toHaveAttribute("title", "Then in its story: #56 Approval cards");
+  expect(within(item(56)).getByText("Then #58")).toBeInTheDocument();
+  // The list draws no blocker arrows, so the tag shows even where a blocker joins the two.
+  expect(within(item(58)).getByText("Then #57")).toBeInTheDocument();
+  expect(within(item(57)).getByText("Then #64")).toBeInTheDocument();
+  // The tag comes after the task's other tags.
+  expect(within(item(57)).getAllByText(/^(Slot|Next|Then) /).map((el) => el.textContent)).toEqual(["Slot 1", "Next 1", "Then #64"]);
+  // The last task of a story and a skipped task have none.
+  expect(within(item(64)).queryByText(/^Then /)).not.toBeInTheDocument();
+  expect(within(item(63)).queryByText(/^Then /)).not.toBeInTheDocument();
+});
