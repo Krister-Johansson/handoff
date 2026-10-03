@@ -28,6 +28,7 @@ const handoff: ProjectRow = {
   defaultBranch: "main",
   setupCommand: "pnpm install",
   isDemo: false,
+  planMode: "timeline",
   runCount: 12,
   plan: { number: 5, title: "handoff plan", url: "https://github.com/users/octo/projects/5" },
 };
@@ -169,6 +170,23 @@ test("a Project without Start and Target gets them from Add the fields too", asy
   fireEvent.click(within(detail("Plan on GitHub")).getByRole("button", { name: "Add the fields" }));
   await waitFor(() => expect(actions.addDateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
   expect(actions.addEstimateFieldsAction).not.toHaveBeenCalled();
+});
+
+test("a Flow project lists and adds only the Size field", async () => {
+  const fieldsOf = () => within(within(detail("Plan on GitHub")).getByRole("list", { name: "Fields" })).getAllByRole("listitem").map((li) => li.textContent);
+  const none = { start: false, target: false, size: false, estimate: false };
+  const { unmount } = render(<ProjectsSettings projects={[{ ...handoff, planMode: "flow", plan: { ...handoff.plan!, fields: { ...none, size: true } } }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(fieldsOf()).toEqual(["Size: S, M, L"]);
+  expect(screen.queryByRole("button", { name: "Add the fields" })).not.toBeInTheDocument();
+  unmount();
+
+  render(<ProjectsSettings projects={[{ ...handoff, planMode: "flow", plan: { ...handoff.plan!, fields: none } }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(fieldsOf()).toEqual(["No Size field"]);
+  fireEvent.click(within(detail("Plan on GitHub")).getByRole("button", { name: "Add the fields" }));
+  await waitFor(() => expect(actions.addEstimateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
+  expect(actions.addDateFieldsAction).not.toHaveBeenCalled();
 });
 
 test("capacity, forecasts and the plan budget are in project settings, not here", () => {

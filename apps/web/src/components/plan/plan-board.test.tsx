@@ -91,6 +91,29 @@ test("a column header sums its tasks with ~ and +n", () => {
   expect(within(card(column("Shaping"), /#148/)).getByRole("button", { name: /^Size L, default forecast 2h/ })).toBeInTheDocument();
 });
 
+test("in a Flow project a column counts its tasks' sizes instead of summing times", () => {
+  const view = planView([
+    epic(120, "Refined product redesign", [
+      story(128, "Restyle the task page", 120, [
+        task(148, "R8 Restyle the task page", "Shaping", { size: "L" }),
+        task(149, "R9 Restyle dialogs", "Shaping", { size: "L" }),
+        task(152, "Document the workflow", "Shaping"),
+        task(143, "R3 Restyle the sidebar", "Ready", { size: "L", estimate: 9 }),
+        task(142, "R2 Geist type", "Running"),
+      ]),
+    ]),
+  ]);
+  render(
+    <Sizing value={sizingOf({ mode: "flow" })}>
+      <PlanBoard {...base} board={view.board} epics={view.epics} />
+    </Sizing>,
+  );
+
+  expect(within(column("Shaping")).getByTitle("3 tasks: 2 L, 1 unsized")).toHaveTextContent(/^2 L, 1 unsized$/);
+  expect(within(column("Ready")).getByTitle("1 task: 1 L")).toHaveTextContent(/^1 L$/);
+  expect(within(column("Running")).queryByTitle(/task/)).not.toBeInTheDocument();
+});
+
 test("a card whose Status disagrees with its active run says what the run is doing", () => {
   const view = planView([epic(12, "Project management", [story(41, "Shaping", 12, [task(16, "Added during its run", "Shaping", { run: run("64fde8ef", "running") })])])]);
   render(<PlanBoard {...base} board={view.board} epics={view.epics} />);

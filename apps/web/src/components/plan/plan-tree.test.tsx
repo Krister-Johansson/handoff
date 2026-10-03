@@ -220,3 +220,27 @@ test("task rows carry their size chip and story and epic rows the sum of their t
   expect(within(row(/Story #127/)).getByTitle("1 hour 40 minutes over 2 tasks, forecasts; #152 has no size")).toHaveTextContent(/^~1h 40m\+1$/);
   expect(within(row(/Epic #120/)).getAllByTitle(/over 2 tasks/)[0]).toHaveTextContent(/^~1h 40m\+1$/);
 });
+
+test("in a Flow project story and epic rows count their tasks' sizes instead of summing times", () => {
+  const epics = [
+    epic(120, "Refined product redesign", [
+      story(127, "Restyle project views", 120, [
+        task(145, "R5 Restyle board columns", "Shaping", { size: "M" }),
+        task(146, "R6 Restyle the list view", "Shaping", { size: "S", estimate: 9 }),
+        task(144, "R4 Restyle the content", "Shaping", { size: "S" }),
+        task(147, "R7 Restyle the dashboard", "Shaping", { proposal: { size: "M", runId: "r9", steps: 6, paths: 4 } }),
+      ]),
+      story(128, "Unsized work", 120, [task(152, "Document the workflow", "Shaping"), task(153, "Write the guide", "Shaping", { estimate: 3 })]),
+    ]),
+  ];
+  render(
+    <Sizing value={sizingOf({ mode: "flow" })}>
+      <PlanTree {...base} epics={epics} />
+    </Sizing>,
+  );
+  expect(within(row(/Story #127/)).getByTitle("4 tasks: 2 S, 1 M, 1 unsized")).toHaveTextContent(/^2 S, 1 M, 1 unsized$/);
+  expect(within(row(/Epic #120/)).getAllByTitle(/^6 tasks/)[0]).toHaveTextContent(/^2 S, 1 M, 3 unsized$/);
+  expect(within(row(/Story #128/)).queryByTitle(/tasks/)).not.toBeInTheDocument();
+  expect(row(/Story #128/).textContent).not.toMatch(/unsized|\d+(m|h|d)\b/);
+  expect(row(/Story #127/).textContent).not.toMatch(/~|\d+(m|h|d)\b/);
+});

@@ -94,3 +94,24 @@ test("a refused size reopens the popover with GitHub's answer", async () => {
   expect(await within(again).findByText("GitHub Project #5 has no Size and no Estimate field.")).toBeInTheDocument();
   expect(router.refresh).not.toHaveBeenCalled();
 });
+
+test("in a Flow project the popover offers sizes only, with no hours, capacity or manual estimate", async () => {
+  const proposed = task(147, "R7 Restyle the dashboard", "Shaping", { proposal: { size: "M", runId: "r9", steps: 6, paths: 4 } });
+  render(
+    <Sizing value={sizingOf({ mode: "flow" })}>
+      <SizeChip task={proposed} />
+    </Sizing>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /#147$/ }));
+  const popover = screen.getByRole("dialog", { name: "Size of #147" });
+  const sizes = within(popover).getByRole("group", { name: "Size" });
+  expect(within(sizes).getAllByRole("button").map((b) => b.textContent)).toEqual(["S", "M", "L"]);
+  expect(within(popover).getByText("In Flow the size sets a card's length and which slot frees first.")).toBeInTheDocument();
+  expect(within(popover).queryByRole("textbox", { name: "Manual estimate" })).not.toBeInTheDocument();
+  expect(within(popover).queryByRole("group", { name: "Estimate quick picks" })).not.toBeInTheDocument();
+  expect(within(popover).queryByRole("button", { name: "Use the forecast" })).not.toBeInTheDocument();
+  expect(popover).not.toHaveTextContent(/hour|\d+(m|h|d)\b|capacity|forecast|estimate/i);
+
+  fireEvent.click(within(popover).getByRole("button", { name: "Use M" }));
+  await waitFor(() => expect(actions.setSizeAction).toHaveBeenCalledWith({ projectId: "p1", issue: 147, size: "M" }));
+});

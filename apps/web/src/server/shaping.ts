@@ -333,9 +333,10 @@ async function requireDateFields({ plan, repo, number }: Planned) {
 
 const shown = (date: string | null | undefined) => date ?? "none";
 
-/** Gives the plan's Project its Start and Target date fields when it lacks them, as the timeline's banner asks. */
+/** Gives the plan's Project its Start and Target date fields when it lacks them, as the timeline's banner asks. A Flow project has no dates and is refused. */
 export async function addDateFields(deps: ShapingDeps, projectId: string) {
-  const { plan, repo, number } = await plannedProject(deps, projectId);
+  const { project, plan, repo, number } = await plannedProject(deps, projectId);
+  refuseInMode(project, "flow", MODE_REFUSALS.dateFields);
   return { date_fields: await plan.ensureDateFields(repo.owner, number), roadmap: ROADMAP_NOTE };
 }
 
@@ -346,10 +347,13 @@ function missingEstimateFields(project: PlanProject, mode: PlanMode): ("Size" | 
   return [...(size ? [] : (["Size"] as const)), ...(fields?.estimate || mode === "flow" ? [] : (["Estimate"] as const))];
 }
 
-/** Gives the plan's Project its Size and Estimate fields when it lacks them, as the timeline's banner asks. */
+/**
+ * Gives the plan's Project its Size and Estimate fields when it lacks them, as the timeline's banner asks. A
+ * Flow project gets Size only, as setup_plan gives it.
+ */
 export async function addEstimateFields(deps: ShapingDeps, projectId: string) {
-  const { plan, repo, number } = await plannedProject(deps, projectId);
-  return { estimate_fields: await plan.ensureEstimateFields(repo.owner, number) };
+  const { project, plan, repo, number } = await plannedProject(deps, projectId);
+  return { estimate_fields: await plan.ensureEstimateFields(repo.owner, number, { estimate: project.planMode !== "flow" }) };
 }
 
 /** The most hours a manual estimate may hold. */

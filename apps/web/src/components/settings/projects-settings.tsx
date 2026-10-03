@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
+import type { PlanModeName } from "@/lib/project-tab";
 import { projectSettingsPath } from "@/lib/settings-tab";
 import type { PlanFieldsPresent, PlanLink } from "@/server/project-admin";
 import type { SchedulerBrief } from "@/server/scheduler-card";
@@ -41,6 +42,8 @@ export type ProjectRow = {
   demoSeedCommand?: string | null;
   uiPaths?: string[] | null;
   isDemo: boolean;
+  /** How the project plans: a Flow project has sizes and no dates or estimates. */
+  planMode: PlanModeName;
   runCount: number;
   plan: PlanLink | null;
   /** The scheduler's state and active runs of max runs, while it is on. */
@@ -114,15 +117,20 @@ const FIELDS: { key: keyof PlanFieldsPresent; present: string; missing: string }
   { key: "estimate", present: "Estimate, Number", missing: "No Estimate field" },
 ];
 
+/** The fields each plan mode reads: a Flow project has no dates and no estimates, so only Size. */
+const MODE_FIELDS: Record<PlanModeName, typeof FIELDS> = { timeline: FIELDS, flow: FIELDS.filter(({ key }) => key === "size") };
+
 /**
- * The Project's Start, Target, Size and Estimate fields, and Add the fields when any is missing: it adds the
- * date fields and the Size and Estimate fields the Project lacks.
+ * The Project's fields that the plan mode reads, and Add the fields when any is missing: in a Timeline project
+ * it adds the date fields and the Size and Estimate fields the Project lacks; in a Flow project, Size only, as
+ * setup_plan does.
  */
-function PlanFields({ projectId, fields }: { projectId: string; fields: PlanFieldsPresent }) {
+function PlanFields({ projectId, mode, fields }: { projectId: string; mode: PlanModeName; fields: PlanFieldsPresent }) {
   const [error, setError] = useState<string>();
   const [pending, startTransition] = useTransition();
-  const dates = !fields.start || !fields.target;
-  const estimates = !fields.size || !fields.estimate;
+  const flow = mode === "flow";
+  const dates = !flow && (!fields.start || !fields.target);
+  const estimates = !fields.size || (!flow && !fields.estimate);
   const add = () =>
     startTransition(async () => {
       const results = [...(dates ? [await addDateFieldsAction({ projectId })] : []), ...(estimates ? [await addEstimateFieldsAction({ projectId })] : [])];
@@ -131,7 +139,7 @@ function PlanFields({ projectId, fields }: { projectId: string; fields: PlanFiel
   return (
     <div className="mt-1.5 flex flex-col items-start gap-1.5">
       <ul aria-label="Fields" className="flex flex-wrap gap-1">
-        {FIELDS.map(({ key, present, missing }) => (
+        {MODE_FIELDS[mode].map(({ key, present, missing }) => (
           <li key={key}>
             {fields[key] ? (
               <Tag tone="success">
@@ -183,7 +191,7 @@ function PlanOnGitHub({ project }: { project: ProjectRow }) {
       ) : (
         <span className="text-muted-foreground">GitHub cannot be read with GITHUB_TOKEN, so the Project&apos;s name is missing.</span>
       )}
-      {plan.fields && <PlanFields projectId={project.id} fields={plan.fields} />}
+      {plan.fields && <PlanFields projectId={project.id} mode={project.planMode} fields={plan.fields} />}
       <div className="mt-1.5">
         <UnlinkPlanDialog project={project} plan={plan} />
       </div>

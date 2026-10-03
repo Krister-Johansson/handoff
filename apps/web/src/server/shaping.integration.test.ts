@@ -6,7 +6,7 @@ import { cancelRun } from "@handoff/engine/operations";
 import { OctokitProjects } from "@handoff/github";
 import { fakeGraphql, FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
-import { addEstimateFields, moveItem, moveToReady, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
+import { addDateFields, addEstimateFields, moveItem, moveToReady, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -279,6 +279,19 @@ test("setup_plan creates Size and Estimate on a new Project and adds them when a
   // The timeline banner's Add the fields does the same on a plan that has none.
   plan.plans.get("octo/sample")!.project.estimateFields = undefined;
   await expect(addEstimateFields(deps, projectId)).resolves.toEqual({ estimate_fields: expect.objectContaining({ estimate: "field-estimate" }) });
+});
+
+test("in a Flow project Add the fields adds Size and no Estimate, and refuses the date fields", async () => {
+  await setupPlan(deps, projectId);
+  const project = plan.plans.get("octo/sample")!.project;
+  project.estimateFields = undefined;
+
+  await addEstimateFields(deps, projectId);
+  expect(project.estimateFields).toEqual({ size: { id: "field-size", options: { S: "opt-size-s", M: "opt-size-m", L: "opt-size-l" } }, estimate: undefined });
+
+  await expect(addDateFields(deps, projectId)).rejects.toThrow("sandbox plans in Flow mode, which has no dates. Its Project needs no Start or Target field.");
+  expect(project.dateFields?.start).toBeUndefined();
+  expect(project.dateFields?.target).toBeUndefined();
 });
 
 test("moveItem writes Start, Target and Estimate in one request and refuses a Target before Start", async () => {

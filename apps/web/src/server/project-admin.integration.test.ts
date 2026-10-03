@@ -74,7 +74,7 @@ describe("Settings, Projects", () => {
     const plan = new FakeProjects(new FakeGitHub());
     const { project } = await projectWithRun();
     const { number } = await plan.createProject("octo", { owner: "octo", name: "sample" }, "sandbox plan");
-    await db.update(projects).set({ planProjectNumber: number, setupCommand: "pnpm install" }).where(eq(projects.id, project.id));
+    await db.update(projects).set({ planProjectNumber: number, setupCommand: "pnpm install", planMode: "timeline" }).where(eq(projects.id, project.id));
     await createProject(db, { name: "quiet", repo: "octo/quiet", defaultBranch: "trunk" });
     return { plan, project, number };
   }
@@ -83,8 +83,8 @@ describe("Settings, Projects", () => {
     const { plan, project, number } = await planned();
     const rows = await projectsForSettings(db, plan);
     expect(rows).toEqual([
-      expect.objectContaining({ name: "quiet", repoOwner: "octo", repoName: "quiet", defaultBranch: "trunk", setupCommand: null, runCount: 0, plan: null }),
-      expect.objectContaining({ id: project.id, name: "sandbox", setupCommand: "pnpm install", runCount: 1, plan: {
+      expect.objectContaining({ name: "quiet", repoOwner: "octo", repoName: "quiet", defaultBranch: "trunk", setupCommand: null, planMode: "flow", runCount: 0, plan: null }),
+      expect.objectContaining({ id: project.id, name: "sandbox", setupCommand: "pnpm install", planMode: "timeline", runCount: 1, plan: {
           number,
           title: "sandbox plan",
           url: expect.stringContaining(`/projects/${number}`),
