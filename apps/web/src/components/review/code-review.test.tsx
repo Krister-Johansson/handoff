@@ -397,7 +397,17 @@ test("Approve with Fix now findings picked warns they will not be sent and reads
   expect(screen.queryByRole("list", { name: "Goes back to coder-1" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Send review" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Approve anyway" }));
-  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "approve", note: "", comments: [] }));
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "approve", note: "", comments: [], findings: [0, 1] }));
+});
+
+test("Approve names the Fix now findings, so skipped and Follow-up ones reach no later step", async () => {
+  render(<CodeReview {...props} findings={graded} />);
+  choose("src/a.ts:10", "Skip");
+  choose("src/b.ts:2", "Follow-up");
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  fireEvent.click(screen.getByRole("radio", { name: /^Approve Let the run go on/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "approve", note: "", comments: [], findings: [] }));
 });
 
 test("Create follow-up issue takes the Follow-up findings, and they then say which issue holds them", async () => {

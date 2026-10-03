@@ -237,3 +237,57 @@ test("approve sends no findings, and a finding the review does not have is refus
   const [answered] = await db.select().from(questions).where(eq(questions.id, question.id));
   expect(answered?.comments).toEqual([]);
 });
+
+/** The Suggestions from reviewers section of a prompt, or "" when it has none. */
+const suggestions = (prompt: string) => {
+  const start = prompt.indexOf("# Suggestions from reviewers");
+  if (start < 0) return "";
+  const next = prompt.indexOf("\n# ", start + 2);
+  return prompt.slice(start, next < 0 ? undefined : next).trim();
+};
+
+test("after an approval, later steps get only the findings the person kept on Fix now", async () => {
+  const { cli, deps, question } = await atReviewedGate();
+  cli.push({ output: outputs.coderDone });
+  await answerQuestion(db, question.id, { answer: "Approved.", option: "approve", findings: [0], answeredBy: "krister" });
+  await drain(deps);
+  const docs = suggestions(cli.requests[2]!.systemPrompt);
+  expect(docs).toContain("- src/a.ts:2 - review: Name the constant.");
+  expect(docs).not.toContain("Add a test for b.");
+  expect(docs).not.toContain("Link the ADR.");
+});
+
+test("an approval that names no findings keeps the Blocking and Should fix ones and drops Follow-up", async () => {
+  const { cli, deps, question } = await atReviewedGate();
+  cli.push({ output: outputs.coderDone });
+  await answerQuestion(db, question.id, { answer: "Approved.", option: "approve", answeredBy: "claude-code" });
+  await drain(deps);
+  const docs = suggestions(cli.requests[2]!.systemPrompt);
+  expect(docs).toContain("- src/a.ts:2 - review: Name the constant.");
+  expect(docs).toContain("- src/a.ts - review: Add a test for b.");
+  expect(docs).not.toContain("Link the ADR.");
+});
+
+test("a coder sent back with changes is not told the findings the person skipped or left for a follow-up", async () => {
+  const { cli, deps, question } = await atReviewedGate();
+  cli.push({ output: { status: "done", summary: "Fixed." } });
+  await answerQuestion(db, question.id, { answer: "Changes requested.", option: "changes", findings: [0], answeredBy: "krister" });
+  await drain(deps);
+  const coder = cli.requests[2]!.systemPrompt;
+  expect(reviewComments(coder)).toBe(["## Review comments", "", "- src/a.ts:2 - review: Name the constant."].join("\n"));
+  expect(coder).not.toContain("Add a test for b.");
+  expect(coder).not.toContain("Link the ADR.");
+});
+
+test("a new review that passes the gate without a person reaches later steps with every finding", async () => {
+  const { cli, deps, question } = await atReviewedGate();
+  cli.push({ output: { status: "done", summary: "Fixed." } }, { output: { verdict: "approve", comments: findings } }, { output: outputs.coderDone });
+  await answerQuestion(db, question.id, { answer: "Fix the name, then go on.", option: "fix", findings: [0], answeredBy: "krister" });
+  await drain(deps);
+  const { events } = await inspect(db, question.runId);
+  expect(events.some((e) => e.type === "human.auto_approved")).toBe(true);
+  const docs = suggestions(cli.requests[4]!.systemPrompt);
+  expect(docs).toContain("- src/a.ts:2 - review: Name the constant.");
+  expect(docs).toContain("- src/a.ts - review: Add a test for b.");
+  expect(docs).toContain("- docs/notes.md - review: Link the ADR.");
+});

@@ -239,7 +239,7 @@ function describe({ questionId, runId, from, files, findings, picks, readOnly, c
         by: findings.by,
         verdict: findings.verdict,
         items: findings.comments.map((f, i) => ({ index: i + 1, severity: f.severity ?? "should_fix", path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body, choice: picks.choices[i] })),
-        choicesNote: "fix_now findings go back to the coder with changes or fix; follow_up ones go into the follow-up issue; skip drops one. page_set_finding_choice changes a choice.",
+        choicesNote: "fix_now findings go back to the coder with changes or fix; follow_up ones go into the follow-up issue; skip drops one. Later steps get only the fix_now findings as suggestions. page_set_finding_choice changes a choice.",
         followUp: findings.followUp ?? null,
         followUpNote: "The person opens a follow-up issue from the Follow-up findings with the Create follow-up issue button. No page tool does it.",
       },

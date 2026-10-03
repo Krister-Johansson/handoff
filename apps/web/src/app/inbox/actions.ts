@@ -78,7 +78,10 @@ const ReviewAnswerSchema = z.object({
       }),
     )
     .max(200),
-  /** The code reviewer's findings to send back with changes or fix, by their place in the review from 0. */
+  /**
+   * The code reviewer's findings the person kept on Fix now, by their place in the review from 0. Changes
+   * and fix send them back; later steps get only these as suggestions.
+   */
   findings: z.array(z.number().int().nonnegative()).max(200).optional(),
 });
 
@@ -90,8 +93,8 @@ const ReviewAnswerSchema = z.object({
 export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchema>): Promise<InboxActionState> {
   const parsed = ReviewAnswerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That review cannot be sent." };
-  const { questionId, runId, option, note, comments, findings = [] } = parsed.data;
-  if (option !== "approve" && option !== "split" && !note && comments.length === 0 && findings.length === 0) return { ok: false, error: "Say what to change: pick a finding, add a comment or a note." };
+  const { questionId, runId, option, note, comments, findings } = parsed.data;
+  if (option !== "approve" && option !== "split" && !note && comments.length === 0 && !findings?.length) return { ok: false, error: "Say what to change: pick a finding, add a comment or a note." };
   try {
     if (option === "split") await splitPlan({ db: getDb(), github: getGitHub(), projects: getProjects() }, { runId, questionId, answeredBy: "dashboard", note });
     else await answerQuestion(getDb(), questionId, { answer: note || (option === "approve" ? "Approved." : "Changes requested."), option, comments, findings, answeredBy: "dashboard" });

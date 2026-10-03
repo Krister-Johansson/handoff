@@ -150,8 +150,8 @@ export async function restartTryIt(db: Db, questionId: string) {
 
 /**
  * Records a person's answer and wakes the Human gate waiting on it. `findings` are the code reviewer's
- * findings to send back with changes or fix, by their place in the review from 0; without it, every
- * Blocking and Should fix finding goes back.
+ * findings the person keeps on Fix now, by their place in the review from 0; without it, every Blocking
+ * and Should fix finding. Changes and fix send them back. Later steps get only them as suggestions.
  */
 type Answer = { answer: string; option?: string; answeredBy: string; comments?: QuestionComment[]; findings?: number[] | undefined };
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -180,28 +180,33 @@ export async function reviewFindingsOf(db: Reader, question: { runId: string; cr
 /** Whether a finding goes back to the coder unless the person picks otherwise: every Blocking and Should fix one. */
 export const fixNowByDefault = (finding: { severity?: string | undefined }) => finding.severity !== "follow_up";
 
-/** The findings a review answer sends back, as comments on their files attributed to the step that found them. */
-async function findingComments(tx: Tx, questionId: string, input: Answer): Promise<QuestionComment[]> {
-  if (input.option !== "changes" && input.option !== "fix") return [];
+/**
+ * The code reviewer's findings a review answer keeps on Fix now, by their place in the review from 0,
+ * and the ones it sends back with changes or fix, as comments on their files attributed to the step
+ * that found them. Undefined `kept` when the question shows no code review findings.
+ */
+async function pickedFindings(tx: Tx, questionId: string, input: Answer): Promise<{ kept?: number[]; comments: QuestionComment[] }> {
+  const sendsBack = input.option === "changes" || input.option === "fix";
   const [question] = await tx.select({ runId: questions.runId, createdAt: questions.createdAt, context: questions.context }).from(questions).where(eq(questions.id, questionId));
   const found = question ? await reviewFindingsOf(tx, question) : undefined;
   if (!found) {
-    if (input.findings?.length) throw new Error("This review has no code review findings.");
-    return [];
+    if (sendsBack && input.findings?.length) throw new Error("This review has no code review findings.");
+    return { comments: [] };
   }
   const all = found.findings.comments;
   const missing = input.findings?.find((i) => i < 0 || i >= all.length);
   if (missing !== undefined) throw new Error(`There is no finding ${missing + 1}. The review has ${all.length}.`);
-  const picked = input.findings ? [...new Set(input.findings)].sort((a, b) => a - b).map((i) => all[i]!) : all.filter(fixNowByDefault);
-  return picked.map((f) => ({ path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body, author: found.by }));
+  const kept = input.findings ? [...new Set(input.findings)].sort((a, b) => a - b) : all.flatMap((f, i) => (fixNowByDefault(f) ? [i] : []));
+  const comments = sendsBack ? kept.map((i) => all[i]!).map((f) => ({ path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body, author: found.by })) : [];
+  return { kept, comments };
 }
 
 export async function answerQuestion(db: Db, questionId: string, input: Answer) {
   // Accepting a split opens the later parts' issues first, which needs GitHub: splitRun answers it.
   if (input.option === "split") throw new Error("Split as proposed opens an issue for each later part first; accept a split through the split, not as a plain answer.");
   return db.transaction(async (tx) => {
-    const findings = await findingComments(tx, questionId, input);
-    return answerIn(tx, questionId, { ...input, comments: [...findings, ...(input.comments ?? [])] });
+    const { kept, comments } = await pickedFindings(tx, questionId, input);
+    return answerIn(tx, questionId, { ...input, comments: [...comments, ...(input.comments ?? [])], findings: kept });
   });
 }
 
@@ -223,7 +228,7 @@ async function answerIn(tx: Tx, questionId: string, input: Answer, extra: { type
     .filter((c) => c.body);
   const [question] = await tx
     .update(questions)
-    .set({ answer: input.answer, option: input.option ?? null, comments, answeredBy: input.answeredBy, answeredAt: sql`now()` })
+    .set({ answer: input.answer, option: input.option ?? null, comments, findings: input.findings ?? null, answeredBy: input.answeredBy, answeredAt: sql`now()` })
     .where(and(eq(questions.id, questionId), sql`${questions.answer} is null`))
     .returning();
   if (!question) {
