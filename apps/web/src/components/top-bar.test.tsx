@@ -7,7 +7,6 @@ import { TopBar, TopBarCrumbsProvider } from "./top-bar";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => <button type="button">Notifications</button> }));
-vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => <button type="button">Assistant</button> }));
 vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => <button type="button">Listen</button> }));
 vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 
@@ -30,7 +29,7 @@ test("the breadcrumb shows one crumb on Inbox", () => {
   const trail = within(bar).getByRole("navigation", { name: "breadcrumb" });
   expect(within(trail).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["Inbox"]);
   expect(within(trail).getByText("Inbox")).toHaveAttribute("aria-current", "page");
-  // The page keeps its title; the top bar holds the trail, the sidebar toggle and the voice, assistant and bell buttons.
+  // The page keeps its title; the top bar holds the trail, the sidebar toggle and the voice and bell buttons. The assistant has no button here.
   expect(screen.getByRole("heading", { level: 1, name: "Inbox" })).toBeInTheDocument();
-  expect(within(bar).getAllByRole("button").map((b) => b.textContent)).toEqual(["Toggle sidebar", "Listen", "Assistant", "Notifications"]);
+  expect(within(bar).getAllByRole("button").map((b) => b.textContent)).toEqual(["Toggle sidebar", "Listen", "Notifications"]);
 });

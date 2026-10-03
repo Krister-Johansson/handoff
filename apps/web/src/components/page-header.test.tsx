@@ -9,7 +9,6 @@ import { TopBar, TopBarCrumbsProvider } from "./top-bar";
 const push = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
-vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => null }));
 vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => null }));
 vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 

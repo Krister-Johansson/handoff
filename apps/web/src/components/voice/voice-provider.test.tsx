@@ -1,8 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { AssistantButton } from "@/components/assistant/assistant-button";
 import { AssistantProvider } from "@/components/assistant/assistant-provider";
-import { AssistantSheet } from "@/components/assistant/assistant-sheet";
+import { AssistantPanel } from "@/components/assistant/assistant-panel";
 import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { notify } from "@/lib/notify";
 import { DEFAULT_VOICE_PREFS, writeVoicePrefs, type VoicePrefs } from "@/lib/voice/prefs";
@@ -69,8 +68,7 @@ function PanelApp({ transport, player }: { transport: FakeAssistantTransport; pl
   return (
     <AssistantProvider transport={transport} available>
       <VoiceTestApp speaker={speaker}>
-        <AssistantButton />
-        <AssistantSheet />
+        <AssistantPanel />
       </VoiceTestApp>
     </AssistantProvider>
   );

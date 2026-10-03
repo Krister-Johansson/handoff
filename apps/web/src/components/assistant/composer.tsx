@@ -14,28 +14,31 @@ function Kbd({ children }: { children: ReactNode }) {
 
 /**
  * Where the person writes to the assistant. Enter sends and Shift+Enter starts a new line; Stop ends a
- * reply while it streams; Escape closes the panel when there is nothing written. While dictation goes
- * into it, a chip says so.
+ * reply while it streams. The panel closes on Escape when there is nothing written. The microphone
+ * dictates into the message box and keeps focus there, as Ctrl+M does; while dictation goes into it,
+ * a chip says so.
  */
 export function Composer() {
-  const { status, composerRef, send: sendMessage, stop, close } = useAssistant();
+  const { status, composerRef, send: sendMessage, stop } = useAssistant();
   const voice = useOptionalVoice();
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
   const streaming = status === "streaming";
-  const dictating = focused && voice?.mode === "dictation" && (voice.state === "listening" || voice.state === "starting");
+  const listening = voice?.mode === "dictation" && (voice.state === "listening" || voice.state === "starting");
+  const dictating = focused && listening;
   const send = () => {
     if (!text.trim() || streaming) return;
     void sendMessage(text, { source: "typed" });
     setText("");
   };
+  const dictate = () => {
+    if (!voice) return;
+    if (listening) return voice.stop();
+    composerRef.current?.focus();
+    void voice.start("dictation");
+  };
   return (
-    <div
-      className={cn(
-        "flex flex-col rounded-md border bg-subtle transition-shadow",
-        focused && "outline-2 outline-offset-1 outline-ring",
-      )}
-    >
+    <div className={cn("flex flex-col rounded-md border bg-subtle transition-shadow", focused && "outline-2 outline-offset-1 outline-ring")}>
       <Label htmlFor="assistant-composer" className="sr-only">
         Message the assistant
       </Label>
@@ -54,7 +57,6 @@ export function Composer() {
             e.preventDefault();
             send();
           }
-          if (e.key === "Escape" && !text) close();
         }}
       />
       <div className="flex items-center gap-1.5 py-1.5 pr-1.5 pl-[11px]">
@@ -64,11 +66,33 @@ export function Composer() {
             Dictating
           </span>
         ) : (
-          <span className="mr-auto flex items-center gap-1 text-[11px] whitespace-nowrap text-muted-foreground/80">
-            <Kbd>Enter</Kbd>sends<span className="w-1.5" />
-            <Kbd>Shift</Kbd>
-            <Kbd>Enter</Kbd>new line
+          // On a phone the hints give way; there is no keyboard to press them on.
+          <span className="mr-auto flex items-center gap-1 text-[11px] whitespace-nowrap text-muted-foreground/80 max-md:invisible">
+            <Kbd>Enter</Kbd>sends
+            {voice?.supported && (
+              <>
+                <span className="w-1.5" />
+                <Kbd>Ctrl</Kbd>
+                <Kbd>M</Kbd>dictates
+              </>
+            )}
           </span>
+        )}
+        {voice?.supported && (
+          <Button
+            type="button"
+            variant={listening ? "default" : "ghost"}
+            size="icon-sm"
+            className={cn("text-muted-foreground", listening && "rounded-full text-primary-foreground")}
+            aria-label={listening ? "Stop dictating" : "Dictate"}
+            aria-pressed={listening}
+            title={listening ? "Stop dictating (Ctrl+M or Escape)" : "Dictate (Ctrl+M)"}
+            // Clicking keeps focus in the message box, so the words go there.
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={dictate}
+          >
+            <MicIcon />
+          </Button>
         )}
         {streaming ? (
           <Button type="button" size="xs" variant="outline" onClick={() => void stop()}>

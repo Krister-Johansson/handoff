@@ -29,6 +29,7 @@ const PAGES = [
   `/runs/${S}/(review|try)/${S}`,
   "/inbox",
   "/notifications",
+  "/chats",
   "/settings",
   `/library/(agents|groups|mcp|skills)/${S}`,
   `/library/skills-sh/${S}(/${S})?`,

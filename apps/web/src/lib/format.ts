@@ -38,3 +38,13 @@ export function formatAgo(when: Date, now: Date = new Date()): string {
   const n = Math.floor(s / size);
   return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
 }
+
+/** How long ago a moment was, in a few characters for a list row: "now", "2m", "3h", "1d", "2w". */
+export function formatAgoShort(when: Date, now: Date = new Date()): string {
+  const s = Math.max(0, Math.floor((now.getTime() - when.getTime()) / 1000));
+  if (s < 60) return "now";
+  if (s < 3_600) return `${Math.floor(s / 60)}m`;
+  if (s < 86_400) return `${Math.floor(s / 3_600)}h`;
+  if (s < 14 * 86_400) return `${Math.floor(s / 86_400)}d`;
+  return `${Math.floor(s / (7 * 86_400))}w`;
+}

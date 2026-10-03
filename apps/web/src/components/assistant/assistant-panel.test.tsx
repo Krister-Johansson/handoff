@@ -1,11 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { FakeAssistantTransport, fakeChat } from "@/lib/assistant/testing/fake-assistant-transport";
-import { AssistantButton } from "./assistant-button";
-import { AssistantProvider } from "./assistant-provider";
-import { AssistantSheet } from "./assistant-sheet";
+import { AssistantPanel } from "./assistant-panel";
+import { AssistantProvider, OPEN_CHAT_KEY, useAssistantPanel } from "./assistant-provider";
 import { VoiceButton } from "@/components/voice/voice-button";
 import { VoiceProvider } from "@/components/voice/voice-provider";
 import type { RecognitionCtor } from "@/lib/voice/support";
@@ -27,12 +26,11 @@ beforeEach(() => {
 function App({ page = "Projects", available = true, offReason, children }: { page?: string; available?: boolean; offReason?: "no-token" | "off"; children?: ReactNode }) {
   return (
     <AssistantProvider transport={transport} available={available} {...(offReason ? { offReason } : {})}>
-      <AssistantButton />
       <main>
         <h1>{page}</h1>
         {children}
       </main>
-      <AssistantSheet />
+      <AssistantPanel />
     </AssistantProvider>
   );
 }
@@ -51,7 +49,9 @@ test("sending a message shows it and streams the reply as it arrives", async () 
   render(<App />);
   await openAndSend("What needs me?");
   expect(transport.turns[0]).toMatchObject({ conversationId: "c1", text: "What needs me?", source: "typed" });
-  expect(within(panel()).getByText("What needs me?")).toBeInTheDocument();
+  // The message, and the new chat's title in the panel header.
+  expect(within(panel()).getAllByText("What needs me?")).toHaveLength(2);
+  expect(within(panel()).getByRole("heading", { level: 2, name: "What needs me?" })).toBeInTheDocument();
   act(() => transport.emit({ type: "turn", turnId: "t1" }));
   act(() => transport.emit({ type: "text", text: "Two runs " }));
   expect(within(panel()).getByText("Thinking")).toBeInTheDocument();
@@ -125,29 +125,41 @@ test("the panel stays open with its messages across a navigation", async () => {
   rerender(<App page="Inbox" />);
   expect(screen.getByRole("heading", { level: 1, name: "Inbox" })).toBeInTheDocument();
   expect(within(panel()).getByText("Opened the Inbox.")).toBeInTheDocument();
-  expect(within(panel()).getByText("Open the inbox")).toBeInTheDocument();
+  expect(within(panel()).getAllByText("Open the inbox")).toHaveLength(2);
 });
 
-test("the picker lists earlier conversations newest first and opens one", async () => {
-  transport.conversations = [
-    fakeChat({ id: "c9", title: "Merge the queue", updatedAt: "2026-10-01T12:00:00Z" }),
-    fakeChat({ id: "c8", title: "What failed?", updatedAt: "2026-10-01T10:00:00Z" }),
-  ];
+test("the panel header shows the open chat's title and project, starts a new chat, and has no history button", async () => {
+  const chat = fakeChat({ id: "c8", title: "What failed?", project: { id: "p1", name: "handoff" } });
+  transport.conversations = [chat];
   transport.stored.set("c8", {
-    conversation: { ...transport.conversations[1]!, turnId: null },
+    conversation: { ...chat, turnId: null },
     messages: [
       { id: "m1", role: "user", content: { text: "What failed?", source: "typed" } },
       { id: "m2", role: "assistant", content: { text: "The coder of run 7f3a failed.", calls: [], outcome: "done" } },
     ],
   });
+  localStorage.setItem(OPEN_CHAT_KEY, "c8");
   render(<App />);
   fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
-  fireEvent.click(await within(panel()).findByRole("button", { name: "Conversations" }));
-  // The picker opens in a popover, outside the sheet.
-  const list = await screen.findByRole("list", { name: "Conversations" });
-  expect(within(list).getAllByRole("button").map((b) => b.textContent)).toEqual([expect.stringContaining("Merge the queue"), expect.stringContaining("What failed?")]);
-  fireEvent.click(within(list).getByRole("button", { name: /What failed\?/ }));
   expect(await within(panel()).findByText("The coder of run 7f3a failed.")).toBeInTheDocument();
+  expect(within(panel()).getByRole("heading", { level: 2, name: "What failed?" })).toBeInTheDocument();
+  expect(within(panel()).getByText("handoff")).toBeInTheDocument();
+  expect(within(panel()).queryByRole("button", { name: "Conversations" })).not.toBeInTheDocument();
+
+  fireEvent.click(within(panel()).getByRole("button", { name: "New chat" }));
+  expect(within(panel()).getByRole("heading", { level: 2, name: "New chat" })).toBeInTheDocument();
+  expect(within(panel()).queryByText("The coder of run 7f3a failed.")).not.toBeInTheDocument();
+  expect(localStorage.getItem(OPEN_CHAT_KEY)).toBeNull();
+});
+
+test("a chat outside any project says All projects under its title", async () => {
+  const chat = fakeChat({ id: "c3", title: "What needs me this week" });
+  transport.conversations = [chat];
+  localStorage.setItem(OPEN_CHAT_KEY, "c3");
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  expect(await within(panel()).findByRole("heading", { level: 2, name: "What needs me this week" })).toBeInTheDocument();
+  expect(within(panel()).getByText("All projects")).toBeInTheDocument();
 });
 
 test("Mod+J opens the panel and focuses the composer, and Escape closes it when the composer is empty", async () => {
@@ -329,10 +341,9 @@ test("a message asked by voice is marked Sent by voice", async () => {
       { id: "m3", role: "user", content: { text: "Thanks", source: "typed" } },
     ],
   });
+  localStorage.setItem(OPEN_CHAT_KEY, "c8");
   render(<App />);
   fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
-  fireEvent.click(await within(panel()).findByRole("button", { name: "Conversations" }));
-  fireEvent.click(within(await screen.findByRole("list", { name: "Conversations" })).getByRole("button", { name: /What needs me\?/ }));
   await within(panel()).findByText("Nothing.");
   expect(within(panel()).getAllByText("Sent by voice")).toHaveLength(1);
 });
@@ -375,9 +386,8 @@ test("the composer shows Dictating while dictation goes into it", async () => {
   render(
     <AssistantProvider transport={transport} available>
       <VoiceProvider support={{ recognition: FakeSpeechRecognition as unknown as RecognitionCtor, onDeviceCheck: true }}>
-        <AssistantButton />
         <VoiceButton />
-        <AssistantSheet />
+        <AssistantPanel />
       </VoiceProvider>
     </AssistantProvider>,
   );
@@ -423,14 +433,14 @@ function windowWidth(initial: number) {
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => <button type="button">Notifications</button> }));
 vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 
-test("from 1280 px the panel docks and the page narrows; below it is a sheet", async () => {
+test("from 1280 px the panel docks and the page narrows; below it floats over the page", async () => {
   const width = windowWidth(1440);
   try {
     render(
       <AssistantProvider transport={transport} available>
         <VoiceProvider support={{ recognition: undefined, onDeviceCheck: false }}>
           <TooltipProvider>
-            <AppShell sidebarOpen sidebar={null} panel={<AssistantSheet />}>
+            <AppShell sidebarOpen sidebar={null} panel={<AssistantPanel />}>
               <main>
                 <h1>Inbox</h1>
               </main>
@@ -451,7 +461,7 @@ test("from 1280 px the panel docks and the page narrows; below it is a sheet", a
     fireEvent.click(within(docked).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("complementary", { name: "Assistant" })).not.toBeInTheDocument();
 
-    // Narrower than 1280 px it overlays the page as a sheet.
+    // Narrower than 1280 px it floats over the page.
     act(() => width.set(1100));
     fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
     expect(await screen.findByRole("dialog", { name: "Assistant" })).toBeInTheDocument();
@@ -463,4 +473,102 @@ test("from 1280 px the panel docks and the page narrows; below it is a sheet", a
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+test("docked, the assist button hides while the panel is open, and closing gives it focus again", async () => {
+  windowWidth(1440);
+  try {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    const docked = await screen.findByRole("complementary", { name: "Assistant" });
+    expect(screen.queryByRole("button", { name: /^Assistant/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Hide the assistant" })).not.toBeInTheDocument();
+    fireEvent.click(within(docked).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Assistant" })).toHaveFocus());
+
+    // Escape in an empty composer closes the docked panel the same way.
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    fireEvent.keyDown(await screen.findByLabelText("Message the assistant"), { key: "Escape" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Assistant" })).toHaveFocus());
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("floating, the assist button turns into Hide while the panel is open", async () => {
+  windowWidth(1024);
+  try {
+    render(<App />);
+    const button = screen.getByRole("button", { name: "Assistant" });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(button);
+    const floating = await screen.findByRole("dialog", { name: "Assistant" });
+    expect(floating).toHaveAttribute("data-variant", "float");
+    const hide = screen.getAllByRole("button", { name: "Hide the assistant" }).find((b) => !floating.contains(b))!;
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    // The panel's own Hide is a minus in its header.
+    expect(within(floating).getByRole("button", { name: "Hide the assistant" })).toBeInTheDocument();
+    fireEvent.click(hide);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Assistant" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Assistant" })).toHaveFocus();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("on a phone the panel fills the width under the top bar and the assist button waits until it closes", async () => {
+  windowWidth(390);
+  try {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+    const phone = await screen.findByRole("dialog", { name: "Assistant" });
+    expect(phone).toHaveAttribute("data-variant", "phone");
+    expect(screen.queryByRole("button", { name: /^Assistant|Hide the assistant/ })).not.toBeInTheDocument();
+    fireEvent.click(within(phone).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Assistant" })).toBeInTheDocument());
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("a dot on the assist button says an approval waits in some chat", async () => {
+  transport.conversations = [fakeChat({ id: "c2", title: "Repair the docs build", state: "approval" })];
+  function Sidebar() {
+    const panel = useAssistantPanel();
+    const { refreshChats } = panel;
+    useEffect(() => void refreshChats(), [refreshChats]);
+    return null;
+  }
+  render(
+    <App>
+      <Sidebar />
+    </App>,
+  );
+  expect(await screen.findByRole("button", { name: "Assistant, an approval waits" })).toBeInTheDocument();
+});
+
+test("the composer's microphone dictates into the message box and keeps focus there", async () => {
+  FakeSpeechRecognition.reset();
+  render(
+    <AssistantProvider transport={transport} available>
+      <VoiceProvider support={{ recognition: FakeSpeechRecognition as unknown as RecognitionCtor, onDeviceCheck: true }}>
+        <AssistantPanel />
+      </VoiceProvider>
+    </AssistantProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  const composer = await screen.findByLabelText("Message the assistant");
+  await waitFor(() => expect(composer).toHaveFocus());
+  expect(within(panel()).getByText(/sends.*dictates$/)).toBeInTheDocument();
+  const mic = within(panel()).getByRole("button", { name: "Dictate" });
+  fireEvent.mouseDown(mic);
+  fireEvent.click(mic);
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(1));
+  act(() => FakeSpeechRecognition.instances[0]!.emitStart());
+  expect(composer).toHaveFocus();
+  expect(within(panel()).getByText("Dictating")).toBeInTheDocument();
+  const stop = within(panel()).getByRole("button", { name: "Stop dictating" });
+  expect(stop).toHaveAttribute("aria-pressed", "true");
+  fireEvent.click(stop);
+  await waitFor(() => expect(FakeSpeechRecognition.instances[0]!.stopped).toBe(true));
 });

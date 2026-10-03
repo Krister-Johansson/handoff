@@ -62,10 +62,13 @@ export function useTurnStream({
   transport,
   setMessages,
   runUi,
+  onChange,
 }: {
   transport: AssistantTransport;
   setMessages: Dispatch<SetStateAction<ChatMessage[]>>;
   runUi: (call: UiCall) => Promise<{ text: string; isError: boolean; note?: string }>;
+  /** Called when the chat's state may have changed: its turn started, a card opened or was answered, the turn ended. */
+  onChange?: () => void;
 }) {
   const [streaming, setStreaming] = useState(false);
   const turnId = useRef<string | undefined>(undefined);
@@ -97,8 +100,10 @@ export function useTurnStream({
         if (controller.signal.aborted) return;
         if (event.type === "turn") {
           turnId.current = event.turnId;
+          onChange?.();
           return;
         }
+        if (event.type === "confirm" || event.type === "confirmed") onChange?.();
         if (event.type === "text") {
           text += event.text;
           for (const listener of replyListeners.current) listener({ id: replyId, text, done: false });
@@ -127,9 +132,10 @@ export function useTurnStream({
           turnId.current = undefined;
           setStreaming(false);
         }
+        onChange?.();
       }
     },
-    [transport, setMessages, runUi],
+    [transport, setMessages, runUi, onChange],
   );
 
   const onReply = useCallback((cb: (reply: ReplyUpdate) => void) => {

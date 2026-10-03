@@ -8,7 +8,7 @@ import { AppSidebar } from "./app-sidebar";
  * The sidebar with what it shows, read per request: the projects with their active runs, the Inbox
  * count (the same count as the Inbox page) and the worker status.
  */
-export async function AppSidebarData({ lastProjectId }: { lastProjectId: string | undefined }) {
+export async function AppSidebarData({ lastProjectId, chatsOpen }: { lastProjectId: string | undefined; chatsOpen: boolean }) {
   const db = getDb();
   const [projects, inboxCount, worker] = await Promise.all([
     listProjects(db).catch(() => []),
@@ -21,6 +21,7 @@ export async function AppSidebarData({ lastProjectId }: { lastProjectId: string 
       lastProjectId={lastProjectId}
       inboxCount={inboxCount}
       worker={{ live: worker.live, queuedRuns: worker.queuedRuns }}
+      chatsOpen={chatsOpen}
     />
   );
 }

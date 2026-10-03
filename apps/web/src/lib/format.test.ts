@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatAgo, formatCost, formatDuration, formatSince } from "./format";
+import { formatAgo, formatAgoShort, formatCost, formatDuration, formatSince } from "./format";
 
 test("formatSince says briefly how long something has gone on, in the largest whole unit", () => {
   const now = new Date("2026-10-02T12:00:00Z");
@@ -30,4 +30,16 @@ test("formatAgo says how long ago, in the largest whole unit", () => {
   expect(formatAgo(new Date("2026-10-01T11:55:00Z"), now)).toBe("5 minutes ago");
   expect(formatAgo(new Date("2026-10-01T11:00:00Z"), now)).toBe("1 hour ago");
   expect(formatAgo(new Date("2026-09-28T12:00:00Z"), now)).toBe("3 days ago");
+});
+
+test("formatAgoShort says how long ago in a few characters, as a chat row shows it", () => {
+  const now = new Date("2026-10-01T12:00:00Z");
+  const ago = (seconds: number) => formatAgoShort(new Date(now.getTime() - seconds * 1000), now);
+  expect(ago(20)).toBe("now");
+  expect(ago(2 * 60)).toBe("2m");
+  expect(ago(3 * 3_600)).toBe("3h");
+  expect(ago(86_400)).toBe("1d");
+  expect(ago(13 * 86_400)).toBe("13d");
+  expect(ago(15 * 86_400)).toBe("2w");
+  expect(ago(-60)).toBe("now");
 });
