@@ -2,7 +2,6 @@
 
 import { createContext, use, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AssistantButton } from "@/components/assistant/assistant-button";
 import { NotificationBell } from "@/components/notification-bell";
 import { PageTrail, type Crumb } from "@/components/page-trail";
 import { Separator } from "@/components/ui/separator";
@@ -27,9 +26,9 @@ export function TopBarCrumbs({ crumbs }: { crumbs: Crumb[] }) {
 }
 
 /**
- * The bar above every page: the sidebar toggle and the page's trail on the left; voice, the assistant
- * and the notification bell on the right. Under it, the voice transcript strip while voice has
- * something to say.
+ * The bar above every page: the sidebar toggle and the page's trail on the left; voice and the
+ * notification bell on the right. Under it, the voice transcript strip while voice has something to
+ * say. The assistant opens from the assist button in the bottom right corner, not from here.
  */
 export function TopBar() {
   const { setSlot } = use(CrumbSlot);
@@ -46,7 +45,6 @@ export function TopBar() {
         <div ref={setSlot} className="min-w-0 flex-1 overflow-hidden" />
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           <VoiceButton />
-          <AssistantButton />
           <NotificationBell />
         </div>
       </div>

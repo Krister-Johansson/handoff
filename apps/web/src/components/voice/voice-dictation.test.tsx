@@ -1,8 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { AssistantButton } from "@/components/assistant/assistant-button";
 import { AssistantProvider } from "@/components/assistant/assistant-provider";
-import { AssistantSheet } from "@/components/assistant/assistant-sheet";
+import { AssistantPanel } from "@/components/assistant/assistant-panel";
 import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { FakeSpeechRecognition, FakeSpeechRecognitionPhrase } from "@/lib/voice/testing/fake-speech-recognition";
 import { VoiceTestApp } from "./testing/voice-test-app";
@@ -64,8 +63,7 @@ test("dictation into the assistant composer keeps its state, so Send sends the d
   render(
     <AssistantProvider transport={transport} available>
       <VoiceTestApp>
-        <AssistantButton />
-        <AssistantSheet />
+        <AssistantPanel />
       </VoiceTestApp>
     </AssistantProvider>,
   );

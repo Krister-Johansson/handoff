@@ -32,9 +32,15 @@ export class FakeAssistantTransport implements AssistantTransport {
 
   async list(query: ChatListQuery = {}) {
     this.lists.push(query);
-    const pinned = this.conversations.filter((c) => c.pinnedAt);
-    const recent = this.conversations.filter((c) => !c.pinnedAt).slice(0, query.limit ?? 30);
-    return { conversations: [...pinned, ...recent], total: this.conversations.length };
+    const words = query.query?.toLowerCase();
+    const matching = this.conversations.filter(
+      (c) =>
+        (!words || c.title.toLowerCase().includes(words) || c.lastMessage?.toLowerCase().includes(words)) &&
+        (!query.projectId || (query.projectId === "none" ? !c.project : c.project?.id === query.projectId)),
+    );
+    const pinned = matching.filter((c) => c.pinnedAt);
+    const recent = matching.filter((c) => !c.pinnedAt).slice(0, query.limit ?? 30);
+    return { conversations: [...pinned, ...recent], total: matching.length };
   }
   async create(text: string, path?: string) {
     this.creates.push({ text, ...(path ? { path } : {}) });

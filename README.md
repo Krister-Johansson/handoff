@@ -252,7 +252,9 @@ The Tester and every Claude step also see the three variables, and the agents ar
 
 ## The assistant
 
-The **Assistant** button in the header (or Cmd or Ctrl+J) opens a panel beside every page. Ask what needs you or how a run is going, or tell it to start, answer, merge, repair or cancel something. It can also open pages for you: the inbox for a project, a run, a review or Try it. The panel stays open while the page behind it changes, and earlier conversations are listed in its picker.
+The assist button in the bottom right corner (or Cmd or Ctrl+J) opens the assistant. From 1280 px the panel docks beside the page; below that it floats above the button, and on a phone it fills the width under the top bar. Ask what needs you or how a run is going, or tell it to start, answer, merge, repair or cancel something. It can also open pages for you: the inbox for a project, a run, a review or Try it. The panel stays open while the page behind it changes. The message box has its own microphone for dictation.
+
+The sidebar's **Chats** group lists your conversations from every project: Pinned first, then the six most recent, each with its project's letter and how long ago it was used, or Approve while an approval waits and Answering while a reply streams. The menu on a row pins, renames (F2) and deletes a conversation. **View all** opens the Chats page, with search over titles and messages and a project filter.
 
 - **How it runs.** Each message runs the Claude Code CLI from the dashboard on your subscription, with the same `CLAUDE_CODE_OAUTH_TOKEN`. The CLI gets handoff's tools and nothing else: no shell, no files, no web. Without the token the assistant is off and the panel says so.
 - **Approvals.** Reading happens without asking. Anything that changes something (starting, answering, merging, repairing, cancelling, adding a project) shows an approval card with what it will do and the arguments. Nothing happens until you press Approve. Deny takes a note that tells the assistant why. A card nobody answers within 5 minutes counts as denied.

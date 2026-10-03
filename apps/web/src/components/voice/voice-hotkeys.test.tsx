@@ -1,8 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { AssistantButton } from "@/components/assistant/assistant-button";
 import { AssistantProvider } from "@/components/assistant/assistant-provider";
-import { AssistantSheet } from "@/components/assistant/assistant-sheet";
+import { AssistantPanel } from "@/components/assistant/assistant-panel";
 import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { FakeSpeechRecognition } from "@/lib/voice/testing/fake-speech-recognition";
 import { VoiceTestApp } from "./testing/voice-test-app";
@@ -47,8 +46,7 @@ test("Ctrl+M with the panel open dictates into the composer", async () => {
   render(
     <AssistantProvider transport={new FakeAssistantTransport()} available>
       <VoiceTestApp>
-        <AssistantButton />
-        <AssistantSheet />
+        <AssistantPanel />
       </VoiceTestApp>
     </AssistantProvider>,
   );

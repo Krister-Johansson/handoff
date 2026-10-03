@@ -9,7 +9,8 @@ import { pageDescriptor, runUiTool } from "@/lib/assistant/run-ui-tool";
 import { pageToolsOnWebMcp, registerWebMcp, type WebMcpHost } from "@/lib/assistant/webmcp";
 import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
 import type { AssistantPort, ChatMessage, PendingRequest, ToolCallView } from "@/lib/assistant/port";
-import { httpTransport, type AssistantTransport, type ConversationSummary, type StoredConversation, type StoredMessage } from "@/lib/assistant/transport";
+import { httpTransport, type AssistantTransport, type ChatList, type ChatListQuery, type ConversationSummary, type StoredConversation, type StoredMessage } from "@/lib/assistant/transport";
+import { useChatList } from "./use-chat-list";
 import { streamingReply, useTurnStream } from "./use-turn-stream";
 
 /** How long a browser agent's approval card waits for the person before the call is denied. */
@@ -39,7 +40,7 @@ function recallOpenChat(): string | undefined {
 }
 
 
-/** What the panel needs on top of the port: the messages, the conversations and switching between them. */
+/** What the panel, the sidebar and the Chats page need on top of the port: the open chat, its messages and the list of chats. */
 type PanelState = {
   messages: ChatMessage[];
   /** Approval cards for tools a browser agent called through WebMCP, outside any conversation. */
@@ -51,10 +52,24 @@ type PanelState = {
   conversationId: string | undefined;
   /** The open chat as the list shows it: its title and project. Undefined until the first message starts one. */
   conversation: ConversationSummary | undefined;
-  conversations: ConversationSummary[] | undefined;
-  loadConversations(): Promise<void>;
+  /** Opens a chat in the panel, letting go of the one that streams. Throws when there is no such chat. */
   openConversation(id: string): Promise<void>;
   newConversation(): void;
+  /** The sidebar's chats: every pinned one, the six most recent others, and how many there are. Undefined until read. */
+  chats: ChatList | undefined;
+  /** Changes whenever a chat is started, renamed, pinned, deleted or answers, so other lists can read again. */
+  chatsVersion: number;
+  refreshChats(): Promise<void>;
+  /** Opens a chat and shows the panel. */
+  showChat(id: string): Promise<void>;
+  /** Starts a new chat and shows the panel. */
+  startChat(): void;
+  renameChat(id: string, title: string): Promise<void>;
+  pinChat(id: string, pinned: boolean): Promise<void>;
+  /** Deletes a chat; the open one gives way to a new chat. Refused while the chat answers. */
+  deleteChat(id: string): Promise<void>;
+  /** Reads chats for a list of its own, such as the Chats page: every pinned one, then up to `limit` others. */
+  listChats(query: ChatListQuery): Promise<ChatList>;
 };
 
 const PortContext = createContext<AssistantPort | undefined>(undefined);
@@ -116,6 +131,31 @@ function messageView(stored: StoredMessage): ChatMessage {
   return { id: stored.id, role: "assistant", text: reply.text, calls: reply.calls.map(callView), requests: [], status, ...(reply.error ? { error: reply.error } : {}) };
 }
 
+/** After a reload, the chat that was open opens again; one that is gone is forgotten, unless another chat opened meanwhile. */
+function useRestoreOpenChat(transport: AssistantTransport, loads: Loads, show: (id: string, stored: StoredConversation) => void) {
+  const restored = useEffectEvent(show);
+  useEffect(() => {
+    const id = recallOpenChat();
+    if (!id) return;
+    const load = loads.next();
+    transport.load(id).then(
+      (stored) => {
+        if (loads.isLatest(load)) restored(id, stored);
+      },
+      () => {
+        if (recallOpenChat() === id) rememberOpenChat(undefined);
+      },
+    );
+  }, [transport, loads]);
+}
+
+/** Counts chat loads, so only the latest one shows when the person opens chats quickly one after another. */
+type Loads = { next(): number; isLatest(load: number): boolean };
+function useLoads(): Loads {
+  const count = useRef(0);
+  return useMemo(() => ({ next: () => ++count.current, isLatest: (load) => load === count.current }), []);
+}
+
 /**
  * Owns the assistant for the whole dashboard: the open conversation, its messages as they stream, the
  * approval cards, and the panel's open state. It lives in the root layout, so a navigation the
@@ -136,14 +176,15 @@ export function AssistantProvider({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversation, setConversation] = useState<ConversationSummary>();
   const conversationId = conversation?.id;
-  const [conversations, setConversations] = useState<ConversationSummary[]>();
+  const chatList = useChatList(transport);
+  const { chats, version: chatsVersion, refresh: refreshChats, changed: chatsChanged, pin: pinChat, list: listChats } = chatList;
   const router = useRouter();
   const [agentRequests, setAgentRequests] = useState<PendingRequest[]>([]);
   const [agentActivity, setAgentActivity] = useState<string>();
   const agentPending = useRef(new Map<string, (answer: { approved: boolean; note?: string }) => void>());
   const webMcpEnabled = useWebMcpEnabled();
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const loads = useRef(0);
+  const loads = useLoads();
   // The open page's tools. The last registration wins; removing one clears it only if it is still the open page.
   // pageVersion changes with every registration and removal, so the page's WebMCP tools follow the open page.
   const pageRef = useRef<OpenPage | undefined>(undefined);
@@ -185,7 +226,8 @@ export function AssistantProvider({
       isPageToolName(call.name) ? runPageTool(openPage(), call) : runUiTool(call, { push: (href) => router.push(href), page: openPage }),
     [router, openPage],
   );
-  const { streaming, turnId, follow, release, onReply, onRequest } = useTurnStream({ transport, setMessages, runUi });
+  const onStreamChange = useCallback(() => void chatsChanged(), [chatsChanged]);
+  const { streaming, turnId, follow, release, onReply, onRequest } = useTurnStream({ transport, setMessages, runUi, onChange: onStreamChange });
 
   const send = useCallback(
     async (text: string, opts?: { source?: "voice" | "typed" }) => {
@@ -298,9 +340,8 @@ export function AssistantProvider({
     [available, streaming, send, stop, onReply, onRequest, respond, open, close, isOpen],
   );
 
-  const loadConversations = useCallback(async () => setConversations((await transport.list()).conversations), [transport]);
   // Shows a loaded chat in the panel: its messages, and its running turn when it still answers.
-  const showChat = useCallback(
+  const displayChat = useCallback(
     (id: string, stored: StoredConversation) => {
       setConversation(stored.conversation);
       rememberOpenChat(id);
@@ -318,11 +359,11 @@ export function AssistantProvider({
   );
   const loadChat = useCallback(
     async (id: string) => {
-      const load = ++loads.current;
+      const load = loads.next();
       const stored = await transport.load(id);
-      if (load === loads.current) showChat(id, stored);
+      if (loads.isLatest(load)) displayChat(id, stored);
     },
-    [transport, showChat],
+    [transport, displayChat, loads],
   );
   /** Opens a chat, letting go of the one that streams. Throws when there is no such chat. */
   const openConversation = useCallback(
@@ -334,33 +375,62 @@ export function AssistantProvider({
   );
   const newConversation = useCallback(() => {
     release();
-    loads.current++;
+    loads.next();
     setConversation(undefined);
     setMessages([]);
     rememberOpenChat(undefined);
     focusComposer();
-  }, [focusComposer, release]);
+  }, [focusComposer, release, loads]);
 
-  // After a reload, the chat that was open opens again.
-  const restored = useEffectEvent((id: string, stored: StoredConversation) => showChat(id, stored));
-  useEffect(() => {
-    const id = recallOpenChat();
-    if (!id) return;
-    const load = ++loads.current;
-    transport.load(id).then(
-      (stored) => {
-        if (load === loads.current) restored(id, stored);
-      },
-      // A chat that is gone is forgotten, unless another chat opened meanwhile.
-      () => {
-        if (recallOpenChat() === id) rememberOpenChat(undefined);
-      },
-    );
-  }, [transport]);
+  const openChat = useCallback(
+    async (id: string) => {
+      await openConversation(id);
+      open();
+    },
+    [openConversation, open],
+  );
+  const startChat = useCallback(() => {
+    newConversation();
+    open();
+  }, [newConversation, open]);
+  const renameChat = useCallback(
+    async (id: string, title: string) => {
+      await chatList.rename(id, title);
+      setConversation((c) => (c?.id === id ? { ...c, title: title.trim().replace(/\s+/g, " ").slice(0, 80) } : c));
+    },
+    [chatList],
+  );
+  const deleteChat = useCallback(
+    async (id: string) => {
+      await chatList.remove(id);
+      if (id === conversationId) newConversation();
+    },
+    [chatList, conversationId, newConversation],
+  );
+
+  useRestoreOpenChat(transport, loads, displayChat);
 
   const panel = useMemo<PanelState>(
-    () => ({ messages, agentRequests, agentActivity, offReason, conversationId, conversation, conversations, loadConversations, openConversation, newConversation }),
-    [messages, agentRequests, agentActivity, offReason, conversationId, conversation, conversations, loadConversations, openConversation, newConversation],
+    () => ({
+      messages,
+      agentRequests,
+      agentActivity,
+      offReason,
+      conversationId,
+      conversation,
+      openConversation,
+      newConversation,
+      chats,
+      chatsVersion,
+      refreshChats,
+      showChat: openChat,
+      startChat,
+      renameChat,
+      pinChat,
+      deleteChat,
+      listChats,
+    }),
+    [messages, agentRequests, agentActivity, offReason, conversationId, conversation, openConversation, newConversation, chats, chatsVersion, refreshChats, openChat, startChat, renameChat, pinChat, deleteChat, listChats],
   );
 
   return (

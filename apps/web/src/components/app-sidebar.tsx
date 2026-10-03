@@ -19,6 +19,7 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { ChatsGroup } from "@/components/assistant/chats-group";
 import { ProjectSwitcher, type SidebarProject } from "@/components/project-switcher";
 import { useProjectSection } from "@/components/sidebar-section";
 import { WorkerStatusView } from "@/components/worker-status-view";
@@ -85,7 +86,7 @@ function NavItem({
 
 /**
  * The dashboard's sidebar: the project switcher, the open project's pages, the Inbox across projects,
- * then Settings and the worker status. A project's graphs are in its Project settings and the library
+ * the assistant's chats, then Settings and the worker status. A project's graphs are in its Project settings and the library
  * is in Settings, so the graph editor marks Project settings and a library entry marks Settings.
  * Collapsed it is a column of icons.
  */
@@ -96,6 +97,7 @@ export function AppSidebar({
   worker,
   loadInboxCount,
   inboxIntervalMs,
+  chatsOpen = true,
 }: {
   projects: SidebarProject[];
   /** The project used last, from its cookie; shown outside a project. */
@@ -105,6 +107,8 @@ export function AppSidebar({
   worker: { live: number; queuedRuns: number };
   loadInboxCount?: () => Promise<number>;
   inboxIntervalMs?: number;
+  /** Whether the Chats group is open, from its cookie. */
+  chatsOpen?: boolean;
 }) {
   const inboxCount = useInboxCount(renderedInboxCount, { load: loadInboxCount, intervalMs: inboxIntervalMs });
   const pathname = usePathname() ?? "/";
@@ -164,6 +168,7 @@ export function AppSidebar({
             </SidebarMenu>
           </nav>
         </SidebarGroup>
+        <ChatsGroup initialOpen={chatsOpen} pathname={pathname} />
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu className="gap-0.5">
