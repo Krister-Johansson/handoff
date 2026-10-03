@@ -77,7 +77,7 @@ A run can link more than one issue, for example `start_run` with issues `[16, 88
 
 - Each issue is checked on its own before the run starts: a planned task must be Ready, it must not be blocked on GitHub, and no other active run may hold it. If any issue fails a check, the whole start is refused.
 - The planner reads every issue's body, comments, story and epic, and writes one plan for all of them.
-- Each linked task moves to Running when the run starts, to In review when the pull request opens, and to Done when it merges. Cancelling the run moves each one back to Ready.
+- Each linked task moves to Running when the run starts, to In review when the pull request opens, and to Done when it merges. Cancelling the run puts each task it moved back to the Status it had before.
 - The pull request says `Closes #N` for each issue, and the Merge node closes every linked issue itself.
 - The Plan shows the same run on each of its tasks.
 
@@ -96,7 +96,7 @@ A project can keep a plan of epics, stories and tasks on GitHub. GitHub holds th
 - **Hierarchy.** Epics, stories and tasks are issues in the project's repository. A story is a sub-issue of its epic and a task is a sub-issue of its story. The labels `epic`, `story` and `task` mark the kind.
 - **Status.** Each task has a Status on a GitHub Project (v2) that you own, with the options Shaping, Ready, Running, In review and Done. A closed issue counts as Done whatever its Status says.
 - **The Ready gate.** Of the issues in the Project, only open tasks in Ready that no run works on reach the backlog and `list_backlog`. Tasks blocked by an open issue are listed last, and a run will not start on them until the blocker closes. Epics and stories never run. Issues that are not in the Project stay in the backlog as unplanned and can still be started.
-- **Status from runs.** handoff sets Running when a run starts on a task, In review when the pull request opens, Done when it merges, and Ready again when you cancel the task's latest run. Each write is a `plan.status` event on the run. A write that cannot happen is a `plan.skipped` event and the run carries on.
+- **Status from runs.** handoff sets Running when a run starts on a task, In review when the pull request opens and Done when it merges. A task that joins the plan while a run works on it gets the run's Status. Each write is a `plan.status` event on the run, and a write that moves a task onto the run's Status records the Status the task had in `from`. Cancelling a run, or stopping it after a loop ran out, puts each task it moved back to that Status: a task the run started on goes back to Ready, and a task that was in Shaping when it joined the plan goes back to Shaping. A task the run never moved keeps its Status, and so does a task a newer run links. A write that cannot happen is a `plan.skipped` event and the run carries on.
 
 ### The token
 
@@ -296,8 +296,6 @@ The dashboard speaks with ElevenLabs. Add `ELEVENLABS_API_KEY` to `.env` and res
 - Speak notifications, for new questions, permission requests, failed runs and pull requests ready to merge, and Also finished and merged runs
 - the ElevenLabs voice, the rate and a Test voice button
 - the voice shortcuts
-
-The review and Try it pages also have a **Read aloud** button.
 
 ## Running each run in a container
 
