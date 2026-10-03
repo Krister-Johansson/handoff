@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, projectSchedulers, runs, schedulerEvents, type Db } from "@handoff/db";
 import { candidates, issueRuns, releasedRuns, type Candidate, type Skipped } from "@handoff/engine/backlog-scheduler";
 import type { PlanItem } from "@handoff/github";
+import type { Flow } from "../lib/plan/flow";
 import { runPath } from "../lib/paths";
 import { describeSchedulerEvent } from "../lib/scheduler-text";
 import type { StatusTone } from "../lib/status";
@@ -146,7 +147,12 @@ export async function schedulerStates(db: Db): Promise<Record<string, SchedulerB
   return Object.fromEntries(states);
 }
 
-/** The place of each next task in the scheduler's order, by issue number, for the Plan's Next tags. */
-export function nextPlaces(card: SchedulerCard): Record<number, number> {
-  return Object.fromEntries(card.next.map((task, i) => [task.number, i + 1]));
+/**
+ * The place of each next task in the scheduler's order, by issue number, for the Plan's Next tags. In a Flow
+ * project they come from the flow (docs/plans/flow.md, Decision 3): every Ready task in its place, blocked ones
+ * counted, so the tree, the Flow and a drag agree.
+ */
+export function nextPlaces(card: Pick<SchedulerCard, "next">, flow?: Flow): Record<number, number> {
+  const order = flow ? flow.ready : card.next.map((task) => task.number);
+  return Object.fromEntries(order.map((issue, i) => [issue, i + 1]));
 }

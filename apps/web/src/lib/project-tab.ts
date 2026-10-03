@@ -29,9 +29,12 @@ export function parseBacklogFilter(params: Record<string, string | string[] | un
   return value === "started" || value === "all" ? value : "todo";
 }
 
-/** The views of the Plan page. */
-export const PLAN_VIEWS = ["tree", "board", "timeline"] as const;
+/** The views of the Plan page: the third is Timeline or Flow, following the project's plan mode. */
+export const PLAN_VIEWS = ["tree", "board", "timeline", "flow"] as const;
 export type PlanViewName = (typeof PLAN_VIEWS)[number];
+
+/** How a project plans its work; the client keeps its own copy so the database package stays on the server. */
+export type PlanModeName = "flow" | "timeline";
 
 /** The timeline's zoom from ?zoom=; undefined lets the timeline pick one from its range. */
 export function parseZoom(params: Record<string, string | string[] | undefined>): Zoom | undefined {
@@ -39,8 +42,12 @@ export function parseZoom(params: Record<string, string | string[] | undefined>)
   return typeof zoom === "string" && (ZOOMS as readonly string[]).includes(zoom) ? (zoom as Zoom) : undefined;
 }
 
-/** The Plan page view from ?view=; the tree unless another known view is asked for. */
-export function parsePlanView(params: Record<string, string | string[] | undefined>): PlanViewName {
+/**
+ * The Plan page view from ?view=; the tree unless another known view is asked for. Timeline and Flow both
+ * open the plan mode's own view, so an old link opens Flow in a Flow project and Timeline in a Timeline one.
+ */
+export function parsePlanView(params: Record<string, string | string[] | undefined>, mode: PlanModeName = "timeline"): PlanViewName {
   const view = params.view;
-  return typeof view === "string" && (PLAN_VIEWS as readonly string[]).includes(view) ? (view as PlanViewName) : "tree";
+  if (typeof view !== "string" || !(PLAN_VIEWS as readonly string[]).includes(view)) return "tree";
+  return view === "timeline" || view === "flow" ? mode : (view as PlanViewName);
 }

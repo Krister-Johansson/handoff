@@ -3,6 +3,7 @@ import type { BacklogIssue, BacklogRun } from "@/server/backlog";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanStory, PlanTask, PlanView } from "@/server/plan";
 import { deriveSpans, type TimelineRun } from "@/lib/plan/schedule";
 import { durationOf, type Forecasts } from "@/lib/plan/forecast";
+import type { FlowInput, FlowRun } from "@/lib/plan/flow";
 import type { SizingControl } from "../plan-context";
 
 export const REPO_URL = "https://github.com/o/r";
@@ -107,6 +108,25 @@ export const FORECASTS: Forecasts = {
   M: { size: "M", source: "runs", minutes: 50, parts: { agent: 30, queue: 5, waiting: 15 }, costUsd: 0.9, runs: 12, measuredMinutes: 50 },
   L: { size: "L", source: "default", minutes: 120, parts: null, costUsd: null, runs: 3, measuredMinutes: 110 },
 };
+
+/**
+ * What loadPlan gives the Flow for a view: every item in Project order as listed (each epic, its stories, their
+ * tasks and its own tasks, then the unparented tasks), one lane, Project order, the human skip label and the
+ * default minutes per size, unless `over` says otherwise.
+ */
+export function flowOf(view: Pick<PlanView, "epics" | "unparented">, over: Partial<FlowInput> = {}): FlowInput {
+  const items = itemsOfView(view).map((i, index) => ({ ...i, position: index + 1 }));
+  return { tasks: items, runs: [], lanes: 1, order: "project", skipLabel: "human", latest: new Map(), held: [], pins: new Set(), minutes: { S: 30, M: 60, L: 120 }, ...over };
+}
+
+/** An active run of the Flow on an issue, created `minute` minutes into the day, with its steps done of its total. */
+export const flowRun = (issue: number, minute: number, done: number, total: number, over: Partial<FlowRun> = {}): FlowRun => ({
+  issue,
+  runId: `${String(issue).padStart(8, "0")}-0000-4000-8000-000000000000`,
+  createdAt: new Date(Date.UTC(2026, 9, 3, 8, minute)),
+  progress: { done, total },
+  ...over,
+});
 
 /** What the size chips read from the Plan page: project p1 named todooverkill at 6 hours a day. */
 export const sizingOf = (over: Partial<SizingControl> = {}): SizingControl => ({

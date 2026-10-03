@@ -62,6 +62,8 @@ export type FlowRow = { issue: number; tags: string[] };
 export type Flow = {
   /** Task numbers in the order the scheduler would start them, Ready then Shaping. */
   queue: number[];
+  /** The Ready tasks at the front of the queue; a task's Next place is its index here plus one. */
+  ready: number[];
   /** Every card, in the order the simulation placed them. */
   cards: FlowCard[];
   /** The cards of each lane, lane 1 first. */
@@ -229,5 +231,5 @@ export function layoutFlow(input: FlowInput): Flow {
       return { issue: t.number, tags };
     });
 
-  return { queue, cards, lanes, rows, arrows, breaks, held: input.held, end: Math.max(0, ...cards.map((c) => c.end)) };
+  return { queue, ready: ready.map((t) => t.number), cards, lanes, rows, arrows, breaks, held: input.held, end: Math.max(0, ...cards.map((c) => c.end)) };
 }

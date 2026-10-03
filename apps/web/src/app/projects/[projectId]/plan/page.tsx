@@ -6,6 +6,7 @@ import { PlanTab } from "@/components/plan/plan-tab";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import { parsePlanFilters } from "@/lib/plan/filters";
+import { layoutFlow } from "@/lib/plan/flow";
 import { readyInBacklog } from "@/lib/plan/task";
 import { parsePlanView, parseZoom } from "@/lib/project-tab";
 import { projectCrumb } from "@/server/crumbs";
@@ -65,6 +66,8 @@ export default async function PlanPage({
     );
   }
 
+  // In a Flow project the Next tags come from the flow's order in every view (docs/plans/flow.md, Decision 3).
+  const flow = plan.flow && layoutFlow(plan.flow);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-3 p-6">
       <PlanHeader crumbs={crumbs} projectId={project.id} project={plan.project} ready={readyInBacklog(plan.board.Ready)} />
@@ -78,10 +81,11 @@ export default async function PlanPage({
         />
       )}
       <PlanTab
-        next={scheduler && nextPlaces(scheduler)}
+        next={scheduler && nextPlaces(scheduler, flow)}
+        scheduler={scheduler && { state: scheduler.status.state, claudeSlots: scheduler.status.claudeSlots }}
         project={project}
         plan={plan}
-        view={parsePlanView(query)}
+        view={parsePlanView(query, project.planMode)}
         zoom={parseZoom(query)}
         filters={parsePlanFilters(query)}
         signals={signals}

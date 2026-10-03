@@ -4,16 +4,15 @@ import { Fragment, startTransition, use, useEffect, useEffectEvent, useMemo, use
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, CalendarRangeIcon, ChevronRightIcon, ExternalLinkIcon, GripVerticalIcon, KeyboardIcon, MoreHorizontalIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, CalendarRangeIcon, ChevronRightIcon, GripVerticalIcon, KeyboardIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
-import type { PlanColumn, PlanEpic, PlanStory, PlanTask } from "@/server/plan";
+import type { PlanColumn, PlanEpic, PlanTask } from "@/server/plan";
 import { moveItemAction, saveArrangeAction } from "@/app/projects/actions";
 import { StatusBadge } from "@/components/runs/status-badge";
 import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
 import { Kbd, KbdGroup } from "@/components/ui/kbd";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDuration } from "@/lib/plan/duration";
@@ -28,15 +27,19 @@ import {
   arrowPath,
   chartRange,
   estimateFieldsGap,
+  isHead,
   itemsOf,
   KIND_NAME,
+  LABEL_WIDTH,
   lacksDateFields,
   placeItem,
   progressOf,
+  rowLabel,
   scheduleNotes,
   spanText,
   stripClock,
   stripDates,
+  tasksOf,
   timelineRows,
   type TimelineRow,
 } from "@/lib/plan/timeline-rows";
@@ -46,6 +49,7 @@ import { runPath } from "@/lib/paths";
 import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { ArrangeBanner, ArrangeButton, type ArrangeControl } from "./arrange-preview";
+import { ItemMenu, RowLabel } from "./row-label";
 import { TaskActions, type StartRunContext } from "./plan-actions";
 import { KindBadge, StatusPill } from "./plan-status";
 import { Sizing, useSearchQuery } from "./plan-context";
@@ -60,7 +64,6 @@ import { LoadRow } from "./load-row";
 import { useBarDrag, type DragBar } from "./use-bar-drag";
 import { useRowsOpen } from "./use-collapsed";
 
-const LABEL_WIDTH = 280;
 /** A bar wider than this repeats the title inside it. */
 const TITLE_INSIDE = 120;
 /** A strip wider than this shows the run's short id beside it. */
@@ -79,8 +82,6 @@ const STRIP_TONE: Record<StatusTone, string> = {
   muted: "bg-muted-foreground/35",
 };
 
-const rowLabel = (row: TimelineRow) => (row.item ? `${KIND_NAME[row.kind]} #${row.item.number} ${row.item.title}` : "Unparented");
-const isHead = (row: TimelineRow) => row.kind === "epic" || row.kind === "group";
 
 /** The left edge and width of a span of whole days. */
 function extent(scale: TimeScale, span: DaySpan) {
@@ -503,49 +504,6 @@ function Strips({ row, entry, scale, projectId, under }: { row: TimelineRow; ent
   });
 }
 
-function Chevron({ expanded, label, onToggle }: { expanded: boolean; label: string; onToggle: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-label={`${expanded ? "Collapse" : "Expand"} ${label}`}
-      onClick={onToggle}
-      className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-    >
-      <ChevronRightIcon aria-hidden className={cn("size-4 transition-transform", expanded && "rotate-90")} />
-    </button>
-  );
-}
-
-/** An epic's or a story's menu on the timeline: Open on GitHub and Schedule. */
-function ItemMenu({ item, onSchedule }: { item: PlanItem; onSchedule: () => void }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button size="icon-xs" variant="ghost" aria-label={`Actions for #${item.number}`}>
-          <MoreHorizontalIcon />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuGroup>
-          <DropdownMenuItem asChild>
-            <a href={item.url}>
-              <ExternalLinkIcon />
-              Open on GitHub
-            </a>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuGroup>
-          <DropdownMenuItem onSelect={onSchedule}>
-            <CalendarIcon />
-            Schedule
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 type RowLabelProps = {
   row: TimelineRow;
   entry: TimelineItem | undefined;
@@ -561,15 +519,6 @@ type RowLabelProps = {
   preview: DaySpan | undefined;
 };
 
-/** A task's status pill, or an epic's or a story's kind badge; nothing on the Unparented heading. */
-function RowMark({ row }: { row: TimelineRow }) {
-  if (row.task) {
-    const column = taskColumn(row.task);
-    return <StatusPill column={column} spinning={column === "Running" && row.task.run?.status === "running"} />;
-  }
-  return row.item ? <KindBadge kind={row.kind === "story" ? "story" : "epic"} /> : null;
-}
-
 /** A task's menu with the moves its status allows and Schedule; an epic's or a story's with Open on GitHub and Schedule. */
 function RowMenu({ row, projectId, start, onSchedule }: Pick<RowLabelProps, "row" | "projectId" | "start" | "onSchedule">) {
   const { item, task } = row;
@@ -577,53 +526,32 @@ function RowMenu({ row, projectId, start, onSchedule }: Pick<RowLabelProps, "row
   return item ? <ItemMenu item={item} onSchedule={() => onSchedule(item)} /> : null;
 }
 
-const INDENT: Record<TimelineRow["level"], string> = { 1: "pl-2.5", 2: "pl-[26px]", 3: "pl-11" };
-
-/** The tasks a story or an epic sums: an epic's through its stories and its own. */
-function tasksOf(item: PlanItem): PlanTask[] {
-  const stories = "stories" in item ? (item.stories as PlanStory[]) : [];
-  const own = "tasks" in item ? (item.tasks as PlanTask[]) : [];
-  return [...stories.flatMap((s) => s.tasks), ...own];
-}
-
-/** The fixed left cell of a row: chevron, status pill or kind badge, number and title with a task's warning icon, then the menu. */
-function RowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, sizeOpen, onSizeOpenChange, preview }: RowLabelProps) {
+/** A Timeline row's left cell: a task's warning icon beside its title, a sum on an epic or a story, and a task's size chip under it. */
+function TimelineRowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, sizeOpen, onSizeOpenChange, preview }: RowLabelProps) {
   const { item, task } = row;
   const sizing = use(Sizing);
   return (
-    <div
-      role="rowheader"
-      className={cn(
-        "sticky left-0 z-10 flex shrink-0 flex-col justify-center gap-1 border-r border-b bg-card pr-2.5 transition-shadow",
-        "group-data-[scrolled=true]/grid:shadow-[8px_0_10px_-8px_color-mix(in_oklab,var(--foreground)_25%,transparent)]",
-        "group-data-[related=true]/row:bg-[linear-gradient(var(--active-bg),var(--active-bg))]",
-        INDENT[row.level],
-        isHead(row) && "bg-muted",
-      )}
-      style={{ width: LABEL_WIDTH }}
-    >
-      <div className="flex min-w-0 items-center gap-1.5">
-        {row.expanded !== undefined && <Chevron expanded={row.expanded} label={rowLabel(row)} onToggle={onToggle} />}
-        <RowMark row={row} />
-        {item ? <IssueTitle item={item} className={cn("text-xs", !task && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}
-        {task && entry && <FlagCard task={task} entry={entry} ctx={flags} />}
-        <span className="ml-auto flex shrink-0 items-center gap-1">
-          {!task && item && <SizeSum tasks={tasksOf(item)} />}
-          <RowMenu row={row} projectId={projectId} start={start} onSchedule={onSchedule} />
-        </span>
-      </div>
-      {task && sizing && (
-        <div className="flex min-w-0 items-center justify-end gap-1.5 pr-7">
-          {preview && (
-            <Tag tone="active">
-              <CalendarRangeIcon aria-hidden />
-              {spanText(preview)}
-            </Tag>
-          )}
-          <SizeChip task={task} open={sizeOpen} onOpenChange={onSizeOpenChange} />
-        </div>
-      )}
-    </div>
+    <RowLabel
+      row={row}
+      onToggle={onToggle}
+      flag={task && entry && <FlagCard task={task} entry={entry} ctx={flags} />}
+      aside={!task && item && <SizeSum tasks={tasksOf(item)} />}
+      menu={<RowMenu row={row} projectId={projectId} start={start} onSchedule={onSchedule} />}
+      below={
+        task &&
+        sizing && (
+          <div className="flex min-w-0 items-center justify-end gap-1.5 pr-7">
+            {preview && (
+              <Tag tone="active">
+                <CalendarRangeIcon aria-hidden />
+                {spanText(preview)}
+              </Tag>
+            )}
+            <SizeChip task={task} open={sizeOpen} onOpenChange={onSizeOpenChange} />
+          </div>
+        )
+      }
+    />
   );
 }
 
@@ -1241,7 +1169,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                     style={{ top: row.top, height: row.height }}
                     onPointerEnter={() => setHovered(row.task ? row.task.number : undefined)}
                   >
-                    <RowLabel
+                    <TimelineRowLabel
                       row={row}
                       entry={entry}
                       projectId={projectId}
