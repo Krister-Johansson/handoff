@@ -1,4 +1,4 @@
-import { criteriaInIssue, demoConfiguration, LAUNCH_FILE, parseLaunchFile } from "@handoff/core";
+import { commandLine, criteriaInIssue, demoConfiguration, LAUNCH_FILE, LaunchConfigurationSchema, parseLaunchFile } from "@handoff/core";
 import { and, desc, eq, graphs, gt, liveWorkers, projects, sql, webhookDeliveries, type Db } from "@handoff/db";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
 import { projectsAccessProblem, SCOPE_FIX } from "./plan";
@@ -12,14 +12,21 @@ const ISSUES_SAMPLED = 10;
 
 const check = (c: ReadinessCheck) => c;
 
-/** The launch file's state on the default branch: whether handoff can start the app for Demo and Try it. */
-function launchCheck(text: string | undefined): ReadinessCheck {
-  const base = { id: "launch", title: "The app starts from .claude/launch.json", required: false };
+/**
+ * Whether handoff can start the app for Demo and Try it: the launch file on the default branch, else the
+ * project's App launch setting.
+ */
+function launchCheck(text: string | undefined, setting: unknown): ReadinessCheck {
+  const base = { id: "launch", title: "The app starts", required: false };
   const fix =
-    `Add ${LAUNCH_FILE} with one configuration (name, runtimeExecutable, runtimeArgs, port) and make the dev server listen on the PORT environment variable, ` +
-    "since handoff gives each run's app a free port. Put local, non-secret environment values such as a local database URL in its env. " +
-    "Without it, Demo and Try it steps cannot start the app.";
-  if (text === undefined) return check({ ...base, status: "todo", detail: `No ${LAUNCH_FILE} on the default branch.`, fix });
+    `Set the command in Project settings, App launch, or add ${LAUNCH_FILE} with one configuration (name, runtimeExecutable, runtimeArgs, port). ` +
+    "Make the dev server listen on the PORT environment variable, since handoff gives each run's app a free port. Put local, non-secret environment values such as a local database URL in its env. " +
+    "Without either, Demo and Try it steps cannot start the app.";
+  if (text === undefined) {
+    const saved = LaunchConfigurationSchema.safeParse(setting);
+    if (setting && saved.success) return check({ ...base, status: "ok", detail: `No ${LAUNCH_FILE}; the project's App launch setting starts \`${commandLine(saved.data)}\`.` });
+    return check({ ...base, status: "todo", detail: `No ${LAUNCH_FILE} on the default branch and no App launch setting.`, fix });
+  }
   try {
     const launch = parseLaunchFile(text);
     const first = demoConfiguration(launch);
@@ -161,7 +168,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
           detail: "No CLAUDE.md on the default branch.",
           fix: "Add a CLAUDE.md with the commands to install, test, lint and run the app, the code layout and the conventions to follow. Every agent step reads it.",
         }),
-    launchCheck(launch),
+    launchCheck(launch, project.launch),
     ci
       ? check({ id: "ci", title: "CI on pull requests", required: false, status: "ok", detail: "The PR node waits for the repository's checks." })
       : check({

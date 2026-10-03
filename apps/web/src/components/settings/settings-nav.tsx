@@ -3,6 +3,7 @@
 import { useCallback, useId } from "react";
 import Link from "next/link";
 import {
+  AppWindowIcon,
   AudioLinesIcon,
   BellIcon,
   BookOpenIcon,
@@ -120,7 +121,7 @@ export function SettingsNav({ active }: { active: SettingsTab }) {
 }
 
 /**
- * The sections of a project's settings. Runs: what a run starts from. Plan: how the project's plan is
+ * The sections of a project's settings. Runs: what a run starts from and how its app starts. Plan: how the project's plan is
  * worked, Plan mode first.
  */
 const PROJECT_SETTINGS_GROUPS: { label: string; items: { tab: ProjectSettingsTab; icon: LucideIcon }[] }[] = [
@@ -129,6 +130,7 @@ const PROJECT_SETTINGS_GROUPS: { label: string; items: { tab: ProjectSettingsTab
     items: [
       { tab: "graphs", icon: GitForkIcon },
       { tab: "library", icon: LibraryIcon },
+      { tab: "launch", icon: AppWindowIcon },
     ],
   },
   {

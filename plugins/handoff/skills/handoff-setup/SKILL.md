@@ -41,7 +41,7 @@ Keep it short and factual. Agents follow it literally.
 
 ### An app that starts from .claude/launch.json
 
-The Demo and Try it steps start the run's app from the worktree using `.claude/launch.json`, the same file Claude Code desktop uses for its Preview. handoff gives each run's app a free port in the `PORT` environment variable, so several runs can preview at once.
+The Demo and Try it steps start the run's app from the worktree using `.claude/launch.json`, the same file Claude Code desktop uses for its Preview. handoff gives each run's app a free port in the `PORT` environment variable, so several runs can preview at once. A repository without the file can set the same values in the dashboard under Project settings, App launch; the file wins when both exist.
 
 ```json
 {

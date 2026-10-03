@@ -33,12 +33,13 @@ test("the library is a group of Settings after Projects, one section per kind", 
   expect(within(library).getByRole("link", { name: "MCP servers" })).toHaveAttribute("aria-current", "page");
 });
 
-test("project settings has Runs with Graphs and Default library, and Plan with Plan mode, the Scheduler and Estimates", () => {
+test("project settings has Runs with Graphs, Default library and App launch, and Plan with Plan mode, the Scheduler and Estimates", () => {
   render(<ProjectSettingsNav projectId="p1" mode="timeline" active="library" />);
   const nav = screen.getByRole("navigation", { name: "Project settings sections" });
   expect(links(within(nav).getByRole("group", { name: "Runs" }))).toEqual([
     ["Graphs", "/projects/p1/settings?tab=graphs"],
     ["Default library", "/projects/p1/settings?tab=library"],
+    ["App launch", "/projects/p1/settings?tab=launch"],
   ]);
   expect(links(within(nav).getByRole("group", { name: "Plan" }))).toEqual([
     ["Plan mode", "/projects/p1/settings?tab=mode"],

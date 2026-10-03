@@ -52,16 +52,17 @@ export function libraryRedirectPath(params: SearchParams): string {
 }
 
 /**
- * The sections of a project's settings. Runs: Graphs and Default library. Plan: Plan mode (Flow or Timeline),
+ * The sections of a project's settings. Runs: Graphs, Default library and App launch. Plan: Plan mode (Flow or Timeline),
  * the Scheduler and Estimates (capacity, forecasts and plan budget; the plan budget only in a Flow project).
  * See PROJECT_SETTINGS_GROUPS in components/settings/settings-nav.tsx.
  */
-export const PROJECT_SETTINGS_TABS = ["graphs", "library", "mode", "scheduler", "estimates"] as const;
+export const PROJECT_SETTINGS_TABS = ["graphs", "library", "launch", "mode", "scheduler", "estimates"] as const;
 export type ProjectSettingsTab = (typeof PROJECT_SETTINGS_TABS)[number];
 
 const PROJECT_SETTINGS_TAB_LABEL: Record<ProjectSettingsTab, string> = {
   graphs: "Graphs",
   library: "Default library",
+  launch: "App launch",
   mode: "Plan mode",
   scheduler: "Scheduler",
   estimates: "Estimates",

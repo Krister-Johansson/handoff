@@ -6,6 +6,9 @@ import type { WorkdirProvider, WorkdirSpec } from "../types.ts";
 import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
 import { launchApp, launchConfigurationFor, logTail, PreviewError, stopGroup, type DockerExec } from "./preview.ts";
 
+// The dashboard makes a Test start's worktree with the same provider the worker uses.
+export { GitWorktreeProvider } from "../workdir/git-worktree.ts";
+
 /** How long a Test start keeps the app running before it stops it. */
 export const LAUNCH_TEST_LIFETIME_MS = 10 * 60_000;
 const TEARDOWN_TIMEOUT_MS = 10 * 60_000;
@@ -43,7 +46,7 @@ function explain(error: unknown): { error: string; log: string | null } {
 export type StartLaunchTestOptions = {
   projectId: string;
   /** The App launch form's values, saved or not. The repository's launch file wins over them. */
-  launch: LaunchConfiguration;
+  launch: LaunchConfiguration | null;
   readyTimeoutMs?: number;
   lifetimeMs?: number;
   /** false: no timer stops it in this process; reading it past its time does. */
@@ -67,7 +70,7 @@ export async function startLaunchTest(deps: LaunchTestDeps, opts: StartLaunchTes
   const now = new Date();
   const [test] = await db
     .insert(launchTests)
-    .values({ projectId: project.id, command: commandLine(opts.launch), createdAt: now, stopsAt: new Date(now.getTime() + lifetimeMs) })
+    .values({ projectId: project.id, command: opts.launch ? commandLine(opts.launch) : "", createdAt: now, stopsAt: new Date(now.getTime() + lifetimeMs) })
     .returning();
   const id = test!.id;
   const controller = new AbortController();

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import {
+  AppWindowIcon,
   AudioLinesIcon,
   BellIcon,
   BookOpenIcon,
@@ -46,6 +47,7 @@ const PAGE_ICON: Record<PageIcon, LucideIcon> = {
   "project-settings": SlidersHorizontalIcon,
   graphs: GitForkIcon,
   library: LibraryIcon,
+  launch: AppWindowIcon,
   mode: WaypointsIcon,
   scheduler: CalendarClockIcon,
   estimates: RulerIcon,
