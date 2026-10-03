@@ -48,6 +48,8 @@ export type SearchDialogProps = {
   tasks: SearchTasks | undefined;
   /** Search covers every project. */
   all: boolean;
+  /** Search keeps to its project: other projects' results wait for All projects instead of showing under Other projects. */
+  onlyProject: boolean;
   /** The project of the open page, which the project menu calls This project. */
   pageProjectId: string | undefined;
   onPickProject: (projectId: string) => void;
@@ -121,9 +123,11 @@ function resultSections(input: ResultInput): { sections: Section[]; message: str
   const searchAll = (title: string, sub: string) => action("all", <ActionRow icon={<LayersIcon />} title={title} sub={sub} />, onAllProjects);
   const hasOther = result.groups.some((g) => g.id === "other");
   const onlyOther = hasOther && result.groups.length === 1;
-  if (hasOther && !all) sections.push({ id: "search-all", rows: [searchAll(`Search all projects for "${term}"`, "Adds their tasks from GitHub")] });
-  const message = onlyOther && !failed && tasks ? `Nothing in ${current?.name ?? "this project"} matches "${term}".` : undefined;
   const none = !result.groups.length && !!tasks && !failed && !!term;
+  if (hasOther && !all) sections.push({ id: "search-all", rows: [searchAll(`Search all projects for "${term}"`, "Adds their tasks from GitHub")] });
+  // Search kept to its project offers what other projects hold, unless no results offer it below.
+  else if (result.elsewhere && !all && !none) sections.push({ id: "search-all", rows: [searchAll(`Search all projects for "${term}"`, `${result.elsewhere} more in other projects`)] });
+  const message = onlyOther && !failed && tasks ? `Nothing in ${current?.name ?? "this project"} matches "${term}".` : undefined;
   if (none) {
     const rows: Row[] = [];
     if (!all && others.length) rows.push(searchAll("Search all projects", `${andList(others.map((p) => p.name))} too`));
@@ -187,15 +191,16 @@ function searchList(input: {
   tasks: SearchTasks | undefined;
   pages: SearchPage[];
   all: boolean;
+  onlyProject: boolean;
   recent: SearchItem[];
   query: ReturnType<typeof useSearchQuery>;
   onOpenHit: SearchDialogProps["onOpenHit"];
   onRetryTasks: () => void;
   onAllProjects: () => void;
 }) {
-  const { records, tasks, pages, all, query } = input;
+  const { records, tasks, pages, all, onlyProject, query } = input;
   const { parsed } = query;
-  const result = searchResults({ records, tasks, pages, all }, query.query, { filter: query.chosen, expanded: query.expanded });
+  const result = searchResults({ records, tasks, pages, all, onlyProject }, query.query, { filter: query.chosen, expanded: query.expanded });
   const filter = result.filter;
   const ctx: RowContext = { projects: new Map(records.projects.map((p) => [p.id, p])), currentId: records.projectId, all };
   const searching = Boolean(parsed.prefix || parsed.term) || filter !== "all";
@@ -269,13 +274,13 @@ const DIALOG_CLASS = { phone: "inset-0 top-0 left-0 h-dvh max-h-dvh w-full max-w
  * Ctrl+Enter opens in a new tab.
  */
 export function SearchDialog(props: SearchDialogProps) {
-  const { phone, all } = props;
+  const { phone, all, onlyProject } = props;
   const records = props.records ?? NO_RECORDS;
   const [selected, setSelected] = useState("");
   const [recent] = useState(readRecent);
   const query = useSearchQuery();
   const pages = useMemo(() => searchPages(records.projects), [records.projects]);
-  const list = searchList({ records, tasks: props.tasks, pages, all, recent, query, onOpenHit: props.onOpenHit, onRetryTasks: props.onRetryTasks, onAllProjects: props.onAllProjects });
+  const list = searchList({ records, tasks: props.tasks, pages, all, onlyProject, recent, query, onOpenHit: props.onOpenHit, onRetryTasks: props.onRetryTasks, onAllProjects: props.onAllProjects });
 
   const rows = list.sections.flatMap((s) => s.rows);
   const value = rows.find((r) => r.key === selected)?.key ?? rows[0]?.key ?? "";

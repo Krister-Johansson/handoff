@@ -199,6 +199,30 @@ test("a view's call of a read-only tool runs at once, without an approval card",
   expect(within(panel()).queryByRole("group", { name: /^Approve:/ })).not.toBeInTheDocument();
 });
 
+test("in a chat on a project, a view's call that leaves out the project runs in the chat's project", async () => {
+  transport.views.set(RUN_CARD, runCard());
+  transport.conversations = [fakeChat({ id: "c9", title: "How is run 7f3a?", project: { id: "p1", name: "sandbox" } })];
+  transport.stored.set("c9", {
+    conversation: { ...transport.conversations[0]!, turnId: null },
+    messages: [
+      { id: "m1", role: "user", content: { text: "How is run 7f3a?", source: "typed" } },
+      { id: "m2", role: "assistant", content: { text: "It runs.", calls: [{ id: "u1", name: "get_run", args: { run_id: RUN }, result: '{"id":"7f3a1b2c"}' }], outcome: "done" } },
+    ],
+  });
+  window.localStorage.setItem(OPEN_CHAT_KEY, "c9");
+  render(
+    <App>
+      <GrabViewTools />
+    </App>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  await within(panel()).findByTitle("Show run 7f3a1b2c");
+  let result: unknown;
+  act(() => void callViewTool("u1", { name: "list_backlog", arguments: {} }).then((r) => (result = r)));
+  await waitFor(() => expect(result).toBeDefined());
+  expect(transport.toolCalls).toEqual([{ name: "list_backlog", args: { project: "sandbox" } }]);
+});
+
 test("when the view's card goes, its open approval counts as denied", async () => {
   await replyWithCard();
   const controller = new AbortController();

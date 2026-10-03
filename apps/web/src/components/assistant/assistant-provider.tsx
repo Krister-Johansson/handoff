@@ -61,8 +61,12 @@ type PanelState = {
   /** Opens a chat in the panel, letting go of the one that streams. Throws when there is no such chat. */
   openConversation(id: string): Promise<void>;
   newConversation(): void;
-  /** The sidebar's chats: every pinned one, the six most recent others, and how many there are. Undefined until read. */
+  /** The sidebar's chats: every pinned one, the most recent others, and how many there are. Undefined until read. */
   chats: ChatList | undefined;
+  /** Whether some chats are not in `chats` yet. */
+  moreChats: boolean;
+  /** Reads the next chats into `chats`, as the sidebar's Recents scrolls to its end. */
+  showMoreChats(): Promise<void>;
   /** Changes whenever a chat is started, renamed, pinned, deleted or answers, so other lists can read again. */
   chatsVersion: number;
   refreshChats(): Promise<void>;
@@ -186,7 +190,7 @@ export function AssistantProvider({
   const [conversation, setConversation] = useState<ConversationSummary>();
   const conversationId = conversation?.id;
   const chatList = useChatList(transport);
-  const { chats, version: chatsVersion, refresh: refreshChats, changed: chatsChanged, pin: pinChat, list: listChats } = chatList;
+  const { chats, version: chatsVersion, refresh: refreshChats, changed: chatsChanged, pin: pinChat, list: listChats, more: moreChats, showMore: showMoreChats } = chatList;
   const router = useRouter();
   const approvals = usePageApprovals();
   const { agentRequests, viewRequests } = approvals;
@@ -288,10 +292,12 @@ export function AssistantProvider({
 
   // A view's tools/call: any of the catalog's server tools, after the approval card for those that need one.
   const ask = approvals.ask;
+  // In a chat on a project, a tool that needs a project uses the chat's when the view's call leaves it out, as in a turn.
+  const chatProject = conversation?.project ?? undefined;
   const callViewTool = useCallback(
     (viewCallId: string, call: ViewToolCall, signal?: AbortSignal) =>
-      runViewTool(call, { approve: (request) => ask(request, { viewCallId, signal }), run: (name, args) => transport.callTool(name, args) }),
-    [ask, transport],
+      runViewTool(call, { approve: (request) => ask(request, { viewCallId, signal }), run: (name, args) => transport.callTool(name, args), project: chatProject }),
+    [ask, transport, chatProject],
   );
 
   // WebMCP: while this browser allows it, every dashboard page offers the catalog to agents in the browser.
@@ -430,6 +436,8 @@ export function AssistantProvider({
       openConversation,
       newConversation,
       chats,
+      moreChats,
+      showMoreChats,
       chatsVersion,
       refreshChats,
       showChat: openChat,
@@ -440,7 +448,7 @@ export function AssistantProvider({
       listChats,
       loadView,
     }),
-    [messages, agentRequests, viewRequests, callViewTool, agentActivity, offReason, conversationId, conversation, openConversation, newConversation, chats, chatsVersion, refreshChats, openChat, startChat, renameChat, pinChat, deleteChat, listChats, loadView],
+    [messages, agentRequests, viewRequests, callViewTool, agentActivity, offReason, conversationId, conversation, openConversation, newConversation, chats, moreChats, showMoreChats, chatsVersion, refreshChats, openChat, startChat, renameChat, pinChat, deleteChat, listChats, loadView],
   );
 
   return (

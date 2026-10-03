@@ -46,15 +46,46 @@ function renderSidebar({ open = true, chatsOpen = true }: { open?: boolean; chat
   );
 }
 
+/** IntersectionObserver for jsdom, which has none: `scrollToEnd` tells the observers their element came into view. */
+class FakeIntersectionObserver {
+  static all: FakeIntersectionObserver[] = [];
+  readonly targets: Element[] = [];
+  constructor(private readonly callback: IntersectionObserverCallback) {
+    FakeIntersectionObserver.all.push(this);
+  }
+  observe(target: Element) {
+    this.targets.push(target);
+  }
+  unobserve() {}
+  disconnect() {
+    FakeIntersectionObserver.all = FakeIntersectionObserver.all.filter((o) => o !== this);
+  }
+  takeRecords() {
+    return [];
+  }
+  static scrollToEnd() {
+    for (const observer of [...FakeIntersectionObserver.all])
+      observer.callback(
+        observer.targets.map((target) => ({ target, isIntersecting: true }) as IntersectionObserverEntry),
+        observer as unknown as IntersectionObserver,
+      );
+  }
+}
+beforeEach(() => {
+  FakeIntersectionObserver.all = [];
+  vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
+  return () => vi.unstubAllGlobals();
+});
+
 const rows = (name: string) => within(screen.getByRole("list", { name })).getAllByRole("listitem");
 const rowOf = (title: string) => screen.getByRole("button", { name: new RegExp(`^${title}`) }).closest("li")!;
 const openMenu = (title: string) => fireEvent.keyDown(within(rowOf(title)).getByRole("button", { name: `Actions for ${title}` }), { key: "Enter" });
 
-test("Chats lists every pinned chat, then the six most recent others, each with its project and time, or its state", async () => {
+test("Chats lists every pinned chat, then every other chat by last use, each with its project and time, or its state", async () => {
   renderSidebar();
   const chats = screen.getByRole("region", { name: "Chats" });
   await within(chats).findByRole("list", { name: "Pinned chats" });
-  expect(transport.lists[0]).toEqual({ limit: 6 });
+  expect(transport.lists[0]).toEqual({ limit: 30 });
   expect(rows("Pinned chats").map((r) => r.textContent)).toEqual([expect.stringMatching(/^Plan the voice epic2d/), expect.stringMatching(/^What needs me this week5d/)]);
   expect(rows("Recent chats").map((r) => r.textContent)).toEqual([
     expect.stringMatching(/^Shaping tools run and story #412m/),
@@ -63,6 +94,7 @@ test("Chats lists every pinned chat, then the six most recent others, each with 
     expect.stringMatching(/^Merge queue for example-shop3h/),
     expect.stringMatching(/^Why the F03 plan was sent back1d/),
     expect.stringMatching(/^Clean up old worktrees2d/),
+    expect.stringMatching(/^An older chat9d/),
   ]);
   // The tile shows the project's letter; a chat outside any project has none.
   expect(rowOf("Repair the docs build").querySelector("[data-letter]")).toHaveAttribute("data-letter", "d");
@@ -71,6 +103,35 @@ test("Chats lists every pinned chat, then the six most recent others, each with 
   expect(within(rowOf("Clean up old worktrees")).getByRole("button", { name: "Clean up old worktrees" })).toHaveAttribute("title", "Clean up old worktrees, All projects, 2 days ago");
   const all = within(chats).getByRole("link", { name: "View all, 9 chats" });
   expect(all).toHaveAttribute("href", "/chats");
+});
+
+test("scrolling to the end of Recents reads the next chats, until there are no more", async () => {
+  transport.conversations = Array.from({ length: 70 }, (_, i) => fakeChat({ id: `c${i}`, title: `Chat ${i + 1}`, updatedAt: ago(i * 60) }));
+  renderSidebar();
+  await waitFor(() => expect(rows("Recent chats")).toHaveLength(30));
+  act(() => FakeIntersectionObserver.scrollToEnd());
+  await waitFor(() => expect(rows("Recent chats")).toHaveLength(60));
+  expect(transport.lists.at(-1)).toEqual({ limit: 60 });
+  act(() => FakeIntersectionObserver.scrollToEnd());
+  await waitFor(() => expect(rows("Recent chats")).toHaveLength(70));
+  expect(rows("Recent chats").at(-1)).toHaveTextContent("Chat 70");
+  const reads = transport.lists.length;
+  act(() => FakeIntersectionObserver.scrollToEnd());
+  expect(transport.lists).toHaveLength(reads);
+  expect(screen.getByRole("link", { name: "View all, 70 chats" })).toBeInTheDocument();
+});
+
+test("a change to a chat reads the list again as far as it was scrolled", async () => {
+  transport.conversations = Array.from({ length: 40 }, (_, i) => fakeChat({ id: `c${i}`, title: `Chat ${i + 1}`, updatedAt: ago(i * 60) }));
+  renderSidebar();
+  await waitFor(() => expect(rows("Recent chats")).toHaveLength(30));
+  act(() => FakeIntersectionObserver.scrollToEnd());
+  await waitFor(() => expect(rows("Recent chats")).toHaveLength(40));
+  openMenu("Chat 35");
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
+  await waitFor(() => expect(rows("Pinned chats")).toHaveLength(1));
+  expect(rows("Recent chats")).toHaveLength(39);
+  expect(transport.lists.at(-1)).toEqual({ limit: 60 });
 });
 
 test("a row opens its chat in the panel, and the pen starts a new chat", async () => {

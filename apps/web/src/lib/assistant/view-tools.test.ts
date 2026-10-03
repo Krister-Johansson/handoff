@@ -41,6 +41,19 @@ test("a view may call only the catalog's server tools, with arguments the catalo
   expect(d.run).not.toHaveBeenCalled();
 });
 
+test("in a chat on a project, a call that leaves out the project its tool needs runs in the chat's project, and the card says so", async () => {
+  const d = deps({ project: { id: "p1", name: "sandbox" } });
+  await runViewTool({ name: "start_run", arguments: { issues: [12] } }, d);
+  expect(d.approve).toHaveBeenCalledWith(expect.objectContaining({ args: { issues: [12], project: "sandbox" }, summary: expect.stringContaining("sandbox") }));
+  expect(d.run).toHaveBeenCalledWith("start_run", { issues: [12], project: "sandbox" });
+  // A project the call names stays, and so does a call without a chat project.
+  await runViewTool({ name: "list_runs", arguments: { project: "other" } }, d);
+  expect(d.run).toHaveBeenLastCalledWith("list_runs", { project: "other" });
+  const outside = deps();
+  expect(await runViewTool({ name: "start_run", arguments: { issues: [12] } }, outside)).toMatchObject({ isError: true });
+  expect(outside.run).not.toHaveBeenCalled();
+});
+
 test("a tool that fails gives the view its message as a tool error", async () => {
   const d = deps({ run: vi.fn(async () => Promise.reject(new Error("There is no run nope."))) });
   expect(await runViewTool({ name: "get_run", arguments: { run_id: "nope" } }, d)).toEqual({ content: [{ type: "text", text: "There is no run nope." }], isError: true });
