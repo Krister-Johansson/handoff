@@ -91,7 +91,7 @@ The library holds skills, MCP servers and subagents that nodes enable by name. I
 
 ## The Plan
 
-A project can keep a plan of epics, stories and tasks on GitHub. GitHub holds the whole plan. handoff stores one thing about it: the number of the GitHub Project that belongs to the handoff project.
+A project can keep a plan of epics, stories and tasks on GitHub. GitHub holds the whole plan. handoff stores one thing about it: the number of the GitHub Project that belongs to the handoff project. The capacity the timeline uses is a project setting in handoff (see Sizes and estimates).
 
 - **Hierarchy.** Epics, stories and tasks are issues in the project's repository. A story is a sub-issue of its epic and a task is a sub-issue of its story. The labels `epic`, `story` and `task` mark the kind.
 - **Status.** Each task has a Status on a GitHub Project (v2) that you own, with the options Shaping, Ready, Running, In review and Done. A closed issue counts as Done whatever its Status says.
@@ -111,22 +111,58 @@ A fine-grained token cannot reach a Project owned by a user account. A GitHub Ap
 
 ### Linking a Project
 
-Ask the assistant, or Claude Code with the handoff plugin, to set up the plan. That calls `setup_plan`, which shows an approval card first. It creates the labels `epic`, `story` and `task` if they are missing. With `use` and the number of one of your existing Projects, it links that Project to the repository and gives it the Status options Shaping, Ready, Running, In review and Done. An option whose name matches apart from case or an emoji is renamed, a missing one is added, and every other option stays, so no card loses its column. `list_github_projects` shows beforehand which options each of your Projects lacks, and the result of `setup_plan` names each option it renamed or added. Without `use`, it creates a Project called "<project name> plan" with those options and links it. Both ways the Project gets the date fields Start and Target. GitHub's roadmap layout reads them once you pick them under "Date fields" in a Roadmap view; the API cannot set that. Either way it stores the Project's number on the handoff project. Running it again on a project that has a plan adds missing labels and date fields and reports what it found.
+Ask the assistant, or Claude Code with the handoff plugin, to set up the plan. That calls `setup_plan`, which shows an approval card first. It creates the labels `epic`, `story` and `task` if they are missing. With `use` and the number of one of your existing Projects, it links that Project to the repository and gives it the Status options Shaping, Ready, Running, In review and Done. An option whose name matches apart from case or an emoji is renamed, a missing one is added, and every other option stays, so no card loses its column. `list_github_projects` shows beforehand which options each of your Projects lacks, and the result of `setup_plan` names each option it renamed or added. Without `use`, it creates a Project called "<project name> plan" with those options and links it. Both ways the Project gets the date fields Start and Target, a single select field Size with the options S, M and L, and a Number field Estimate. On a Project that already has a Size field, `setup_plan` adds S, M and L and keeps the field's other options. GitHub's roadmap layout reads them once you pick them under "Date fields" in a Roadmap view; the API cannot set that. Either way it stores the Project's number on the handoff project. Running it again on a project that has a plan adds missing labels and fields and reports what it found.
 
 ### Shaping
 
 The assistant and the Claude Code plugin shape the plan with these tools. Every one that writes to GitHub shows an approval card first, or the permission prompt in Claude Code.
 
-- `list_plan` shows the tree: epics, their stories, their tasks, each with its status and its Start and Target dates, and each task with its open blockers, latest run and pull request, plus the open issues outside the plan.
+- `list_plan` shows the tree: epics, their stories, their tasks, each with its status and its Start and Target dates, and each task with its open blockers, latest run and pull request, its size, estimate, the size its planner proposed and its duration, plus the open issues outside the plan. It also gives the project's capacity and each size's forecast.
 - `create_epic` creates an issue labelled `epic` with its goal.
 - `create_story` creates a sub-issue of an epic labelled `story`, with its acceptance criteria as checkboxes.
-- `create_task` creates a sub-issue of a story labelled `task`, with its brief, optional criteria and the issues it is blocked by.
+- `create_task` creates a sub-issue of a story labelled `task`, with its brief, optional criteria, the issues it is blocked by and an optional size.
 - `plan_issue` brings an issue from outside the plan in as a task, optionally under a story.
 - `move_to_ready` moves tasks to Ready. It refuses an epic, a story, a closed issue and a task without a body.
 - `move_to_shaping` moves tasks back to Shaping. It refuses a task that an active run works on.
 - `schedule` sets, moves or clears the Start and Target dates of epics, stories and tasks, each with its own dates. It refuses a Target before its Start, a date not written YYYY-MM-DD, an issue outside the plan and a Project without the date fields, and then changes nothing. The assistant proposes dates only when you ask it to plan the timeline. `create_story` and `create_task` also take `start` and `target`.
+- `set_size` sets or clears the size and the manual estimate of tasks. An estimate is hours or days (`3h`, `2d`) or a number of hours, and 0 or null clears it. A task with a Start gets the Target its new duration ends on. It refuses an epic, a story, an issue outside the plan, an estimate it cannot read or outside 0 to 1000 hours, and a Project without the Size and Estimate fields, and then changes nothing.
+- `arrange_plan` writes nothing. It returns where the unscheduled tasks with a size or an estimate fit, as Arrange by estimate on the timeline places them, and the tasks left out because they need a size. With `epic`, it places only that epic's tasks. The assistant then proposes those dates in one `schedule` call.
 
 Everything created starts in Shaping. `setup_project` reports whether the plan is in place.
+
+### The timeline
+
+The Plan page shows the plan as a tree, a board or a timeline. The timeline draws a bar for each item from its Start to its Target, with each run of a task as a strip under its bar, arrows from blocked-by links, and flags for late, blocked and overdue items. A story or an epic without dates of its own spans its tasks, drawn dashed. Items without dates are listed under Unscheduled, each with Schedule. The zooms are Days, Weeks and Months, and the zoom is part of the page's URL. Under 640 px the timeline is a list.
+
+### Sizes and estimates
+
+A task has a size, S, M or L, in the Project's Size field, and can have a manual estimate in its Estimate field. The size chip on each task in the tree, on the board and on the timeline opens the size popover. Picking S, M or L saves it to GitHub at once. Under Manual estimate you pick 1h to 2d or type hours or days, such as `5h` or `1.5d`, and Enter saves it. Use the forecast clears the estimate, and so does 0. GitHub stores the estimate in hours. A story, an epic and a board column show the sum of their tasks, starting with `~` when part of it is a forecast and ending with `+n` for tasks that have neither a size nor an estimate.
+
+A size's forecast comes from this project's finished runs: the median wall time of the succeeded runs of that size that link one task, split into agent time, queue time and time waiting on you, with the median reported cost and the number of runs. A size with fewer than 5 runs uses its default, S 30m, M 1h and L 2h. A run records the Size its task had when it started; a run without one counts under its planner's proposal, else under its task's current Size.
+
+The planner proposes a size in its plan. A task without a Size shows, dashed, the proposal of its latest run that has one, and the popover offers Use with that size, such as Use M. Only that press writes the proposal to GitHub. A task with a Size ignores proposals.
+
+A task's duration is its estimate, else the forecast of its Size, else the forecast of its planner's proposal. A task without a duration keeps a bar from Start to Target.
+
+The capacity is the hours you work on the plan a day: 6 unless you change it, from 1 to 24. A day in an estimate is the capacity, so `2d` at 6 hours a day is 12 hours. A sized task's bar runs from its Start for its duration over the capacity, so at 6 hours a day a 9 hour task covers a day and a half. Every day counts, weekends too. Tasks that start on the same day sit one after another, in blocked-by order and then by issue number, and a task whose blocker ends on its Start day starts after the blocker's last hour. Its Target is the day its hours end. handoff writes that Target to GitHub when you drop the bar, change its size or estimate, or save Arrange. When the Target on GitHub differs, for example after a change of the capacity, the bar's hover card shows both, and Overdue uses GitHub's.
+
+The load row under the dates shows the planned hours of each day against the capacity, red on a day over it. Its label, "Load at 6h a day", opens the capacity popover.
+
+Project settings has an Estimates section in its Plan group. It holds the capacity with Change, the forecasts from finished runs (Usually, Agent, Queue, Waiting on you, Cost and Runs per size, with Default and what the runs measured so far for a size under 5 runs), and the plan budget: the most files and steps a plan may have before its planner proposes a split. Settings, Projects lists the Project's fields under Plan on GitHub and offers Add the fields when Start, Target, Size or Estimate is missing. On the Plan page, a Project without Size or Estimate shows the banner "This Project has no Size and no Estimate field" with Add the fields, which asks before it writes.
+
+### Moving bars
+
+Drag a task's bar to move its Start a day at a time, and its Target follows. Drag the right end of a sized bar to set a manual estimate in whole hours; its size stays. The end has a handle on bars at least 12 px wide. A tooltip names the day, the duration and the Target that follows, and a dashed ghost marks where the bar was. Escape puts the bar back. Each drop saves Start, Target and the estimate it set to GitHub at once, with a toast and Undo. If GitHub refuses the write, the bar goes back and the toast offers Try again.
+
+A drop before a blocker ends is allowed. The bar's left edge and the arrow from the blocker turn red, the row's warning adds "Starts before #143 ends", and the blocker stays where it is. A task with dates and no duration moves both dates by the same number of days. Done and Running tasks, and tasks a run works on, do not move.
+
+With a bar focused, the arrow keys move it a day, Shift with an arrow changes its estimate by an hour, and E opens the size popover. The save follows 800 ms after the last key, or when the bar loses focus. An unscheduled task with a size or an estimate has a grip in Unscheduled that drags it onto the chart. Under 640 px nothing drags: a sized task has a Start button, and its Target follows from its duration.
+
+A sized task's run strips start under the bar's left edge at the bar's scale, so a run that takes longer than the duration shows its overrun in red. While an active run is past the duration, the row says "Over forecast by 50m" instead of Overdue. The bar's hover card gives the size, the forecast with its parts and cost, the estimate, the actual time so far and the clock times of each run.
+
+### Arrange by estimate
+
+Arrange by estimate, in the Unscheduled header, lays out the unscheduled tasks in view that have a size or an estimate. It places them from today in blocked-by order, fills each day up to the capacity after the work already planned (including bars the filters hide), and starts no task before its blockers end. Tasks with dates stay where they are. It shows a preview first: a banner with the placed tasks' range, dashed bars, the preview's hours in the load row, and Needs a size on the tasks it left out. Cancel writes nothing. Save writes Start and Target for every placed task. A task GitHub refuses goes back to Unscheduled, and the toast names it with the reason. When no unscheduled task in view has a size or an estimate, the button is off and says why.
 
 ### Staying up to date
 
