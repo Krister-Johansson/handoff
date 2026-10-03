@@ -15514,6 +15514,40 @@ var StdioServerTransport = class {
   }
 };
 
+// plugins/handoff/.claude-plugin/plugin.json
+var plugin_default = {
+  name: "handoff",
+  version: "0.17.0",
+  description: "Drive handoff from Claude Code: shape a plan of epics, stories and tasks, see the backlog, start runs for issues, follow them and hear when a run needs you.",
+  author: { name: "Krister Johansson" },
+  userConfig: {
+    url: {
+      type: "string",
+      title: "handoff dashboard",
+      description: "Where the handoff dashboard runs",
+      default: "http://localhost:3000"
+    },
+    token: {
+      type: "string",
+      title: "Connection token",
+      description: "From handoff's Settings, Connect Claude Code",
+      sensitive: true,
+      required: true
+    }
+  },
+  mcpServers: {
+    handoff: {
+      command: "node",
+      args: ["${CLAUDE_PLUGIN_ROOT}/server/handoff-mcp.mjs"],
+      env: {
+        HANDOFF_URL: "${user_config.url}",
+        HANDOFF_TOKEN: "${user_config.token}"
+      }
+    }
+  },
+  channels: [{ server: "handoff" }]
+};
+
 // node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
@@ -19494,7 +19528,7 @@ function createBridge(options) {
   );
   let upstream;
   const dashboard = () => upstream ??= (async () => {
-    const client = new Client({ name: "handoff-bridge", version: "1.0.0" });
+    const client = new Client({ name: "handoff-bridge", version: options.version ?? "dev" });
     const transport = new StreamableHTTPClientTransport(new URL("/api/mcp", url2), { requestInit: { headers: { authorization: `Bearer ${options.token}` } } });
     await client.connect(asTransport(transport));
     return client;
@@ -19502,8 +19536,11 @@ function createBridge(options) {
     upstream = void 0;
     throw error2;
   });
-  let toolsMissing = false;
   let upstreamTools;
+  let listed;
+  let announced;
+  const fingerprint = (tools) => JSON.stringify(tools);
+  const bridgeInfo = { version: options.version ?? null };
   const sessionArgument = (tool) => {
     const required2 = tool.inputSchema.required ?? [];
     if (required2.includes("project")) return "project";
@@ -19530,7 +19567,15 @@ function createBridge(options) {
   const currentProject = async (client) => {
     const project = await sessionProject(client);
     const next = project ? `Tools use ${project.name} when no project is named.` : options.repo ? `${options.repo} is not a handoff project yet. add_project adds it.` : "This folder has no GitHub origin remote, so name the project in each call. list_projects shows them.";
-    return { folder: options.folder ?? null, repo: options.repo ?? null, project: project ?? null, next };
+    return { folder: options.folder ?? null, repo: options.repo ?? null, project: project ?? null, next, bridge: bridgeInfo };
+  };
+  const withBridge = (result) => {
+    try {
+      const value = resultJson(result);
+      return value && typeof value === "object" && !Array.isArray(value) ? toolJson({ ...value, bridge: bridgeInfo }) : result;
+    } catch {
+      return result;
+    }
   };
   const withSessionArguments = async (client, name, args) => {
     const tool = (upstreamTools ?? await listUpstream(client)).find((t) => t.name === name);
@@ -19544,9 +19589,11 @@ function createBridge(options) {
   };
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
-      return { tools: [...(await listUpstream(await dashboard())).map(forSession), CURRENT_PROJECT] };
+      const tools = await listUpstream(await dashboard());
+      listed = fingerprint(tools);
+      return { tools: [...tools.map(forSession), CURRENT_PROJECT] };
     } catch {
-      toolsMissing = true;
+      listed = fingerprint([]);
       return { tools: [] };
     }
   });
@@ -19556,23 +19603,29 @@ function createBridge(options) {
       if (request.params.name === CURRENT_PROJECT.name) return toolJson(await currentProject(client));
       const filled = await withSessionArguments(client, request.params.name, request.params.arguments ?? {});
       if ("error" in filled) return toolError(filled.error);
-      return await client.callTool({ ...request.params, arguments: filled.args }, void 0, { timeout: TOOL_CALL_TIMEOUT_MS });
+      const result = await client.callTool({ ...request.params, arguments: filled.args }, void 0, { timeout: TOOL_CALL_TIMEOUT_MS });
+      return request.params.name === "get_project" ? withBridge(result) : result;
     } catch (error2) {
       if (error2 instanceof McpError && error2.code === ErrorCode.RequestTimeout) return toolError(stillWorking(request.params.name));
       upstream = void 0;
       return toolError(explain(url2, error2));
     }
   });
+  const announceNewTools = async (client) => {
+    if (listed === void 0) return;
+    const now = fingerprint(await listUpstream(client));
+    if (now === listed || now === announced) return;
+    announced = now;
+    await server.sendToolListChanged();
+  };
   let seen;
   const poll = async () => {
     try {
-      const result = await (await dashboard()).callTool({ name: "list_attention", arguments: {} });
+      const client = await dashboard();
+      const result = await client.callTool({ name: "list_attention", arguments: {} });
       const text = result.content.find((c) => c.type === "text");
       if (result.isError || !text || text.type !== "text") return;
-      if (toolsMissing) {
-        toolsMissing = false;
-        await server.sendToolListChanged();
-      }
+      await announceNewTools(client);
       const items = JSON.parse(text.text);
       const fresh = seen ? items.filter((item) => !seen.has(item.id)) : [];
       seen = new Set(items.map((item) => item.id));
@@ -19627,7 +19680,8 @@ var bridge = createBridge({
   repo: await repoOfFolder(folder),
   url: process.env.HANDOFF_URL || "http://localhost:3000",
   token: process.env.HANDOFF_TOKEN ?? "",
-  pollMs: Number(process.env.HANDOFF_POLL_MS) || 15e3
+  pollMs: Number(process.env.HANDOFF_POLL_MS) || 15e3,
+  version: plugin_default.version
 });
 await bridge.start(new StdioServerTransport());
 var exit = () => void bridge.stop().finally(() => process.exit(0));

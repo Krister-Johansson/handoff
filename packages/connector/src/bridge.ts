@@ -13,6 +13,8 @@ export type BridgeOptions = {
   /** The Claude Code session's folder (CLAUDE_PROJECT_DIR) and the GitHub repository its origin points at. */
   folder?: string | undefined;
   repo?: string | undefined;
+  /** The plugin version this bridge was built as, which get_project and current_project report. */
+  version?: string | undefined;
 };
 
 export type Bridge = { start(transport: Transport): Promise<void>; stop(): Promise<void> };
@@ -83,7 +85,7 @@ export function createBridge(options: BridgeOptions): Bridge {
   // One connection to the dashboard, made again after a failure (the dashboard may have restarted).
   const dashboard = () =>
     (upstream ??= (async () => {
-      const client = new Client({ name: "handoff-bridge", version: "1.0.0" });
+      const client = new Client({ name: "handoff-bridge", version: options.version ?? "dev" });
       const transport = new StreamableHTTPClientTransport(new URL("/api/mcp", url), { requestInit: { headers: { authorization: `Bearer ${options.token}` } } });
       await client.connect(asTransport(transport));
       return client;
@@ -92,8 +94,16 @@ export function createBridge(options: BridgeOptions): Bridge {
       throw error;
     }));
 
-  let toolsMissing = false;
   let upstreamTools: Tool[] | undefined;
+  /**
+   * The dashboard's tools as Claude Code last listed them, and the list last announced as changed.
+   * Claude Code keeps the list it got until notifications/tools/list_changed tells it to ask again,
+   * so the poll compares the dashboard's current tools with the ones Claude Code has.
+   */
+  let listed: string | undefined;
+  let announced: string | undefined;
+  const fingerprint = (tools: Tool[]) => JSON.stringify(tools);
+  const bridgeInfo = { version: options.version ?? null };
 
   /**
    * The argument a tool can leave out in this session: a required project, or add_project's repo.
@@ -135,7 +145,17 @@ export function createBridge(options: BridgeOptions): Bridge {
       : options.repo
         ? `${options.repo} is not a handoff project yet. add_project adds it.`
         : "This folder has no GitHub origin remote, so name the project in each call. list_projects shows them.";
-    return { folder: options.folder ?? null, repo: options.repo ?? null, project: project ?? null, next };
+    return { folder: options.folder ?? null, repo: options.repo ?? null, project: project ?? null, next, bridge: bridgeInfo };
+  };
+
+  /** get_project's answer with the version of the bridge this session runs, so an agent can tell it is out of date. */
+  const withBridge = (result: CallToolResult): CallToolResult => {
+    try {
+      const value = resultJson<unknown>(result);
+      return value && typeof value === "object" && !Array.isArray(value) ? toolJson({ ...value, bridge: bridgeInfo }) : result;
+    } catch {
+      return result;
+    }
   };
 
   /** Fills in what the call left out that this session knows, or says why it cannot. */
@@ -152,10 +172,12 @@ export function createBridge(options: BridgeOptions): Bridge {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
-      return { tools: [...(await listUpstream(await dashboard())).map(forSession), CURRENT_PROJECT] };
+      const tools = await listUpstream(await dashboard());
+      listed = fingerprint(tools);
+      return { tools: [...tools.map(forSession), CURRENT_PROJECT] };
     } catch {
       // Claude Code asks once at startup; list_changed tells it to ask again once the dashboard answers.
-      toolsMissing = true;
+      listed = fingerprint([]);
       return { tools: [] };
     }
   });
@@ -165,7 +187,8 @@ export function createBridge(options: BridgeOptions): Bridge {
       if (request.params.name === CURRENT_PROJECT.name) return toolJson(await currentProject(client));
       const filled = await withSessionArguments(client, request.params.name, request.params.arguments ?? {});
       if ("error" in filled) return toolError(filled.error);
-      return (await client.callTool({ ...request.params, arguments: filled.args }, undefined, { timeout: TOOL_CALL_TIMEOUT_MS })) as CallToolResult;
+      const result = (await client.callTool({ ...request.params, arguments: filled.args }, undefined, { timeout: TOOL_CALL_TIMEOUT_MS })) as CallToolResult;
+      return request.params.name === "get_project" ? withBridge(result) : result;
     } catch (error) {
       if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) return toolError(stillWorking(request.params.name));
       upstream = undefined;
@@ -173,16 +196,23 @@ export function createBridge(options: BridgeOptions): Bridge {
     }
   });
 
+  /** Tells Claude Code to list the tools again when the dashboard's differ from the ones it has. */
+  const announceNewTools = async (client: Client) => {
+    if (listed === undefined) return;
+    const now = fingerprint(await listUpstream(client));
+    if (now === listed || now === announced) return;
+    announced = now;
+    await server.sendToolListChanged();
+  };
+
   let seen: Set<string> | undefined;
   const poll = async () => {
     try {
-      const result = (await (await dashboard()).callTool({ name: "list_attention", arguments: {} })) as CallToolResult;
+      const client = await dashboard();
+      const result = (await client.callTool({ name: "list_attention", arguments: {} })) as CallToolResult;
       const text = result.content.find((c) => c.type === "text");
       if (result.isError || !text || text.type !== "text") return;
-      if (toolsMissing) {
-        toolsMissing = false;
-        await server.sendToolListChanged();
-      }
+      await announceNewTools(client);
       const items = JSON.parse(text.text) as AttentionItem[];
       // What already waits when the session starts is not news; list_attention shows it on request.
       const fresh = seen ? items.filter((item) => !seen!.has(item.id)) : [];

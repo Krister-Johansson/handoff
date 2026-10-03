@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { createServer, type Server as HttpServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -5,12 +6,17 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { ToolListChangedNotificationSchema } from "@modelcontextprotocol/sdk/types.js";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { z } from "zod";
 import { createBridge, type Bridge } from "./bridge.ts";
 
 type Item = { id: string; kind: string; title: string; body: string; url: string };
 let items: Item[] = [];
+/** Tools the stand-in gains while a session runs, as the dashboard does when it ships new tools. */
+let added: string[] = [];
+/** The stand-in answers 503 while down, as a dashboard that is restarting does. */
+let down = false;
 let http: HttpServer;
 let url = "";
 let bridge: Bridge | undefined;
@@ -22,9 +28,12 @@ let releaseSlow: () => void = () => {};
 /** A stand-in for the dashboard's /api/mcp: bearer token "tok", an echo tool, a slow tool and list_attention. */
 beforeEach(async () => {
   items = [];
+  added = [];
+  down = false;
   slowStarted = false;
   slowDone = new Promise((resolve) => (releaseSlow = resolve));
   http = createServer(async (req, res) => {
+    if (down) return void res.writeHead(503).end("Restarting.");
     if (req.headers.authorization !== "Bearer tok") return void res.writeHead(401).end("The token is missing or wrong.");
     const server = new McpServer({ name: "handoff", version: "1.0.0" });
     server.registerTool("echo", { inputSchema: { text: z.string() } }, async ({ text }) => ({ content: [{ type: "text", text: `echo ${text}` }] }));
@@ -40,6 +49,7 @@ beforeEach(async () => {
       await slowDone;
       return { content: [{ type: "text", text: "done" }] };
     });
+    for (const name of added) server.registerTool(name, {}, async () => ({ content: [{ type: "text", text: name }] }));
     // Stateless mode; the casts only bridge the SDK's optional-property types and exactOptionalPropertyTypes.
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true } as never);
     res.on("close", () => void transport.close());
@@ -63,13 +73,15 @@ afterEach(async () => {
 const ChannelSchema = z.object({ method: z.literal("notifications/claude/channel"), params: z.object({ content: z.string(), meta: z.record(z.string(), z.string()) }) });
 
 async function connect(token: string, session: { folder?: string; repo?: string } = {}) {
-  bridge = createBridge({ url, token, pollMs: 25, ...session });
+  bridge = createBridge({ url, token, pollMs: 25, version: "9.9.9", ...session });
   const client = new Client({ name: "claude-code", version: "test" });
   const pushed: z.infer<typeof ChannelSchema>["params"][] = [];
+  const toolsChanged: number[] = [];
   client.setNotificationHandler(ChannelSchema, ({ params }) => void pushed.push(params));
+  client.setNotificationHandler(ToolListChangedNotificationSchema, () => void toolsChanged.push(Date.now()));
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   await Promise.all([bridge.start(serverSide), client.connect(clientSide)]);
-  return { client, pushed };
+  return { client, pushed, toolsChanged };
 }
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -91,6 +103,38 @@ test("each new item that needs attention is pushed once; what was there at the s
   expect(pushed).toEqual([
     { content: "sandbox: gate asks a question\nWhich license?\nhttp://localhost:3000/runs/r2", meta: { kind: "question", run_id: "r2", item_id: "question:2" } },
   ]);
+});
+
+test("when the dashboard gains a tool, the bridge tells Claude Code its tool list changed, once, and the next list has it", async () => {
+  const { client, toolsChanged } = await connect("tok");
+  expect((await client.listTools()).tools.map((t) => t.name)).not.toContain("schedule");
+  await wait(150);
+  expect(toolsChanged).toEqual([]);
+  added = ["schedule"];
+  await wait(150);
+  expect(toolsChanged).toHaveLength(1);
+  expect((await client.listTools()).tools.map((t) => t.name)).toContain("schedule");
+  expect(await client.callTool({ name: "schedule", arguments: {} })).toMatchObject({ content: [{ type: "text", text: "schedule" }] });
+  await wait(150);
+  expect(toolsChanged).toHaveLength(1);
+});
+
+test("a tool list that came back empty while the dashboard was down is announced as changed once the dashboard answers", async () => {
+  down = true;
+  const { client, toolsChanged } = await connect("tok");
+  expect((await client.listTools()).tools).toEqual([]);
+  await wait(100);
+  expect(toolsChanged).toEqual([]);
+  down = false;
+  await wait(150);
+  expect(toolsChanged).toHaveLength(1);
+  expect((await client.listTools()).tools.map((t) => t.name)).toContain("echo");
+});
+
+test("get_project and current_project say which bridge version this session runs", async () => {
+  const { client } = await connect("tok", { folder: "/work/sample", repo: "octo/sample" });
+  expect(text(await client.callTool({ name: "get_project", arguments: {} }))).toMatchObject({ name: "sandbox", bridge: { version: "9.9.9" } });
+  expect(text(await client.callTool({ name: "current_project", arguments: {} }))).toMatchObject({ bridge: { version: "9.9.9" } });
 });
 
 test("a wrong token comes back as a tool error that says what to fix", async () => {
@@ -119,6 +163,8 @@ test("the bundled plugin server runs on its own, the way the installed plugin st
   await client.connect(transport);
   try {
     expect((await client.callTool({ name: "echo", arguments: { text: "bundled" } })) as object).toMatchObject({ content: [{ text: "echo bundled" }] });
+    const { version } = JSON.parse(readFileSync(fileURLToPath(new URL("../../../plugins/handoff/.claude-plugin/plugin.json", import.meta.url)), "utf8"));
+    expect(text(await client.callTool({ name: "current_project", arguments: {} }))).toMatchObject({ bridge: { version } });
   } finally {
     await client.close();
   }
@@ -131,8 +177,8 @@ test("in a folder of a known repository, tools default to its project and curren
   const getProject = (await client.listTools()).tools.find((t) => t.name === "get_project");
   expect(getProject?.inputSchema.required ?? []).not.toContain("project");
   expect(getProject?.description).toMatch(/this session's project/);
-  expect(text(await client.callTool({ name: "get_project", arguments: {} }))).toEqual({ name: "sandbox" });
-  expect(text(await client.callTool({ name: "get_project", arguments: { project: "other" } }))).toEqual({ name: "other" });
+  expect(text(await client.callTool({ name: "get_project", arguments: {} }))).toMatchObject({ name: "sandbox" });
+  expect(text(await client.callTool({ name: "get_project", arguments: { project: "other" } }))).toMatchObject({ name: "other" });
   // An optional project is a filter: leaving it out still means every project.
   expect(text(await client.callTool({ name: "list_runs", arguments: {} }))).toEqual({ project: "all" });
   expect(text(await client.callTool({ name: "current_project", arguments: {} }))).toMatchObject({ folder: "/work/sample", repo: "octo/sample", project: { name: "sandbox", id: "p1" } });
