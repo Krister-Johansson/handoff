@@ -3,6 +3,7 @@ import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { asc, eq, graphVersions, projects, projectSchedulers, runs, schedulerEvents } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { planPath } from "@/lib/paths";
 import { createProject, saveGraphVersion } from "@/server/graphs";
 
 const db = createTestDb();
@@ -12,7 +13,9 @@ vi.mock("next/cache", () => ({ revalidatePath: (path: string) => void env.revali
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => undefined, getProjects: () => env.projects }));
 
-const { pauseSchedulerAction, releaseTaskAction, resumeSchedulerAction, saveSchedulerAction, turnOffSchedulerAction, turnOnSchedulerAction } = await import("./scheduler-actions");
+const { pauseSchedulerAction, releaseTaskAction, resumeSchedulerAction, saveSchedulerAction, switchToProjectOrderAction, turnOffSchedulerAction, turnOnSchedulerAction } = await import(
+  "./scheduler-actions"
+);
 
 const repo = { owner: "octo", name: "sample" };
 let projectId: string;
@@ -69,4 +72,15 @@ test("the dashboard lets the scheduler take a task whose run a person cancelled"
 
   expect(await releaseTaskAction({ projectId, issue: 66 })).toEqual({ ok: true });
   expect((await log()).at(-1)).toEqual(["scheduler.released", "dashboard"]);
+});
+
+test("Switch to Project order from a Flow drop changes the order as the dashboard and revalidates the Plan page", async () => {
+  await turnOnSchedulerAction({ projectId, maxRuns: 1, order: "project", graph: "linear" });
+  await db.update(projectSchedulers).set({ order: "priority" }).where(eq(projectSchedulers.projectId, projectId));
+  env.revalidated.length = 0;
+
+  expect(await switchToProjectOrderAction({ projectId })).toEqual({ ok: true });
+  expect(await row()).toMatchObject({ order: "project", enabled: true });
+  expect((await log()).at(-1)).toEqual(["scheduler.changed", "dashboard"]);
+  expect(env.revalidated).toContain(planPath(projectId));
 });

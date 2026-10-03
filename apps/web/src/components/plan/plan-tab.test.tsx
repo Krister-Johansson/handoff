@@ -8,6 +8,7 @@ import { epic, planView, story, task, timelineOf } from "./testing/plan-fixtures
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), setupPlanAction: vi.fn() }));
+vi.mock("@/app/projects/scheduler-actions", () => ({ switchToProjectOrderAction: vi.fn() }));
 
 const render = (ui: ReactElement) => rtlRender(<TooltipProvider>{ui}</TooltipProvider>);
 

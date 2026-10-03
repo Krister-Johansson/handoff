@@ -100,6 +100,22 @@ export async function startScheduler(deps: SchedulerDeps, projectId: string, set
 }
 
 /**
+ * Switches the project's scheduler to Project order, from the Flow's "Switch to Project order" after a drop
+ * under Priority order (docs/plans/flow.md, Decision 3). Only the order changes: a scheduler that is off stays
+ * off and a paused one stays paused. Records scheduler.changed; a scheduler without a row or already in Project
+ * order changes nothing.
+ */
+export async function switchToProjectOrder(db: Db, projectId: string, actor: string) {
+  await db.transaction(async (tx) => {
+    const [before] = await tx.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId)).for("update");
+    if (!before || before.order === "project") return;
+    await tx.update(projectSchedulers).set({ order: "project" }).where(eq(projectSchedulers.projectId, projectId));
+    await record(tx, projectId, "scheduler.changed", { by: actor, from: settingsOf(before), to: settingsOf({ ...before, order: "project" }) });
+    if (before.enabled) await nudgeScheduler(tx, projectId);
+  });
+}
+
+/**
  * Pauses the project's scheduler: no new starts until start_scheduler resumes it. Active runs go on.
  * Pausing a paused scheduler changes nothing, and a scheduler that is off stays off.
  */

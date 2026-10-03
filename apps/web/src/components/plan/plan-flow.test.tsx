@@ -1,19 +1,44 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { FlowInput } from "@/lib/plan/flow";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { PlanFlow } from "./plan-flow";
+import { KEY_DELAY } from "./use-card-drag";
 import { epic, flowOf, flowRun, planView, REPO_URL, story, task } from "./testing/plan-fixtures";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }) }));
-vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn() }));
+const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
+const actions = vi.hoisted(() => ({
+  moveToReadyAction: vi.fn(),
+  moveToShapingAction: vi.fn(),
+  startRunAction: vi.fn(),
+  listIssuesAction: vi.fn(),
+  writeOrderAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+  unpinAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+}));
+vi.mock("@/app/projects/actions", () => actions);
+const schedulerActions = vi.hoisted(() => ({
+  switchToProjectOrderAction: vi.fn(async (): Promise<{ ok: true } | { ok: false; error: string }> => ({ ok: true })),
+}));
+vi.mock("@/app/projects/scheduler-actions", () => schedulerActions);
 
 beforeEach(() => localStorage.clear());
 afterEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  // Sonner keeps its toasts in a module; each test starts with none.
+  toast.dismiss();
+  vi.useRealTimers();
 });
+
+/**
+ * Testing Library's waitFor and findBy advance fake timers only when they see Jest's; `vi` stands in for it, so
+ * they advance Vitest's fake clock instead of waiting on the wall clock.
+ */
+Object.assign(globalThis, { jest: { advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms) } });
 
 /**
  * The design's plan: three lanes; #55, #70 and #56 run, #56 waiting for a review. #57 waits for #55 and #62
@@ -69,6 +94,7 @@ function renderFlow(over: Partial<Props> = {}) {
   return render(
     <TooltipProvider>
       <PlanFlow {...props} />
+      <Toaster />
     </TooltipProvider>,
   );
 }
@@ -166,4 +192,260 @@ test("a held scheduler shows Held with its reasons", () => {
   renderFlow({ scheduler: { state: "off", claudeSlots: 3 } });
   expect(screen.getByText("The scheduler is off: tasks start when someone starts them, in this order")).toBeInTheDocument();
   expect(screen.queryByText(/^Held/)).not.toBeInTheDocument();
+});
+
+/**
+ * The design's plan with its toasts, for the drag. Its order is #57, #58, #61, #62, #60, #72 and #74. Timeouts
+ * are fake: the keys' save, sonner's renders and auto close run on the fake clock, which only waitFor, findBy and
+ * the test move.
+ */
+function renderDrag(over: Partial<Props> = {}) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  return renderFlow(over);
+}
+
+const ORDER = [57, 58, 61, 62, 60, 72, 74];
+const taskRow = (n: number) => screen.getByRole("row", { name: new RegExp(`^Task #${n} `) });
+const cardOf = (n: number) => within(taskRow(n)).getByRole("link", { name: new RegExp(`^#${n} .*, (Next \\d+|running|Shaping)`) });
+const dragTip = () => within(screen.getByRole("grid", { name: "Flow" })).queryByRole("status");
+
+/** Drags a card by its body from x 500 by `dx` pixels and lets go. */
+function dragBy(card: HTMLElement, dx: number) {
+  fireEvent.pointerDown(card, { pointerId: 1, button: 0, clientX: 500 });
+  fireEvent.pointerMove(card, { pointerId: 1, clientX: 500 + dx });
+  fireEvent.pointerUp(card, { pointerId: 1, clientX: 500 + dx });
+}
+
+test("dragging a Ready card shows where it lands and how many cards move", () => {
+  const { container } = renderDrag();
+  const card = cardOf(74);
+  const was = leftOf(card);
+
+  fireEvent.pointerDown(card, { pointerId: 1, button: 0, clientX: 500 });
+  fireEvent.pointerMove(card, { pointerId: 1, clientX: -500 });
+  // To the front: #74 starts first, in slot 3, and five other cards change slots.
+  expect(dragTip()).toHaveTextContent("Next 1, before #57Lands in slot 3. 5 cards move.");
+  // The card shows where it lands, a dashed outline where it was, and the drop line at its new start.
+  expect(leftOf(cardOf(74))).toBeLessThan(was);
+  expect(leftOf(taskRow(74).querySelector<HTMLElement>("[data-ghost]")!)).toBeGreaterThan(leftOf(cardOf(74)));
+  expect(leftOf(container.querySelector<HTMLElement>("[data-drop-line]")!)).toBeCloseTo(leftOf(cardOf(74)), 2);
+
+  // Escape puts it back and saves nothing.
+  fireEvent.keyDown(card, { key: "Escape" });
+  expect(dragTip()).not.toBeInTheDocument();
+  expect(leftOf(cardOf(74))).toBe(was);
+  fireEvent.pointerUp(card, { pointerId: 1, clientX: -500 });
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+  // The click that ends a drag does not open the issue; a click after it does.
+  expect(fireEvent.click(card)).toBe(false);
+  expect(fireEvent.click(card)).toBe(true);
+});
+
+test("a drop saves the order, pins the card and the toast's Undo writes the old order back", async () => {
+  renderDrag();
+  dragBy(cardOf(74), -1000);
+
+  expect(await screen.findByText("Saving the order to GitHub")).toBeInTheDocument();
+  await waitFor(() => expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: ORDER, queue: [74, 57, 58, 61, 62, 60, 72], pin: [74] }));
+  expect(await screen.findByText("Saved to GitHub in Project order. #74 is pinned.")).toBeInTheDocument();
+  expect(screen.getByText("#74 moves to Next 1")).toBeInTheDocument();
+  expect(router.refresh).toHaveBeenCalled();
+  // The card stays where it was dropped, pinned, until the next read from GitHub.
+  expect(cardOf(74)).toHaveAccessibleName("#74 Voice errors in the transcript strip, Next 1, slot 3, pinned");
+  expect(within(taskRow(58)).getByText("Next 3")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() => expect(actions.writeOrderAction).toHaveBeenLastCalledWith({ projectId: "p1", shown: [74, 57, 58, 61, 62, 60, 72], queue: ORDER, unpin: [74] }));
+  expect(await screen.findByText("Put #74 back at Next 7")).toBeInTheDocument();
+  expect(cardOf(74)).toHaveAccessibleName("#74 Voice errors in the transcript strip, Next 7, slot 3");
+  expect(actions.writeOrderAction).toHaveBeenCalledTimes(2);
+});
+
+test("a refused write puts the card back and offers Try again", async () => {
+  actions.writeOrderAction.mockResolvedValueOnce({ ok: false, error: "GitHub API rate limit exceeded." });
+  renderDrag();
+  dragBy(cardOf(74), -1000);
+
+  expect(await screen.findByText("GitHub did not take the order")).toBeInTheDocument();
+  expect(screen.getByText("#74 is back at Next 7. GitHub API rate limit exceeded.")).toBeInTheDocument();
+  expect(cardOf(74)).toHaveAccessibleName("#74 Voice errors in the transcript strip, Next 7, slot 3");
+  expect(router.refresh).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByText("Saved to GitHub in Project order. #74 is pinned.")).toBeInTheDocument();
+  expect(actions.writeOrderAction).toHaveBeenCalledTimes(2);
+  expect(actions.writeOrderAction).toHaveBeenLastCalledWith({ projectId: "p1", shown: ORDER, queue: [74, 57, 58, 61, 62, 60, 72], pin: [74] });
+  expect(cardOf(74)).toHaveAccessibleName("#74 Voice errors in the transcript strip, Next 1, slot 3, pinned");
+});
+
+test("a drop before a blocker opens the dialog with Move to the next free slot picked and the checkbox on", async () => {
+  renderDrag();
+  dragBy(cardOf(62), -1000);
+
+  const dialog = await screen.findByRole("dialog", { name: "#62 can't start before #61" });
+  expect(dialog).toHaveTextContent("#61 Story page with its tasks blocks it.");
+  expect(within(dialog).getByRole("radio", { name: "Move to the next free slot" })).toBeChecked();
+  expect(within(dialog).getByRole("radio", { name: "Move #61 earlier too" })).not.toBeChecked();
+  expect(within(dialog).getByRole("radio", { name: "Keep it here" })).not.toBeChecked();
+  expect(dialog).toHaveTextContent("Right after #61, as Next 4.");
+  expect(dialog).toHaveTextContent("#61 and #62 become Next 1 and Next 2. Nothing blocks #61.");
+  expect(dialog).toHaveTextContent("Pinned at Next 1 with the warning Waits for #61. It still starts after #61 ends.");
+  expect(within(dialog).getByRole("checkbox", { name: "Move the tasks that wait on #62 with it" })).toBeChecked();
+  expect(dialog).toHaveTextContent("Turn it off to move only #62. The tasks after it may get warnings.");
+
+  // Cancel writes nothing and puts the card back.
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+  expect(cardOf(62)).toHaveAccessibleName("#62 Size chip on board cards, Next 4, slot 2");
+});
+
+/** Drops `issue` at the front, picks `choice` in the dialog, sets the checkbox and presses Move. */
+async function choose(issue: number, choice: string, carry = true) {
+  dragBy(cardOf(issue), -1000);
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("radio", { name: choice }));
+  if (!carry) fireEvent.click(within(dialog).getByRole("checkbox"));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Move" }));
+  await waitFor(() => expect(actions.writeOrderAction).toHaveBeenCalled());
+}
+
+test("each choice gives the order its operation computes", async () => {
+  // The next free slot is right after #61, where #62 already was; #61 earlier too puts both first.
+  for (const [choice, queue] of [
+    ["Move to the next free slot", ORDER],
+    ["Move #61 earlier too", [61, 62, 57, 58, 60, 72, 74]],
+  ] as const) {
+    const { unmount } = renderDrag();
+    await choose(62, choice);
+    expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: ORDER, queue, pin: [62] });
+    unmount();
+    vi.clearAllMocks();
+    toast.dismiss();
+  }
+
+  // Keep it here pins #62 at Next 1 with the warning.
+  renderDrag();
+  await choose(62, "Keep it here");
+  expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: ORDER, queue: [62, 57, 58, 61, 60, 72, 74], pin: [62], reason: "keep_here" });
+  expect(await screen.findByText("Pinned. It waits for #61.")).toBeInTheDocument();
+  expect(screen.getByText("#62 stays at Next 1")).toBeInTheDocument();
+  expect(within(taskRow(62)).getByText("Waits for #61")).toBeInTheDocument();
+  expect(cardOf(62)).toHaveAttribute("data-break", "true");
+});
+
+test("the checkbox carries the tasks that wait on the dropped task, and off leaves them with a warning", async () => {
+  // #83 waits on #82, which waits on #81; #83 already sits before #82.
+  const chain = planView([
+    epic(12, "Project management", [
+      story(41, "Chain", 12, [
+        task(84, "Free task", "Ready", { size: "M" }),
+        task(83, "Third link", "Ready", { size: "S", blockedBy: [82] }),
+        task(81, "First link", "Ready", { size: "S" }),
+        task(82, "Second link", "Ready", { size: "S", blockedBy: [81] }),
+      ]),
+    ]),
+  ]);
+  const props = { epics: chain.epics, flow: flowOf(chain) };
+  const { unmount } = renderDrag(props);
+  await choose(82, "Move to the next free slot");
+  expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: [84, 83, 81, 82], queue: [84, 81, 82, 83], pin: [82] });
+  unmount();
+  vi.clearAllMocks();
+  toast.dismiss();
+
+  renderDrag(props);
+  await choose(82, "Move to the next free slot", false);
+  expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: [84, 83, 81, 82], queue: [84, 83, 81, 82], pin: [82] });
+});
+
+test("clicking the pin unpins the card", async () => {
+  renderDrag({ flow: designFlow({ pins: new Set([60]) }) });
+  const row60 = taskRow(60);
+  expect(cardOf(60)).toHaveAccessibleName("#60 Ready count in the sidebar, Next 5, slot 3, pinned");
+  // The pin on the card and the Pinned tag in the row both unpin.
+  expect(within(within(row60).getByRole("rowheader")).getByRole("button", { name: "Unpin #60" })).toHaveTextContent("Pinned");
+  fireEvent.click(within(within(row60).getByRole("gridcell")).getByRole("button", { name: "Unpin #60" }));
+
+  await waitFor(() => expect(actions.unpinAction).toHaveBeenCalledWith({ projectId: "p1", issue: 60 }));
+  expect(await screen.findByText("#60 is unpinned")).toBeInTheDocument();
+  expect(cardOf(60)).toHaveAccessibleName("#60 Ready count in the sidebar, Next 5, slot 3");
+  expect(within(row60).queryByRole("button", { name: "Unpin #60" })).not.toBeInTheDocument();
+  expect(router.refresh).toHaveBeenCalled();
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+});
+
+test("Alt and an arrow move a task one place with one save after the last key", async () => {
+  renderDrag();
+  const card = cardOf(74);
+  expect(card).toHaveAttribute("aria-keyshortcuts", "Alt+ArrowLeft Alt+ArrowRight Escape");
+  act(() => card.focus());
+
+  // An arrow without Alt moves nothing.
+  fireEvent.keyDown(card, { key: "ArrowLeft" });
+  expect(dragTip()).not.toBeInTheDocument();
+  fireEvent.keyDown(card, { key: "ArrowLeft", altKey: true });
+  fireEvent.keyDown(card, { key: "ArrowLeft", altKey: true });
+  expect(dragTip()).toHaveTextContent("Next 5, before #60");
+  expect(dragTip()).toHaveTextContent("Saves when you stop pressing keys.");
+
+  await act(() => vi.advanceTimersByTimeAsync(KEY_DELAY - 1));
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: ORDER, queue: [57, 58, 61, 62, 74, 60, 72], pin: [74] });
+  expect(await screen.findByText("#74 moves to Next 5")).toBeInTheDocument();
+  expect(actions.writeOrderAction).toHaveBeenCalledTimes(1);
+});
+
+test("running, done, skipped and Shaping cards do not drag", () => {
+  const mixed = planView([
+    epic(12, "Project management", [
+      story(41, "Mixed", 12, [
+        task(55, "Shaping tools", "Running", { size: "L" }),
+        task(58, "Plan page tree and board", "Ready", { size: "M" }),
+        task(63, "Release notes", "Ready", { size: "S", labels: ["task", "human"] }),
+        task(64, "Board filters", "Shaping", { size: "S" }),
+        task(69, "Transcript strip", "Done", { state: "closed" }),
+      ]),
+    ]),
+  ]);
+  renderDrag({ epics: mixed.epics, flow: flowOf(mixed, { lanes: 2, runs: [flowRun(55, 0, 3, 7)] }) });
+  for (const n of [55, 64]) {
+    const card = cardOf(n);
+    const left = leftOf(card);
+    expect(card).not.toHaveAttribute("aria-keyshortcuts");
+    fireEvent.pointerDown(card, { pointerId: 1, button: 0, clientX: 500 });
+    fireEvent.pointerMove(card, { pointerId: 1, clientX: 900 });
+    expect(dragTip()).not.toBeInTheDocument();
+    expect(leftOf(card)).toBe(left);
+    fireEvent.pointerUp(card, { pointerId: 1, clientX: 900 });
+    fireEvent.keyDown(card, { key: "ArrowRight", altKey: true });
+    expect(dragTip()).not.toBeInTheDocument();
+  }
+  // Done and skipped tasks have no card to drag; a Ready task drags.
+  for (const n of [63, 69]) expect(within(taskRow(n)).queryByRole("link", { name: /, Next / })).not.toBeInTheDocument();
+  expect(cardOf(58)).toHaveAttribute("aria-keyshortcuts");
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+});
+
+test("under Priority order a drop asks to switch to Project order", async () => {
+  renderDrag({ flow: designFlow({ order: "priority", priorityOptions: ["P0", "P1"] }) });
+  dragBy(cardOf(74), -1000);
+
+  let dialog = await screen.findByRole("dialog", { name: "The scheduler starts tasks by Priority" });
+  expect(dialog).toHaveTextContent("Switch it to Project order to plan by dragging?");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(schedulerActions.switchToProjectOrderAction).not.toHaveBeenCalled();
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+  expect(cardOf(74)).toHaveAccessibleName("#74 Voice errors in the transcript strip, Next 7, slot 3");
+
+  // Switching saves the scheduler's order, then the drop.
+  dragBy(cardOf(74), -1000);
+  dialog = await screen.findByRole("dialog", { name: "The scheduler starts tasks by Priority" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Switch to Project order" }));
+  await waitFor(() => expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: ORDER, queue: [74, 57, 58, 61, 62, 60, 72], pin: [74] }));
+  expect(schedulerActions.switchToProjectOrderAction).toHaveBeenCalledWith({ projectId: "p1" });
+  expect(await screen.findByText("Saved to GitHub in Project order. #74 is pinned.")).toBeInTheDocument();
+  expect(screen.getByText("Project order. Length by size.")).toBeInTheDocument();
 });
