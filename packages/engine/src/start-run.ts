@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { LinkedIssue, PreviousRun } from "@handoff/core";
-import { graphs, graphVersions, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
+import { graphs, graphVersions, planPins, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
 import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
 import { assignStarter } from "./assign-starter.ts";
 import { recordPlanStatus, type StatusesBefore } from "./plan-status.ts";
@@ -86,7 +86,10 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
-    return createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events, previousRun: input.previousRun });
+    const created = await createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events, previousRun: input.previousRun });
+    // A pin keeps a task's place in the Flow's queue; a task with a run has left the queue, so its pin ends.
+    if (numbers.length > 0) await tx.delete(planPins).where(and(eq(planPins.projectId, input.projectId), inArray(planPins.issue, numbers)));
+    return created;
   });
   // The run owns its tasks now: they move to Running on the plan, recording the Status the gate read (or, for
   // a run started again, the one the earlier run moved them from) for a cancel to put back. A failed write
