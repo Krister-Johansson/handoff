@@ -42,6 +42,8 @@ export type SearchData = {
   pages: SearchPage[];
   /** Search covers every project: other projects' results join their groups instead of Other projects. */
   all?: boolean;
+  /** Outside All projects, search keeps to its project: other projects' results are left out instead of shown under Other projects. */
+  onlyProject?: boolean;
 };
 
 /** How many results each group shows in All before Show more. */
@@ -115,24 +117,28 @@ const projectOf = (hit: SearchHit): string | null => {
  * Search's results for a query: the filter it shows (# means Tasks and / Pages, whatever chip is on), the
  * count of each filter, and the groups. In All each group shows 3 with Show more unless `expanded` names
  * it; a filter shows its kind in full. Outside All projects, what another project holds goes under Other
- * projects. An empty query finds nothing in All, and lists the whole kind under a filter.
+ * projects, or with `onlyProject` is left out and counted in `elsewhere` (for the filter shown). An empty
+ * query finds nothing in All, and lists the whole kind under a filter.
  */
 export function searchResults(
   data: SearchData,
   raw: string,
   opts: { filter?: SearchFilter; expanded?: ReadonlySet<GroupId> } = {},
-): { filter: SearchFilter; counts: Record<SearchFilter, number>; groups: ResultGroup[] } {
+): { filter: SearchFilter; counts: Record<SearchFilter, number>; groups: ResultGroup[]; elsewhere: number } {
   const query = parseQuery(raw);
   const filter: SearchFilter = query.prefix === "#" ? "tasks" : query.prefix === "/" ? "pages" : (opts.filter ?? "all");
   const counts: Record<SearchFilter, number> = { all: 0, tasks: 0, runs: 0, pages: 0, chats: 0 };
-  if (!query.prefix && !query.term && filter === "all") return { filter, counts, groups: [] };
-  const hits = hitsOf(data, query);
+  if (!query.prefix && !query.term && filter === "all") return { filter, counts, groups: [], elsewhere: 0 };
+  const isOther = (hit: SearchHit) => !data.all && projectOf(hit) !== null && projectOf(hit) !== data.records.projectId;
+  const inFilter = (hit: SearchHit) => filter === "all" || FILTER_OF_KIND[hit.kind] === filter;
+  const found = hitsOf(data, query);
+  const hits = data.onlyProject ? found.filter(({ hit }) => !isOther(hit)) : found;
+  const elsewhere = data.onlyProject ? found.filter(({ hit }) => isOther(hit) && inFilter(hit)).length : 0;
   for (const { hit } of hits) {
     counts[FILTER_OF_KIND[hit.kind]]++;
     counts.all++;
   }
-  const isOther = (hit: SearchHit) => !data.all && projectOf(hit) !== null && projectOf(hit) !== data.records.projectId;
-  const shown = hits.filter(({ hit }) => filter === "all" || FILTER_OF_KIND[hit.kind] === filter);
+  const shown = hits.filter(({ hit }) => inFilter(hit));
   const byGroup = new Map<GroupId, SearchHit[]>();
   for (const { hit } of shown) {
     const id: GroupId = isOther(hit) ? "other" : FILTER_OF_KIND[hit.kind];
@@ -146,5 +152,5 @@ export function searchResults(
     const capped = filter === "all" && !opts.expanded?.has(id) && sorted.length > GROUP_CAP;
     return [{ id, total: sorted.length, hits: capped ? sorted.slice(0, GROUP_CAP) : sorted, hidden: capped ? sorted.length - GROUP_CAP : 0 }];
   });
-  return { filter, counts, groups };
+  return { filter, counts, groups, elsewhere };
 }

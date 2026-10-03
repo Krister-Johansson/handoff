@@ -4,9 +4,9 @@ import { join } from "node:path";
 import type { ChatEvent, ChatTurnRequest, ChatTurnResult } from "@handoff/cli-adapter";
 import type { AssistantCall, Db } from "@handoff/db";
 import type { GitHubPort } from "@handoff/github";
-import { CATALOG, type ToolSpec } from "../../lib/assistant/catalog";
+import { CATALOG, withChatProject, type ChatProject, type ToolSpec } from "../../lib/assistant/catalog";
 import { pageSpecsOf, pageToolSpec, type PageDescriptor, type PageToolSpec } from "../../lib/assistant/page-tools";
-import { claimProject, getConversation, setConversationSession, storeMessage } from "./conversations";
+import { claimProject, conversationProject, getConversation, setConversationSession, storeMessage } from "./conversations";
 import { SYSTEM_PROMPT, turnPrompt } from "./prompt";
 import type { AssistantConfig } from "./env";
 import { closeTurn, openTurn, type LiveTurn } from "./relay";
@@ -26,13 +26,17 @@ const SPECS = new Map(CATALOG.map((t) => [t.name, t]));
 const READ_TOOLS = CATALOG.filter((t) => t.readOnly && !t.confirm).map((t) => `${TOOL_PREFIX}${t.name}`);
 
 
-/** A tool call as the panel shows it: its catalog or page tool title and one-line summary. */
-function describeCall(name: string, args: unknown) {
+/**
+ * A tool call as the panel shows it: its catalog or page tool title and one-line summary, and its
+ * arguments with the chat's project where the call left it out, as the tool ran them.
+ */
+function describeCall(name: string, given: unknown, project: ChatProject | undefined) {
   const bare = name.startsWith(TOOL_PREFIX) ? name.slice(TOOL_PREFIX.length) : undefined;
   const spec: ToolSpec | PageToolSpec | undefined = bare === undefined ? undefined : (SPECS.get(bare) ?? pageToolSpec(bare));
-  if (!spec) return { name, title: name, summary: name };
+  if (!spec) return { name, title: name, summary: name, args: given };
+  const args = withChatProject(spec, given, project);
   const parsed = spec.input.safeParse(args);
-  return { name: spec.name, title: spec.title, summary: parsed.success ? spec.summarize(parsed.data) : spec.title };
+  return { name: spec.name, title: spec.title, summary: parsed.success ? spec.summarize(parsed.data) : spec.title, args };
 }
 
 /**
@@ -46,7 +50,9 @@ export async function startTurn(deps: TurnDeps, conversationId: string, input: {
   if (!conversation) throw new Error(`There is no conversation ${conversationId}.`);
   // A chat started outside a project takes the project of the first page a later message names.
   if (!conversation.projectId && input.page) await claimProject(deps.db, conversationId, input.page.path);
-  const turn = openTurn(conversationId, input.page);
+  // A chat on a project names it to the model, and its tools use it when a call leaves the project out.
+  const project = await conversationProject(deps.db, conversationId);
+  const turn = openTurn(conversationId, input.page, project);
   await storeMessage(deps.db, {
     conversationId,
     turnId: turn.id,
@@ -72,8 +78,9 @@ export async function startTurn(deps: TurnDeps, conversationId: string, input: {
     if (event.type === "tool_call") {
       // Asking the person is Claude Code's permission prompt, not a call of its own.
       if (event.name === APPROVE_TOOL) return;
-      calls.push({ id: event.id, name: event.name.replace(TOOL_PREFIX, ""), args: event.input });
-      return turn.emit({ type: "tool_call", id: event.id, args: event.input, ...describeCall(event.name, event.input) });
+      const described = describeCall(event.name, event.input, project);
+      calls.push({ id: event.id, name: event.name.replace(TOOL_PREFIX, ""), args: described.args });
+      return turn.emit({ type: "tool_call", id: event.id, ...described });
     }
     const call = calls.find((c) => c.id === event.id);
     if (call) Object.assign(call, { result: event.content, isError: event.isError });
@@ -89,7 +96,7 @@ export async function startTurn(deps: TurnDeps, conversationId: string, input: {
     try {
       result = await deps.runner.run(
         {
-          prompt: turnPrompt(input.text, input.source, input.page),
+          prompt: turnPrompt(input.text, input.source, input.page, project),
           systemPrompt: SYSTEM_PROMPT,
           cwd,
           stagingDir: staging,

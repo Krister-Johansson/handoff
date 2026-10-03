@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import type { ChatProject } from "../../lib/assistant/catalog";
 import type { PageDescriptor } from "../../lib/assistant/page-tools";
 
 /** What a turn streams to the panel. */
@@ -39,10 +40,14 @@ export class LiveTurn {
   private readonly pendingUi = new Map<string, PendingUi>();
   ended = false;
 
-  /** `page` is the page the person asked on, as the turn's route validated it: its tools are the turn's page tools. */
+  /**
+   * `page` is the page the person asked on, as the turn's route validated it: its tools are the turn's page
+   * tools. `project` is the chat's project, which tools that take a project use when a call leaves it out.
+   */
   constructor(
     readonly conversationId: string,
     readonly page?: PageDescriptor,
+    readonly project?: ChatProject,
   ) {}
 
   emit(event: TurnEvent) {
@@ -123,11 +128,11 @@ const registry = globalThis as unknown as { handoffAssistantTurns?: Map<string, 
 const turns = () => (registry.handoffAssistantTurns ??= new Map<string, LiveTurn>());
 
 /** Starts a turn of a conversation; refused while another turn of it runs. */
-export function openTurn(conversationId: string, page?: PageDescriptor): LiveTurn {
+export function openTurn(conversationId: string, page?: PageDescriptor, project?: ChatProject): LiveTurn {
   for (const turn of turns().values()) {
     if (turn.conversationId === conversationId) throw new TurnRunningError("This conversation is already answering. Wait for it, or stop it.");
   }
-  const turn = new LiveTurn(conversationId, page);
+  const turn = new LiveTurn(conversationId, page, project);
   turns().set(turn.id, turn);
   return turn;
 }
