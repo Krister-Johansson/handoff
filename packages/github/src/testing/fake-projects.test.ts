@@ -138,3 +138,31 @@ test("FakeProjects ensureEstimateFields adds S, M and L to a Size field that lac
   expect(await projects.ensureEstimateFields("octo", project.number)).toEqual(ids);
   expect((await projects.getProject("octo", project.number))?.estimateFields).toEqual(ids);
 });
+
+test("moveItems reorders listItems", async () => {
+  const projects = new FakeProjects(new FakeGitHub());
+  const project = await projects.createProject("octo", repo, "sample plan");
+  const tasks: number[] = [];
+  for (const title of ["First", "Second", "Third", "Fourth"]) tasks.push((await projects.createIssue(repo, { project: project.number, title, body: "", labels: ["task"] })).number);
+  const [first, second, third, fourth] = tasks as [number, number, number, number];
+  const read = async () => (await projects.listItems("octo", project.number, repo)).map((i) => [i.number, i.position, i.itemId]);
+  const before = await read();
+  const id = (issue: number) => before.find(([n]) => n === issue)![2] as string;
+  expect(new Set(before.map(([, , itemId]) => itemId)).size).toBe(4);
+
+  // The fourth goes to the top, then the first after the third, one move after another.
+  await projects.moveItems("octo", project.number, [
+    { itemId: id(fourth), afterId: null },
+    { itemId: id(first), afterId: id(third) },
+  ]);
+  expect(await read()).toEqual([
+    [fourth, 1, id(fourth)],
+    [second, 2, id(second)],
+    [third, 3, id(third)],
+    [first, 4, id(first)],
+  ]);
+
+  // An item that is not in the Project throws, and the moves before it stay, as on GitHub.
+  await expect(projects.moveItems("octo", project.number, [{ itemId: id(second), afterId: null }, { itemId: "PVTI_gone", afterId: null }])).rejects.toThrow(/moved 1 of 2/);
+  expect((await read()).map(([n]) => n)).toEqual([second, fourth, third, first]);
+});

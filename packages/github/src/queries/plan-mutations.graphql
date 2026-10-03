@@ -153,3 +153,10 @@ mutation SetPlanSizeOptions($fieldId: ID!, $options: [ProjectV2SingleSelectField
     }
   }
 }
+
+# Moves an item in Project order right after afterId, or to the top for null. moveItems sends several of these, aliased, in one request.
+mutation MovePlanItem($projectId: ID!, $itemId: ID!, $afterId: ID) {
+  updateProjectV2ItemPosition(input: { projectId: $projectId, itemId: $itemId, afterId: $afterId }) {
+    clientMutationId
+  }
+}

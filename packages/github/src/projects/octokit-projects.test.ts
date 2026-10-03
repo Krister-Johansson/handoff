@@ -1014,6 +1014,90 @@ test("setManyPlanFields writes nothing when an issue is outside the Project or t
   expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "PlanItemIds", "PlanProject", "PlanItemIds"]);
 });
 
+test("listItems returns each item's id", async () => {
+  const draft = { id: "PVTI_draft", status: null, content: { __typename: "DraftIssue" } };
+  const { fetch, calls } = fakeGraphql({
+    PlanItems: () => page([{ ...issueItem(7), id: "PVTI_7" }, draft, { ...issueItem(3), id: "PVTI_3" }], null, false),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("octo", 3, repo)).map((i) => [i.number, i.position, i.itemId])).toEqual([
+    [7, 1, "PVTI_7"],
+    [3, 3, "PVTI_3"],
+  ]);
+  // The query selects the id on each item, so a write can name it.
+  const sent = parse((calls[0]!.body as { query: string }).query);
+  expect(validate(githubSchema, sent)).toEqual([]);
+  expect((calls[0]!.body as { query: string }).query).toMatch(/nodes\s*{\s*id\b/);
+});
+
+/** The PlanProject answer for Project #3, the plan the moves go to. */
+const movesProject = () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } });
+const moves = (count: number) => Array.from({ length: count }, (_, i) => ({ itemId: `PVTI_${i + 1}`, afterId: i === 0 ? null : `PVTI_${i}` }));
+
+test("moveItems sends the moves in order, 20 per request", async () => {
+  const { fetch, operations, calls } = fakeGraphql({
+    PlanProject: movesProject,
+    MovePlanItems: (v) => Object.fromEntries(Object.keys(v).filter((k) => k.endsWith("Item")).map((k) => [k.slice(0, -4), { clientMutationId: null }])),
+    MovePlanItem: () => ({ updateProjectV2ItemPosition: { clientMutationId: null } }),
+  });
+  const projects = port(fetch);
+
+  await projects.moveItems("octo", 3, moves(45));
+
+  // One read of the Project for its id, then 45 moves in requests of 20, 20 and 5.
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "MovePlanItems", "MovePlanItems", "MovePlanItems"]);
+  const writes = calls.slice(1).map((c) => mutationsOf((c.body as { query: string }).query));
+  expect(writes.map((w) => w.length)).toEqual([20, 20, 5]);
+  expect(writes.flat().every(([, mutation]) => mutation === "updateProjectV2ItemPosition")).toBe(true);
+  // The moves go out in the order given, each with its afterId; the first goes to the top with null.
+  const sent = operations.slice(1).flatMap((o) => {
+    const count = Object.keys(o.variables).filter((k) => k.endsWith("Item")).length;
+    expect(o.variables.projectId).toBe("PVT_3");
+    return Array.from({ length: count }, (_, i) => ({ itemId: o.variables[`m${i + 1}Item`], afterId: o.variables[`m${i + 1}After`] }));
+  });
+  expect(sent).toEqual(moves(45));
+
+  // A single move, as a drag writes, is the MovePlanItem operation; no moves send nothing.
+  operations.length = 0;
+  await projects.moveItems("octo", 3, [{ itemId: "PVTI_9", afterId: null }]);
+  await projects.moveItems("octo", 3, []);
+  expect(operations).toEqual([
+    { operation: "PlanProject", variables: { login: "octo", number: 3 } },
+    { operation: "MovePlanItem", variables: { projectId: "PVT_3", itemId: "PVTI_9", afterId: null } },
+  ]);
+});
+
+test("a refusal part way throws naming how many moved", async () => {
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: movesProject,
+    // The second request's fourth move names an item that left the Project; GitHub runs the others.
+    MovePlanItems: (v) => {
+      const aliases = Object.keys(v).filter((k) => k.endsWith("Item")).map((k) => k.slice(0, -4));
+      if (v.m1Item === "PVTI_1") return Object.fromEntries(aliases.map((a) => [a, { clientMutationId: null }]));
+      return new GraphqlErrors(Object.fromEntries(aliases.map((a) => [a, a === "m4" ? null : { clientMutationId: null }])), [
+        { type: "NOT_FOUND", message: "Could not resolve to a node with the global id of 'PVTI_24'", path: ["m4"] },
+      ]);
+    },
+  });
+  const projects = port(fetch);
+
+  await expect(projects.moveItems("octo", 3, moves(50))).rejects.toThrow(/GitHub moved 39 of 50 items in Project order, then refused: .*PVTI_24/);
+  // Nothing is sent after the refused request.
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject", "MovePlanItems", "MovePlanItems"]);
+
+  // A request GitHub refuses whole moves nothing in it.
+  const failing = fakeGraphql({ PlanProject: movesProject, MovePlanItem: () => new GraphqlErrors(null, [{ message: "Something went wrong" }]) });
+  await expect(port(failing.fetch).moveItems("octo", 3, moves(1))).rejects.toThrow(/GitHub moved 0 of 1 items in Project order, then refused: .*Something went wrong/);
+});
+
+test("moveItems throws when the Project does not exist", async () => {
+  const { fetch, operations } = fakeGraphql({ PlanProject: () => new GraphqlErrors({ user: { projectV2: null } }, [{ type: "NOT_FOUND", message: "Could not resolve to a ProjectV2" }]) });
+
+  await expect(port(fetch).moveItems("octo", 9, moves(2))).rejects.toThrow(/Project #9 of octo does not exist/);
+  expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
+});
+
 /** How createProjectV2Field or updateProjectV2Field answers for a Size field with these options: the sent ids kept, new ones for the rest. */
 const sizeFieldFrom = (options: { id?: string; name: string }[]) => ({
   __typename: "ProjectV2SingleSelectField",
