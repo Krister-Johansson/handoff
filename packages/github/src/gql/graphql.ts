@@ -272,7 +272,7 @@ export type PlanItemsQueryVariables = Exact<{
 }>;
 
 
-export type PlanItemsQuery = { user: { projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ status:
+export type PlanItemsQuery = { user: { projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
             | { __typename: 'ProjectV2ItemFieldDateValue' }
             | { __typename: 'ProjectV2ItemFieldIterationValue' }
             | { __typename: 'ProjectV2ItemFieldLabelValue' }
@@ -528,6 +528,15 @@ export type SetPlanSizeOptionsMutation = { updateProjectV2Field: { projectV2Fiel
       | { __typename: 'ProjectV2MultiSelectField' }
       | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
      | null } | null };
+
+export type MovePlanItemMutationVariables = Exact<{
+  projectId: string | number;
+  itemId: string | number;
+  afterId?: string | number | null | undefined;
+}>;
+
+
+export type MovePlanItemMutation = { updateProjectV2ItemPosition: { clientMutationId: string | null } | null };
 
 export type PlanDateFieldsFragment = { start:
     | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
@@ -1101,6 +1110,7 @@ export const PlanItemsDocument = new TypedDocumentString(`
           endCursor
         }
         nodes {
+          id
           status: fieldValueByName(name: "Status") {
             __typename
             ... on ProjectV2ItemFieldSingleSelectValue {
@@ -1414,6 +1424,15 @@ export const SetPlanSizeOptionsDocument = new TypedDocumentString(`
   }
 }
     `) as unknown as TypedDocumentString<SetPlanSizeOptionsMutation, SetPlanSizeOptionsMutationVariables>;
+export const MovePlanItemDocument = new TypedDocumentString(`
+    mutation MovePlanItem($projectId: ID!, $itemId: ID!, $afterId: ID) {
+  updateProjectV2ItemPosition(
+    input: { projectId: $projectId, itemId: $itemId, afterId: $afterId }
+  ) {
+    clientMutationId
+  }
+}
+    `) as unknown as TypedDocumentString<MovePlanItemMutation, MovePlanItemMutationVariables>;
 export const PlanOwnerIdsDocument = new TypedDocumentString(`
     query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
   user(login: $login) {
