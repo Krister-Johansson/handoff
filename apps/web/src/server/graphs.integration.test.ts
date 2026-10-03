@@ -84,7 +84,9 @@ describe("projects and graphs", () => {
     const [pinned] = await db.select().from(runs).where(eq(runs.id, run.id));
     const [v1] = await db.select().from(graphVersions).where(eq(graphVersions.id, pinned!.graphVersionId));
     expect(v1?.version).toBe(1);
-    expect((await listProjects(db))[0]).toMatchObject({ runCount: 1, activeRuns: 1 });
+    expect((await listProjects(db))[0]).toMatchObject({ planMode: "flow", runCount: 1, activeRuns: 1, waitingRuns: 0 });
+    await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
+    expect((await listProjects(db))[0]).toMatchObject({ activeRuns: 1, waitingRuns: 1 });
     const detail = await getProjectDetail(db, project.id);
     expect(detail?.graphs).toEqual([expect.objectContaining({ name: "g", latestVersion: 2 })]);
     expect(detail?.runs.map((r) => r.id)).toEqual([run.id]);

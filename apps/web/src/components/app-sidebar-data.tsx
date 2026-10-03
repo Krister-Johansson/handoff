@@ -5,7 +5,7 @@ import { workerSummary } from "@/server/workers";
 import { AppSidebar } from "./app-sidebar";
 
 /**
- * The sidebar with what it shows, read per request: the projects with their active runs, the Inbox
+ * The sidebar with what it shows, read per request: the projects with their plan mode and their active and waiting runs, the Inbox
  * count (the same count as the Inbox page) and the worker status.
  */
 export async function AppSidebarData({ lastProjectId, chatsOpen }: { lastProjectId: string | undefined; chatsOpen: boolean }) {
@@ -17,7 +17,7 @@ export async function AppSidebarData({ lastProjectId, chatsOpen }: { lastProject
   ]);
   return (
     <AppSidebar
-      projects={projects.map((p) => ({ id: p.id, name: p.name, repo: `${p.repoOwner}/${p.repoName}`, activeRuns: p.activeRuns }))}
+      projects={projects.map((p) => ({ id: p.id, name: p.name, repo: `${p.repoOwner}/${p.repoName}`, planMode: p.planMode, activeRuns: p.activeRuns, waitingRuns: p.waitingRuns }))}
       lastProjectId={lastProjectId}
       inboxCount={inboxCount}
       worker={{ live: worker.live, queuedRuns: worker.queuedRuns }}

@@ -13,9 +13,11 @@ test("a project's runs take a status filter in the query", () => {
 
 test("the plan lives under its project, with the view, an epic and statuses in the query", () => {
   expect(planPath("p1")).toBe("/projects/p1/plan");
-  expect(planPath("p1", { view: "tree" })).toBe("/projects/p1/plan");
+  // Without a view the Plan page opens the plan mode's view, so the tree is named like the others.
+  expect(planPath("p1", { view: "tree" })).toBe("/projects/p1/plan?view=tree");
   expect(planPath("p1", { view: "board", epic: 12, status: ["Ready", "In review"] })).toBe("/projects/p1/plan?view=board&epic=12&status=Ready,In%20review");
-  expect(planPath("p1", { epic: "unplanned", run: "needs-you" })).toBe("/projects/p1/plan?epic=unplanned&run=needs-you");
+  // The unplanned issues are a block of the tree.
+  expect(planPath("p1", { epic: "unplanned", run: "needs-you" })).toBe("/projects/p1/plan?view=tree&epic=unplanned&run=needs-you");
   expect(planPath("p1", { run: "any" })).toBe("/projects/p1/plan");
 });
 

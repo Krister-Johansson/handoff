@@ -28,8 +28,10 @@ export async function listProjects(db: Db) {
       repoName: projects.repoName,
       defaultBranch: projects.defaultBranch,
       isDemo: projects.isDemo,
+      planMode: projects.planMode,
       runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,
       activeRuns: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id" and r.status in ('queued','running','waiting'))`,
+      waitingRuns: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id" and r.status = 'waiting')`,
     })
     .from(projects)
     .orderBy(projects.name);

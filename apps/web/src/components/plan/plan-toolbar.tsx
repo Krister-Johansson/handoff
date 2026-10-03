@@ -16,9 +16,9 @@ import { useCollapsed } from "./use-collapsed";
 
 type ViewChoice = { value: PlanViewName; label: string; icon: ReactNode };
 
-const TREE_AND_BOARD: ViewChoice[] = [
-  { value: "tree", label: "Tree", icon: <ListTreeIcon /> },
+const BOARD_AND_TREE: ViewChoice[] = [
   { value: "board", label: "Board", icon: <KanbanIcon /> },
+  { value: "tree", label: "Tree", icon: <ListTreeIcon /> },
 ];
 /** The third view follows the plan mode; there is no switch between Flow and Timeline on the Plan page. */
 const MODE_VIEW: Record<PlanModeName, ViewChoice> = {
@@ -26,10 +26,13 @@ const MODE_VIEW: Record<PlanModeName, ViewChoice> = {
   flow: { value: "flow", label: "Flow", icon: <WaypointsIcon /> },
 };
 
-/** Tree, Board and Timeline or Flow; under 640 px icons only, each keeping its name for screen readers and as a tooltip. */
+/**
+ * Flow or Timeline (the plan mode's view, which the Plan page opens on), then Board and Tree, as the
+ * sidebar lists them; under 640 px icons only, each keeping its name for screen readers and as a tooltip.
+ */
 function ViewToggle({ projectId, view, filters, mode }: { projectId: string; view: PlanViewName; filters: PlanFilters; mode: PlanModeName }) {
   const router = useRouter();
-  const views = [...TREE_AND_BOARD, MODE_VIEW[mode]];
+  const views = [MODE_VIEW[mode], ...BOARD_AND_TREE];
   return (
     <ToggleGroup
       type="single"

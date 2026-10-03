@@ -111,7 +111,7 @@ export function planUiTool(name: string, args: unknown, origin: string, context:
     case "go_to_plan": {
       const p = parsed.data as { project_id: string; view?: PlanViewName | "flow"; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; zoom?: Zoom };
       refuseOtherModeView(p.view, context.project);
-      // planPath writes any view but the tree as ?view=, so flow opens as the Plan page reads it.
+      // planPath writes the view as ?view=; without one the Plan page opens the plan mode's view.
       return navigate(planPath(id(p.project_id, "project"), { ...p, view: p.view as PlanViewName | undefined }));
     }
     case "go_to_run":

@@ -43,11 +43,11 @@ export function parseZoom(params: Record<string, string | string[] | undefined>)
 }
 
 /**
- * The Plan page view from ?view=; the tree unless another known view is asked for. Timeline and Flow both
- * open the plan mode's own view, so an old link opens Flow in a Flow project and Timeline in a Timeline one.
+ * The Plan page view from ?view=: the plan mode's own view (Flow or Timeline) unless the tree or the board
+ * is asked for. Timeline and Flow both open the plan mode's view, so an old link opens Flow in a Flow
+ * project and Timeline in a Timeline one.
  */
-export function parsePlanView(params: Record<string, string | string[] | undefined>, mode: PlanModeName = "timeline"): PlanViewName {
+export function parsePlanView(params: Record<string, string | string[] | undefined>, mode: PlanModeName): PlanViewName {
   const view = params.view;
-  if (typeof view !== "string" || !(PLAN_VIEWS as readonly string[]).includes(view)) return "tree";
-  return view === "timeline" || view === "flow" ? mode : (view as PlanViewName);
+  return view === "tree" || view === "board" ? view : mode;
 }

@@ -785,7 +785,7 @@ export const CATALOG: ToolSpec[] = [
     name: "go_to_plan",
     title: "Open the plan",
     description:
-      "Opens a project's Plan page: epics, stories and tasks from its GitHub Project, as a tree, a board, or the view of its plan mode (flow in a Flow project, timeline in a Timeline project; get_project says which), optionally narrowed to one epic (or the unplanned issues), some statuses, or tasks by their run. The timeline takes a zoom.",
+      "Opens a project's Plan page: epics, stories and tasks from its GitHub Project, in the view of its plan mode (flow in a Flow project, timeline in a Timeline project; get_project says which) unless view asks for the tree or the board, optionally narrowed to one epic (or the unplanned issues), some statuses, or tasks by their run. The timeline takes a zoom.",
     input: z.object({
       project_id: z.string().describe("The project's id from list_projects"),
       view: z.enum(["tree", "board", "flow", "timeline"]).optional(),

@@ -57,11 +57,11 @@ test("epic, status and run filters live in the URL and narrow both views", () =>
   );
   fireEvent.keyDown(screen.getByRole("button", { name: "Status Running" }), { key: "Enter" });
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /In review/ }));
-  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?epic=12&status=Running,In%20review", { scroll: false });
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=tree&epic=12&status=Running,In%20review", { scroll: false });
   fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
   const chips = screen.getByRole("list", { name: "Filters" });
-  expect(within(chips).getByRole("link", { name: "Remove Epic: Project management" })).toHaveAttribute("href", "/projects/p1/plan?status=Running");
-  expect(screen.getByRole("link", { name: "Clear filters" })).toHaveAttribute("href", "/projects/p1/plan");
+  expect(within(chips).getByRole("link", { name: "Remove Epic: Project management" })).toHaveAttribute("href", "/projects/p1/plan?view=tree&status=Running");
+  expect(screen.getByRole("link", { name: "Clear filters" })).toHaveAttribute("href", "/projects/p1/plan?view=tree");
 
   // Narrowed by epic 12 and Running or In review: the tree keeps the matching tasks, the board the same.
   const { narrowed } = filters({ epic: "12", status: "Running,In review" });

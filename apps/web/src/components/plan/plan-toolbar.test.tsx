@@ -64,7 +64,7 @@ test("an unset filter shows only its name, a set one its value, and Assignee off
   const options = within(screen.getByRole("radiogroup", { name: "Assignee" })).getAllByRole("radio");
   expect(options.map((o) => document.querySelector(`label[for="${o.id}"]`)?.textContent)).toEqual(["Anyone", "Me", "Unassigned", "example-dev"]);
   fireEvent.click(screen.getByRole("radio", { name: "Unassigned" }));
-  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?assignee=none", { scroll: false });
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=tree&assignee=none", { scroll: false });
   unmount();
 
   renderTab({ filters: parsePlanFilters({ epic: "12", assignee: "me" }), me: "krister" });
@@ -74,7 +74,7 @@ test("an unset filter shows only its name, a set one its value, and Assignee off
   const tree = screen.getByRole("tree");
   expect(within(tree).getByRole("treeitem", { name: /Task #58/ })).toBeInTheDocument();
   expect(within(tree).queryByRole("treeitem", { name: /Task #56/ })).not.toBeInTheDocument();
-  expect(within(screen.getByRole("list", { name: "Filters" })).getByRole("link", { name: "Remove Assignee: Me" })).toHaveAttribute("href", "/projects/p1/plan?epic=12");
+  expect(within(screen.getByRole("list", { name: "Filters" })).getByRole("link", { name: "Remove Assignee: Me" })).toHaveAttribute("href", "/projects/p1/plan?view=tree&epic=12");
 });
 
 test("without a token user the Assignee filter has no Me", () => {
@@ -110,14 +110,14 @@ test("searching #58 keeps the task with its story and epic open, marks the match
 
   expect(replaceState).not.toHaveBeenCalled();
   act(() => vi.advanceTimersByTime(150));
-  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/projects/p1/plan?q=%2358");
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/projects/p1/plan?view=tree&q=%2358");
 
   fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
   expect(searchBox()).toHaveValue("");
   expect(treeRow(/Epic #12/)).toHaveAttribute("aria-expanded", "false");
   expect(screen.getByRole("status")).toBeEmptyDOMElement();
   act(() => vi.advanceTimersByTime(150));
-  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/projects/p1/plan");
+  expect(replaceState).toHaveBeenLastCalledWith(null, "", "/projects/p1/plan?view=tree");
   replaceState.mockRestore();
 });
 
@@ -244,10 +244,10 @@ test("under 640 px the timeline's toolbar shows the range it lists in place of T
 /** The same plan in a Flow project: loadPlan sets its flow. */
 const flowPlan = { ...plan, flow: flowOf(view) };
 
-test("a Flow project's toggle is Tree, Board and Flow, with no Timeline", () => {
+test("a Flow project's toggle is Flow, Board and Tree, with no Timeline", () => {
   renderTab({ plan: flowPlan, view: "tree" });
   const toggle = screen.getByRole("radiogroup", { name: "View" });
-  expect(within(toggle).getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Tree", "Board", "Flow"]);
+  expect(within(toggle).getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Flow", "Board", "Tree"]);
   fireEvent.click(within(toggle).getByRole("radio", { name: "Flow" }));
   expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=flow", { scroll: false });
 });

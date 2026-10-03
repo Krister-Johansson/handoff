@@ -33,15 +33,16 @@ export function projectAt(pathname: string): { projectId: string; section?: Proj
 }
 
 /**
- * A project's Plan page, with the view (the tree unless given), an epic (or the unplanned issues),
- * statuses and a run filter to narrow it to, and the timeline's zoom.
+ * A project's Plan page, with the view (the plan mode's view unless given), an epic (or the unplanned
+ * issues, which only the tree shows), statuses and a run filter to narrow it to, and the timeline's zoom.
  */
 export function planPath(
   projectId: string,
   opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; assignee?: AssigneeFilter; q?: string; zoom?: Zoom } = {},
 ) {
+  const view = opts.view ?? (opts.epic === "unplanned" ? "tree" : undefined);
   const query = [
-    opts.view && opts.view !== "tree" ? `view=${opts.view}` : undefined,
+    view ? `view=${view}` : undefined,
     opts.epic !== undefined ? `epic=${opts.epic}` : undefined,
     opts.status?.length ? `status=${opts.status.map(encodeURIComponent).join(",")}` : undefined,
     opts.run && opts.run !== "any" ? `run=${opts.run}` : undefined,
