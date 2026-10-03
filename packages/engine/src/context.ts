@@ -82,19 +82,34 @@ function decisionsOf(state: RunState): NonNullable<ContextPacket["decisions"]> {
 }
 
 /**
+ * The findings of a review a person kept on Fix now at a code review gate, by their place in the
+ * review, when the step's latest output is the review the person answered. Undefined when nobody
+ * answered for it, so every finding counts.
+ */
+function keptOf(state: RunState, key: string, executionId: string): Set<number> | undefined {
+  const kept = obj(obj((state as { keptFindings?: unknown }).keptFindings)[key]);
+  return kept.executionId === executionId && Array.isArray(kept.indices) ? new Set(kept.indices.filter((i): i is number => typeof i === "number")) : undefined;
+}
+
+/**
  * Comments that came with an approval, from any other step whose latest output approves: advice the
- * run would otherwise drop, since only request_changes sends comments back. Recognised by shape.
+ * run would otherwise drop, since only request_changes sends comments back. Recognised by shape. A
+ * finding a person set to Skip or Follow-up at a code review gate is not advice for later steps.
  */
 function suggestionsOf(state: RunState, self: string): NonNullable<ContextPacket["suggestions"]> {
   return Object.entries(state.nodes).flatMap(([key, result]) => {
     const o = obj(result.output);
-    if (key === self || o.verdict !== "approve" || !Array.isArray(o.comments) || o.comments.length === 0) return [];
-    const comments = o.comments.map(obj).map((c) => ({
-      ...(typeof c.path === "string" ? { path: c.path } : {}),
-      ...(typeof c.line === "number" ? { line: c.line } : {}),
-      body: String(c.body ?? ""),
-    }));
-    return [{ from: key, comments }];
+    if (key === self || o.verdict !== "approve" || !Array.isArray(o.comments)) return [];
+    const kept = keptOf(state, key, result.executionId);
+    const comments = o.comments
+      .filter((_, i) => !kept || kept.has(i))
+      .map(obj)
+      .map((c) => ({
+        ...(typeof c.path === "string" ? { path: c.path } : {}),
+        ...(typeof c.line === "number" ? { line: c.line } : {}),
+        body: String(c.body ?? ""),
+      }));
+    return comments.length ? [{ from: key, comments }] : [];
   });
 }
 

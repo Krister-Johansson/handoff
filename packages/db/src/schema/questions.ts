@@ -28,6 +28,11 @@ export const questions = pgTable(
     option: text("option"),
     /** Comments on quoted parts of what the gate showed for review, sent back with the answer. */
     comments: jsonb("comments").$type<QuestionComment[]>().notNull().default([]),
+    /**
+     * The code reviewer's findings the person kept on Fix now, by their place in the review from 0.
+     * Null when the question shows no code review findings. Later steps get only these as suggestions.
+     */
+    findings: jsonb("findings").$type<number[]>(),
     answeredBy: text("answered_by"),
     answeredAt: tstz("answered_at"),
     createdAt: createdAt(),

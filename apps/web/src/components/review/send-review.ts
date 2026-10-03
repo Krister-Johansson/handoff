@@ -43,7 +43,8 @@ type Review = {
   comments: SentComment[];
   /**
    * The code reviewer's Fix now findings, by their place in the review from 0; undefined when the review
-   * has no findings. Request changes and approve after fixes send them back.
+   * has no findings. Request changes and approve after fixes send them back. Every option names them,
+   * so later steps get none of the findings set to Follow-up or Skip.
    */
   findings?: number[] | undefined;
   /** Called as the review is sent, to drop the kept draft, and again if sending failed, to keep it. */
@@ -62,7 +63,7 @@ export async function sendReview({ questionId, runId, option, note, comments, fi
   if (sendsBack(option) && !note.trim() && comments.length === 0 && !picked?.length) return findings ? NOTHING_PICKED : NOTHING_TO_FIX;
   // A sent review redirects to the run, so the draft goes first and comes back if the send fails.
   onSending?.();
-  const result = await answerReviewAction({ questionId, runId, option, note: note.trim(), comments, ...(picked ? { findings: picked } : {}) });
+  const result = await answerReviewAction({ questionId, runId, option, note: note.trim(), comments, ...(findings ? { findings } : {}) });
   if (result && "error" in result && result.error) {
     onFailed?.();
     return result.error;

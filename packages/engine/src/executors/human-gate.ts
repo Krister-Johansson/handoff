@@ -343,6 +343,12 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
       };
       const statePatch: Record<string, unknown> = { human: { ...ctx.state.human, [ctx.node.key]: answer } };
       if (afterFixes) statePatch.approvedAfterFixes = { ...approvedAfterFixes, [ctx.node.key]: { answeredBy: answer.answeredBy } };
+      // The code review findings the person kept on Fix now: later steps get only these of that review as suggestions.
+      const reviewer = (question.context as { review?: { from?: string } }).review?.from;
+      const reviewed = reviewer ? ctx.state.nodes[reviewer]?.executionId : undefined;
+      if (question.findings && reviewer && reviewed) {
+        statePatch.keptFindings = { ...obj(ctx.state.keptFindings), [reviewer]: { executionId: reviewed, indices: question.findings } };
+      }
       // An approval of the code holds until the run's own change changes.
       if (option === "approve" && approvesCode(ctx)) Object.assign(statePatch, await recordApproval(ctx, { at: answer.answeredAt, by: answer.answeredBy }));
       // A review that asks for changes, comments, or has a note of its own is a decision every later step must keep to.
