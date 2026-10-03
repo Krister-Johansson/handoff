@@ -247,6 +247,20 @@ test("a task blocked by an issue outside the order keeps its place, gets no card
   ]);
 });
 
+test("a task placed before its blocker says Waits for the blocker and the flow lists the break", () => {
+  const flow = layoutFlow(input({ tasks: [task(2, { position: 1, blockedBy: [1] }), task(1, { position: 2 }), task(3, { position: 3 })] }));
+
+  expect(flow.queue).toEqual([2, 1, 3]);
+  expect(flow.breaks).toEqual([{ issue: 2, waitsFor: [1] }]);
+  expect(flow.rows).toEqual([
+    { issue: 2, tags: ["Next 1", "Waits for #1"] },
+    { issue: 1, tags: ["Next 2"] },
+    { issue: 3, tags: ["Next 3"] },
+  ]);
+  // The flow still starts #2 after #1 ends.
+  expect(placed(flow).map((c) => c.issue)).toEqual([1, 2, 3]);
+});
+
 test("a task without a size counts as M", () => {
   const flow = layoutFlow(
     input({
