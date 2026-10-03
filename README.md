@@ -91,7 +91,7 @@ The library holds skills, MCP servers and subagents that nodes enable by name. I
 
 ## The Plan
 
-A project can keep a plan of epics, stories and tasks on GitHub. GitHub holds the whole plan. handoff stores one thing about it: the number of the GitHub Project that belongs to the handoff project. The capacity the timeline uses is a project setting in handoff (see Sizes and estimates).
+A project can keep a plan of epics, stories and tasks on GitHub. GitHub holds the whole plan, including the order of the work. handoff stores the number of the GitHub Project that belongs to the handoff project, and three things GitHub has no field for: the plan mode (see Plan mode), the capacity the timeline uses (see Sizes and estimates) and the Flow's pins (see Pins).
 
 - **Hierarchy.** Epics, stories and tasks are issues in the project's repository. A story is a sub-issue of its epic and a task is a sub-issue of its story. The labels `epic`, `story` and `task` mark the kind.
 - **Status.** Each task has a Status on a GitHub Project (v2) that you own, with the options Shaping, Ready, Running, In review and Done. A closed issue counts as Done whatever its Status says.
@@ -111,32 +111,48 @@ A fine-grained token cannot reach a Project owned by a user account. A GitHub Ap
 
 ### Linking a Project
 
-Ask the assistant, or Claude Code with the handoff plugin, to set up the plan. That calls `setup_plan`, which shows an approval card first. It creates the labels `epic`, `story` and `task` if they are missing. With `use` and the number of one of your existing Projects, it links that Project to the repository and gives it the Status options Shaping, Ready, Running, In review and Done. An option whose name matches apart from case or an emoji is renamed, a missing one is added, and every other option stays, so no card loses its column. `list_github_projects` shows beforehand which options each of your Projects lacks, and the result of `setup_plan` names each option it renamed or added. Without `use`, it creates a Project called "<project name> plan" with those options and links it. Both ways the Project gets the date fields Start and Target, a single select field Size with the options S, M and L, and a Number field Estimate. On a Project that already has a Size field, `setup_plan` adds S, M and L and keeps the field's other options. GitHub's roadmap layout reads them once you pick them under "Date fields" in a Roadmap view; the API cannot set that. Either way it stores the Project's number on the handoff project. Running it again on a project that has a plan adds missing labels and fields and reports what it found.
+Ask the assistant, or Claude Code with the handoff plugin, to set up the plan. That calls `setup_plan`, which shows an approval card first. It creates the labels `epic`, `story` and `task` if they are missing. With `use` and the number of one of your existing Projects, it links that Project to the repository and gives it the Status options Shaping, Ready, Running, In review and Done. An option whose name matches apart from case or an emoji is renamed, a missing one is added, and every other option stays, so no card loses its column. `list_github_projects` shows beforehand which options each of your Projects lacks, and the result of `setup_plan` names each option it renamed or added. Without `use`, it creates a Project called "<project name> plan" with those options and links it. Both ways the Project gets a single select field Size with the options S, M and L. In a Timeline project it also gets the date fields Start and Target and a Number field Estimate; a Flow project uses none of them and gets Size only. On a Project that already has a Size field, `setup_plan` adds S, M and L and keeps the field's other options. GitHub's roadmap layout reads Start and Target once you pick them under "Date fields" in a Roadmap view; the API cannot set that. Either way it stores the Project's number on the handoff project. Running it again on a project that has a plan adds missing labels and the missing fields its plan mode uses, and reports what it found.
+
+### Plan mode
+
+A project plans in Flow mode or in Timeline mode. In Flow mode the plan is an order of tasks and their blockers, with no dates and no hours (see The Flow). In Timeline mode items have Start and Target dates and tasks have sizes and estimates (see The timeline). A project added to handoff starts in Flow mode. A project that existed before plan modes plans in Timeline mode.
+
+Project settings has a Plan mode section in its Plan group, with Flow ("Order, no dates"), Timeline ("Dates and estimates") and Save. Only a person changes the mode. No MCP tool writes it; `get_project` returns it as `plan_mode` and `list_plan` as `mode`. Switching writes nothing to GitHub: Start, Target and Estimate stay on the items, and Project order stays as it is. A project switched back to Timeline shows the dates it had.
+
+The Plan page's toolbar has Tree, Board and the mode's own view, Flow or Timeline, with no switch between the two. A link with `?view=timeline` opens the Flow in a Flow project, and `?view=flow` opens the timeline in a Timeline project. The scheduler works the same in both modes.
+
+The agents follow the mode. The MCP server's instructions and the `handoff` skill tell them to set only the order and the blockers in a Flow project, and to set dates only in a Timeline project when you ask to plan the timeline. A tool that belongs to the other mode refuses with a sentence that names what to use instead, and writes nothing:
+
+- In a Flow project, `schedule` refuses, `create_story` and `create_task` refuse `start` and `target`, `set_size` refuses an estimate, and `go_to_plan` refuses the timeline view. For example: "todooverkill plans in Flow mode: tasks have an order and blockers, no dates. Use arrange_plan and set_order, or a person can switch the plan mode in Project settings."
+- In a Timeline project, `set_order` refuses, and `go_to_plan` refuses the flow view.
+
+The planner proposes a size in both modes and never a date. In a Flow project, when a run splits its plan, the issues it opens for the later parts land right after the run's task in Project order, so they come next in the queue.
 
 ### Shaping
 
 The assistant and the Claude Code plugin shape the plan with these tools. Every one that writes to GitHub shows an approval card first, or the permission prompt in Claude Code.
 
-- `list_plan` shows the tree: epics, their stories, their tasks, each with its status and its Start and Target dates, and each task with its open blockers, latest run and pull request, its size, estimate, the size its planner proposed and its duration, plus the open issues outside the plan. It also gives the project's capacity and each size's forecast.
+- `list_plan` shows the tree: epics, their stories, their tasks, each with its status, and each task with its open blockers, latest run and pull request, its size and the size its planner proposed, plus the open issues outside the plan. `mode` says the plan mode. In a Timeline project each item also has its Start and Target dates, each task its estimate and duration, and the result gives the project's capacity and each size's forecast. In a Flow project there are no dates or hours. The result gives the queue, the number of lanes, the scheduler's order and what holds it. Each task has its place in the queue, its lane, whether it is pinned, the blockers it waits for, the blocker its lane waits for, why the scheduler skips it, and while it runs, its steps and what it waits on.
 - `create_epic` creates an issue labelled `epic` with its goal.
 - `create_story` creates a sub-issue of an epic labelled `story`, with its acceptance criteria as checkboxes.
-- `create_task` creates a sub-issue of a story labelled `task`, with its brief, optional criteria, the issues it is blocked by and an optional size.
+- `create_task` creates a sub-issue of a story labelled `task`, with its brief, optional criteria, the issues it is blocked by and an optional size. In a Flow project the blockers are what orders the work.
 - `plan_issue` brings an issue from outside the plan in as a task, optionally under a story.
 - `move_to_ready` moves tasks to Ready. It refuses an epic, a story, a closed issue and a task without a body.
 - `move_to_shaping` moves tasks back to Shaping. It refuses a task that an active run works on.
-- `schedule` sets, moves or clears the Start and Target dates of epics, stories and tasks, each with its own dates. It refuses a Target before its Start, a date not written YYYY-MM-DD, an issue outside the plan and a Project without the date fields, and then changes nothing. The assistant proposes dates only when you ask it to plan the timeline. `create_story` and `create_task` also take `start` and `target`.
-- `set_size` sets or clears the size and the manual estimate of tasks. An estimate is hours or days (`3h`, `2d`) or a number of hours, and 0 or null clears it. A task with a Start gets the Target its new duration ends on. It refuses an epic, a story, an issue outside the plan, an estimate it cannot read or outside 0 to 1000 hours, and a Project without the Size and Estimate fields, and then changes nothing.
-- `arrange_plan` writes nothing. It returns where the unscheduled tasks with a size or an estimate fit, as Arrange by estimate on the timeline places them, and the tasks left out because they need a size. With `epic`, it places only that epic's tasks. The assistant then proposes those dates in one `schedule` call.
+- `schedule` sets, moves or clears the Start and Target dates of epics, stories and tasks, each with its own dates. It refuses a Target before its Start, a date not written YYYY-MM-DD, an issue outside the plan and a Project without the date fields, and then changes nothing. The assistant proposes dates only when you ask it to plan the timeline. `create_story` and `create_task` also take `start` and `target`. A Flow project refuses `schedule` and those dates.
+- `set_size` sets or clears the size and the manual estimate of tasks. An estimate is hours or days (`3h`, `2d`) or a number of hours, and 0 or null clears it. A task with a Start gets the Target its new duration ends on. It refuses an epic, a story, an issue outside the plan, an estimate it cannot read or outside 0 to 1000 hours, and a Project without the Size and Estimate fields, and then changes nothing. A Flow project takes sizes only and refuses an estimate.
+- `arrange_plan` writes nothing. In a Timeline project it returns where the unscheduled tasks with a size or an estimate fit, as Arrange by estimate on the timeline places them, and the tasks left out because they need a size; the assistant then proposes those dates in one `schedule` call. In a Flow project it returns Optimize's preview: the order now, each task that moves with its old and new place, the pinned tasks it kept, the new queue with each task's lane, and the tasks still placed before a blocker. With `epic`, `story` or `issues`, it arranges only the tasks inside them.
+- `set_order` writes a new order of a Flow project's queue to Project order. `order` lists tasks in their new order, and they fill the places they hold now, so every other task keeps its place. `pin` pins tasks at their new place, which the assistant does only when you ask for a task's place to stay, and `unpin` removes pins. It refuses a Timeline project, a scheduler that starts by Priority, a task outside the queue, a Shaping task in a Ready task's place, a queue that changed on GitHub since it was read, and a pinned task that would move unless `unpin` names it. Its approval card lists each move and each pin change.
 
 Everything created starts in Shaping. `setup_project` reports whether the plan is in place.
 
 ### The timeline
 
-The Plan page shows the plan as a tree, a board or a timeline. The timeline draws a bar for each item from its Start to its Target, with each run of a task as a strip under its bar, arrows from blocked-by links, and flags for late, blocked and overdue items. A story or an epic without dates of its own spans its tasks, drawn dashed. Items without dates are listed under Unscheduled, each with Schedule. The zooms are Days, Weeks and Months, and the zoom is part of the page's URL. Under 640 px the timeline is a list.
+In a Timeline project the Plan page shows the plan as a tree, a board or a timeline. The timeline draws a bar for each item from its Start to its Target, with each run of a task as a strip under its bar, arrows from blocked-by links, and flags for late, blocked and overdue items. A story or an epic without dates of its own spans its tasks, drawn dashed. Items without dates are listed under Unscheduled, each with Schedule. The zooms are Days, Weeks and Months, and the zoom is part of the page's URL. Under 640 px the timeline is a list.
 
 ### Sizes and estimates
 
-A task has a size, S, M or L, in the Project's Size field, and can have a manual estimate in its Estimate field. The size chip on each task in the tree, on the board and on the timeline opens the size popover. Picking S, M or L saves it to GitHub at once. Under Manual estimate you pick 1h to 2d or type hours or days, such as `5h` or `1.5d`, and Enter saves it. Use the forecast clears the estimate, and so does 0. GitHub stores the estimate in hours. A story, an epic and a board column show the sum of their tasks, starting with `~` when part of it is a forecast and ending with `+n` for tasks that have neither a size nor an estimate.
+A task has a size, S, M or L, in the Project's Size field, and in a Timeline project it can have a manual estimate in its Estimate field. A Flow project uses sizes only, with no estimates and no capacity. The size chip on each task in the tree, on the board and on the timeline opens the size popover. Picking S, M or L saves it to GitHub at once. Under Manual estimate you pick 1h to 2d or type hours or days, such as `5h` or `1.5d`, and Enter saves it. Use the forecast clears the estimate, and so does 0. GitHub stores the estimate in hours. A story, an epic and a board column show the sum of their tasks, starting with `~` when part of it is a forecast and ending with `+n` for tasks that have neither a size nor an estimate.
 
 A size's forecast comes from this project's finished runs: the median wall time of the succeeded runs of that size that link one task, split into agent time, queue time and time waiting on you, with the median reported cost and the number of runs. A size with fewer than 5 runs uses its default, S 30m, M 1h and L 2h. A run records the Size its task had when it started; a run without one counts under its planner's proposal, else under its task's current Size.
 
@@ -163,6 +179,52 @@ A sized task's run strips start under the bar's left edge at the bar's scale, so
 ### Arrange by estimate
 
 Arrange by estimate, in the Unscheduled header, lays out the unscheduled tasks in view that have a size or an estimate. It places them from today in blocked-by order, fills each day up to the capacity after the work already planned (including bars the filters hide), and starts no task before its blockers end. Tasks with dates stay where they are. It shows a preview first: a banner with the placed tasks' range, dashed bars, the preview's hours in the load row, and Needs a size on the tasks it left out. Cancel writes nothing. Save writes Start and Target for every placed task. A task GitHub refuses goes back to Unscheduled, and the toast names it with the reason. When no unscheduled task in view has a size or an estimate, the button is off and says why.
+
+### The Flow
+
+In a Flow project the Plan page's third view is the Flow. The tree of epics, stories and tasks stays on the left, as on the timeline. On the right, each task's card sits on its row along an order axis with a Now line, in the lane the scheduler would start it in. The Flow shows no dates, hours or minutes. A card's length is its size's forecast and only decides which lane frees first; a task without a size counts as M and its size chip is dashed. The legend says the same: "Length follows the size: S, M or L. Flow has no dates."
+
+The Flow has one lane per run the scheduler may hold at once: `max_runs`, or 1 when the scheduler has never been turned on. The lanes show as Slot 1, Slot 2 and so on, in a strip at the top that repeats every card. The header gives the runs and the worker's Claude slots, for example "3 runs at once, 1 Claude slot", and the scheduler's order.
+
+The Flow places cards by following the scheduler's rules from now:
+
+- Each active run takes a lane, oldest first. Its card straddles the Now line, filled by the share of its graph's steps that are done, such as "3 of 7 steps". When a review loop sends the run back to the coder, the coder and the steps after it stop counting as done until they pass again, so the count can go down. A run that waits on you has a dashed ring, and its row says what it waits for. It keeps its lane, because it counts toward `max_runs`.
+- The queue is the Ready tasks the scheduler may start, in its order, and then the Shaping tasks in Project order. A Ready card is blue, and its row has its Next tag, its place in the queue. The tree shows the same Next tags in every view of a Flow project. Shaping cards are faded and tagged Shaping, since the scheduler starts none of them until you move them to Ready.
+- When a lane frees, the first task in the queue whose blockers have ended starts in it. A blocked task is passed over for the next one, as the scheduler does. When no task may start, the lane waits for the next card to end, and the task that starts then says "After #55". Arrows run from a blocker's end to its task's start.
+- Tasks with the skip label or a cancelled latest run keep their rows with "Skipped: label human" or "Skipped: latest run cancelled" and "Not in the order". A task blocked by an issue outside the order says "Waits for #N, not in the order" and has no card. Done tasks say Done.
+- While a failed run or a permission request holds the project, the header shows "Held" with the reasons, and the first task in the queue says "Waits for the hold". While the scheduler is off or paused, the header says tasks start when someone starts them, in this order.
+
+Hover over a card to see the task's size, place, lane and blockers. Under 640 px the Flow is a list in order, with each task's slot, Next tag, steps and row tags, and nothing drags.
+
+### Moving cards
+
+Drag a Ready card along its row to give it a new place in the queue. While it moves, a dashed outline marks where it was and a tooltip says where it lands, for example "Next 1, before #58. Lands in slot 3. 3 cards move." Escape puts it back. With a Ready card focused, Alt and an arrow move it a place: Left and Up earlier, Right and Down later. The save follows 800 ms after the last key. Running, done, skipped and Shaping cards do not drag.
+
+A drop saves the new order to Project order on GitHub at once and pins the card. The toast says, for example, "#74 moves to Next 1" and "Saved to GitHub in Project order. #74 is pinned.", with Undo, which writes the old order back and removes the pin the drop added. If GitHub refuses the write, the card goes back and the toast offers Try again. If the order on GitHub changed since the page loaded, the write is refused with "The order changed on GitHub since the page loaded. The Flow now shows the new order."
+
+A drop before an open blocker that is in the queue opens a dialog, such as "#62 can't start before #61", with three choices:
+
+- Move to the next free slot, the default, puts the task right after its last blocker in the queue.
+- Move #61 earlier too keeps the task where you dropped it and moves its blockers, with their own blockers, to just before it.
+- Keep it here leaves the task where you dropped it with the warning "Waits for #61", a red edge and a red arrow. The Flow still starts it after #61 ends.
+
+"Move the tasks that wait on #62 with it" is on by default. It moves every task that #62 blocks, directly or through others, and that would now sit before it, to right after it. Turn it off to move only #62; a task that then sits before its blocker gets its own "Waits for" warning. Each choice says which places it gives, saves at once, pins the card, and offers Undo.
+
+Dragging works in Project order. Under Priority order a drop opens "The scheduler starts tasks by Priority" with Switch to Project order and Cancel. Switching saves the scheduler's order and then saves the drop; the scheduler keeps its other settings.
+
+### Pins
+
+A pin keeps a task at its place number while other tasks move. A dropped card is pinned and shows a pin. Click the pin on the card, or the Pinned tag in its row, to unpin it. Every later drop, dialog choice and Optimize puts each pinned task back at its place number, and its number falls as tasks ahead of it start. A pin ends when its task's run starts. GitHub Projects has no field for a pin, so handoff stores pins in its database. Agents pin only through `set_order`'s `pin` list, when you ask for a task's place to stay.
+
+### Optimize
+
+Optimize, in the toolbar of the Flow, arranges the queue for the earliest finish on the lanes. Each place, from the front, takes the highest-ranked task whose blockers in the queue come earlier. A task ranks higher when it starts a longer chain of work, then when it unblocks more work, then by Priority when the Project has a Priority field, then by the larger size. Pinned tasks keep their places.
+
+It works on the whole plan, or on what you tick in the tree: each row of the Flow has a tick box, and ticking an epic or a story ticks the tasks under it. The toolbar then says, for example, "1 selected", with a button that clears the selection. Tasks outside the selection keep their places.
+
+Optimize shows a preview first and writes nothing until Apply. The banner says what it will do, for example "Optimize will move 3 tasks in epic #12 Project management. 1 pinned stays." The moved cards are dashed at their new places, their old places are outlined, and their Next tags add the place they had, such as "was 3". Cards do not drag during the preview. Apply writes the order to GitHub with the toast "Optimized epic #12 Project management" and "Moved 3 tasks. 1 pinned stayed.", with Undo, which writes the previous order back. Cancel, or Optimize again, closes the preview. Under Priority order Optimize asks to switch the scheduler to Project order first. Under 640 px the toolbar has no Optimize.
+
+`arrange_plan` gives agents the same preview, and `set_order` writes it with an approval card (see Shaping). Neither Optimize nor `arrange_plan` pins or unpins.
 
 ### Staying up to date
 
@@ -225,7 +287,7 @@ The scheduler skips tasks with the skip label and leaves them to a person. The l
 
 On the dashboard:
 
-- The Plan page has the scheduler card. It shows the state (Off, Running, Held, Idle or Paused) with Turn on, Pause or Resume, the active runs, the next three tasks, the skipped Ready tasks with their reasons, what holds the project with a link to each run, and the recent events. The tree marks the next three tasks Next 1 to Next 3.
+- The Plan page has the scheduler card. It shows the state (Off, Running, Held, Idle or Paused) with Turn on, Pause or Resume, the active runs, the next three tasks, the skipped Ready tasks with their reasons, what holds the project with a link to each run, and the recent events. The tree marks the next three tasks Next 1 to Next 3; in a Flow project it marks every Ready task with its place in the Flow's queue.
 - Home shows one line with the state and the same action while the scheduler is on.
 - Project settings has a Scheduler section: turn it on or off, pause or resume, set the runs at a time, the order, the graph and the skip label, and read the worker's Claude cap.
 - Settings, Projects shows the state and the active runs on the project's row, for example "Scheduler held, 1 of 2".

@@ -10,6 +10,8 @@ This plan reverses two choices of `docs/plans/project-management.md`: the non-go
 
 The Plan toolbar PR, being built now, replaces the timeline label column's blocker chips with a "!" icon and a tooltip. This plan does not touch that, and the design's "Starts before #143 ends" warning goes wherever that PR puts row warnings.
 
+This plan describes Timeline mode. A project in Flow mode ([`docs/plans/flow.md`](flow.md)) uses neither dates nor Arrange by estimate: it has no Start, Target, Estimate or capacity, `schedule` and an estimate in `set_size` refuse, and `arrange_plan` returns the Flow's Optimize preview. Sizes and their forecasts stay in both modes; in the Flow a size sets a card's length, which decides only which lane frees first.
+
 Read `CLAUDE.md`, `GLOSSARY.md`, `docs/plan.md`, `docs/plans/project-management.md` and `docs/plans/scheduler.md` first.
 
 ## Goals
