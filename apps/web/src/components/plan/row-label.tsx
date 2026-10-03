@@ -75,6 +75,8 @@ const INDENT: Record<TimelineRow["level"], string> = {
 
 type RowLabelProps = {
   row: TimelineRow;
+  /** Before the chevron: the Flow's tick box. */
+  lead?: ReactNode;
   onToggle: () => void;
   /** Beside the title: the Timeline's warning icon. */
   flag?: ReactNode;
@@ -87,10 +89,10 @@ type RowLabelProps = {
 };
 
 /**
- * The fixed left cell of a Timeline or Flow row: chevron, status pill or kind badge, number and title, what
+ * The fixed left cell of a Timeline or Flow row: the Flow's tick box, chevron, status pill or kind badge, number and title, what
  * the view puts beside them, then the menu, and a task's second line under them.
  */
-export function RowLabel({ row, onToggle, flag, aside, menu, below, width = LABEL_WIDTH }: RowLabelProps) {
+export function RowLabel({ row, lead, onToggle, flag, aside, menu, below, width = LABEL_WIDTH }: RowLabelProps) {
   const { item, task } = row;
   return (
     <div
@@ -105,6 +107,7 @@ export function RowLabel({ row, onToggle, flag, aside, menu, below, width = LABE
       style={{ width }}
     >
       <div className="flex min-w-0 items-center gap-1.5">
+        {lead}
         {row.expanded !== undefined && <Chevron expanded={row.expanded} label={rowLabel(row)} onToggle={onToggle} />}
         <RowMark row={row} />
         {item ? <IssueTitle item={item} className={cn("text-xs", !task && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ChartGanttIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, KanbanIcon, ListTreeIcon, WaypointsIcon } from "lucide-react";
+import { ChartGanttIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, KanbanIcon, ListTreeIcon, WandSparklesIcon, WaypointsIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -10,6 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { planPath } from "@/lib/paths";
 import type { PlanFilters } from "@/lib/plan/filters";
 import type { PlanModeName, PlanViewName } from "@/lib/project-tab";
+import { useFlowSelection } from "./plan-context";
 import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
 import { useCollapsed } from "./use-collapsed";
 
@@ -94,6 +95,38 @@ export function ExpandCollapse({ projectId, rows, searching }: { projectId: stri
       </TooltipTrigger>
       <TooltipContent>Clear the search to expand or collapse</TooltipContent>
     </Tooltip>
+  );
+}
+
+/**
+ * The Flow's toolbar part for Optimize (docs/plans/flow.md, Decisions 11 and 13): how many items are ticked in
+ * the tree, with a way to clear them, and Optimize, which shows its preview over the ticked items or the whole
+ * plan and hides it on a second press.
+ */
+export function OptimizeControls() {
+  const selection = useFlowSelection();
+  if (!selection) return null;
+  const { picks, setPicks, previewing, setPreviewing } = selection;
+  return (
+    <>
+      {picks.size > 0 && (
+        <span className="inline-flex h-8 items-center gap-1 rounded-md border border-active-dot/40 bg-active-bg pr-1 pl-2.5 text-xs font-medium whitespace-nowrap text-active">
+          {picks.size} selected
+          <Button variant="ghost" size="icon-xs" aria-label="Clear the selection" title="Clear the selection" className="text-active hover:bg-active-dot/15" onClick={() => setPicks(new Set())}>
+            <XIcon />
+          </Button>
+        </span>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="outline" size="sm" aria-pressed={previewing} className="aria-pressed:border-foreground/70 aria-pressed:bg-muted" onClick={() => setPreviewing(!previewing)}>
+            <WandSparklesIcon />
+            Optimize
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>{picks.size > 0 ? `Optimize the ${picks.size} selected` : "Optimize the whole plan"}</TooltipContent>
+      </Tooltip>
+    </>
   );
 }
 

@@ -10,6 +10,7 @@ import { DEFAULT_SIZE } from "@/lib/plan/flow-text";
 import { projectSettingsPath } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
 import { LegendPopover } from "./legend-popover";
+import { OptimizeControls } from "./plan-toolbar";
 
 /** A row tag's look: its tone and icon, by what it says. */
 function tagLook(text: string): {
@@ -52,13 +53,18 @@ function tagLook(text: string): {
   return { tone: "outline" };
 }
 
-/** One of a row's tags, such as "Next 2", "After #55" or "Skipped: label human". */
-export function RowTag({ text }: { text: string }) {
+/** One of a row's tags, such as "Next 2", "After #55" or "Skipped: label human"; in Optimize's preview a Next tag adds "was 3". */
+export function RowTag({ text, was }: { text: string; was?: number | undefined }) {
   const look = tagLook(text);
   return (
-    <Tag tone={look.tone} title={look.title} className={cn("h-[18px] px-1.5 text-[10.5px]", look.dashed && "border-dashed")}>
+    <Tag
+      tone={look.tone}
+      title={was === undefined ? look.title : `Optimize moves it from Next ${was}`}
+      className={cn("h-[18px] px-1.5 text-[10.5px]", look.dashed && "border-dashed", was !== undefined && "border-active-dot text-active")}
+    >
       {look.icon}
       {text}
+      {was !== undefined && <span className="font-normal text-muted-foreground">was {was}</span>}
     </Tag>
   );
 }
@@ -188,12 +194,13 @@ function FlowLegend() {
 }
 
 /**
- * The Flow's controls at the right end of the Plan toolbar: Flow mode, which opens the Plan mode settings,
- * and the Legend. Optimize joins them before Flow mode.
+ * The Flow's controls at the right end of the Plan toolbar: the selection and Optimize, Flow mode, which
+ * opens the Plan mode settings, and the Legend. Under 640 px the Flow is a list without Optimize.
  */
-export function FlowControls({ projectId }: { projectId: string }) {
+export function FlowControls({ projectId, narrow = false }: { projectId: string; narrow?: boolean }) {
   return (
     <div className="ml-auto flex items-center gap-1.5">
+      {!narrow && <OptimizeControls />}
       <Link
         href={projectSettingsPath(projectId, "mode")}
         title="Plan mode: Flow. Change it in Project settings"

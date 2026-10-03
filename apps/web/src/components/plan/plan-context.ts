@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, use } from "react";
+import { createContext, use, useMemo, useState } from "react";
 import type { Forecasts } from "@/lib/plan/forecast";
 import type { PlannedSpan } from "@/lib/plan/schedule";
 
@@ -40,3 +40,26 @@ export type SizingControl = {
 
 /** The size chips' data; without it, rows and cards show no size. */
 export const Sizing = createContext<SizingControl | undefined>(undefined);
+
+/**
+ * The Flow's tick boxes and Optimize, shared by the toolbar and the Flow (docs/plans/flow.md, Decisions 11 and
+ * 13): the epics, stories and tasks the person ticked, and whether Optimize shows its preview. Ticking an item
+ * covers what is under it, so `picks` holds only what was ticked.
+ */
+export type FlowSelectionControl = {
+  picks: ReadonlySet<number>;
+  setPicks: (picks: ReadonlySet<number>) => void;
+  previewing: boolean;
+  setPreviewing: (on: boolean) => void;
+};
+
+/** The Flow's selection; without it, the Flow shows no tick boxes and the toolbar no Optimize. */
+export const FlowSelection = createContext<FlowSelectionControl | undefined>(undefined);
+export const useFlowSelection = () => use(FlowSelection);
+
+/** The selection's state, held by the Plan page for its toolbar and its Flow. */
+export function useFlowSelectionState(): FlowSelectionControl {
+  const [picks, setPicks] = useState<ReadonlySet<number>>(() => new Set());
+  const [previewing, setPreviewing] = useState(false);
+  return useMemo(() => ({ picks, setPicks, previewing, setPreviewing }), [picks, previewing]);
+}

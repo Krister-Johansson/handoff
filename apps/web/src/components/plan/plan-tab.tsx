@@ -19,7 +19,7 @@ import { searchPlan, type SearchResult } from "@/lib/plan/search";
 import type { Zoom } from "@/lib/plan/timeline-scale";
 import type { PlanModeName, PlanViewName } from "@/lib/project-tab";
 import type { StartRunContext } from "./plan-actions";
-import { Assigning, SearchQuery, Sizing, type AssignControl } from "./plan-context";
+import { Assigning, FlowSelection, SearchQuery, Sizing, useFlowSelectionState, type AssignControl } from "./plan-context";
 import { PlanBoard } from "./plan-board";
 import { PlanEmpty } from "./plan-empty";
 import { FlowControls } from "./flow-parts";
@@ -217,6 +217,8 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
   const todayRef = useRef<(() => void) | null>(null);
   const timeline = useMemo(() => plan.timeline ?? deriveSpans([], [], new Date(readAt)), [plan.timeline, readAt]);
   const collapsed = useCollapsed(project.id);
+  // The Flow's tick boxes and Optimize, shared by the toolbar and the Flow.
+  const selection = useFlowSelectionState();
   const body = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useSearchText(filters.q, (q) => planPath(project.id, { view, ...filters, q, zoom }));
   const counts = Object.fromEntries(Object.entries(plan.board).map(([c, tasks]) => [c, tasks.length])) as Record<PlanColumn, number>;
@@ -248,6 +250,7 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
     <Assigning value={assigning}>
       <Sizing value={sizing}>
       <SearchQuery value={found.active ? query.trim() : ""}>
+      <FlowSelection value={view === "flow" ? selection : undefined}>
         <div className="flex flex-col gap-3">
           <PlanToolbar
             projectId={project.id}
@@ -271,7 +274,7 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
               view === "timeline" ? (
                 <TimelineControls projectId={project.id} filters={current} timeline={timeline} zoom={zoom} narrow={narrow} onToday={() => todayRef.current?.()} />
               ) : (
-                view === "flow" && <FlowControls projectId={project.id} />
+                view === "flow" && <FlowControls projectId={project.id} narrow={narrow} />
               )
             }
           />
@@ -287,6 +290,7 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
             <PlanRefresher readAt={readAt} />
           </div>
         </div>
+      </FlowSelection>
       </SearchQuery>
       </Sizing>
     </Assigning>

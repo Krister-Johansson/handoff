@@ -5,6 +5,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { FlowInput } from "@/lib/plan/flow";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { FlowControls } from "./flow-parts";
+import { FlowSelection, useFlowSelectionState } from "./plan-context";
 import { PlanFlow } from "./plan-flow";
 import { KEY_DELAY } from "./use-card-drag";
 import { epic, flowOf, flowRun, planView, REPO_URL, story, task } from "./testing/plan-fixtures";
@@ -448,4 +450,183 @@ test("under Priority order a drop asks to switch to Project order", async () => 
   expect(schedulerActions.switchToProjectOrderAction).toHaveBeenCalledWith({ projectId: "p1" });
   expect(await screen.findByText("Saved to GitHub in Project order. #74 is pinned.")).toBeInTheDocument();
   expect(screen.getByText("Project order. Length by size.")).toBeInTheDocument();
+});
+
+/** The Plan page's Flow with its toolbar controls, which share the ticks in the tree and the Optimize preview. */
+function Optimizing(props: Props) {
+  const selection = useFlowSelectionState();
+  return (
+    <FlowSelection value={selection}>
+      <FlowControls projectId="p1" />
+      <PlanFlow {...props} />
+    </FlowSelection>
+  );
+}
+
+function renderOptimize(over: Partial<Props> = {}) {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const props: Props = {
+    projectId: "p1",
+    repoUrl: REPO_URL,
+    epics: view.epics,
+    unparented: [],
+    flow: designFlow({ pins: new Set([60]) }),
+    scheduler: { state: "running", claudeSlots: 3 },
+    graphs: ["loop"],
+    graphName: "loop",
+    ...over,
+  };
+  return render(
+    <TooltipProvider>
+      <Optimizing {...props} />
+      <Toaster />
+    </TooltipProvider>,
+  );
+}
+
+const tick = (n: number) => screen.getByRole("checkbox", { name: `Select #${n}` });
+
+test("ticking an epic ticks its stories and tasks and the toolbar says 1 selected", () => {
+  renderOptimize();
+  expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
+
+  fireEvent.click(tick(12));
+  for (const n of [12, 41, 43, 55, 57, 58, 61, 62, 60]) expect(tick(n)).toBeChecked();
+  for (const n of [10, 18, 72, 74]) expect(tick(n)).not.toBeChecked();
+  expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+  // Unticking a story under the ticked epic leaves its other story ticked, and the epic half ticked.
+  fireEvent.click(tick(43));
+  expect(tick(43)).not.toBeChecked();
+  expect(tick(61)).not.toBeChecked();
+  expect(tick(41)).toBeChecked();
+  expect(tick(57)).toBeChecked();
+  expect(tick(12)).toHaveAttribute("aria-checked", "mixed");
+  expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+  // A task in the other epic adds to the selection.
+  fireEvent.click(tick(74));
+  expect(screen.getByText("2 selected")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Clear the selection" }));
+  expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
+  for (const n of [12, 41, 57, 74]) expect(tick(n)).not.toBeChecked();
+});
+
+const preview = () => screen.queryByRole("status", { name: "Optimize preview" });
+
+test("Optimize previews the moves with their old places and writes nothing until Apply", () => {
+  renderOptimize();
+  fireEvent.click(tick(12));
+  fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+
+  // #61 sits on the longest chain, so it goes first; #62 follows its blocker and #57 goes after them.
+  const banner = preview()!;
+  expect(banner).toHaveTextContent("Optimize will move 3 tasks in epic #12 Project management. 1 pinned stays.");
+  expect(banner).toHaveTextContent("Everything outside the selection keeps its place.");
+  expect(screen.getByRole("button", { name: "Optimize" })).toHaveAttribute("aria-pressed", "true");
+  for (const [n, next, was] of [
+    [61, 1, 3],
+    [62, 3, 4],
+    [57, 4, 1],
+  ] as const) {
+    const row = taskRow(n);
+    expect(within(row).getByText(`Next ${next}`)).toBeInTheDocument();
+    expect(within(row).getByText(`was ${was}`)).toBeInTheDocument();
+    expect(cardOf(n)).toHaveAccessibleName(new RegExp(`, Next ${next}, slot \\d, moved by Optimize from Next ${was}$`));
+    expect(cardOf(n)).toHaveAttribute("data-preview", "true");
+    // The card's old place is outlined.
+    expect(row.querySelector("[data-ghost]")).not.toBeNull();
+  }
+  // #58 keeps its place.
+  expect(within(taskRow(58)).getByText("Next 2")).toBeInTheDocument();
+  expect(within(taskRow(58)).queryByText(/^was /)).not.toBeInTheDocument();
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+
+  // Cancel puts every card back and writes nothing.
+  fireEvent.click(within(banner).getByRole("button", { name: "Cancel" }));
+  expect(preview()).not.toBeInTheDocument();
+  expect(within(taskRow(61)).getByText("Next 3")).toBeInTheDocument();
+  expect(within(taskRow(61)).queryByText(/^was /)).not.toBeInTheDocument();
+  expect(cardOf(61)).not.toHaveAttribute("data-preview");
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
+});
+
+test("Apply writes the order and the toast's Undo restores it", async () => {
+  renderOptimize();
+  fireEvent.click(tick(12));
+  fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+  fireEvent.click(within(preview()!).getByRole("button", { name: "Apply" }));
+
+  // Optimize never pins: the write names no pin, and #60 keeps the pin it had.
+  const optimized = [61, 58, 62, 57, 60, 72, 74];
+  await waitFor(() => expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: ORDER, queue: optimized }));
+  expect(preview()).not.toBeInTheDocument();
+  expect(await screen.findByText("Optimized epic #12 Project management")).toBeInTheDocument();
+  expect(screen.getByText("Moved 3 tasks. 1 pinned stayed.")).toBeInTheDocument();
+  expect(router.refresh).toHaveBeenCalled();
+  // The cards show the new order until the next read from GitHub, with no preview marks.
+  expect(cardOf(61)).toHaveAccessibleName("#61 Story page with its tasks, Next 1, slot 3");
+  expect(cardOf(60)).toHaveAccessibleName(/, Next 5, slot \d, pinned$/);
+  expect(within(taskRow(61)).queryByText(/^was /)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  await waitFor(() => expect(actions.writeOrderAction).toHaveBeenLastCalledWith({ projectId: "p1", shown: optimized, queue: ORDER }));
+  expect(await screen.findByText("Put the order back")).toBeInTheDocument();
+  expect(within(taskRow(61)).getByText("Next 3")).toBeInTheDocument();
+  expect(actions.writeOrderAction).toHaveBeenCalledTimes(2);
+});
+
+test("pinned cards and tasks outside the selection keep their places", async () => {
+  renderOptimize();
+  // The whole plan: #60 is pinned at Next 5 and stays there.
+  fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+  expect(preview()).toHaveTextContent("Optimize will move 3 tasks in the plan. 1 pinned stays.");
+  expect(preview()).toHaveTextContent("Pinned tasks keep their places.");
+  expect(within(taskRow(60)).getByText("Next 5")).toBeInTheDocument();
+  expect(within(taskRow(60)).queryByText(/^was /)).not.toBeInTheDocument();
+  expect(cardOf(60)).not.toHaveAttribute("data-preview");
+
+  // Story #41 alone: #58 and #57 trade places, and #61, which the whole plan put first, keeps Next 3.
+  fireEvent.click(tick(41));
+  expect(preview()).toHaveTextContent("Optimize will move 2 tasks in story #41 Shaping with the assistant.");
+  expect(preview()).not.toHaveTextContent("pinned");
+  expect(within(taskRow(58)).getByText("was 2")).toBeInTheDocument();
+  expect(within(taskRow(57)).getByText("was 1")).toBeInTheDocument();
+  for (const [n, next] of [
+    [61, 3],
+    [62, 4],
+    [60, 5],
+    [72, 6],
+    [74, 7],
+  ] as const) {
+    expect(within(taskRow(n)).getByText(`Next ${next}`)).toBeInTheDocument();
+    expect(within(taskRow(n)).queryByText(/^was /)).not.toBeInTheDocument();
+  }
+
+  fireEvent.click(within(preview()!).getByRole("button", { name: "Apply" }));
+  await waitFor(() => expect(actions.writeOrderAction).toHaveBeenCalledWith({ projectId: "p1", shown: ORDER, queue: [58, 57, 61, 62, 60, 72, 74] }));
+  expect(await screen.findByText("Optimized story #41 Shaping with the assistant")).toBeInTheDocument();
+  expect(screen.getByText("Moved 2 tasks.")).toBeInTheDocument();
+});
+
+test("under Priority order Optimize asks to switch to Project order before its preview", async () => {
+  renderOptimize({ flow: designFlow({ pins: new Set([60]), order: "priority", priorityOptions: ["P0", "P1"] }) });
+  fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+  let dialog = await screen.findByRole("dialog", { name: "The scheduler starts tasks by Priority" });
+  expect(dialog).toHaveTextContent("Switch it to Project order to optimize the order?");
+  expect(preview()).not.toBeInTheDocument();
+
+  // Cancel leaves the order and shows no preview.
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getByRole("button", { name: "Optimize" })).toHaveAttribute("aria-pressed", "false");
+  expect(schedulerActions.switchToProjectOrderAction).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+  dialog = await screen.findByRole("dialog", { name: "The scheduler starts tasks by Priority" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Switch to Project order" }));
+  await waitFor(() => expect(schedulerActions.switchToProjectOrderAction).toHaveBeenCalledWith({ projectId: "p1" }));
+  expect(await screen.findByRole("status", { name: "Optimize preview" })).toHaveTextContent("Optimize will move 3 tasks in the plan. 1 pinned stays.");
+  expect(actions.writeOrderAction).not.toHaveBeenCalled();
 });

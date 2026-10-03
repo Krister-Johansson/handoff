@@ -34,3 +34,18 @@ export function schedulerNote(flow: Pick<Flow, "held">, scheduler: SchedulerBrie
 
 /** A sentence with a lower-case first letter, to end a card's name: "waits on you: review". */
 export const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** "1 task" or "3 tasks". */
+export const tasksText = (n: number) => `${n} ${n === 1 ? "task" : "tasks"}`;
+
+/** "1 pinned stays." or "2 pinned stay.", after Apply "stayed."; nothing without pins in the scope. */
+const keptText = (kept: number, past = false) => (kept === 0 ? "" : ` ${kept} pinned ${past ? "stayed" : kept === 1 ? "stays" : "stay"}.`);
+
+/** What Optimize's preview says it will do: "Optimize will move 3 tasks in epic #12 Project management. 1 pinned stays." */
+export function previewSentence(moved: number, kept: number, scope: string): string {
+  const head = moved === 0 ? `Optimize finds nothing to move in ${scope}.` : `Optimize will move ${tasksText(moved)} in ${scope}.`;
+  return `${head}${keptText(kept)}`;
+}
+
+/** What the toast says after Optimize's Apply: "Moved 3 tasks. 1 pinned stayed." */
+export const appliedSentence = (moved: number, kept: number) => `Moved ${tasksText(moved)}.${keptText(kept, true)}`;
