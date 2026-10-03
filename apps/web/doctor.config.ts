@@ -14,6 +14,14 @@ export default defineConfig({
         files: ["src/app/api/webhooks/github/route.ts"],
         rules: ["react-doctor/webhook-signature-risk"],
       },
+      {
+        // The MCP Apps sandbox proxy's frame. The specification (2026-01-26, "Sandbox proxy") requires
+        // allow-scripts and allow-same-origin on it; its document comes from another origin (a port of its own,
+        // src/server/mcp-apps-sandbox.ts), so it cannot reach the dashboard, and the view inside it runs with
+        // allow-scripts only.
+        files: ["src/components/assistant/app-view.tsx"],
+        rules: ["react-doctor/iframe-missing-sandbox"],
+      },
     ],
   },
 });

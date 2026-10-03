@@ -25,7 +25,15 @@ export type ToolSpec<I extends z.ZodRawShape = z.ZodRawShape> = {
   idempotent?: boolean;
   /** One sentence for the approval card and the tool card. */
   summarize: (args: z.infer<z.ZodObject<I>>) => string;
+  /**
+   * The ui:// resource of its MCP Apps view, which draws its result: _meta.ui.resourceUri on /api/mcp, and the
+   * card the assistant panel shows for the call.
+   */
+  view?: string;
 };
+
+/** The run card's ui:// resource: get_run's result drawn as a card. */
+export const RUN_CARD_URI = "ui://handoff/run-card.html";
 
 const spec = <I extends z.ZodRawShape>(s: ToolSpec<I>) => s as unknown as ToolSpec;
 
@@ -230,6 +238,7 @@ export const CATALOG: ToolSpec[] = [
     readOnly: true,
     untrusted: true,
     summarize: (a) => `Show run ${short(a.run_id)}`,
+    view: RUN_CARD_URI,
   }),
   spec({
     name: "get_run_events",
@@ -840,6 +849,11 @@ export function toolSpec(name: string): ToolSpec | PageToolSpec {
   const found = BY_NAME.get(name) ?? pageToolSpec(name);
   if (!found) throw new Error(`There is no tool ${name}.`);
   return found;
+}
+
+/** The ui:// resource of a catalog tool's MCP Apps view, if it has one. */
+export function viewOf(name: string): string | undefined {
+  return BY_NAME.get(name)?.view;
 }
 
 /** The MCP annotations a tool's spec implies. */

@@ -2,19 +2,18 @@
 
 import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
-import { toolSpec } from "@/lib/assistant/catalog";
+import { toolSpec, viewOf } from "@/lib/assistant/catalog";
 import { isPageToolName } from "@/lib/assistant/page-tools";
 import { runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
 import { pageDescriptor, runUiTool } from "@/lib/assistant/run-ui-tool";
+import { runViewTool, type ViewToolCall, type ViewToolResult } from "@/lib/assistant/view-tools";
 import { pageToolsOnWebMcp, registerWebMcp, type WebMcpHost } from "@/lib/assistant/webmcp";
 import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
 import type { AssistantPort, ChatMessage, PendingRequest, ToolCallView } from "@/lib/assistant/port";
-import { httpTransport, type AssistantTransport, type ChatList, type ChatListQuery, type ConversationSummary, type StoredConversation, type StoredMessage } from "@/lib/assistant/transport";
+import { httpTransport, type AppViewResource, type AssistantTransport, type ChatList, type ChatListQuery, type ConversationSummary, type StoredConversation, type StoredMessage } from "@/lib/assistant/transport";
 import { useChatList } from "./use-chat-list";
+import { usePageApprovals } from "./use-page-approvals";
 import { streamingReply, useTurnStream } from "./use-turn-stream";
-
-/** How long a browser agent's approval card waits for the person before the call is denied. */
-const AGENT_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * Where this browser keeps the open chat's id, so a reload opens it again. The panel lives in the root
@@ -45,6 +44,13 @@ type PanelState = {
   messages: ChatMessage[];
   /** Approval cards for tools a browser agent called through WebMCP, outside any conversation. */
   agentRequests: PendingRequest[];
+  /** Approval cards for tools an MCP Apps view called, each under the card of the call it draws (`viewCallId`). */
+  viewRequests: PendingRequest[];
+  /**
+   * Runs a tool an MCP Apps view calls, from the card of tool call `viewCallId`: one of the catalog's server tools,
+   * after an approval card when the catalog asks for one. Aborting `signal` (the card going) denies an open card.
+   */
+  callViewTool(viewCallId: string, call: ViewToolCall, signal?: AbortSignal): Promise<ViewToolResult>;
   /** What a browser agent is doing now, for the status line. */
   agentActivity: string | undefined;
   /** Why the assistant is unavailable: no OAuth token, or switched off in Settings. */
@@ -70,6 +76,8 @@ type PanelState = {
   deleteChat(id: string): Promise<void>;
   /** Reads chats for a list of its own, such as the Chats page: every pinned one, then up to `limit` others. */
   listChats(query: ChatListQuery): Promise<ChatList>;
+  /** Reads a tool's MCP Apps view by its ui:// resource, to draw its calls as cards. */
+  loadView(uri: string): Promise<AppViewResource>;
 };
 
 const PortContext = createContext<AssistantPort | undefined>(undefined);
@@ -119,7 +127,8 @@ function callView(call: { id: string; name: string; args: unknown; result?: stri
     // A tool the catalog no longer has keeps its name.
   }
   const status = call.approval?.approved === false ? "denied" : call.isError ? "failed" : "done";
-  return { id: call.id, name: call.name, title, summary, status, ...(call.result !== undefined ? { result: call.result } : {}) };
+  const view = viewOf(call.name);
+  return { id: call.id, name: call.name, title, summary, status, args: call.args, ...(call.result !== undefined ? { result: call.result } : {}), ...(view ? { view } : {}) };
 }
 
 /** A stored message as the panel shows it. */
@@ -179,9 +188,9 @@ export function AssistantProvider({
   const chatList = useChatList(transport);
   const { chats, version: chatsVersion, refresh: refreshChats, changed: chatsChanged, pin: pinChat, list: listChats } = chatList;
   const router = useRouter();
-  const [agentRequests, setAgentRequests] = useState<PendingRequest[]>([]);
+  const approvals = usePageApprovals();
+  const { agentRequests, viewRequests } = approvals;
   const [agentActivity, setAgentActivity] = useState<string>();
-  const agentPending = useRef(new Map<string, (answer: { approved: boolean; note?: string }) => void>());
   const webMcpEnabled = useWebMcpEnabled();
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const loads = useLoads();
@@ -263,30 +272,27 @@ export function AssistantProvider({
 
   const respond = useCallback(
     async (requestId: string, decision: { approve: boolean; note?: string }) => {
-      const agentAnswer = agentPending.current.get(requestId);
-      if (agentAnswer) return agentAnswer({ approved: decision.approve, ...(decision.note ? { note: decision.note } : {}) });
-      if (!turnId.current) return;
-      await transport.reply(turnId.current, requestId, { approved: decision.approve, ...(decision.note ? { note: decision.note } : {}) });
+      const answer = { approved: decision.approve, ...(decision.note ? { note: decision.note } : {}) };
+      // A card for a call made in this page (a browser agent's or a view's), else one of the running turn's.
+      if (approvals.answer(requestId, answer) || !turnId.current) return;
+      await transport.reply(turnId.current, requestId, answer);
     },
-    [transport, turnId],
+    [transport, turnId, approvals],
   );
 
-  // Asks the person about a browser agent's call on an approval card in the panel; no answer in time denies it.
+  // A browser agent's call opens the panel on its approval card.
   const approveForAgent = useEffectEvent((call: { name: string; title: string; summary: string; args: unknown }) => {
-    const requestId = `agent-${crypto.randomUUID()}`;
     open();
-    return new Promise<{ approved: boolean; note?: string }>((resolve) => {
-      const settle = (answer: { approved: boolean; note?: string }) => {
-        clearTimeout(timer);
-        agentPending.current.delete(requestId);
-        setAgentRequests((list) => list.filter((r) => r.requestId !== requestId));
-        resolve(answer);
-      };
-      const timer = setTimeout(() => settle({ approved: false, note: "No one approved this in time." }), AGENT_APPROVAL_TIMEOUT_MS);
-      agentPending.current.set(requestId, settle);
-      setAgentRequests((list) => [...list, { requestId, ...call, status: "open", expiresAt: new Date(Date.now() + AGENT_APPROVAL_TIMEOUT_MS).toISOString() }]);
-    });
+    return approvals.ask(call);
   });
+
+  // A view's tools/call: any of the catalog's server tools, after the approval card for those that need one.
+  const ask = approvals.ask;
+  const callViewTool = useCallback(
+    (viewCallId: string, call: ViewToolCall, signal?: AbortSignal) =>
+      runViewTool(call, { approve: (request) => ask(request, { viewCallId, signal }), run: (name, args) => transport.callTool(name, args) }),
+    [ask, transport],
+  );
 
   // WebMCP: while this browser allows it, every dashboard page offers the catalog to agents in the browser.
   useEffect(() => {
@@ -409,11 +415,14 @@ export function AssistantProvider({
   );
 
   useRestoreOpenChat(transport, loads, displayChat);
+  const loadView = useCallback((uri: string) => transport.view(uri), [transport]);
 
   const panel = useMemo<PanelState>(
     () => ({
       messages,
       agentRequests,
+      viewRequests,
+      callViewTool,
       agentActivity,
       offReason,
       conversationId,
@@ -429,8 +438,9 @@ export function AssistantProvider({
       pinChat,
       deleteChat,
       listChats,
+      loadView,
     }),
-    [messages, agentRequests, agentActivity, offReason, conversationId, conversation, openConversation, newConversation, chats, chatsVersion, refreshChats, openChat, startChat, renameChat, pinChat, deleteChat, listChats],
+    [messages, agentRequests, viewRequests, callViewTool, agentActivity, offReason, conversationId, conversation, openConversation, newConversation, chats, chatsVersion, refreshChats, openChat, startChat, renameChat, pinChat, deleteChat, listChats, loadView],
   );
 
   return (
