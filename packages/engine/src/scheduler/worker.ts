@@ -37,7 +37,7 @@ import { budgetFor, freshIssues, otherWorkOf } from "../planning.ts";
 import type { GitHubPort } from "@handoff/github";
 import { runAllowRules } from "../permissions/broker.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
-import { workdirSpecOf } from "../runs.ts";
+import { defaultRemote, workdirSpecOf } from "../runs.ts";
 import type { ExecutorOutcome, ExecutorRegistry, Workdir, WorkdirProvider, WorkdirSpec } from "../types.ts";
 import { askAboutPaths, completeFailed, completePassed, failAndRetry, LeaseLostError, resolvePaths, releaseForReclaim, scheduleRetry, yieldWaiting } from "./complete.ts";
 
@@ -210,10 +210,6 @@ async function reap(deps: EngineDeps) {
   }
 }
 
-/** Where a project's code is fetched from: its local clone when it has one, else its GitHub repository. */
-export function defaultRemote(project: typeof projects.$inferSelect): string {
-  return project.localClonePath ?? `https://github.com/${project.repoOwner}/${project.repoName}.git`;
-}
 
 async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSignal?: AbortSignal): Promise<void> {
   const { db, workerId } = deps;

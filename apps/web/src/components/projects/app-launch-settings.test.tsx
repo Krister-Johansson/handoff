@@ -99,6 +99,9 @@ test("without a launch file or a setting the section says what fails, and Set up
   const s = section();
   expect(s).toHaveTextContent("Handoff does not know how to start this app");
   expect(s).toHaveTextContent("example-shop has no .claude/launch.json on main.");
+  expect(s).toHaveTextContent(
+    'Until then, Try it and demo steps in this project stop with "This repository has no .claude/launch.json and the project has no App launch setting, so handoff does not know how to start the app."',
+  );
   expect(within(s).getByRole("link", { name: /About launch.json/ })).toHaveAttribute("href", "https://code.claude.com/docs/en/desktop");
   fireEvent.click(within(s).getByRole("button", { name: "Set up here" }));
   expect(within(s).getByRole("textbox", { name: "Command" })).toHaveValue("");

@@ -329,7 +329,7 @@ function TestResult({ test, now, onStop, onRetry, busy }: { test: LaunchTestView
             </span>
             {resultTitle(test)}
           </p>
-          <p className="truncate text-xs text-muted-foreground">
+          <p className="text-xs break-words text-muted-foreground">
             Test start{test.command && `, ${test.command}`}
             {test.port && ` on port ${test.port}`}
           </p>
@@ -550,6 +550,13 @@ function NotSetUp({ view, onSetUp }: { view: AppLaunchView; onSetUp: () => void 
             </a>
           </Button>
         </EmptyContent>
+        <p className="flex max-w-lg items-start gap-2 rounded-md border border-dashed px-3 py-2 text-left text-xs text-muted-foreground">
+          <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+          <span>
+            Until then, Try it and demo steps in this project stop with &quot;This repository has no .claude/launch.json and the project has no App launch setting, so handoff does not
+            know how to start the app.&quot;
+          </span>
+        </p>
       </Empty>
       <UnknownNote view={view} />
     </>

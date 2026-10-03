@@ -1,7 +1,7 @@
-import { commandLine, type LaunchConfiguration } from "@handoff/core";
+import { commandLine, redactSecrets, type LaunchConfiguration } from "@handoff/core";
 import { and, desc, eq, inArray, launchTests, projects, type Db, type LaunchTestStep, type LaunchTestStepName } from "@handoff/db";
 import { shell } from "../contract/checks.ts";
-import { defaultRemote } from "../scheduler/worker.ts";
+import { defaultRemote } from "../runs.ts";
 import type { WorkdirProvider, WorkdirSpec } from "../types.ts";
 import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
 import { launchApp, launchConfigurationFor, logTail, PreviewError, stopGroup, type DockerExec } from "./preview.ts";
@@ -102,7 +102,7 @@ export async function startLaunchTest(deps: LaunchTestDeps, opts: StartLaunchTes
         workdir = await deps.workdirs.acquire(spec);
       } catch (error) {
         step("worktree", "failed", `Could not check out ${project.defaultBranch}`);
-        throw error;
+        throw new PreviewError(`Handoff could not make a fresh worktree of ${project.defaultBranch}.`, redactSecrets((error as Error).message.trim()));
       }
       step("worktree", "done", `A fresh worktree of ${project.defaultBranch} at ${workdir.baseSha.slice(0, 7)}`);
       save({ worktreePath: workdir.path });

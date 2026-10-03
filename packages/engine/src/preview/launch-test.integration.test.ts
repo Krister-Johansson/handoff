@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
 import { SETTING_CONFIGURATION, type LaunchConfiguration } from "@handoff/core";
-import { projects } from "@handoff/db";
+import { eq, projects } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { createOriginRepo } from "../testing/git.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
@@ -51,7 +51,7 @@ async function project(files: Record<string, string>, values: Partial<typeof pro
     .insert(projects)
     .values({ name: `p-${crypto.randomUUID()}`, repoOwner: "o", repoName: "r", defaultBranch: "main", localClonePath: origin, ...values })
     .returning();
-  const deps = { db, workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) };
+  const deps = { db, workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")), retryMs: 10 }) };
   return { project: row!, deps, origin };
 }
 
@@ -99,6 +99,14 @@ test("a setup command that fails stops the Test start there, with its output", a
     ["worktree", "done"],
     ["setup", "failed"],
   ]);
+});
+
+test("a repository handoff cannot check out fails at the worktree, with git's own words as the log", async () => {
+  const { project: p, deps } = await project({ "app.js": server });
+  await db.update(projects).set({ localClonePath: join(tmpdir(), "handoff-no-such-repo") }).where(eq(projects.id, p.id));
+  const failed = await (await startLaunchTest(deps, { projectId: p.id, launch: form() })).finished;
+  expect(failed).toMatchObject({ status: "failed", error: "Handoff could not make a fresh worktree of main.", log: expect.stringContaining("handoff-no-such-repo") });
+  expect(failed.steps).toEqual([{ name: "worktree", status: "failed", detail: "Could not check out main", ms: expect.any(Number) }]);
 });
 
 test("the repository's launch file wins over the form", async () => {
