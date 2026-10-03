@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useOptionalAssistant, useOptionalAssistantPanel } from "@/components/assistant/assistant-provider";
+import type { PendingRequest } from "@/lib/assistant/port";
 import { setNotificationVoice } from "@/lib/notify";
 import { approvalAnswer } from "@/lib/voice/approval-answer";
 import { confirmQuestion } from "@/lib/voice/confirm-question";
@@ -110,7 +111,9 @@ export function VoiceProvider({
   // A card answered with its buttons no longer waits for a spoken answer.
   const waitingId = shownBubble.approval?.requestId;
   const stillOpen = Boolean(
-    waitingId && panel?.messages.some((m) => m.role === "assistant" && m.requests.some((r) => r.requestId === waitingId && r.status === "open")),
+    waitingId &&
+      (panel?.messages.some((m) => m.role === "assistant" && m.requests.some((r) => r.requestId === waitingId && r.status === "open")) ||
+        panel?.viewRequests.some((r) => r.requestId === waitingId)),
   );
   const bubble = useMemo<Bubble>(() => (waitingId && !stillOpen ? { ...shownBubble, approval: undefined } : shownBubble), [shownBubble, stillOpen, waitingId]);
   const latest = useRef({ assistant, panel, bubble, speaker });
@@ -229,6 +232,33 @@ export function VoiceProvider({
     cancelAnswer();
     speaker?.stop();
   }, [cancelAnswer, speaker]);
+  // A confirmation card while the bubble is open: its question is read out, then the bubble listens once
+  // for the answer; Ctrl+M listens again after that.
+  const cardAfterSpeech = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => () => cardAfterSpeech.current?.(), []);
+  const askByVoice = useCallback(
+    (request: PendingRequest) => {
+      if (!latest.current.bubble.open) return;
+      cardAfterSpeech.current?.();
+      cardAfterSpeech.current = undefined;
+      setBubble((b) => ({ ...b, approval: { requestId: request.requestId }, misheard: undefined }));
+      say(`${confirmQuestion(request)} Say yes or no.`);
+      const listen = () => {
+        cardAfterSpeech.current = undefined;
+        const shown = latest.current.bubble;
+        if (shown.open && shown.approval?.requestId === request.requestId) void startInput("command");
+      };
+      const speaking = latest.current.speaker;
+      if (!speaking?.isSpeaking()) return listen();
+      const off = speaking.subscribe(() => {
+        if (speaking.isSpeaking()) return;
+        off();
+        listen();
+      });
+      cardAfterSpeech.current = off;
+    },
+    [say, startInput],
+  );
   // The bubble's question gets its reply spoken, and a confirmation card is read out with how to answer it.
   const onReply = assistant?.onReply;
   const onRequest = assistant?.onRequest;
@@ -246,28 +276,24 @@ export function VoiceProvider({
       // A reply that asks something back is answered by voice too: the bubble listens once more.
       if (asksBack(reply.text)) listenForAnswer(shown.question);
     });
-    const offRequest = onRequest((request) => {
-      if (!latest.current.bubble.open) return;
-      setBubble((b) => ({ ...b, approval: { requestId: request.requestId }, misheard: undefined }));
-      say(`${confirmQuestion(request)} Say yes or no.`);
-      // Once the card is read out, listen once for the answer; Ctrl+M listens again after that.
-      const listen = () => {
-        const shown = latest.current.bubble;
-        if (shown.open && shown.approval?.requestId === request.requestId) void startInput("command");
-      };
-      const speaking = latest.current.speaker;
-      if (!speaking?.isSpeaking()) return listen();
-      const off = speaking.subscribe(() => {
-        if (speaking.isSpeaking()) return;
-        off();
-        listen();
-      });
-    });
+    const offRequest = onRequest(askByVoice);
     return () => {
       offReply();
       offRequest();
     };
-  }, [onReply, onRequest, say, sayWhenQuiet, startInput, listenForAnswer]);
+  }, [onReply, onRequest, say, sayWhenQuiet, listenForAnswer, askByVoice]);
+
+  // A call an MCP Apps view made waits on a card too; while the bubble is open it is asked by voice
+  // like a turn's card. Each card is asked once.
+  const viewRequests = panel?.viewRequests;
+  const askedViewCards = useRef(new Set<string>());
+  useEffect(() => {
+    for (const request of viewRequests ?? []) {
+      if (askedViewCards.current.has(request.requestId)) continue;
+      askedViewCards.current.add(request.requestId);
+      askByVoice(request);
+    }
+  }, [viewRequests, askByVoice]);
 
   const closeBubble = useCallback(() => {
     cancelAnswer();

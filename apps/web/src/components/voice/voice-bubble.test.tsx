@@ -1,7 +1,8 @@
+import { useEffect, type ReactNode } from "react";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { AssistantPanel } from "@/components/assistant/assistant-panel";
-import { AssistantProvider } from "@/components/assistant/assistant-provider";
+import { AssistantProvider, useAssistantPanel } from "@/components/assistant/assistant-provider";
 import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
 import { DEFAULT_VOICE_PREFS } from "@/lib/voice/prefs";
 import { createSpeaker } from "@/lib/voice/speaker";
@@ -25,7 +26,7 @@ beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-function App({ available = true, panel = false }: { available?: boolean; panel?: boolean }) {
+function App({ available = true, panel = false, children }: { available?: boolean; panel?: boolean; children?: ReactNode }) {
   const speaker = createSpeaker(synth, () => DEFAULT_VOICE_PREFS);
   return (
     <AssistantProvider transport={transport} available={available}>
@@ -33,6 +34,7 @@ function App({ available = true, panel = false }: { available?: boolean; panel?:
         <VoiceHotkeys />
         <VoiceBubble />
         {panel && <AssistantPanel />}
+        {children}
         <main>
           <h1>Projects</h1>
         </main>
@@ -270,6 +272,71 @@ test("a long spoken reply stops after three sentences and says the rest is on sc
   for (let i = 0; i < 6; i++) act(() => synth.finishCurrent());
   expect(said()).toEqual(["One.", "Two.", "Three.", "The rest is on screen."]);
   expect(bubble()).toHaveTextContent("One. Two. Three. Four. Five.");
+});
+
+/** The panel's tool runner for MCP Apps views, as a view's frame reaches it. */
+const viewTools: { call?: ReturnType<typeof useAssistantPanel>["callViewTool"] } = {};
+function GrabViewTools() {
+  const { callViewTool } = useAssistantPanel();
+  useEffect(() => {
+    viewTools.call = callViewTool;
+  }, [callViewTool]);
+  return null;
+}
+
+const RUN = "7f3a1b2c-0000-4000-8000-000000000000";
+
+test("a view's call that needs approval shows in the open bubble as a confirmation card, and a spoken yes confirms it", async () => {
+  transport.toolResults.set("cancel_run", { id: RUN, status: "cancelled" });
+  render(
+    <App>
+      <GrabViewTools />
+    </App>,
+  );
+  await ask("what needs me");
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "done", text: "Run 7f3a waits." }));
+  act(() => synth.finishCurrent());
+  let result: unknown;
+  act(() => void viewTools.call!("u1", { name: "cancel_run", arguments: { run_id: RUN } }).then((r) => (result = r)));
+  const card = await within(bubble()).findByRole("group", { name: "Cancel run 7f3a1b2c?" });
+  expect(within(card).getByRole("button", { name: "Confirm" })).toBeInTheDocument();
+  expect(within(card).queryByRole("textbox")).not.toBeInTheDocument();
+  await waitFor(() => expect(said().at(-1)).toBe("Cancel run 7f3a1b2c?"));
+  act(() => synth.finishCurrent());
+  act(() => synth.finishCurrent());
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(2));
+  expect(transport.toolCalls).toEqual([]);
+  act(() => recognizer().emitStart());
+  expect(bubble()).toHaveTextContent("Say yes or no");
+  act(() => recognizer().emitResult("yes", true));
+  act(() => recognizer().emitEnd());
+  await waitFor(() => expect(result).toEqual({ content: [{ type: "text", text: JSON.stringify({ id: RUN, status: "cancelled" }, null, 2) }] }));
+  expect(transport.toolCalls).toEqual([{ name: "cancel_run", args: { run_id: RUN } }]);
+  // The answer was not sent to the assistant as a question.
+  expect(transport.turns).toHaveLength(1);
+});
+
+test("a spoken no with words after it cancels a view's call with them as the note", async () => {
+  render(
+    <App>
+      <GrabViewTools />
+    </App>,
+  );
+  await ask("what needs me");
+  await waitFor(() => expect(transport.turns).toHaveLength(1));
+  let result: unknown;
+  act(() => void viewTools.call!("u1", { name: "cancel_run", arguments: { run_id: RUN } }).then((r) => (result = r)));
+  await within(bubble()).findByRole("group", { name: "Cancel run 7f3a1b2c?" });
+  act(() => synth.finishCurrent());
+  act(() => synth.finishCurrent());
+  await waitFor(() => expect(FakeSpeechRecognition.instances).toHaveLength(2));
+  act(() => recognizer().emitStart());
+  act(() => recognizer().emitResult("no, let it finish", true));
+  act(() => recognizer().emitEnd());
+  await waitFor(() => expect(result).toEqual({ content: [{ type: "text", text: "The person did not approve this: let it finish." }], isError: true }));
+  expect(transport.toolCalls).toEqual([]);
 });
 
 /** A window as wide as a phone (`phone`) or a laptop: only the phone query matches on a phone. */
