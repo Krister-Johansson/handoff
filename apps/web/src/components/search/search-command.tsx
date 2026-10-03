@@ -16,7 +16,11 @@ import { isSearchShortcut } from "@/lib/search/shortcut";
 import type { SearchRecords, SearchTasks } from "@/lib/search/types";
 import { SearchDialog } from "./search-dialog";
 
-/** What search covers: a project (the open page's, or the one used last when none), or every project. */
+/**
+ * What search covers: a project (the open page's, or the one used last when none), or every project. A
+ * project given here (the page's, or one picked in the chip) keeps search to it; the one used last also
+ * shows what other projects hold, under Other projects.
+ */
 type Scope = { projectId: string | undefined; all: boolean };
 
 const NO_TASKS: SearchTasks = { tasks: [], sources: [] };
@@ -130,6 +134,8 @@ export function SearchCommand() {
         records={records}
         tasks={tasks}
         all={scope.all}
+        // On a project's page, or with a project picked in the chip, search keeps to that project.
+        onlyProject={!scope.all && scope.projectId !== undefined}
         pageProjectId={pageProjectId}
         onPickProject={(id) => read({ projectId: id, all: false })}
         onAllProjects={() => {

@@ -1,8 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useSyncExternalStore } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useIsDark } from "@/hooks/use-is-dark";
 
 type EditorProps = { value: string; onChange: (value: string) => void; label: string; isMarkdown: boolean; dark: boolean };
 
@@ -36,16 +36,8 @@ const Editor = dynamic(
   { ssr: false, loading: () => <Skeleton className="h-96 w-full" /> },
 );
 
-// The app is dark when <html> has the .dark class (Tailwind's class-based dark variant).
-const isDark = () => document.documentElement.classList.contains("dark");
-const subscribe = (onChange: () => void) => {
-  const observer = new MutationObserver(onChange);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  return () => observer.disconnect();
-};
-
 /** CodeMirror with markdown highlighting (and highlighted code blocks) or plain text, in the app's theme. */
 export function CodeEditor(props: Omit<EditorProps, "dark">) {
-  const dark = useSyncExternalStore(subscribe, isDark, () => false);
+  const dark = useIsDark();
   return <Editor {...props} dark={dark} />;
 }

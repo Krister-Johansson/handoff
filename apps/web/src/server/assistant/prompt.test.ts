@@ -76,3 +76,26 @@ test("the system prompt sizes tasks with set_size and lays out dates from sizes 
   expect(shaping).toMatch(/set_size when the person sizes them/);
   expect(shaping).toMatch(/arrange_plan[^.]*then[^.]*schedule/);
 });
+
+test("a turn in a chat on a project names the project, so tools that take a project use it without a list_projects detour", () => {
+  const project = { id: "p1", name: "todooverkill" };
+  const prompt = turnPrompt("what is the status for task #151?", "typed", undefined, project);
+  const [head, question] = prompt.split("\n</project>\n");
+  expect(head).toMatch(/^<project name="todooverkill">\n/);
+  expect(head).toContain("This chat is on project todooverkill.");
+  expect(head).toMatch(/Tools that take a project use todooverkill when the call leaves project out/);
+  expect(head).toMatch(/list_projects/);
+  expect(head).toMatch(/another project only when the person names it or asks across projects/);
+  expect(question).toBe("what is the status for task #151?");
+  // The project comes before the page, and a spoken question still starts with its instruction.
+  const spoken = turnPrompt("status of 151", "voice", runPage, project);
+  expect(spoken).toMatch(/^\(Spoken question/);
+  expect(spoken.endsWith(`${head}\n</project>\n${block}\nstatus of 151`)).toBe(true);
+  // A project's name cannot close the attribute or the block.
+  expect(turnPrompt("hi", "typed", undefined, { id: "p2", name: 'x"></project>' }).split("\n")[0]).toBe('<project name="x&quot;&gt;&lt;/project&gt;">');
+});
+
+test("a turn in a chat without a project carries no project block", () => {
+  expect(turnPrompt("what failed?", "typed", undefined, undefined)).toBe("what failed?");
+  expect(SYSTEM_PROMPT).not.toContain("<project");
+});
