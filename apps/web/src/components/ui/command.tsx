@@ -39,26 +39,31 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  contentProps,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  /** Passed to DialogContent, for its Escape handling and data attributes. */
+  contentProps?: Omit<React.ComponentProps<typeof DialogContent>, "className" | "showCloseButton" | "children">
 }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn(
           "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
           className
         )}
         showCloseButton={showCloseButton}
+        {...contentProps}
       >
+        {/* Inside the content, so the title names the dialog and is gone while it is closed. */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
         {children}
       </DialogContent>
     </Dialog>

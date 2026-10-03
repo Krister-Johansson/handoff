@@ -312,6 +312,18 @@ The scheduler's runs start without you watching, and several can be active on th
 
 The Tester and every Claude step also see the three variables, and the agents are told to name anything they create outside the worktree after `HANDOFF_RUN_SHORT`. `setup_project` warns when the repository has a lockfile and no setup command.
 
+## Search
+
+Cmd+K or Ctrl+K opens search from any page, in a text field too. On a Mac, Ctrl+K in a text field stays "delete to end of line". The top bar's Search button shows the shortcut (⌘K on a Mac, Ctrl K elsewhere); on a phone it is an icon, and search fills the screen with Cancel.
+
+One query finds tasks, runs, pages and chats. Search covers the open page's project, or outside a project the one used last; the chip in the input picks another project or All projects. Runs, chats and names of other projects show under Other projects. Their tasks come only with All projects, since those need GitHub. Before you type, search shows Recent (the last 4 results opened, kept in this browser), the project's active runs and a few pages to go to.
+
+- Results come in groups of 3 with Show more. Tab and Shift+Tab move between the filters All, Tasks, Runs, Pages and Chats.
+- `#` filters to tasks and matches numbers, so `#4` finds #41 to #48. `/` filters to pages and settings sections.
+- Esc clears the query, then closes. Enter opens the result; Cmd+Enter or Ctrl+Enter opens it in a new tab. A chat opens in the assistant panel.
+
+Opening search reads the runs (the latest 200 of each project), chats and projects from Postgres, and the tasks from the plan on GitHub Projects through a cache that lives 60 seconds, so typing never reads GitHub. A project without a plan searches its open issues. When GitHub does not answer, the tasks come from the issues the runs linked, without their status, with Try GitHub again. A Flow project's results show no dates.
+
 ## The assistant
 
 The assist button in the bottom right corner (or Cmd or Ctrl+J) opens the assistant. From 1280 px the panel docks beside the page; below that it floats above the button, and on a phone it fills the width under the top bar. Ask what needs you or how a run is going, or tell it to start, answer, merge, repair or cancel something. It can also open pages for you: the inbox for a project, a run, a review or Try it. The panel stays open while the page behind it changes. The message box has its own microphone for dictation.

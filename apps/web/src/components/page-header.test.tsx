@@ -7,7 +7,7 @@ import { PageHeader } from "./page-header";
 import { TopBar, TopBarCrumbsProvider } from "./top-bar";
 
 const push = vi.hoisted(() => vi.fn());
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }), usePathname: () => "/inbox" }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
 vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => null }));
 vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));

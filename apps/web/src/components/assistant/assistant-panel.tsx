@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BotIcon, Loader2Icon, MinusIcon, ShieldQuestionIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ChatMessage } from "@/lib/assistant/port";
+import { useModKey } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { ApprovalCard } from "./approval-card";
 import { AssistButton } from "./assist-button";
@@ -56,6 +57,7 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 function Empty() {
+  const mod = useModKey();
   return (
     <div className="flex flex-col gap-3 px-1 pt-2">
       <p className="max-w-[360px] text-[13px] leading-[1.55] text-foreground/85">
@@ -63,7 +65,7 @@ function Empty() {
       </p>
       <div className="flex flex-col gap-1.5 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
-          <Kbd>⌘</Kbd>
+          <Kbd>{mod}</Kbd>
           <Kbd>J</Kbd>opens and closes this panel
         </span>
         <span className="flex items-center gap-1.5">
