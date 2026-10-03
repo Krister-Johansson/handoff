@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { useEffect, type ComponentProps } from "react";
+import { act, fireEvent, render as renderInto, screen, waitFor, within } from "@testing-library/react";
+import { useEffect, type ComponentProps, type ReactElement } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { AssistantProvider, useAssistant } from "@/components/assistant/assistant-provider";
 import type { AssistantPort } from "@/lib/assistant/port";
 import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { TryReview } from "./try-review";
 
 const actions = vi.hoisted(() => ({ answerReviewAction: vi.fn(), restartTryItAction: vi.fn() }));
@@ -55,7 +56,14 @@ const props = {
   ],
 };
 
+/** Renders inside the TooltipProvider the app's layout gives every page. */
+const render = (ui: ReactElement) => renderInto(ui, { wrapper: TooltipProvider });
+
 const section = (name: string) => screen.getByRole("region", { name });
+const checkAll = () => {
+  for (const name of props.acceptance) fireEvent.click(within(section(name)).getByRole("checkbox", { name: "Works" }));
+};
+const HELP = "Approve sends the note with the approval. Send back to coder-1 sends it as the change to make.";
 
 test("each criterion is a section to check, with its screenshots, and the app opens from the top", () => {
   render(<TryReview {...props} />);
@@ -93,6 +101,48 @@ test("Approve submits in one click when every criterion works", async () => {
   await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "approve", note: "", comments: [] }));
 });
 
+test("with every criterion working, Add a note opens the Submit popover in the note, and Approve sends the note", async () => {
+  render(<TryReview {...props} />);
+  checkAll();
+  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  const popover = screen.getByRole("dialog");
+  const note = within(popover).getByLabelText("Note (optional)");
+  await waitFor(() => expect(note).toHaveFocus());
+  expect(within(popover).getByText(HELP)).toBeInTheDocument();
+  fireEvent.change(note, { target: { value: "Checked in Safari too." } });
+  fireEvent.click(within(popover).getByRole("button", { name: "Approve" }));
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "approve", note: "Checked in Safari too.", comments: [] }));
+});
+
+test("with every criterion working, a note alone sends the work back to the coder", async () => {
+  render(<TryReview {...props} />);
+  checkAll();
+  fireEvent.click(screen.getByRole("button", { name: "Add a note" }));
+  const popover = screen.getByRole("dialog");
+  expect(within(popover).getByRole("button", { name: "Send back to coder-1" })).toBeDisabled();
+  fireEvent.change(within(popover).getByLabelText("Note (optional)"), { target: { value: "Select the new project after it is created." } });
+  fireEvent.click(within(popover).getByRole("button", { name: "Send back to coder-1" }));
+  await waitFor(() =>
+    expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "changes", note: "Select the new project after it is created.", comments: [] }),
+  );
+});
+
+test("a note kept after the popover closes marks Add a note, and the one-click Approve sends it", async () => {
+  render(<TryReview {...props} />);
+  checkAll();
+  const addNote = screen.getByRole("button", { name: "Add a note" });
+  expect(addNote.querySelector("[data-slot=note-kept]")).toBeNull();
+  fireEvent.click(addNote);
+  fireEvent.change(screen.getByLabelText("Note (optional)"), { target: { value: "Checked at 320 px." } });
+  fireEvent.keyDown(screen.getByLabelText("Note (optional)"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(addNote.querySelector("[data-slot=note-kept]")).not.toBeNull();
+  const approve = screen.getByRole("button", { name: "Approve" });
+  expect(approve).toHaveAccessibleDescription("Approve sends the note with the approval.");
+  fireEvent.click(approve);
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "approve", note: "Checked at 320 px.", comments: [] }));
+});
+
 test("the app link updates when the app is started again", async () => {
   render(<TryReview {...props} />);
   const stream = FakeEventSource.instances.at(-1)!;
@@ -122,6 +172,8 @@ test("a criterion that does not work stays open for what is wrong, and goes back
   fireEvent.change(within(second).getByLabelText("What is wrong?"), { target: { value: "It shows only after a reload." } });
   fireEvent.click(screen.getByRole("button", { name: "Submit" }));
   expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+  // The help line is for a note alone; here the failing criteria are what goes back.
+  expect(screen.queryByText(HELP)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Send back to coder-1" }));
   await waitFor(() =>
     expect(actions.answerReviewAction).toHaveBeenCalledWith(
