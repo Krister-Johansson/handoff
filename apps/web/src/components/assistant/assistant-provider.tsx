@@ -55,8 +55,12 @@ type PanelState = {
   /** Opens a chat in the panel, letting go of the one that streams. Throws when there is no such chat. */
   openConversation(id: string): Promise<void>;
   newConversation(): void;
-  /** The sidebar's chats: every pinned one, the six most recent others, and how many there are. Undefined until read. */
+  /** The sidebar's chats: every pinned one, the most recent others, and how many there are. Undefined until read. */
   chats: ChatList | undefined;
+  /** Whether some chats are not in `chats` yet. */
+  moreChats: boolean;
+  /** Reads the next chats into `chats`, as the sidebar's Recents scrolls to its end. */
+  showMoreChats(): Promise<void>;
   /** Changes whenever a chat is started, renamed, pinned, deleted or answers, so other lists can read again. */
   chatsVersion: number;
   refreshChats(): Promise<void>;
@@ -177,7 +181,7 @@ export function AssistantProvider({
   const [conversation, setConversation] = useState<ConversationSummary>();
   const conversationId = conversation?.id;
   const chatList = useChatList(transport);
-  const { chats, version: chatsVersion, refresh: refreshChats, changed: chatsChanged, pin: pinChat, list: listChats } = chatList;
+  const { chats, version: chatsVersion, refresh: refreshChats, changed: chatsChanged, pin: pinChat, list: listChats, more: moreChats, showMore: showMoreChats } = chatList;
   const router = useRouter();
   const [agentRequests, setAgentRequests] = useState<PendingRequest[]>([]);
   const [agentActivity, setAgentActivity] = useState<string>();
@@ -421,6 +425,8 @@ export function AssistantProvider({
       openConversation,
       newConversation,
       chats,
+      moreChats,
+      showMoreChats,
       chatsVersion,
       refreshChats,
       showChat: openChat,
@@ -430,7 +436,7 @@ export function AssistantProvider({
       deleteChat,
       listChats,
     }),
-    [messages, agentRequests, agentActivity, offReason, conversationId, conversation, openConversation, newConversation, chats, chatsVersion, refreshChats, openChat, startChat, renameChat, pinChat, deleteChat, listChats],
+    [messages, agentRequests, agentActivity, offReason, conversationId, conversation, openConversation, newConversation, chats, moreChats, showMoreChats, chatsVersion, refreshChats, openChat, startChat, renameChat, pinChat, deleteChat, listChats],
   );
 
   return (
