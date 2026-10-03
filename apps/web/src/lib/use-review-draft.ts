@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 
-type Draft<T> = { comments: T[]; note: string };
+/** `choices` holds what the person picked for a code reviewer's findings, by their place in the review. */
+type Draft<T> = { comments: T[]; note: string; choices: Record<number, string> };
 
 const keyOf = (questionId: string) => `handoff:review-draft:${questionId}`;
 
@@ -41,17 +42,18 @@ function subscribe(listener: () => void) {
 function parse<T>(raw: string | null): Draft<T> {
   try {
     const draft = raw ? (JSON.parse(raw) as Partial<Draft<T>>) : {};
-    return { comments: Array.isArray(draft.comments) ? draft.comments : [], note: typeof draft.note === "string" ? draft.note : "" };
+    const choices = draft.choices && typeof draft.choices === "object" && !Array.isArray(draft.choices) ? draft.choices : {};
+    return { comments: Array.isArray(draft.comments) ? draft.comments : [], note: typeof draft.note === "string" ? draft.note : "", choices };
   } catch {
-    return { comments: [], note: "" };
+    return { comments: [], note: "", choices: {} };
   }
 }
 
-const save = <T,>(key: string, draft: Draft<T>) => store(key, draft.comments.length === 0 && !draft.note ? null : JSON.stringify(draft));
+const save = <T,>(key: string, draft: Draft<T>) => store(key, draft.comments.length === 0 && !draft.note && Object.keys(draft.choices).length === 0 ? null : JSON.stringify(draft));
 
 /**
- * A review's unsent comments and overall comment, kept in this browser until the review is sent, so
- * leaving the page loses nothing. The server renders an empty draft; the browser's copy follows.
+ * A review's unsent comments, overall comment and choices for its findings, kept in this browser until
+ * the review is sent, so leaving the page loses nothing. The server renders an empty draft; the browser's copy follows.
  */
 export function useReviewDraft<T>(questionId: string, enabled = true) {
   const key = keyOf(questionId);
@@ -71,6 +73,13 @@ export function useReviewDraft<T>(questionId: string, enabled = true) {
     [key],
   );
   const setNote = useCallback((note: string) => save(key, { ...parse<T>(read(key)), note }), [key]);
+  const setChoice = useCallback(
+    (index: number, choice: string) => {
+      const current = parse<T>(read(key));
+      save(key, { ...current, choices: { ...current.choices, [index]: choice } });
+    },
+    [key],
+  );
   // A sent review redirects to the run, so the draft goes first and comes back if the send fails.
   const onSending = () => {
     sent.current = read(key);
@@ -78,5 +87,5 @@ export function useReviewDraft<T>(questionId: string, enabled = true) {
   };
   const onFailed = () => store(key, sent.current);
 
-  return { comments: draft.comments, setComments, note: draft.note, setNote, onSending, onFailed };
+  return { comments: draft.comments, setComments, note: draft.note, setNote, choices: draft.choices, setChoice, onSending, onFailed };
 }

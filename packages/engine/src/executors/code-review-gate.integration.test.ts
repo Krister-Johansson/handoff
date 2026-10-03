@@ -160,3 +160,80 @@ test("files the coder changed outside the plan are listed with their reasons in 
   const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
   expect(reviewIn(question!).markdown).toContain("## Files outside the plan\n\n- `pnpm-workspace.yaml`: pnpm 12 reads build approvals only here");
 });
+
+/** coder -> code review -> gate; the review and the gate send changes back to the coder, approve goes on to docs. */
+const reviewedGraph = {
+  attributes: { startNode: "coder" },
+  nodes: [
+    { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+    { key: "review", attributes: { type: "code_review", x: 300, y: 0 } },
+    { key: "gate", attributes: { type: "human_gate", x: 600, y: 0 } },
+    { key: "docs", attributes: { type: "coder", x: 900, y: 0 } },
+  ],
+  edges: [
+    { key: "coder->review", source: "coder", target: "review", attributes: { port: "done" } },
+    { key: "review->coder", source: "review", target: "coder", attributes: { port: "changes" } },
+    { key: "review->gate", source: "review", target: "gate", attributes: { port: "approve" } },
+    { key: "gate->coder", source: "gate", target: "coder", attributes: { port: "changes" } },
+    { key: "gate->docs", source: "gate", target: "docs", attributes: { port: "approve" } },
+  ],
+};
+
+const findings = [
+  { path: "src/a.ts", line: 2, body: "Name the constant.", severity: "should_fix" },
+  { path: "src/a.ts", body: "Add a test for b.", severity: "should_fix" },
+  { path: "docs/notes.md", body: "Link the ADR.", severity: "follow_up" },
+];
+
+/** The Review comments section of a prompt's Previous attempt: what the coder must fix. */
+const reviewComments = (prompt: string) => {
+  const start = prompt.indexOf("## Review comments");
+  return start < 0 ? "" : prompt.slice(start, prompt.indexOf("\n\n", prompt.indexOf("\n\n", start) + 2));
+};
+
+/** A run stopped at the gate after a code review that approved with three findings. */
+async function atReviewedGate() {
+  const cli = new FakeCliExecutor([{ output: { status: "done", summary: "Added two constants." } }, { output: { verdict: "approve", comments: findings } }]);
+  const { run } = await startRun(db, reviewedGraph, "Add constants");
+  const agent = cliNodeExecutor({ cli, maxTurns: 20, timeoutMs: 60_000 });
+  const deps = engineDeps(db, { coder: agent, code_review: agent, human_gate: humanGateExecutor({ db, branchDiff: async () => diff }) });
+  await drain(deps);
+  const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
+  return { cli, deps, question: question! };
+}
+
+test("the Fix now findings go back to the coder as the reviewer's comments, with the person's line comments", async () => {
+  const { cli, deps, question } = await atReviewedGate();
+  expect(reviewIn(question)).toMatchObject({ from: "review", kind: "code", backTo: "coder" });
+  cli.push({ output: { status: "done", summary: "Fixed." } });
+  await answerQuestion(db, question.id, {
+    answer: "Changes requested.",
+    option: "changes",
+    comments: [{ path: "src/a.ts", line: 3, body: "Use one object." }],
+    findings: [0],
+    answeredBy: "krister",
+  });
+  await drain(deps);
+  const [answered] = await db.select().from(questions).where(eq(questions.id, question.id));
+  expect(answered?.comments).toEqual([
+    { path: "src/a.ts", line: 2, body: "Name the constant.", author: "review" },
+    { path: "src/a.ts", line: 3, body: "Use one object." },
+  ]);
+  expect(reviewComments(cli.requests[2]!.systemPrompt)).toBe(["## Review comments", "", "- src/a.ts:2 - review: Name the constant.", "- src/a.ts:3 - person: Use one object."].join("\n"));
+});
+
+test("approve after fixes with no findings named sends every Blocking and Should fix finding back", async () => {
+  const { cli, deps, question } = await atReviewedGate();
+  cli.push({ output: { status: "done", summary: "Fixed." } });
+  await answerQuestion(db, question.id, { answer: "Approved after fixes.", option: "fix", answeredBy: "claude-code" });
+  await drain(deps);
+  expect(reviewComments(cli.requests[2]!.systemPrompt)).toBe(["## Review comments", "", "- src/a.ts:2 - review: Name the constant.", "- src/a.ts - review: Add a test for b."].join("\n"));
+});
+
+test("approve sends no findings, and a finding the review does not have is refused", async () => {
+  const { question } = await atReviewedGate();
+  await expect(answerQuestion(db, question.id, { answer: "Changes requested.", option: "changes", findings: [3], answeredBy: "krister" })).rejects.toThrow("There is no finding 4. The review has 3.");
+  await answerQuestion(db, question.id, { answer: "Approved.", option: "approve", findings: [0], answeredBy: "krister" });
+  const [answered] = await db.select().from(questions).where(eq(questions.id, question.id));
+  expect(answered?.comments).toEqual([]);
+});

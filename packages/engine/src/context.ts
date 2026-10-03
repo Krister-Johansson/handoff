@@ -39,10 +39,12 @@ export function feedbackFrom(output: unknown): { failedChecks: CheckResult[]; re
       });
     }
   }
-  // A person at a Human gate who asked for changes, commenting on quoted parts or lines of what they reviewed.
+  // A person at a Human gate who asked for changes, commenting on quoted parts or lines of what they
+  // reviewed, and sending back the code reviewer's findings they picked, each in the reviewer's name.
   if (typeof o.option === "string" && Array.isArray(o.comments)) {
     for (const c of o.comments.map(obj)) {
-      reviewComments.push({ author: "person", body: String(c.body ?? ""), ...placeOf(c), ...(typeof c.quote === "string" ? { quote: c.quote } : {}), resolved: false });
+      const author = typeof c.author === "string" && c.author ? c.author : "person";
+      reviewComments.push({ author, body: String(c.body ?? ""), ...placeOf(c), ...(typeof c.quote === "string" ? { quote: c.quote } : {}), resolved: false });
     }
   }
   const feedback = obj(o.feedback);

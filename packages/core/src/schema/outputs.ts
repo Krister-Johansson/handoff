@@ -186,6 +186,7 @@ export const MergeOutputSchema = z.object({ merged: z.boolean(), sha: z.string()
 /**
  * A person's comment on what they reviewed: on a quoted part of a plan, or on lines of a file in a
  * code review. `line` to `endLine` count in the new file, or the old one when `side` is "old".
+ * `author` names the code reviewing step when the comment is one of its findings the person sent back.
  */
 export const PersonCommentSchema = z.object({
   quote: z.string().optional(),
@@ -194,6 +195,7 @@ export const PersonCommentSchema = z.object({
   line: z.number().int().positive().optional(),
   endLine: z.number().int().positive().optional(),
   side: z.enum(["old", "new"]).optional(),
+  author: z.string().optional(),
 });
 export type PersonComment = z.infer<typeof PersonCommentSchema>;
 

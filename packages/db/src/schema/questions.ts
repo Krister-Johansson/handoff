@@ -3,8 +3,11 @@ import { createdAt, id, tstz } from "./columns.ts";
 import { nodeExecutions } from "./node-executions.ts";
 import { runs } from "./runs.ts";
 
-/** A comment a person made on a quoted part, or on lines of a file, of what they reviewed. */
-export type QuestionComment = { quote?: string; body: string; path?: string; line?: number; endLine?: number; side?: "old" | "new" };
+/**
+ * A comment a person made on a quoted part, or on lines of a file, of what they reviewed. `author` is
+ * set on a code reviewer's finding the person sent back with their answer: the reviewing step's key.
+ */
+export type QuestionComment = { quote?: string; body: string; path?: string; line?: number; endLine?: number; side?: "old" | "new"; author?: string };
 
 /** A question for a person, asked by a Human gate. Its id is the gate execution's wait token. */
 export const questions = pgTable(

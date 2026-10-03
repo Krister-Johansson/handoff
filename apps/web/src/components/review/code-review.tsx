@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitl
 import { markViewedAction } from "@/app/inbox/actions";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { commentedAt, placeEarlier, type EarlierRound } from "@/lib/earlier";
-import { placeFindings, type Findings, type FollowUp } from "@/lib/findings";
+import { choicesOf, fixNowOf, placeFindings, type Choice, type Finding, type Findings, type FollowUp } from "@/lib/findings";
 import type { LineTokens } from "@/lib/highlight-types";
 import type { LineComment, LineSelection, Side } from "@/lib/line-comments";
 import { useReviewDraft } from "@/lib/use-review-draft";
@@ -145,6 +145,17 @@ type Props = {
   findings?: (Findings & { by: string; followUp?: FollowUp | undefined }) | undefined;
 };
 
+/**
+ * What the person does with each of the code reviewer's findings. An open review keeps the picks with
+ * its draft; an answered one only on this page, where they still choose what a follow-up issue takes.
+ */
+function useFindingChoices(findings: Finding[], draft: { choices: Readonly<Record<number, string>>; setChoice: (index: number, choice: string) => void }, readOnly: boolean, followUp: FollowUp | undefined) {
+  const [local, setLocal] = useState<Readonly<Record<number, Choice>>>({});
+  const choices = choicesOf(findings, readOnly ? local : draft.choices, followUp);
+  const choose = (index: number, choice: Choice) => (readOnly ? setLocal((picks) => ({ ...picks, [index]: choice })) : draft.setChoice(index, choice));
+  return { choices, choose, fixNow: fixNowOf(findings, choices) };
+}
+
 /** Which files count as viewed: the saved marks, overridden by what the person clicks on this page. */
 function useViewed(runId: string, files: DiffFile[], views: View[], earlier: EarlierRound[], enabled: boolean) {
   const initial = useMemo(() => {
@@ -193,6 +204,8 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
   // The follow-up issue the person opens here; until then, the one opened before.
   const [opened, setOpened] = useState<FollowUp>();
   const followUp = opened ?? findings?.followUp;
+  const picks = useFindingChoices(findings?.comments ?? [], draft, readOnly, followUp);
+  const choiceOf = new Map(findings?.comments.map((f, i) => [f, picks.choices[i]!]));
 
   const select = (path: string, side: Side, n: number, extend: boolean) =>
     !readOnly &&
@@ -223,6 +236,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
     from,
     files,
     findings: findings && { ...findings, followUp },
+    picks,
     readOnly,
     comments,
     draft,
@@ -241,6 +255,10 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
           onFollowUp={setOpened}
           runId={runId}
           questionId={questionId}
+          target={from}
+          choices={picks.choices}
+          choose={picks.choose}
+          answered={readOnly}
           files={files}
           open={(index) => {
             setOpen(files[index]!.path, true);
@@ -288,7 +306,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
             <PopoverContent align="end" className="w-[min(25rem,calc(100vw-2rem))]">
               <PopoverHeader>
                 <PopoverTitle>Submit review</PopoverTitle>
-                <PopoverDescription>{`Comments go back to ${from}.`}</PopoverDescription>
+                <PopoverDescription>{findings?.comments.length ? `Findings and comments go back to ${from}.` : `Comments go back to ${from}.`}</PopoverDescription>
               </PopoverHeader>
               <SubmitReview
                 questionId={questionId}
@@ -297,6 +315,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
                 comments={comments}
                 note={draft.note}
                 setNote={draft.setNote}
+                findings={findings?.comments.length ? picks.fixNow : undefined}
                 onSending={draft.onSending}
                 onFailed={draft.onFailed}
               />
@@ -325,7 +344,7 @@ export function CodeReview({ questionId, runId, from, markdown, files, views, ea
           selection={selection?.path === file.path ? selection : undefined}
           comments={comments.filter((c) => c.path === file.path)}
           earlier={placeEarlier(file, last?.comments ?? [])}
-          findings={findings && { by: findings.by, ...placeFindings(file, findings.comments) }}
+          findings={findings && { by: findings.by, ...placeFindings(file, findings.comments), choiceOf: (f: Finding) => choiceOf.get(f) }}
           tokens={tokens?.[file.path]}
           onSelect={(side, n, extend) => select(file.path, side, n, extend)}
           onAdd={(body) => add(file, body)}

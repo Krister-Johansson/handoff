@@ -3,7 +3,7 @@
 import type { DiffFile } from "@handoff/core";
 import type { PageHandlers } from "@/lib/assistant/page-tools";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
-import type { Findings, FollowUp } from "@/lib/findings";
+import { CHOICES, CHOICE_TITLES, locationOf, type Choice, type Finding, type Findings, type FollowUp } from "@/lib/findings";
 import { numberOn, type LineComment, type Side } from "@/lib/line-comments";
 import type { useReviewDraft } from "@/lib/use-review-draft";
 import type { ViewState } from "@/lib/viewed";
@@ -83,6 +83,8 @@ type Review = {
   from: string;
   files: DiffFile[];
   findings: (Findings & { by: string; followUp?: FollowUp | undefined }) | undefined;
+  /** What the person does with each finding, and the Fix now ones the review sends back. */
+  picks: { choices: Choice[]; choose: (index: number, choice: Choice) => void; fixNow: { index: number; finding: Finding }[] };
   readOnly: boolean;
   /** The drafted comments, or an answered review's sent ones. */
   comments: LineComment[];
@@ -144,11 +146,15 @@ const ANSWERED: DraftTools = {
   page_comment_on_lines: undefined,
   page_remove_line_comment: undefined,
   page_set_note: undefined,
+  page_set_finding_choice: undefined,
   page_submit_review: undefined,
 };
 
+/** How many findings have each choice, in words. */
+const tallyText = (choices: Choice[]) => CHOICES.map(({ choice, title }) => `${title} ${choices.filter((c) => c === choice).length}`).join(", ");
+
 /** The tools that change the person's drafts and marks, and send the review. */
-function draftTools({ questionId, runId, from, files, comments, draft, view, viewed }: Review): DraftTools {
+function draftTools({ questionId, runId, from, files, findings, picks, comments, draft, view, viewed }: Review): DraftTools {
   return {
     page_mark_viewed: async ({ path, viewed: on }) => {
       const file = files[findFile(files, { path })]!;
@@ -183,12 +189,32 @@ function draftTools({ questionId, runId, from, files, comments, draft, view, vie
       draft.setNote(note);
       return note.trim() ? `Set the overall comment to "${note}"` : "Cleared the overall comment.";
     },
-    page_submit_review: ({ option }) => submitReviewTool({ questionId, runId, option, note: draft.note, comments, target: from, onSending: draft.onSending, onFailed: draft.onFailed }),
+    page_set_finding_choice: ({ index, choice }) => {
+      const all = findings?.comments ?? [];
+      if (!all.length) throw new Error("This review has no findings.");
+      if (index > all.length) throw new Error(`There is no finding ${index}. The findings run from 1 to ${all.length}.`);
+      if (findings?.followUp?.findings?.includes(index - 1)) throw new Error(`Finding ${index} is in follow-up issue #${findings.followUp.number}.`);
+      picks.choose(index - 1, choice);
+      const next = picks.choices.map((c, i) => (i === index - 1 ? choice : c));
+      return `Set finding ${index}, ${locationOf(all[index - 1]!)}, to ${CHOICE_TITLES[choice]}. ${tallyText(next)}.`;
+    },
+    page_submit_review: ({ option }) =>
+      submitReviewTool({
+        questionId,
+        runId,
+        option,
+        note: draft.note,
+        comments,
+        findings: findings?.comments.length ? picks.fixNow.map((f) => f.index).sort((a, b) => a - b) : undefined,
+        target: from,
+        onSending: draft.onSending,
+        onFailed: draft.onFailed,
+      }),
   };
 }
 
 /** The page's state for where_am_i: the files with the indices the tools take, the drafts, and the code reviewer's findings. */
-function describe({ questionId, runId, from, files, findings, readOnly, comments, draft, view, viewed }: Review) {
+function describe({ questionId, runId, from, files, findings, picks, readOnly, comments, draft, view, viewed }: Review) {
   return {
     questionId,
     runId,
@@ -212,9 +238,10 @@ function describe({ questionId, runId, from, files, findings, readOnly, comments
       findings: {
         by: findings.by,
         verdict: findings.verdict,
-        items: findings.comments.map((f, i) => ({ index: i + 1, severity: f.severity ?? "should_fix", path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body })),
+        items: findings.comments.map((f, i) => ({ index: i + 1, severity: f.severity ?? "should_fix", path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body, choice: picks.choices[i] })),
+        choicesNote: "fix_now findings go back to the coder with changes or fix; follow_up ones go into the follow-up issue; skip drops one. page_set_finding_choice changes a choice.",
         followUp: findings.followUp ?? null,
-        followUpNote: "The person opens a follow-up issue from picked findings with the Create follow-up issue button. No page tool does it.",
+        followUpNote: "The person opens a follow-up issue from the Follow-up findings with the Create follow-up issue button. No page tool does it.",
       },
     }),
   };
@@ -223,7 +250,7 @@ function describe({ questionId, runId, from, files, findings, readOnly, comments
 /**
  * Offers the code review's page tools to the assistant: moving between files and changing the view
  * always, and while the review is open, marking files viewed, drafting line comments, the overall
- * comment and submitting.
+ * comment, choosing what to do with each finding and submitting.
  */
 export function useCodeReviewTools(review: Review) {
   usePageTools("code_review", { ...viewTools(review), ...(review.readOnly ? ANSWERED : draftTools(review)) }, () => describe(review));

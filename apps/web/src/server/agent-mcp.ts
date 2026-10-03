@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
 import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, projects, questions, type Db, type QuestionComment } from "@handoff/db";
-import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, stuckLoop } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlanProgress, type PlanTask } from "./plan";
 import { projectReadiness } from "./readiness";
@@ -198,12 +198,13 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const [stuck, prompts, demoSummary, answered, states] = await Promise.all([
+  const [stuck, prompts, demoSummary, answered, states, findings] = await Promise.all([
     stuckLoop(deps.db, run.id),
     pendingPermissions(deps.db, run.id),
     latestDemoSummary(deps.db, run.id),
     answeredGates(deps.db, run.id),
     stepStates(deps.db, executions.map((e) => e.id)),
+    Promise.all(openQuestions.map((q) => reviewFindingsOf(deps.db, { ...q, runId: run.id }))),
   ]);
   const costs = executions.map((e) => (e.costUsd === null ? null : Number(e.costUsd)));
   return {
@@ -233,8 +234,9 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
       duration_seconds: e.startedAt ? Math.round(((e.finishedAt ?? new Date()).getTime() - e.startedAt.getTime()) / 1000) : null,
       cost_usd: costs[i] ?? null,
     })),
-    questions: openQuestions.map((q) => {
+    questions: openQuestions.map((q, i) => {
       const review = (q.context as { review?: { markdown?: string } }).review;
+      const found = findings[i]?.findings.comments;
       return {
         id: q.id,
         node: q.nodeKey,
@@ -242,6 +244,8 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
         options: q.options ?? [],
         // A review shows what to approve; the person can also comment on it in the dashboard.
         ...(review?.markdown ? { review: review.markdown, review_url: `${deps.baseUrl}${reviewPath(run.projectId, run.id, q.id)}` } : {}),
+        // A code review's findings, by index from 1: answer_question sends the Fix now ones back with changes or fix.
+        ...(found?.length ? { findings: found.map((f, n) => ({ index: n + 1, severity: f.severity, path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body, fix_now: fixNowByDefault(f) })) } : {}),
         ...((q.context as { reason?: string }).reason === "try" ? { try: tryItOf(deps, run, q, demoSummary) } : {}),
       };
     }),
@@ -465,7 +469,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { dismissed: true };
     },
 
-    answer_question: async ({ question_id, ...input }: { question_id: string; answer?: string; option?: string; comments?: QuestionComment[]; criteria?: CriterionVerdict[] }) => {
+    answer_question: async ({ question_id, findings, ...input }: { question_id: string; answer?: string; option?: string; comments?: QuestionComment[]; criteria?: CriterionVerdict[]; findings?: number[] }) => {
       const [question] = await db.select({ options: questions.options, context: questions.context }).from(questions).where(eq(questions.id, question_id));
       if (!question) throw new Error(`question ${question_id} not found`);
       const { answer, option, comments } = input.criteria ? tryItAnswer(question.context, input.criteria, input.answer) : input;
@@ -479,7 +483,8 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         await splitPlan({ db, github, projects: plan }, { runId: asked!.runId, questionId: question_id, answeredBy: actor, note: answer });
         return { answered: true, run_id: asked!.runId, url: await urlOf(asked!.runId) };
       }
-      const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), answeredBy: actor });
+      // The tool numbers findings from 1, as get_run lists them.
+      const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), ...(findings ? { findings: findings.map((n) => n - 1) } : {}), answeredBy: actor });
       return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
     },
 
