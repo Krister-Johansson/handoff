@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Drive handoff from Claude Code: shape a plan of epics, stories and tasks, see the backlog, start runs for issues, follow them and hear when a run needs you.",
   "author": { "name": "Krister Johansson" },
   "userConfig": {

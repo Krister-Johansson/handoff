@@ -220,15 +220,31 @@ export async function runAgain(db: Db, runId: string, opts: RunAgainOptions = {}
 export type SplitDeps = { db: Db; github: GitHubPort | undefined; projects: ProjectsPort | undefined };
 
 /**
+ * In a Flow project, moves a split's later parts right after the run's task in Project order, in part order, so
+ * they come next in the queue instead of last. Does nothing when the task is not an item of the Project.
+ */
+async function partsAfterTask(plan: ProjectsPort, repo: { owner: string; name: string }, number: number, task: number, parts: SplitIssue[]) {
+  const idOf = new Map((await plan.listItems(repo.owner, number, repo)).map((item) => [item.number, item.itemId]));
+  const ids = [task, ...parts.map((p) => p.number)].map((n) => idOf.get(n));
+  if (ids.some((id) => id === undefined)) return;
+  await plan.moveItems(
+    repo.owner,
+    number,
+    ids.slice(1).map((itemId, index) => ({ itemId: itemId!, afterId: ids[index]! })),
+  );
+}
+
+/**
  * "Split as proposed" at a plan gate: opens one issue for each part after the first, then narrows the
  * run to the first part and answers the gate, which sends the planner back to plan that part. With a
  * plan on GitHub Projects each issue is a sub-issue of the run's issue; without one, each issue depends
  * on the one before it (the first on the run's issue) through a "Depends on" line and GitHub's
- * blocked-by link, so the parts run in order. Returns the opened issues.
+ * blocked-by link, so the parts run in order. In a Flow project the parts land right after the run's task in
+ * Project order. Returns the opened issues.
  */
 export async function splitPlan(deps: SplitDeps, input: { runId: string; questionId: string; answeredBy: string; note?: string | undefined }): Promise<SplitIssue[]> {
   const [row] = await deps.db
-    .select({ question: questions, issues: runs.issues, task: runs.task, owner: projects.repoOwner, name: projects.repoName, planNumber: projects.planProjectNumber })
+    .select({ question: questions, issues: runs.issues, task: runs.task, owner: projects.repoOwner, name: projects.repoName, planNumber: projects.planProjectNumber, planMode: projects.planMode })
     .from(questions)
     .innerJoin(runs, eq(runs.id, questions.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
@@ -257,6 +273,7 @@ export async function splitPlan(deps: SplitDeps, input: { runId: string; questio
     }
     opened.push({ number: created.number, title: part.title, url: created.url });
   }
+  if (withPlan && row.planMode === "flow" && parent && opened.length) await partsAfterTask(deps.projects!, repo, row.planNumber!, parent.number, opened);
   await splitRun(deps.db, input.questionId, { answeredBy: input.answeredBy, issues: opened, note: input.note });
   return opened;
 }

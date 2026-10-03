@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { CATALOG } from "./catalog";
-import { planUiTool, UI_TOOL_NAMES } from "./ui-tools";
+import { planUiTool, UI_TOOL_NAMES, UiToolError } from "./ui-tools";
 
 const origin = "http://127.0.0.1:3000";
 const plan = (name: string, args: unknown) => planUiTool(name, args, origin);
@@ -60,6 +60,23 @@ test("go_to_plan opens the timeline view with a zoom", () => {
   expect(plan("go_to_plan", { project_id: "p1", view: "board", zoom: "months" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=board" });
   expect(plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "days" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=timeline&zoom=days" });
   expect(() => plan("go_to_plan", { project_id: "p1", view: "timeline", zoom: "hours" })).toThrow(/not valid/);
+});
+
+test("go_to_plan with view timeline in a Flow project refuses", () => {
+  const flow = { project: { name: "todooverkill", planMode: "flow" as const } };
+  const timeline = { project: { name: "todooverkill", planMode: "timeline" as const } };
+  expect(() => planUiTool("go_to_plan", { project_id: "p1", view: "timeline" }, origin, flow)).toThrow(
+    new UiToolError("todooverkill plans in Flow mode, so its Plan page shows Flow, not a timeline. Use go_to_plan with view flow."),
+  );
+  expect(() => planUiTool("go_to_plan", { project_id: "p1", view: "timeline" }, origin, flow)).toThrow(UiToolError);
+  expect(planUiTool("go_to_plan", { project_id: "p1", view: "flow", epic: 12 }, origin, flow)).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=flow&epic=12" });
+  expect(() => planUiTool("go_to_plan", { project_id: "p1", view: "flow" }, origin, timeline)).toThrow(
+    new UiToolError("todooverkill plans in Timeline mode, so its Plan page shows a timeline, not Flow. Use go_to_plan with view timeline."),
+  );
+  expect(planUiTool("go_to_plan", { project_id: "p1", view: "timeline" }, origin, timeline)).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=timeline" });
+  // The tree and the board are in both modes, and without the project's mode the Plan page decides.
+  expect(planUiTool("go_to_plan", { project_id: "p1", view: "board" }, origin, flow)).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=board" });
+  expect(plan("go_to_plan", { project_id: "p1", view: "flow" })).toEqual({ kind: "navigate", href: "/projects/p1/plan?view=flow" });
 });
 
 test("the notifications, run, review and Try it tools open their pages, and an id that is not one is refused", () => {

@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, events, questions, runs } from "@handoff/db";
+import { afterAll, beforeEach, expect, test, vi } from "vitest";
+import { eq, events, projects, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { answerQuestion } from "@handoff/engine/operations";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
@@ -92,4 +92,29 @@ test("with a plan, the parts are sub-issues of the run's issue", async () => {
   const before = github.issues.size;
   await expect(splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" })).rejects.toThrow(/already answered/);
   expect(github.issues.size).toBe(before);
+});
+
+test("in a Flow project a split's parts land right after the run's task in Project order", async () => {
+  const gate = await splitGate();
+  const { project } = await setupPlan({ db, github, projects: plan }, projectId);
+  await plan.addIssue(repo, { project: project.number, issue: 11, labels: ["task"] });
+  const later = await plan.createIssue(repo, { project: project.number, title: "Later work", body: "Later.", labels: ["task"] });
+
+  const opened = await splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" });
+
+  expect([...plan.itemsOf(repo).keys()]).toEqual([11, ...opened.map((i) => i.number), later.number]);
+});
+
+test("in a Timeline project a split's parts land at the end of Project order", async () => {
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, projectId));
+  const gate = await splitGate();
+  const { project } = await setupPlan({ db, github, projects: plan }, projectId);
+  await plan.addIssue(repo, { project: project.number, issue: 11, labels: ["task"] });
+  const later = await plan.createIssue(repo, { project: project.number, title: "Later work", body: "Later.", labels: ["task"] });
+  const moves = vi.spyOn(plan, "moveItems");
+
+  const opened = await splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" });
+
+  expect([...plan.itemsOf(repo).keys()]).toEqual([11, later.number, ...opened.map((i) => i.number)]);
+  expect(moves).not.toHaveBeenCalled();
 });

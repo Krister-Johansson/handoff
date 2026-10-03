@@ -1,7 +1,7 @@
 import { candidates, type IssueRun } from "@handoff/engine/candidates";
 import type { PlanItem } from "@handoff/github";
 import { expect, test } from "vitest";
-import { layoutFlow, type Flow, type FlowInput, type FlowRun } from "./flow";
+import { layoutFlow, reorderFlow, type Flow, type FlowInput, type FlowRun } from "./flow";
 
 /** A plan item as listItems returns it: an open task in Ready of size M with no blockers, unless `over` says otherwise. */
 function task(number: number, over: Partial<PlanItem> = {}): PlanItem {
@@ -338,4 +338,20 @@ test("the flow's order of Ready tasks without blockers equals candidates()", () 
     expect(flow.queue.filter((n) => ready.has(n))).toEqual(candidates(tasks, latest, opts).candidates.map((c) => c.number));
   }
   expect(layoutFlow(input({ tasks, latest, runs, priorityOptions: ["P0", "P1"], order: "priority" })).queue).toEqual([3, 1, 9, 5, 8]);
+});
+
+test("reorderFlow lays the flow out in a new queue, keeping the places of items outside it", () => {
+  // An epic at place 2 sits between the tasks; it keeps its place while #3 and #1 swap.
+  const tasks = [task(1, { position: 1 }), task(9, { kind: "epic", position: 2 }), task(3, { position: 3, size: "S" })];
+  const reordered = reorderFlow(input({ tasks }), [3, 1]);
+  expect(reordered.tasks.map((t) => [t.number, t.position])).toEqual([
+    [1, 3],
+    [9, 2],
+    [3, 1],
+  ]);
+  expect(layoutFlow(reordered).queue).toEqual([3, 1]);
+  expect(placed(layoutFlow(reordered))).toEqual([
+    { issue: 3, lane: 1, start: 0, end: 30 },
+    { issue: 1, lane: 1, start: 30, end: 90 },
+  ]);
 });

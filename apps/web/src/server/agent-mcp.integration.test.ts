@@ -2,7 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterAll, afterEach, beforeEach, expect, test, vi } from "vitest";
-import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, projects, projectSchedulers, questions, registerWorker, runs, schedulerEvents, sql, workers } from "@handoff/db";
+import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, planPins, projects, projectSchedulers, questions, registerWorker, runs, schedulerEvents, sql, workers } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { checkProject } from "@handoff/engine/backlog-scheduler";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
@@ -573,6 +573,9 @@ async function withPlan() {
   return { number, task, statusOf };
 }
 
+/** Plans the sandbox project in Timeline mode, as every project added before the plan mode does. */
+const timeline = () => db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, projectId));
+
 const planEvents = async (runId: string) =>
   (await db.select({ type: events.type, payload: events.payload }).from(events).where(eq(events.runId, runId))).filter((e) => e.type.startsWith("plan."));
 
@@ -671,6 +674,7 @@ test("list_github_projects lists the user's Projects, those linked to the reposi
 });
 
 test("setup_plan with use adopts an existing Project: links it, adds the Status options and date fields it lacks and stores its number", async () => {
+  await timeline();
   const other = await roadmap();
   const adopted = await call("setup_plan", { project: "sandbox", use: other });
   expect(adopted).toMatchObject({
@@ -796,6 +800,7 @@ test("plan_issue adds an unplanned issue as a task under the given story", async
 });
 
 test("list_plan returns the tree with statuses, dates and runs, wrapped as data", async () => {
+  await timeline();
   const { epic, story } = await epicAndStory();
   const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column.", blocked_by: [12], start: "2026-10-06", target: "2026-10-09" }))
     .number as number;
@@ -851,6 +856,7 @@ test("list_plan returns the tree with statuses, dates and runs, wrapped as data"
 });
 
 test("list_plan returns sizes, estimates, durations, forecasts and the capacity", async () => {
+  await timeline();
   const { number, story } = await epicAndStory();
   await plan.ensureEstimateFields("octo", number);
   const create = async (title: string) => (await call("create_task", { project: "sandbox", story, title, brief: `${title}.` })).number as number;
@@ -903,6 +909,7 @@ const datesOf = (issue: number) => {
 };
 
 test("schedule sets Start and Target on epics, stories and tasks and lists old and new dates in its summary", async () => {
+  await timeline();
   const { epic, story } = await epicAndStory();
   const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column." })).number as number;
   plan.itemsOf(repo).get(task)!.start = "2026-10-01";
@@ -934,6 +941,7 @@ test("schedule sets Start and Target on epics, stories and tasks and lists old a
 });
 
 test("schedule refuses a Target before its Start, a malformed date and an issue outside the Project", async () => {
+  await timeline();
   const { story } = await epicAndStory();
   const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column." })).number as number;
   plan.itemsOf(repo).get(task)!.start = "2026-10-12";
@@ -951,6 +959,7 @@ test("schedule refuses a Target before its Start, a malformed date and an issue 
 });
 
 test("schedule on a Project without date fields names setup_plan", async () => {
+  await timeline();
   const { story } = await epicAndStory();
   plan.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
   expect((await call("schedule", { project: "sandbox", items: [{ issue: story, target: "2026-10-30" }] })).error).toMatch(/no Start and Target date fields\. Run setup_plan/);
@@ -963,6 +972,7 @@ test("schedule on a Project without date fields names setup_plan", async () => {
 });
 
 test("create_task with start and target sets them", async () => {
+  await timeline();
   const { story } = await epicAndStory();
   const task = await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add the column.", start: "2026-10-06", target: "2026-10-09" });
   expect(task).toMatchObject({ kind: "task", start: "2026-10-06", target: "2026-10-09" });
@@ -976,6 +986,7 @@ test("create_task with start and target sets them", async () => {
 
 /** A story with a task dated Oct 4 and an undated task, on a plan with the Size and Estimate fields. */
 async function sizingPlan() {
+  await timeline();
   const { number, epic, story } = await epicAndStory();
   await plan.ensureEstimateFields("octo", number);
   const create = async (title: string, dates: Record<string, string> = {}) => (await call("create_task", { project: "sandbox", story, title, brief: `${title}.`, ...dates })).number as number;
@@ -1040,6 +1051,7 @@ test("set_size refuses an epic, an issue outside the plan, an unknown estimate a
 });
 
 test("arrange_plan returns placements and the tasks it left out, and writes nothing", async () => {
+  await timeline();
   const { number, story } = await epicAndStory();
   await plan.ensureEstimateFields("octo", number);
   const now = new Date();
@@ -1088,6 +1100,7 @@ test("arrange_plan returns placements and the tasks it left out, and writes noth
 });
 
 test("create_task with a size sets it", async () => {
+  await timeline();
   const { number, story } = await epicAndStory();
   await plan.ensureEstimateFields("octo", number);
   const task = await call("create_task", { project: "sandbox", story, title: "Sized", brief: "A brief.", size: "M" });
@@ -1100,6 +1113,179 @@ test("create_task with a size sets it", async () => {
   const count = github.issues.size;
   expect((await call("create_task", { project: "sandbox", story, title: "Unsized", brief: "A brief.", size: "S" })).error).toMatch(/no Size and no Estimate field\. .*run setup_plan/);
   expect(github.issues.size).toBe(count);
+});
+
+/** The sentence every date path refuses with in a Flow project. */
+const NO_DATES = "sandbox plans in Flow mode: tasks have an order and blockers, no dates. Use arrange_plan and set_order, or a person can switch the plan mode in Project settings.";
+
+/** Ready tasks of a Flow plan with the Size field, created through the tools in this order, each with its size and the titles of its blockers. */
+async function flowPlan(ready: Record<string, { size?: "S" | "M" | "L"; after?: string[] }>) {
+  const planned = await epicAndStory();
+  await plan.ensureEstimateFields("octo", planned.number);
+  const tasks: Record<string, number> = {};
+  for (const [title, { size, after = [] }] of Object.entries(ready)) {
+    const { number } = await call("create_task", { project: "sandbox", story: planned.story, title, brief: `${title}.`, ...(size ? { size } : {}), blocked_by: after.map((t) => tasks[t]!) });
+    tasks[title] = number;
+    plan.itemsOf(repo).get(number)!.status = "Ready";
+  }
+  return { ...planned, tasks };
+}
+
+/** The order of the Project's items on GitHub. */
+const projectOrder = () => [...plan.itemsOf(repo).keys()];
+
+test("schedule in a Flow project refuses and names arrange_plan and set_order", async () => {
+  const { tasks } = await flowPlan({ First: {} });
+  const before = structuredClone([...plan.itemsOf(repo).entries()]);
+  const writes = vi.spyOn(plan, "setManyPlanFields");
+  expect(await call("schedule", { project: "sandbox", items: [{ issue: tasks.First, start: "2026-10-06", target: "2026-10-09" }] })).toEqual({ error: NO_DATES });
+  expect(writes).not.toHaveBeenCalled();
+  expect([...plan.itemsOf(repo).entries()]).toEqual(before);
+});
+
+test("set_order in a Timeline project refuses", async () => {
+  const { tasks } = await flowPlan({ First: {}, Second: {} });
+  await timeline();
+  const moves = vi.spyOn(plan, "moveItems");
+  expect(await call("set_order", { project: "sandbox", order: [tasks.Second, tasks.First] })).toEqual({
+    error: "sandbox plans in Timeline mode: order work with dates through arrange_plan and schedule.",
+  });
+  expect(moves).not.toHaveBeenCalled();
+});
+
+test("set_size in a Flow project sets a size and refuses an estimate", async () => {
+  const { tasks } = await flowPlan({ First: { size: "S" }, Second: {} });
+  // A Flow plan needs only the Size field, and dates left from Timeline mode stay as they are.
+  plan.plans.get("octo/sample")!.project.estimateFields!.estimate = undefined;
+  Object.assign(plan.itemsOf(repo).get(tasks.First!)!, { start: "2026-10-04", target: "2026-10-04" });
+  expect(await call("set_size", { project: "sandbox", items: [{ issue: tasks.First, size: "L" }] })).toEqual({
+    sized: [{ issue: tasks.First, title: "First", size: { from: "S", to: "L" } }],
+    summary: `#${tasks.First} First: size S to L`,
+  });
+  expect([sizeOf(tasks.First!), datesOf(tasks.First!)]).toEqual([
+    { size: "L", estimate: undefined },
+    { start: "2026-10-04", target: "2026-10-04" },
+  ]);
+
+  const writes = vi.spyOn(plan, "setManyPlanFields");
+  const refusal = "sandbox plans in Flow mode, which has no hours. Set a size with set_size instead: S, M or L.";
+  expect(await call("set_size", { project: "sandbox", items: [{ issue: tasks.Second, size: "M" }, { issue: tasks.First, estimate: "3h" }] })).toEqual({ error: refusal });
+  expect(await call("set_size", { project: "sandbox", items: [{ issue: tasks.First, estimate: null }] })).toEqual({ error: refusal });
+  expect(writes).not.toHaveBeenCalled();
+  expect(sizeOf(tasks.Second!)).toEqual({ size: undefined, estimate: undefined });
+});
+
+test("create_task with dates in a Flow project refuses and writes nothing", async () => {
+  const { number, epic, story } = await epicAndStory();
+  const count = github.issues.size;
+  const refusal = { error: "sandbox plans in Flow mode, which has no dates. Leave start and target out; set_order places the task." };
+  expect(await call("create_task", { project: "sandbox", story, title: "Dated", brief: "A brief.", start: "2026-10-06", target: "2026-10-09" })).toEqual(refusal);
+  expect(await call("create_story", { project: "sandbox", epic, title: "Dated story", acceptance: ["x"], target: "2026-10-30" })).toEqual(refusal);
+  expect(github.issues.size).toBe(count);
+  // A size is still welcome: the Flow uses it to tell which lane frees first.
+  await plan.ensureEstimateFields("octo", number);
+  expect(await call("create_task", { project: "sandbox", story, title: "Sized", brief: "A brief.", size: "M" })).toMatchObject({ kind: "task", size: "M" });
+});
+
+test("setup_plan in a Flow project adds Size and no date or Estimate field", async () => {
+  const created = await call("setup_plan", { project: "sandbox" });
+  expect(created).toMatchObject({ created: true, added_date_fields: [], added_estimate_fields: ["Size"] });
+  expect(created.roadmap).toBeUndefined();
+  const { dateFields, estimateFields } = plan.plans.get("octo/sample")!.project;
+  expect({ dateFields, estimateFields }).toEqual({
+    dateFields: { start: undefined, target: undefined },
+    estimateFields: { size: { id: expect.any(String), options: { S: expect.any(String), M: expect.any(String), L: expect.any(String) } }, estimate: undefined },
+  });
+  // Again, it finds nothing missing.
+  expect(await call("setup_plan", { project: "sandbox" })).toMatchObject({ created: false, added_date_fields: [], added_estimate_fields: [] });
+  expect(plan.plans.get("octo/sample")!.project.estimateFields?.estimate).toBeUndefined();
+});
+
+test("list_plan in a Flow project returns places, lanes, pins and progress and no dates or hours", async () => {
+  const { story, tasks } = await flowPlan({ First: { size: "S" }, Running: {}, Third: { size: "L", after: ["First"] } });
+  const later = (await call("create_task", { project: "sandbox", story, title: "Later", brief: "Later." })).number as number;
+  await db.insert(projectSchedulers).values({ projectId, maxRuns: 2, graphName: "linear" });
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [tasks.Running] });
+  await db.insert(planPins).values({ projectId, issue: tasks.Third!, pinnedBy: "person", reason: "drop" });
+  Object.assign(plan.itemsOf(repo).get(tasks.First!)!, { start: "2026-10-04", target: "2026-10-04", estimate: 3 });
+
+  const listed = await call("list_plan", { project: "sandbox" });
+  expect(listed).toMatchObject({ mode: "flow", lanes: 2, held: [], queue: [tasks.First, tasks.Third, later] });
+  const byNumber = Object.fromEntries((listed.epics[0].stories[0].tasks as { number: number }[]).map((t) => [t.number, t]));
+  // The run takes lane 1; First takes lane 2, and Third follows it there once First ends.
+  expect(byNumber[tasks.Running!]).toMatchObject({ status: "Running", place: null, lane: 1, pinned: false, progress: { done: 0, total: expect.any(Number) }, waits_on: null, run: { id: run_id } });
+  expect(byNumber[tasks.First!]).toMatchObject({ place: 1, lane: 2, pinned: false, waits_for: [], after: null, skipped: null, progress: null });
+  expect(byNumber[tasks.Third!]).toMatchObject({ place: 2, lane: 2, pinned: true, waits_for: [] });
+  expect(byNumber[later]).toMatchObject({ status: "Shaping", place: 3, lane: 1, pinned: false });
+  expect(JSON.stringify(listed)).not.toMatch(/"start"|"target"|estimate_hours|"duration"|capacity_hours|forecasts/);
+});
+
+test("arrange_plan in a Flow project returns the optimized order with its moves and kept pins, and writes nothing", async () => {
+  // Small first, then the long chain of Long and After, then a pinned task at the end.
+  const { tasks } = await flowPlan({ Small: { size: "S" }, Long: { size: "L" }, After: { size: "M", after: ["Long"] }, Pinned: { size: "S" } });
+  await db.insert(planPins).values({ projectId, issue: tasks.Pinned!, pinnedBy: "person", reason: "drop" });
+  const before = projectOrder();
+  const writes = [vi.spyOn(plan, "moveItems"), vi.spyOn(plan, "setManyPlanFields"), vi.spyOn(plan, "setPlanFields")];
+
+  expect(await call("arrange_plan", { project: "sandbox" })).toEqual({
+    mode: "flow",
+    was: [tasks.Small, tasks.Long, tasks.After, tasks.Pinned],
+    moves: [
+      { issue: tasks.Long, title: "Long", from: 2, to: 1 },
+      { issue: tasks.After, title: "After", from: 3, to: 2 },
+      { issue: tasks.Small, title: "Small", from: 1, to: 3 },
+    ],
+    kept: [{ issue: tasks.Pinned, title: "Pinned", place: 4 }],
+    queue: [
+      { issue: tasks.Long, title: "Long", place: 1, lane: 1 },
+      { issue: tasks.After, title: "After", place: 2, lane: 1 },
+      { issue: tasks.Small, title: "Small", place: 3, lane: 1 },
+      { issue: tasks.Pinned, title: "Pinned", place: 4, lane: 1 },
+    ],
+    waits_for: [],
+    summary: `#${tasks.Long} from Next 2 to Next 1; #${tasks.After} from Next 3 to Next 2; #${tasks.Small} from Next 1 to Next 3. #${tasks.Pinned} is pinned and stays Next 4.`,
+  });
+  // Scoped to Small and After, nothing moves: After waits for Long, which stays where it is.
+  expect((await call("arrange_plan", { project: "sandbox", issues: [tasks.Small, tasks.After] })).moves).toEqual([]);
+  for (const write of writes) expect(write).not.toHaveBeenCalled();
+  expect(projectOrder()).toEqual(before);
+  expect(await db.select({ issue: planPins.issue }).from(planPins)).toEqual([{ issue: tasks.Pinned }]);
+});
+
+test("set_order writes the order, pins what pin names, and refuses to move a pinned task unless unpin names it", async () => {
+  const { tasks } = await flowPlan({ Alpha: {}, Bravo: {}, Charlie: {} });
+  const { Alpha: A, Bravo: B, Charlie: C } = tasks as Record<"Alpha" | "Bravo" | "Charlie", number>;
+  await db.insert(planPins).values({ projectId, issue: C, pinnedBy: "person", reason: "drop" });
+  const queueOnGitHub = () => projectOrder().filter((n) => [A, B, C].includes(n));
+
+  expect(await call("set_order", { project: "sandbox", order: [B, A] })).toMatchObject({
+    moved: [
+      { issue: B, from: 2, to: 1 },
+      { issue: A, from: 1, to: 2 },
+    ],
+    pinned: [],
+    unpinned: [],
+  });
+  expect(queueOnGitHub()).toEqual([B, A, C]);
+
+  const moves = vi.spyOn(plan, "moveItems");
+  expect(await call("set_order", { project: "sandbox", order: [C, B] })).toEqual({ error: `#${C} is pinned by a person. Arrange around it, or name it in unpin.` });
+  // An order read before the last write is stale.
+  expect(await call("set_order", { project: "sandbox", order: [B, A], was: [A, B, C] })).toEqual({
+    error: "The order changed on GitHub since it was read. Read it again with list_plan or arrange_plan.",
+  });
+  expect(moves).not.toHaveBeenCalled();
+
+  expect(await call("set_order", { project: "sandbox", order: [C, B], unpin: [C], pin: [B], was: [B, A, C] })).toMatchObject({
+    moved: [
+      { issue: C, from: 3, to: 1 },
+      { issue: B, from: 1, to: 3 },
+    ],
+    pinned: [B],
+    unpinned: [C],
+  });
+  expect(queueOnGitHub()).toEqual([C, A, B]);
+  expect(await db.select({ issue: planPins.issue, pinnedBy: planPins.pinnedBy, reason: planPins.reason }).from(planPins)).toEqual([{ issue: B, pinnedBy: "claude-code", reason: "set_order" }]);
 });
 
 test("every shaping tool refuses with the scope sentence when the Projects port is missing", async () => {
@@ -1122,6 +1308,7 @@ test("every shaping tool refuses with the scope sentence when the Projects port 
     ["schedule", { items: [{ issue: 3, start: "2026-10-06" }] }],
     ["set_size", { items: [{ issue: 3, size: "M" }] }],
     ["arrange_plan", {}],
+    ["set_order", { order: [3] }],
   ];
   for (const [name, args] of calls) {
     const result = (await without.callTool({ name, arguments: { project: "sandbox", ...args } })) as { content: { text: string }[]; isError?: boolean };

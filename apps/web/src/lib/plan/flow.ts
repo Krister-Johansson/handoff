@@ -82,6 +82,22 @@ export type Flow = {
 const DEFAULT_SIZE: PlanSize = "M";
 
 /**
+ * The input with the queue's tasks in a new order: they take the places in Project order the queue's tasks
+ * held, in the new order, and every other item keeps its place, as writeOrder writes it. layoutFlow then shows
+ * where the tasks would run in that order, which is what arrange_plan returns before anything is written.
+ */
+export function reorderFlow(input: FlowInput, queue: readonly number[]): FlowInput {
+  const moving = new Set(queue);
+  const places = input.tasks
+    .map((t, index) => ({ number: t.number, place: t.position ?? index }))
+    .filter((t) => moving.has(t.number))
+    .map((t) => t.place)
+    .sort((a, b) => a - b);
+  const placeOf = new Map(queue.map((n, index) => [n, places[index]]));
+  return { ...input, tasks: input.tasks.map((t) => (placeOf.has(t.number) ? { ...t, position: placeOf.get(t.number) } : t)) };
+}
+
+/**
  * Where each task would run if the scheduler worked from now (docs/plans/flow.md, Decision 5). Active
  * runs keep their lanes, oldest first. Each lane that frees takes the first task in the scheduler's
  * order whose blockers have ended, passing over a blocked one as the scheduler does, and nothing

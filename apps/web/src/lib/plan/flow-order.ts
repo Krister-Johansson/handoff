@@ -99,6 +99,23 @@ export function carryDependents(queue: readonly number[], issue: number, blocks:
 }
 
 /**
+ * set_order's order: the tasks of `order` that are in the queue, in that order, fill the places they hold now,
+ * as an Optimize scope does; every other task keeps its place. A task named twice counts once.
+ */
+export function fillPlaces(queue: readonly number[], order: readonly number[]): number[] {
+  const inQueue = new Set(queue);
+  const next = [...new Set(order)].filter((n) => inQueue.has(n));
+  const moving = new Set(next);
+  return queue.map((n) => (moving.has(n) ? next.shift()! : n));
+}
+
+/** Each task whose place changed between two orders of the same tasks, in its new order; places count from 1, as Next does. */
+export function placeMoves(before: readonly number[], after: readonly number[]): { issue: number; from: number; to: number }[] {
+  const place = new Map(before.map((n, index) => [n, index + 1]));
+  return after.flatMap((issue, index) => (place.get(issue) === index + 1 ? [] : [{ issue, from: place.get(issue)!, to: index + 1 }]));
+}
+
+/**
  * Each pinned task back at its place from before the operation, and the other tasks in the places
  * left, in their order after it. `before` and `after` hold the same tasks. Every order operation ends
  * with this; a task the operation itself pins, such as a dropped card, is left out of `pins`.

@@ -75,6 +75,7 @@ test("runs started and run again from the dashboard record dashboard as the star
 
 test("the schedule dialog's save writes Start and Target through scheduleAction and refuses a Target before Start", async () => {
   const { project, plan, issue } = await readyTask();
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
   expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: "2026-10-09" })).toEqual({ ok: true });
   expect(plan.itemsOf(repo).get(issue)).toMatchObject({ start: "2026-10-06", target: "2026-10-09" });
   // Clear empties a field.
@@ -86,6 +87,7 @@ test("the schedule dialog's save writes Start and Target through scheduleAction 
 
 test("Add date fields gives the plan's Project its Start and Target fields", async () => {
   const { project, plan, issue } = await readyTask();
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
   plan.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
   expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: null })).toEqual({ ok: false, error: expect.stringContaining("no Start and Target date fields") });
   expect(await addDateFieldsAction({ projectId: project.id })).toEqual({ ok: true });
@@ -127,7 +129,8 @@ test("setPlanModeAction stores Flow or Timeline and keeps Start, Target and Proj
   const { project, plan, issue } = await readyTask();
   const number = (await db.select({ n: projects.planProjectNumber }).from(projects).where(eq(projects.id, project.id)))[0]!.n!;
   const later = await plan.createIssue(repo, { project: number, title: "Add the API", body: "Read the column.", labels: ["task"] });
-  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: "2026-10-09" })).toEqual({ ok: true });
+  // Dates set while the project planned in Timeline mode.
+  Object.assign(plan.itemsOf(repo).get(issue)!, { start: "2026-10-06", target: "2026-10-09" });
   const github = async () => (await plan.listItems("octo", number, repo)).map((i) => ({ number: i.number, position: i.position, start: i.start, target: i.target }));
   const before = await github();
   expect(before.map((i) => i.number)).toEqual([issue, later.number]);

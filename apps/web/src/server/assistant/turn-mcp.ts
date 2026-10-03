@@ -4,6 +4,7 @@ import { z } from "zod";
 import { annotationsOf, CATALOG, type ToolSpec } from "../../lib/assistant/catalog";
 import { pageSpecsOf, type PageToolSpec } from "../../lib/assistant/page-tools";
 import { registerDataTools, type HandoffMcpDeps } from "../agent-mcp";
+import { planViewRefusal } from "../plan-mode";
 import { turnByToken, type LiveTurn } from "./relay";
 
 /** The prefix Claude Code gives the tools of the "handoff" MCP server. */
@@ -29,6 +30,9 @@ export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServe
   // So do the tools of the page the person asked on, the ones it bound when the turn started.
   for (const spec of [...CATALOG.filter((t) => t.kind === "ui"), ...pageSpecsOf(turn.page)]) {
     server.registerTool(spec.name, { title: spec.title, description: spec.description, inputSchema: spec.input.shape, annotations: annotationsOf(spec) }, async (args) => {
+      // Only the server knows a project's plan mode, so it refuses the other mode's Plan view here.
+      const refusal = await planViewRefusal(deps.db, spec.name, args);
+      if (refusal) return { content: [{ type: "text" as const, text: refusal }], isError: true };
       const result = await turn.requestUi({ name: spec.name, args }, deps.uiTimeoutMs);
       return { content: [{ type: "text" as const, text: result.text }], ...(result.isError ? { isError: true } : {}) };
     });

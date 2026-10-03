@@ -3,6 +3,7 @@ import { orderMoves, type ProjectsPort } from "@handoff/github";
 import { layoutFlow } from "../lib/plan/flow";
 import { loadFlow } from "./flow";
 import { projectsAccessProblem } from "./plan";
+import { MODE_REFUSALS, refuseInMode } from "./plan-mode";
 
 export type OrderDeps = { db: Db; projects: ProjectsPort | undefined };
 
@@ -35,7 +36,7 @@ export async function writeOrder(deps: OrderDeps, projectId: string, write: Orde
   const { db } = deps;
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) throw new Error("The project no longer exists.");
-  if (project.planMode !== "flow") throw new Error(`${project.name} plans in Timeline mode: order work with dates through arrange_plan and schedule.`);
+  refuseInMode(project, "timeline", MODE_REFUSALS.order);
   const [scheduler] = await db.select({ order: projectSchedulers.order }).from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId));
   if (scheduler?.order === "priority") {
     throw new Error("The scheduler starts tasks by Priority, so the order of the tasks does not decide what starts next. Switch the scheduler to Project order to plan by order.");

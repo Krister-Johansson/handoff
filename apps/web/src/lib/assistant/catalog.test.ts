@@ -32,6 +32,7 @@ test("tools that change state are marked confirm and never read only", () => {
     "resolve_loop",
     "run_again",
     "schedule",
+    "set_order",
     "set_size",
     "setup_plan",
     "start_run",
@@ -130,6 +131,18 @@ test("set_size is confirm and its summary names each task with its old and new s
   expect(parses({})).toBe(false);
   expect(parses({ size: "XL" })).toBe(false);
   expect(parses({ estimate: "2d" })).toBe(true);
+});
+
+test("set_order is confirm and its summary lists each move and pin", () => {
+  expect(toolSpec("set_order")).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true, idempotent: true });
+  // With the order it read, the card names each task's old and new place.
+  expect(toolSpec("set_order").summarize({ project: "todooverkill", order: [74, 60], was: [60, 61, 74], pin: [74, 61], unpin: [60] })).toBe(
+    "Order in todooverkill: #74 Next 3 to Next 1, pinned; #60 Next 1 to Next 3, unpinned; #61 stays Next 2, pinned",
+  );
+  expect(toolSpec("set_order").summarize({ project: "todooverkill", order: [61, 60], was: [60, 61, 74] })).toBe("Order in todooverkill: #61 Next 2 to Next 1; #60 Next 1 to Next 2");
+  // Without it, the card lists the new relative order.
+  expect(toolSpec("set_order").summarize({ project: "todooverkill", order: [74, 60], pin: [74] })).toBe("Order in todooverkill: #74, #60 in that order; pin #74");
+  expect(toolSpec("set_order").input.safeParse({ project: "todooverkill", order: [] }).success).toBe(false);
 });
 
 test("start_scheduler is confirm and its summary names the project, the limit, the order and the graph", () => {

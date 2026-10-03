@@ -29,6 +29,9 @@ beforeEach(async () => {
 });
 afterAll(() => db.$client.end());
 
+/** Plans the sandbox project in Timeline mode, as every project added before the plan mode does. */
+const timeline = () => db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, projectId));
+
 /** A run started on issues before the project had a plan, as run 64fde8ef was. */
 const runBeforePlan = (issues: number[]) => startRunFromGraph(db, { projectId, graphName: "linear", task: "", issues }, github);
 
@@ -69,7 +72,7 @@ test("schedule writes 60 items' dates to GitHub in a dozen requests at most", as
     },
     { "GET /user": () => ({ json: { login: "octo" }, headers: { "x-oauth-scopes": "repo, project" } }) },
   );
-  await db.update(projects).set({ planProjectNumber: 3 }).where(eq(projects.id, projectId));
+  await db.update(projects).set({ planProjectNumber: 3, planMode: "timeline" }).where(eq(projects.id, projectId));
   const items = issues.map((issue, i) => ({ issue, start: `2026-10-${String(1 + (i % 28)).padStart(2, "0")}`, target: "2026-10-30" }));
 
   const result = await schedule({ db, github, projects: OctokitProjects.withToken("t", { fetch, throttle: false }) }, projectId, items);
@@ -194,6 +197,7 @@ test("moving tasks to Ready nudges the project's scheduler", async () => {
 
 /** A story #20 with tasks #21 and #22 that both start on Oct 4, #22 blocked by #21, in a plan with Size and Estimate. */
 async function sizedPlan() {
+  await timeline();
   await setupPlan(deps, projectId);
   const issue = (number: number, labels: string[], blockedBy: number[] = []) =>
     github.issues.set(number, { number, title: `Issue ${number}`, url: `https://github.com/octo/sample/issues/${number}`, body: "", state: "open", labels, blockedBy });
@@ -250,6 +254,7 @@ test("setSize writes Size and moves the Target of a task with a Start", async ()
 });
 
 test("setup_plan creates Size and Estimate on a new Project and adds them when adopting", async () => {
+  await timeline();
   const created = await setupPlan(deps, projectId);
   expect(created).toMatchObject({ created: true, added_estimate_fields: ["Size", "Estimate"] });
   expect(plan.plans.get("octo/sample")!.project.estimateFields).toEqual({
@@ -261,6 +266,7 @@ test("setup_plan creates Size and Estimate on a new Project and adds them when a
   // Adopting a Project whose Size lacks S, M and L adds them; a Project without Estimate gets it.
   await truncateAll(db);
   projectId = (await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" })).id;
+  await timeline();
   const roadmap = await plan.createProject("octo", { owner: "octo", name: "roadmap" }, "Roadmap");
   plan.plans.get("octo/roadmap")!.project.estimateFields = { size: { id: "field-old-size", options: { S: undefined, M: undefined, L: undefined } }, estimate: undefined };
   const adopted = await setupPlan(deps, projectId, { use: roadmap.number });
