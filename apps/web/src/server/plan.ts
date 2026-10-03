@@ -4,6 +4,8 @@ import { latestRuns, type BacklogIssue, type BacklogRun } from "./backlog.ts";
 import { deriveSpans, type Timeline, type TimelineRun } from "../lib/plan/schedule.ts";
 import { durationOf, type Duration, type Forecasts } from "../lib/plan/forecast.ts";
 import { latestProposals, loadForecasts, type Proposal } from "./forecasts.ts";
+import type { FlowInput } from "../lib/plan/flow.ts";
+import { loadFlow } from "./flow.ts";
 
 /** A board column: one per Status handoff knows, plus Other for an option it does not. */
 export type PlanColumn = PlanStatus | "Other";
@@ -42,6 +44,8 @@ export type PlanView = {
   forecasts?: Forecasts | undefined;
   /** The person's hours of work a day on the plan; loadPlan sets it. */
   capacity?: number | undefined;
+  /** What the Flow lays out with layoutFlow; loadPlan sets it for a project in Flow mode only. */
+  flow?: FlowInput | undefined;
 };
 
 /** Why a project's plan cannot be shown, with a sentence that says what to do. */
@@ -158,7 +162,18 @@ export async function loadPlan(
   const unplanned = open
     .filter((i) => !byNumber.has(i.number))
     .map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
-  return { project: planProject, epics, unparented, board, unplanned, timeline: deriveSpans(items, projectRuns, opts.now ?? new Date(), { durations, capacity }), forecasts, capacity };
+  const flow = project.planMode === "flow" ? await loadFlow(db, projectId, { items, priorityOptions: planProject.priorityOptions, forecasts }) : undefined;
+  return {
+    project: planProject,
+    epics,
+    unparented,
+    board,
+    unplanned,
+    timeline: deriveSpans(items, projectRuns, opts.now ?? new Date(), { durations, capacity }),
+    forecasts,
+    capacity,
+    ...(flow ? { flow } : {}),
+  };
 }
 
 /** Every run of a project with the issues it linked and when it ran, for the timeline's actual strips. */

@@ -258,3 +258,21 @@ test("without a plan number loadPlan says there is no plan, and without the proj
   await db.update(projects).set({ planProjectNumber: 9 }).where(eq(projects.id, project.id));
   expect(await loadPlan(db, github, plan, project.id)).toEqual({ reason: "unreachable", error: expect.stringContaining("#9") });
 });
+
+test("loadPlan gives a Flow project the flow's input and a Timeline project none", async () => {
+  const { github, plan, project, issue, status } = await planned();
+  const first = await issue("Add the column", ["task"]);
+  const second = await issue("The Ready gate", ["task"]);
+  status(first, "Ready");
+  status(second, "Ready");
+
+  const flow = await loadPlan(db, github, plan, project.id);
+  if ("error" in flow) throw new Error(flow.error);
+  expect(flow.flow?.tasks.map((t) => t.number)).toEqual([first, second]);
+  expect(flow.flow).toMatchObject({ lanes: 1, order: "project", runs: [], held: [], minutes: { S: 30, M: 60, L: 120 } });
+
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
+  const timeline = await loadPlan(db, github, plan, project.id);
+  if ("error" in timeline) throw new Error(timeline.error);
+  expect(timeline.flow).toBeUndefined();
+});
