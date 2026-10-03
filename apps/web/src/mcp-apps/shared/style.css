@@ -1,0 +1,122 @@
+/* The Inbox's cards, the Needs you list and the Plan list, on the tokens of base.css. */
+
+.muted { color: var(--hf-muted); }
+.trunc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28ch; }
+.btn { cursor: pointer; background: transparent; color: inherit; border: 1px solid transparent; font-family: inherit; }
+.btn-outline { border-color: var(--hf-border-strong); }
+.btn-primary { background: var(--hf-fg); color: var(--hf-card); }
+.btn-primary:hover { background: var(--hf-fg-2); }
+.btn-ghost { color: var(--hf-fg-2); }
+.btn-xs { height: 22px; padding: 0 8px; font-size: 12px; }
+.btn.wrap { height: auto; min-height: 26px; padding: 4px 10px; white-space: normal; text-align: left; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:focus-visible, .input:focus-visible, summary:focus-visible { outline: 2px solid var(--hf-active-dot); outline-offset: 2px; }
+
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 5px; border: 1px solid transparent; font-size: 11px; font-weight: 500; white-space: nowrap; }
+.tag.t-neutral { border-color: var(--hf-border-strong); }
+.tag.t-fill { background: var(--hf-track); color: var(--hf-fg-2); }
+.tag.dashed { border-style: dashed; }
+
+/* A card: an icon tile in the item's tone beside its body. */
+.ic { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 12px 14px; border: 1px solid var(--hf-border-strong); border-radius: var(--hf-radius); background: var(--hf-card); }
+.tile { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; }
+.tile svg { width: 15px; height: 15px; }
+.ic-b { display: flex; flex-direction: column; min-width: 0; gap: 6px; }
+.ic-c { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--hf-muted); min-width: 0; }
+.ic-t { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.ic-t.mono { font-size: 13px; font-weight: 500; }
+.ic-a { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ic-a:empty { display: none; }
+.note { margin: 0; font-size: 12.5px; color: var(--hf-muted); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.answer { margin: 0; padding: 7px 10px; border-radius: 6px; background: var(--hf-hover); font-size: 12.5px; overflow-wrap: anywhere; }
+.ci { display: inline-flex; align-items: center; gap: 6px; }
+.ci::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--hf-muted-2); }
+.ci-success::before { background: var(--hf-success-dot); }
+.ci-failure::before { background: var(--hf-danger-dot); }
+
+/* The permission card spans the whole width: its head holds the tile. */
+.pc { display: flex; flex-direction: column; gap: 8px; border-color: color-mix(in oklch, var(--hf-attention-dot) 40%, transparent); }
+.pc-h { display: flex; align-items: center; gap: 10px; }
+.pc .tile { width: 28px; height: 28px; border-radius: 7px; }
+.pc > p { margin: 0; font-size: 12.5px; }
+.term { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--hf-track); font: 12px/1.5 var(--hf-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
+.full summary { cursor: pointer; font-size: 12px; color: var(--hf-muted); }
+.full .term { margin-top: 6px; }
+
+.form { display: flex; flex-direction: column; gap: 8px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.label { font-size: 12px; font-weight: 500; }
+.input { font: inherit; font-size: 12.5px; color: inherit; background: var(--hf-card); border: 1px solid var(--hf-border-strong); border-radius: 6px; padding: 5px 8px; resize: vertical; }
+
+/* The line under a card's buttons: pending, done, or why it failed. */
+.act { margin: 0; font-size: 12.5px; color: var(--hf-fg-2); }
+.act-pending { color: var(--hf-muted); }
+.act-pending::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 999px; background: var(--hf-active-dot); animation: pulse 1.6s ease-in-out infinite; }
+.act-done { color: var(--hf-success); }
+.act-error { color: var(--hf-danger); }
+
+/* The Needs you list. */
+.ny { display: flex; flex-direction: column; gap: 14px; }
+.ny-h { display: flex; align-items: baseline; gap: 8px; }
+.ny-h h2, .pl-h h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.count { font-size: 12px; color: var(--hf-muted); }
+.more { margin-left: auto; font-size: 12px; color: var(--hf-muted); }
+.ny-s { display: flex; flex-direction: column; gap: 8px; }
+.ny-g { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--hf-muted); }
+.count-n { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--hf-track); font-size: 11px; font-weight: 600; letter-spacing: 0; color: var(--hf-fg-2); }
+.empty { padding: 16px; border: 1px dashed var(--hf-border-strong); border-radius: var(--hf-radius); text-align: center; }
+.empty p { margin: 0; font-size: 12.5px; }
+.empty .empty-t { font-weight: 600; color: var(--hf-success); margin-bottom: 4px; }
+
+/* The run card's cards for what the run waits for. */
+.rc-asks { display: flex; flex-direction: column; gap: 8px; margin: 10px 12px 0; }
+
+/* The Plan list. */
+.pl { display: flex; flex-direction: column; gap: 10px; }
+.pl-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.proj { font-size: 12.5px; color: var(--hf-fg-2); }
+.pl-flow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; color: var(--hf-muted); }
+.blk-h { margin: 4px 0 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; }
+.blk-h .muted { font-size: 12px; font-weight: 400; }
+.block, .rows { list-style: none; margin: 0; padding: 0; }
+.block { border: 1px solid var(--hf-border-strong); border-radius: var(--hf-radius); background: var(--hf-card); overflow: hidden; }
+/* Each row's line is indented by its depth in the tree: an epic, its stories, their tasks. */
+.row { --step: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px 6px calc(10px + var(--depth, 0) * var(--step)); border-top: 1px solid var(--hf-border); }
+.block > .node:first-child > .row { border-top: 0; }
+.row.epic { background: var(--hf-hover); }
+@media (max-width: 420px) {
+  .row { --step: 10px; }
+}
+.row-l { display: flex; flex: 1 1 260px; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.row-r { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px 8px; margin-left: auto; min-width: 0; }
+.row > .act { flex-basis: 100%; }
+.ttl { font-size: 12.5px; overflow-wrap: anywhere; }
+.ttl .n { font-family: var(--hf-mono); font-size: 12px; color: var(--hf-muted); }
+.ttl.strong { font-weight: 600; }
+.kind { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border: 1px solid var(--hf-border-strong); border-radius: 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--hf-muted); }
+.dates { font-size: 11.5px; color: var(--hf-muted); white-space: nowrap; }
+.prog { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; }
+.bar { display: inline-flex; width: 64px; height: 6px; border-radius: 999px; background: var(--hf-track); overflow: hidden; }
+.bar-in { background: var(--hf-success-dot); }
+.size { display: inline-grid; place-items: center; min-width: 20px; height: 18px; padding: 0 5px; border: 1px solid var(--hf-border-strong); border-radius: 4px; font: 600 10.5px/1 var(--hf-mono); color: var(--hf-muted); }
+.size.none { border-style: dashed; font-family: inherit; font-weight: 400; }
+.pr { font-size: 12px; color: var(--hf-muted); }
+.acts { display: inline-flex; gap: 4px; }
+.pill.c-shaping { background: var(--hf-track); color: var(--hf-muted); }
+.pill.c-ready { background: var(--hf-active-bg); color: var(--hf-active); }
+.pill.c-running { background: var(--hf-attention-bg); color: var(--hf-attention); }
+.pill.c-review { background: var(--hf-repaired-bg); color: var(--hf-repaired); }
+.pill.c-done { background: var(--hf-success-bg); color: var(--hf-success); }
+.pill.c-other { border-color: var(--hf-border); color: var(--hf-muted); }
+.pill.run { border-color: var(--hf-border); color: var(--hf-fg-2); }
+.pill.run::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--hf-muted-2); }
+.pill.r-running::before, .pill.r-queued::before { background: var(--hf-active-dot); }
+.pill.r-waiting::before { background: var(--hf-attention-dot); }
+.pill.r-succeeded::before { background: var(--hf-success-dot); }
+.pill.r-failed::before { background: var(--hf-danger-dot); }
+.foot { display: flex; align-items: center; gap: 6px; }
+.foot .src { margin-left: auto; font: 10.5px/1 var(--hf-mono); color: var(--hf-muted-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  .act-pending::before { animation: none; }
+}

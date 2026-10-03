@@ -3,7 +3,8 @@ import type { McpUiHostCapabilities } from "@modelcontextprotocol/ext-apps";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
-import { RUN_CARD_HTML } from "../run-card.generated";
+import { mountView, textResult as jsonResult, unmountViews } from "../testing";
+import { RUN_CARD_HTML } from "../views.generated";
 import { startRunCard } from "./main";
 
 const RUN_URL = "http://localhost:3000/projects/p1/runs/7f3a2c1e-0000-4000-8000-000000000001";
@@ -31,7 +32,7 @@ const run = {
     { node: "coder", attempt: 2, status: "running", state: "waiting", waiting_on: "permission", started_at: "2026-10-03T10:09:00.000Z", finished_at: null, duration_seconds: 300, cost_usd: 0.2 },
   ],
   questions: [],
-  permissions: [{ id: "perm1", node: "coder", attempt: 2, tool: "Bash", asks: "Run a command", detail: "pnpm test", input: { command: "pnpm test" }, asked_at: "2026-10-03T10:12:00.000Z" }],
+  permissions: [{ id: "perm1", node: "coder", attempt: 2, tool: "Bash", asks: "asks to run a command", detail: "pnpm test", input: { command: "pnpm test" }, asked_at: "2026-10-03T10:12:00.000Z" }],
   failed: null,
   answered: [],
   stuck: null,
@@ -82,7 +83,8 @@ test("the run card shows the run's status, issue, graph, attempt, cost, steps, p
   // One segment per node, the latest attempt of each: coder ran twice and now waits.
   const steps = view.getByRole("list", { name: "Steps, 3 of 4 done" });
   expect(within(steps).getAllByRole("listitem").map((li) => li.getAttribute("title"))).toEqual(["planner, done", "plan-review, done", "coder, waiting, attempt 2", "reviewer, done"]);
-  expect(view.getByText("Waits for your permission: Run a command, pnpm test")).toBeInTheDocument();
+  // The permission it waits for is a card of its own, with the whole command.
+  expect(within(view.getByRole("article", { name: "coder asks to run a command" })).getByText("pnpm test")).toBeInTheDocument();
   expect(view.getByRole("link", { name: "PR #88" })).toBeInTheDocument();
 });
 
@@ -168,4 +170,39 @@ test("the card follows the host's theme, light or dark", async () => {
   await waitFor(() => expect(document.documentElement).toHaveAttribute("data-theme", "dark"));
   bridge!.setHostContext({ theme: "light" });
   await waitFor(() => expect(document.documentElement).toHaveAttribute("data-theme", "light"));
+});
+
+test("a run that waits for a permission or a question is answered from the card, through the host's tool calls", async () => {
+  onTestFinished(unmountViews);
+  const question = { id: "q1", node: "gate", question: "Which database?", options: ["postgres", "sqlite"] };
+  const { calls } = await mountView(startRunCard, {
+    input: { run_id: run.id },
+    result: jsonResult({ ...run, questions: [question] }),
+    tools: { answer_permission: () => jsonResult({ decision: "allowed", url: RUN_URL }), answer_question: () => jsonResult({ answered: true, run_id: run.id, url: RUN_URL }) },
+  });
+  const permission = within(await screen.findByRole("article", { name: "coder asks to run a command" }));
+  fireEvent.click(permission.getByRole("button", { name: "Allow once" }));
+  await waitFor(() => expect(permission.getByRole("status")).toHaveTextContent("Allowed once."));
+  const asked = within(screen.getByRole("article", { name: "Which database?" }));
+  fireEvent.click(asked.getByRole("button", { name: "sqlite" }));
+  await waitFor(() => expect(asked.getByRole("status")).toHaveTextContent("Answered: sqlite"));
+  expect(calls).toEqual([
+    { name: "answer_permission", arguments: { request_id: "perm1", decision: "allow" } },
+    { name: "answer_question", arguments: { question_id: "q1", option: "sqlite", answer: "sqlite" } },
+  ]);
+});
+
+test("a question that asks for a review or a Try it links to its page", async () => {
+  await show(
+    textResult({
+      ...run,
+      permissions: [],
+      questions: [
+        { id: "q2", node: "plan-review", question: "Approve the plan?", options: ["approve", "changes"], review: "# Plan", review_url: `${RUN_URL}/review/q2` },
+        { id: "q3", node: "try", question: "Does it work?", options: ["approve", "changes"], try: { url: `${RUN_URL}/try/q3` } },
+      ],
+    }),
+  );
+  expect(await screen.findByRole("link", { name: "Open the review" })).toHaveAttribute("href", `${RUN_URL}/review/q2`);
+  expect(screen.getByRole("link", { name: "Open Try it" })).toHaveAttribute("href", `${RUN_URL}/try/q3`);
 });
