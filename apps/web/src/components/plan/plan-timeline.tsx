@@ -55,6 +55,7 @@ import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
 import { FlagCard, type FlagContext } from "./timeline-flag-card";
 import { DateFieldsBanner, EstimateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
+import { CapacityPopover } from "@/components/settings/capacity-popover";
 import { LoadRow } from "./load-row";
 import { useBarDrag, type DragBar } from "./use-bar-drag";
 import { useRowsOpen } from "./use-collapsed";
@@ -952,19 +953,35 @@ function TodayMarker({ side, today, onClick }: { side: "left" | "right"; today: 
   );
 }
 
-/** The time axis: months over days or weeks, Today, and under them the load row when the plan has sizes. */
-function TimeAxis({ scale, todayX, load }: { scale: TimeScale; todayX: number; load: (ReturnType<typeof loadOf> & { preview: Record<string, number> | undefined }) | undefined }) {
+/**
+ * The time axis: months over days or weeks, Today, and under them the load row when the plan has sizes. The
+ * load row's label opens the capacity popover.
+ */
+function TimeAxis({
+  projectId,
+  scale,
+  todayX,
+  load,
+}: {
+  projectId: string;
+  scale: TimeScale;
+  todayX: number;
+  load: (ReturnType<typeof loadOf> & { preview: Record<string, number> | undefined }) | undefined;
+}) {
   return (
     <div role="row" aria-label="Time axis" className={cn("flex", load ? "h-[66px]" : "h-12")}>
       <div role="columnheader" className="sticky left-0 z-10 border-r border-b bg-card" style={{ width: LABEL_WIDTH }}>
         <span className="absolute top-[26px] left-2.5 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Item</span>
         {load && (
-          <span
-            title={load.note}
-            className="absolute inset-x-0 bottom-0 flex h-[18px] items-center justify-end border-t px-2.5 text-[10.5px] font-medium text-muted-foreground"
-          >
-            Load at {formatDuration(load.capacity, Infinity)} a day
-          </span>
+          <CapacityPopover projectId={projectId} capacity={load.capacity}>
+            <button
+              type="button"
+              title={load.note}
+              className="absolute inset-x-0 bottom-0 flex h-[18px] items-center justify-end border-t px-2.5 text-[10.5px] font-medium text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              Load at {formatDuration(load.capacity, Infinity)} a day
+            </button>
+          </CapacityPopover>
         )}
       </div>
       <div role="columnheader" aria-label={`${shortDay(scale.range.start)} to ${shortDay(scale.range.end)}`} className="relative flex-1 border-b" style={{ minWidth: scale.width }}>
@@ -1206,7 +1223,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
             style={{ width: LABEL_WIDTH + scale.width, minWidth: "100%" }}
           >
             <div role="rowgroup">
-              <TimeAxis scale={scale} todayX={todayX} load={load} />
+              <TimeAxis projectId={projectId} scale={scale} todayX={todayX} load={load} />
             </div>
             <div role="rowgroup" className="relative" style={{ height }} onPointerLeave={() => setHovered(undefined)}>
               {rows.map((row) => {

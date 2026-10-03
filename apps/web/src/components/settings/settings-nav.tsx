@@ -15,6 +15,7 @@ import {
   LibraryIcon,
   MessageSquareIcon,
   PlugIcon,
+  RulerIcon,
   SunMoonIcon,
   TerminalIcon,
   type LucideIcon,
@@ -128,7 +129,13 @@ const PROJECT_SETTINGS_GROUPS: { label: string; items: { tab: ProjectSettingsTab
       { tab: "library", icon: LibraryIcon },
     ],
   },
-  { label: "Plan", items: [{ tab: "scheduler", icon: CalendarClockIcon }] },
+  {
+    label: "Plan",
+    items: [
+      { tab: "scheduler", icon: CalendarClockIcon },
+      { tab: "estimates", icon: RulerIcon },
+    ],
+  },
 ];
 
 /** The sections of a project's settings as a side menu, each link setting ?tab= as Settings does. */

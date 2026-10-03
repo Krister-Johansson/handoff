@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect } from "react";
-import { DEFAULT_PLAN_BUDGET, DEFAULT_UI_PATHS } from "@handoff/core";
+import { DEFAULT_UI_PATHS } from "@handoff/core";
 import { deleteProjectAction, updateProjectAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,7 +31,6 @@ export type ProjectSummary = {
   agentNotes?: string | null;
   demoSeedCommand?: string | null;
   uiPaths?: string[] | null;
-  planBudget?: { files: number; steps: number } | null;
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -41,40 +40,6 @@ function useCloseOnSuccess(state: ActionState, onOpenChange: (open: boolean) => 
   useEffect(() => {
     if (state.ok) onOpenChange(false);
   }, [state, onOpenChange]);
-}
-
-/** The plan budget's files and steps: what the person typed last, else the project's, else empty with the defaults shown. */
-function PlanBudgetField({ project, values }: { project: ProjectSummary; values: Record<string, string> | undefined }) {
-  return (
-    <Field>
-      <FieldLabel htmlFor={`edit-budget-${project.id}`}>Plan budget</FieldLabel>
-      <div className="grid grid-cols-2 gap-2">
-        <Input
-          type="number"
-          min={1}
-          max={500}
-          id={`edit-budget-${project.id}`}
-          aria-label="Plan budget: files"
-          name="planBudgetFiles"
-          placeholder={String(DEFAULT_PLAN_BUDGET.files)}
-          defaultValue={values?.planBudgetFiles ?? project.planBudget?.files ?? ""}
-        />
-        <Input
-          type="number"
-          min={1}
-          max={500}
-          aria-label="Plan budget: steps"
-          name="planBudgetSteps"
-          placeholder={String(DEFAULT_PLAN_BUDGET.steps)}
-          defaultValue={values?.planBudgetSteps ?? project.planBudget?.steps ?? ""}
-        />
-      </div>
-      <FieldDescription>
-        The most files and steps a plan may have. A planner over it proposes a split, which a plan gate offers as Split as proposed. Empty means {DEFAULT_PLAN_BUDGET.files} files
-        and {DEFAULT_PLAN_BUDGET.steps} steps.
-      </FieldDescription>
-    </Field>
-  );
 }
 
 export function EditProjectDialog({ project, open, onOpenChange }: { project: ProjectSummary; open: boolean; onOpenChange: (open: boolean) => void }) {
@@ -165,7 +130,6 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 <span className="font-mono">{DEFAULT_UI_PATHS.join(" ")}</span>.
               </FieldDescription>
             </Field>
-            <PlanBudgetField project={project} values={state.values} />
             {state.error && <FieldError>{state.error}</FieldError>}
           </FieldGroup>
           <DialogFooter>

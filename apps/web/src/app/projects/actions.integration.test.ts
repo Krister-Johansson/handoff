@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: (path: string) => void env.redirec
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { addDateFieldsAction, runAgainAction, scheduleAction, startRunAction } = await import("./actions");
+const { addDateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, startRunAction } = await import("./actions");
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -91,4 +91,34 @@ test("Add date fields gives the plan's Project its Start and Target fields", asy
   expect(await addDateFieldsAction({ projectId: project.id })).toEqual({ ok: true });
   expect(plan.plans.get("octo/sample")!.project.dateFields).toEqual({ start: expect.any(String), target: expect.any(String) });
   expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: null })).toEqual({ ok: true });
+});
+
+test("setCapacityAction stores hours a day for the project and refuses a value outside 1 to 24", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  const capacity = async () => (await db.select({ hours: projects.planHoursPerDay }).from(projects).where(eq(projects.id, project.id)))[0]?.hours;
+  expect(await capacity()).toBe(6);
+  expect(await setCapacityAction({ projectId: project.id, hours: 7.5 })).toEqual({ ok: true });
+  expect(await capacity()).toBe(7.5);
+  expect(await setCapacityAction({ projectId: project.id, hours: 24 })).toEqual({ ok: true });
+  expect(await setCapacityAction({ projectId: project.id, hours: 1 })).toEqual({ ok: true });
+  for (const hours of [0, 0.5, 24.5, 25, Number.NaN]) {
+    expect(await setCapacityAction({ projectId: project.id, hours })).toEqual({ ok: false, error: "Hours a day is a number from 1 to 24." });
+  }
+  expect(await capacity()).toBe(1);
+  expect(await setCapacityAction({ projectId: "not a project", hours: 6 })).toEqual({ ok: false, error: expect.any(String) });
+});
+
+test("setPlanBudgetAction saves files and steps, keeps the default for one left empty, clears both when empty and refuses one out of range", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  const budget = async () => (await db.select({ budget: projects.planBudget }).from(projects).where(eq(projects.id, project.id)))[0]?.budget;
+  expect(await setPlanBudgetAction({ projectId: project.id, files: " 8 ", steps: "6" })).toEqual({ ok: true });
+  expect(await budget()).toEqual({ files: 8, steps: 6 });
+  expect(await setPlanBudgetAction({ projectId: project.id, files: "20", steps: "" })).toEqual({ ok: true });
+  expect(await budget()).toEqual({ files: 20, steps: 12 });
+  expect(await setPlanBudgetAction({ projectId: project.id, files: "", steps: "" })).toEqual({ ok: true });
+  expect(await budget()).toBeNull();
+  for (const [files, steps] of [["0", ""], ["", "two"], ["501", "6"]]) {
+    expect(await setPlanBudgetAction({ projectId: project.id, files: files!, steps: steps! })).toEqual({ ok: false, error: expect.stringMatching(/whole number from 1 to 500/) });
+  }
+  expect(await budget()).toBeNull();
 });

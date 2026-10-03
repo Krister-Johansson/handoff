@@ -5,13 +5,14 @@ import { z } from "zod";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
 import { planPath, runPath } from "@/lib/paths";
+import { projectSettingsPath } from "@/lib/settings-tab";
 import { LibrarySelectionSchema } from "@handoff/core";
 import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
 import { addDateFields, addEstimateFields, listGitHubProjects, moveItem, moveToReady, moveToShaping, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
-import { deleteProject, unlinkPlan, updateProject } from "@/server/project-admin";
+import { deleteProject, setCapacity, setPlanBudget, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { linkDependencies } from "@/server/link-dependencies";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
@@ -56,8 +57,6 @@ export async function updateProjectAction(_: ActionState, form: FormData): Promi
     agentNotes: field(form, "agentNotes"),
     demoSeedCommand: field(form, "demoSeedCommand"),
     uiPaths: field(form, "uiPaths"),
-    planBudgetFiles: field(form, "planBudgetFiles"),
-    planBudgetSteps: field(form, "planBudgetSteps"),
   };
   try {
     await updateProject(getDb(), projectId, values);
@@ -277,6 +276,43 @@ export async function planIssueAction(input: z.input<typeof PlanIssueSchema>): P
   return onPlan(projectId, (deps) => planIssue(deps, projectId, { issue, ...(story !== undefined ? { story } : {}) }));
 }
 
+// An emptied number field gives NaN, which setCapacity refuses with the range.
+const CapacitySchema = z.object({ projectId: z.string().uuid(), hours: z.union([z.number(), z.nan()]) });
+
+/**
+ * Project settings' capacity: the person's hours of work a day on the plan, from 1 to 24. The timeline's
+ * bars and Arrange read it, so the plan page is refreshed too.
+ */
+export async function setCapacityAction(input: z.input<typeof CapacitySchema>): Promise<ActionState> {
+  const parsed = CapacitySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project's capacity cannot be changed from here." };
+  const { projectId, hours } = parsed.data;
+  try {
+    await setCapacity(getDb(), projectId, hours);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(projectSettingsPath(projectId));
+  revalidatePath(planPath(projectId));
+  return { ok: true };
+}
+
+const PlanBudgetSchema = z.object({ projectId: z.string().uuid(), files: z.string().max(20), steps: z.string().max(20) });
+
+/** Project settings' plan budget: the most files and steps a plan may have, each as typed; one left empty takes its default. */
+export async function setPlanBudgetAction(input: z.input<typeof PlanBudgetSchema>): Promise<ActionState> {
+  const parsed = PlanBudgetSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project's plan budget cannot be changed from here." };
+  const { projectId, files, steps } = parsed.data;
+  try {
+    await setPlanBudget(getDb(), projectId, { files, steps });
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(projectSettingsPath(projectId));
+  return { ok: true };
+}
+
 /** A GitHub Project the plan can live in, as the Set up the plan dialog lists it. */
 export type GitHubProjectChoice = Awaited<ReturnType<typeof listGitHubProjects>>[number];
 
@@ -389,16 +425,20 @@ export async function saveArrangeAction(input: z.input<typeof SaveArrangeSchema>
   }
 }
 
-/** The timeline banner's Add the fields: creates Size and Estimate on the plan's GitHub Project. */
+/** Add the fields, on the timeline's banner and in Settings, Projects: creates Size and Estimate on the plan's GitHub Project. */
 export async function addEstimateFieldsAction(input: { projectId: string }): Promise<ActionState> {
   const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
   if (!parsed.success) return { ok: false, error: "That project has no plan to add fields to." };
-  return onPlan(parsed.data.projectId, (deps) => addEstimateFields(deps, parsed.data.projectId));
+  const result = await onPlan(parsed.data.projectId, (deps) => addEstimateFields(deps, parsed.data.projectId));
+  if (result.ok) revalidatePath("/settings");
+  return result;
 }
 
-/** The timeline banner's Add date fields: creates the Start and Target fields on the plan's GitHub Project. */
+/** Add date fields, on the timeline's banner and in Settings, Projects: creates the Start and Target fields on the plan's GitHub Project. */
 export async function addDateFieldsAction(input: { projectId: string }): Promise<ActionState> {
   const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
   if (!parsed.success) return { ok: false, error: "That project has no plan to add dates to." };
-  return onPlan(parsed.data.projectId, (deps) => addDateFields(deps, parsed.data.projectId));
+  const result = await onPlan(parsed.data.projectId, (deps) => addDateFields(deps, parsed.data.projectId));
+  if (result.ok) revalidatePath("/settings");
+  return result;
 }

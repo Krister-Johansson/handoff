@@ -5,12 +5,14 @@ import { NewGraphDialog } from "@/components/projects/forms";
 import { GraphList } from "@/components/projects/graph-list";
 import { CARD_BODY, SectionCard } from "@/components/section-card";
 import { SchedulerSettings } from "@/components/scheduler/scheduler-settings";
+import { EstimateSettings } from "@/components/settings/estimate-settings";
 import { ProjectSettingsNav } from "@/components/settings/settings-nav";
 import { getDb } from "@/lib/db";
 import { getProjects } from "@/lib/github";
 import { PROJECTS_SETTINGS_PATH } from "@/lib/paths";
 import { parseProjectSettingsTab, PROJECT_SETTINGS_TAB_LABEL, projectSettingsPath, type ProjectSettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
+import { forecastsForSettings } from "@/server/forecasts";
 import { listProjectGraphs, TEMPLATES } from "@/server/graphs";
 import { libraryChoices } from "@/server/library-choices";
 import { projectPage, sectionCrumbs, type ProjectDetail } from "@/server/project-page";
@@ -66,12 +68,25 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
         />
       );
     }
+    case "estimates": {
+      const { capacity, forecasts } = await forecastsForSettings(getDb(), project.id, getProjects());
+      return (
+        <EstimateSettings
+          // A save gives the section its stored values again.
+          key={JSON.stringify([capacity, project.planBudget])}
+          projectId={project.id}
+          capacity={capacity}
+          forecasts={forecasts}
+          planBudget={project.planBudget}
+        />
+      );
+    }
   }
 }
 
 /**
  * What a project's runs start from and how its plan is worked, one section at a time beside a side menu
- * as in Settings: Graphs and the Default library, then the Scheduler. The repository, branch, setup
+ * as in Settings: Graphs and the Default library, then the Scheduler and Estimates. The repository, branch, setup
  * command and GitHub Project are managed in Settings, Projects.
  */
 export default async function ProjectSettingsPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {

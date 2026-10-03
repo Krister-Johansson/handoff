@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNotNull, nodeExecutions, permissionRequests, projects, questions, runs, sql, type Db } from "@handoff/db";
-import { PLAN_SIZES, sizeOf, type PlanSize } from "@handoff/github";
+import { PLAN_SIZES, sizeOf, type PlanSize, type ProjectsPort } from "@handoff/github";
 import { forecastOf, runParts, type ForecastSample, type Forecasts } from "../lib/plan/forecast.ts";
 
 export type ProjectForecasts = {
@@ -85,6 +85,21 @@ export async function loadForecasts(db: Db, projectId: string, sizeOfIssue: (iss
   }
   const forecasts = Object.fromEntries(PLAN_SIZES.map((size) => [size, forecastOf(samples[size], size)])) as Forecasts;
   return { forecasts, capacity: project?.capacity ?? 6 };
+}
+
+/**
+ * The forecasts and capacity as project settings show them. A run without a recorded size or a proposal counts
+ * under its task's current Size, read from the plan's items; without GitHub, or when it does not answer, such
+ * runs are left out.
+ */
+export async function forecastsForSettings(db: Db, projectId: string, plan: ProjectsPort | undefined): Promise<ProjectForecasts> {
+  const [project] = await db
+    .select({ owner: projects.repoOwner, name: projects.repoName, number: projects.planProjectNumber })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const items = project?.number != null && plan ? await plan.listItems(project.owner, project.number, { owner: project.owner, name: project.name }).catch(() => []) : [];
+  const sizes = new Map(items.map((item) => [item.number, item.size]));
+  return loadForecasts(db, projectId, (issue) => sizes.get(issue));
 }
 
 /** A size the planner proposed for a task, from the plan of the run it names. */

@@ -48,20 +48,6 @@ describe("updateProject", () => {
     expect(await read()).toMatchObject({ demoSeedCommand: null, uiPaths: null });
   });
 
-  test("saves the plan budget, keeps the default for a number left empty, clears it when both are empty, and refuses one out of range", async () => {
-    const { project } = await projectWithRun();
-    const read = async () => (await db.select().from(projects).where(eq(projects.id, project.id)))[0];
-    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: " 8 ", planBudgetSteps: "6" });
-    expect(await read()).toMatchObject({ planBudget: { files: 8, steps: 6 } });
-    expect((await projectsForSettings(db, undefined))[0]).toMatchObject({ planBudget: { files: 8, steps: 6 } });
-    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: "20", planBudgetSteps: "" });
-    expect(await read()).toMatchObject({ planBudget: { files: 20, steps: 12 } });
-    await updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: "", planBudgetSteps: "" });
-    expect(await read()).toMatchObject({ planBudget: null });
-    await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetFiles: "0" })).rejects.toThrow(/whole number from 1 to 500/);
-    await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: "main", planBudgetSteps: "two" })).rejects.toThrow(/whole number from 1 to 500/);
-  });
-
   test("refuses an invalid or taken name", async () => {
     const { project } = await projectWithRun();
     await createProject(db, { name: "other", repo: "octo/other", defaultBranch: "main" });
@@ -86,8 +72,26 @@ describe("Settings, Projects", () => {
     const rows = await projectsForSettings(db, plan);
     expect(rows).toEqual([
       expect.objectContaining({ name: "quiet", repoOwner: "octo", repoName: "quiet", defaultBranch: "trunk", setupCommand: null, runCount: 0, plan: null }),
-      expect.objectContaining({ id: project.id, name: "sandbox", setupCommand: "pnpm install", runCount: 1, plan: { number, title: "sandbox plan", url: expect.stringContaining(`/projects/${number}`) } }),
+      expect.objectContaining({ id: project.id, name: "sandbox", setupCommand: "pnpm install", runCount: 1, plan: {
+          number,
+          title: "sandbox plan",
+          url: expect.stringContaining(`/projects/${number}`),
+          fields: { start: true, target: true, size: false, estimate: false },
+        },
+      }),
     ]);
+  });
+
+  test("the plan's GitHub Project lists which of Start, Target, Size and Estimate it has", async () => {
+    const { plan, number } = await planned();
+    const fieldsOf = async () => (await projectsForSettings(db, plan)).find((p) => p.name === "sandbox")?.plan?.fields;
+    await plan.ensureEstimateFields("octo", number);
+    expect(await fieldsOf()).toEqual({ start: true, target: true, size: true, estimate: true });
+    // A Size field without all of S, M and L counts as missing, as Add the fields would complete it.
+    const project = plan.plans.get("octo/sample")!.project;
+    project.estimateFields!.size!.options.L = undefined;
+    project.dateFields = { start: undefined, target: "field-target" };
+    expect(await fieldsOf()).toEqual({ start: false, target: true, size: false, estimate: true });
   });
 
   test("keeps the plan's number when GitHub cannot be read", async () => {

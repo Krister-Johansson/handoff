@@ -30,6 +30,7 @@ const actions = vi.hoisted(() => ({
   setSizeAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   moveItemAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
   saveArrangeAction: vi.fn(async (input: { items: { issue: number }[] }): Promise<ArrangeState> => ({ ok: true, saved: input.items.map((i) => i.issue), refused: [] })),
+  setCapacityAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
 }));
 vi.mock("@/app/projects/actions", () => actions);
 
@@ -792,7 +793,8 @@ test("the load row shows hours per day and marks a day over capacity", () => {
   // Oct 4 #145's last hour, #146's 50 minutes and #149's 5 hours.
   renderSized({ plan: sizedWith({ 145: { estimate: 4 }, 149: { estimate: 5 }, 152: { start: "2026-10-05", target: "2026-10-06" } }) });
   const axis = screen.getByRole("row", { name: "Time axis" });
-  expect(within(axis).getByText("Load at 6h a day")).toHaveAttribute("title", "1 task with dates has no size, so its hours are not counted");
+  const label = within(axis).getByRole("button", { name: "Load at 6h a day" });
+  expect(label).toHaveAttribute("title", "1 task with dates has no size, so its hours are not counted");
 
   expect(within(axis).getByTitle("Oct 1: 1h 15m of 6h")).not.toHaveAttribute("data-over");
   expect(within(axis).getByTitle("Oct 2: 6h of 6h")).not.toHaveAttribute("data-over");
@@ -801,6 +803,15 @@ test("the load row shows hours per day and marks a day over capacity", () => {
   expect(over).toHaveAttribute("data-over", "true");
   expect(over).toHaveTextContent("6h 50m");
   expect(within(axis).queryByTitle(/^Oct 5:/)).not.toBeInTheDocument();
+});
+
+test("the load row's label opens the capacity popover, which saves the project's hours a day", async () => {
+  renderSized();
+  fireEvent.click(within(screen.getByRole("row", { name: "Time axis" })).getByRole("button", { name: "Load at 6h a day" }));
+  const popover = screen.getByRole("dialog", { name: "Capacity" });
+  fireEvent.change(within(popover).getByLabelText("Hours a day"), { target: { value: "8" } });
+  fireEvent.click(within(popover).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(actions.setCapacityAction).toHaveBeenCalledWith({ projectId: "p1", hours: 8 }));
 });
 
 test("strips start under the bar at its scale and the hover card gives clock times", async () => {

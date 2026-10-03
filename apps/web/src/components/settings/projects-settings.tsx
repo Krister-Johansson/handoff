@@ -1,9 +1,9 @@
 "use client";
 
 import { useState, useTransition, type ReactNode } from "react";
-import { ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
-import { DEFAULT_PLAN_BUDGET } from "@handoff/core";
-import { unlinkPlanAction } from "@/app/projects/actions";
+import Link from "next/link";
+import { CheckIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { addDateFieldsAction, addEstimateFieldsAction, unlinkPlanAction } from "@/app/projects/actions";
 import { SetUpPlanDialog } from "@/components/plan/set-up-plan-dialog";
 import { AddProjectDialog } from "@/components/projects/add-project-dialog";
 import { DeleteProjectDialog, EditProjectDialog } from "@/components/projects/project-dialogs";
@@ -24,7 +24,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
-import type { PlanLink } from "@/server/project-admin";
+import { projectSettingsPath } from "@/lib/settings-tab";
+import type { PlanFieldsPresent, PlanLink } from "@/server/project-admin";
 import type { SchedulerBrief } from "@/server/scheduler-card";
 
 /** A project as Settings, Projects lists it. */
@@ -39,7 +40,6 @@ export type ProjectRow = {
   agentNotes?: string | null;
   demoSeedCommand?: string | null;
   uiPaths?: string[] | null;
-  planBudget?: { files: number; steps: number } | null;
   isDemo: boolean;
   runCount: number;
   plan: PlanLink | null;
@@ -106,7 +106,56 @@ function UnlinkPlanDialog({ project, plan }: { project: ProjectRow; plan: PlanLi
   );
 }
 
-/** The plan's GitHub Project with its link, or Set up the plan when there is none. */
+/** The fields handoff reads, as each reads present or missing. */
+const FIELDS: { key: keyof PlanFieldsPresent; present: string; missing: string }[] = [
+  { key: "start", present: "Start", missing: "No Start field" },
+  { key: "target", present: "Target", missing: "No Target field" },
+  { key: "size", present: "Size: S, M, L", missing: "No Size field" },
+  { key: "estimate", present: "Estimate, Number", missing: "No Estimate field" },
+];
+
+/**
+ * The Project's Start, Target, Size and Estimate fields, and Add the fields when any is missing: it adds the
+ * date fields and the Size and Estimate fields the Project lacks.
+ */
+function PlanFields({ projectId, fields }: { projectId: string; fields: PlanFieldsPresent }) {
+  const [error, setError] = useState<string>();
+  const [pending, startTransition] = useTransition();
+  const dates = !fields.start || !fields.target;
+  const estimates = !fields.size || !fields.estimate;
+  const add = () =>
+    startTransition(async () => {
+      const results = [...(dates ? [await addDateFieldsAction({ projectId })] : []), ...(estimates ? [await addEstimateFieldsAction({ projectId })] : [])];
+      setError(results.find((r) => r.error)?.error);
+    });
+  return (
+    <div className="mt-1.5 flex flex-col items-start gap-1.5">
+      <ul aria-label="Fields" className="flex flex-wrap gap-1">
+        {FIELDS.map(({ key, present, missing }) => (
+          <li key={key}>
+            {fields[key] ? (
+              <Tag tone="success">
+                <CheckIcon aria-hidden />
+                {present}
+              </Tag>
+            ) : (
+              <Tag className="border-dashed">{missing}</Tag>
+            )}
+          </li>
+        ))}
+      </ul>
+      {(dates || estimates) && (
+        <Button size="xs" variant="outline" disabled={pending} onClick={add}>
+          <PlusIcon data-icon="inline-start" />
+          Add the fields
+        </Button>
+      )}
+      {error && <FieldError>{error}</FieldError>}
+    </div>
+  );
+}
+
+/** The plan's GitHub Project with its link and fields, or Set up the plan when there is none. */
 function PlanOnGitHub({ project }: { project: ProjectRow }) {
   const { plan } = project;
   if (!plan) {
@@ -134,6 +183,7 @@ function PlanOnGitHub({ project }: { project: ProjectRow }) {
       ) : (
         <span className="text-muted-foreground">GitHub cannot be read with GITHUB_TOKEN, so the Project&apos;s name is missing.</span>
       )}
+      {plan.fields && <PlanFields projectId={project.id} fields={plan.fields} />}
       <div className="mt-1.5">
         <UnlinkPlanDialog project={project} plan={plan} />
       </div>
@@ -167,15 +217,17 @@ function ProjectDetails({ project }: { project: ProjectRow }) {
           <span className="text-[13px] text-muted-foreground">the defaults: routes, pages, components and styles</span>
         )}
       </Detail>
-      <Detail term="Plan budget">
-        {project.planBudget ? (
-          <span className="text-[13px]">{`${project.planBudget.files} files, ${project.planBudget.steps} steps`}</span>
-        ) : (
-          <span className="text-[13px] text-muted-foreground">{`the defaults: ${DEFAULT_PLAN_BUDGET.files} files, ${DEFAULT_PLAN_BUDGET.steps} steps`}</span>
-        )}
-      </Detail>
       <Detail term="Plan on GitHub">
         <PlanOnGitHub project={project} />
+      </Detail>
+      <Detail term="Estimates">
+        <span className="text-[13px] text-muted-foreground">
+          Capacity, forecasts and the plan budget are in{" "}
+          <Link href={projectSettingsPath(project.id, "estimates")} className="font-medium text-foreground underline underline-offset-3">
+            Project settings, Estimates
+          </Link>
+          .
+        </span>
       </Detail>
     </dl>
   );
