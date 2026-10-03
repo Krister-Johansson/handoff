@@ -32,24 +32,9 @@ test("editing submits the new name, default branch and setup command", async () 
     agentNotes: "",
     demoSeedCommand: "",
     uiPaths: "",
-    planBudgetFiles: "",
-    planBudgetSteps: "",
   });
-});
-
-test("editing submits the plan budget, with the defaults shown when the project has none", async () => {
-  const { unmount } = render(<EditProjectDialog project={project} open onOpenChange={() => {}} />);
-  expect(screen.getByLabelText("Plan budget: files")).toHaveAttribute("placeholder", "15");
-  expect(screen.getByLabelText("Plan budget: steps")).toHaveAttribute("placeholder", "12");
-  unmount();
-  render(<EditProjectDialog project={{ ...project, planBudget: { files: 8, steps: 6 } }} open onOpenChange={() => {}} />);
-  expect(screen.getByLabelText("Plan budget: files")).toHaveValue(8);
-  fireEvent.change(screen.getByLabelText("Plan budget: steps"), { target: { value: "5" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() => expect(actions.updateProjectAction).toHaveBeenCalledTimes(1));
-  const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
-  expect(form.get("planBudgetFiles")).toBe("8");
-  expect(form.get("planBudgetSteps")).toBe("5");
+  // The plan budget is set in project settings, Estimates.
+  expect(screen.queryByLabelText(/Plan budget/)).not.toBeInTheDocument();
 });
 
 test("editing submits the teardown command and the agent notes, and says to keep secrets out of the notes", async () => {

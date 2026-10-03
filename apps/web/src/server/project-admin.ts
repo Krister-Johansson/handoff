@@ -1,6 +1,6 @@
 import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, notifications, projects, questions, runs, sql, type Db } from "@handoff/db";
-import { planBudgetOf, type PlanBudget } from "@handoff/core";
-import type { ProjectsPort } from "@handoff/github";
+import { planBudgetOf } from "@handoff/core";
+import { PLAN_SIZES, type PlanProject, type ProjectsPort } from "@handoff/github";
 import { projectsAccessProblem } from "./plan.ts";
 
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
@@ -15,9 +15,6 @@ type ProjectEdit = {
   demoSeedCommand?: string;
   /** Globs, one a line. */
   uiPaths?: string;
-  /** The plan budget's files and steps as typed; empty keeps the default. */
-  planBudgetFiles?: string;
-  planBudgetSteps?: string;
 };
 
 const MAX_BUDGET = 500;
@@ -31,15 +28,35 @@ function budgetNumber(value: string | undefined): number | undefined {
   return n;
 }
 
+/** The plan budget's files and steps as typed; a number left empty takes its default. */
+export type PlanBudgetInput = { files: string; steps: string };
+
 /**
- * The plan budget to store: null when both numbers are empty, so the defaults apply; a number left empty
- * takes its default. Undefined leaves the column as it is.
+ * Saves the most files and steps a plan may have before its planner proposes a split. Both empty clears the
+ * setting, so the defaults apply; a number left empty takes its default.
  */
-function planBudget(input: ProjectEdit): PlanBudget | null | undefined {
-  if (input.planBudgetFiles === undefined && input.planBudgetSteps === undefined) return undefined;
-  const files = budgetNumber(input.planBudgetFiles);
-  const steps = budgetNumber(input.planBudgetSteps);
-  return files === undefined && steps === undefined ? null : planBudgetOf({ ...(files ? { files } : {}), ...(steps ? { steps } : {}) });
+export async function setPlanBudget(db: Db, projectId: string, input: PlanBudgetInput) {
+  const files = budgetNumber(input.files);
+  const steps = budgetNumber(input.steps);
+  const planBudget = files === undefined && steps === undefined ? null : planBudgetOf({ ...(files ? { files } : {}), ...(steps ? { steps } : {}) });
+  const [row] = await db.update(projects).set({ planBudget, updatedAt: new Date() }).where(eq(projects.id, projectId)).returning({ id: projects.id });
+  if (!row) throw new Error("The project no longer exists.");
+}
+
+/** The fewest and most hours of work a day a project's plan may count on. */
+export const CAPACITY_RANGE = { min: 1, max: 24 } as const;
+
+/**
+ * Saves the person's hours of work a day on the project's plan: how long a sized bar is on the timeline and
+ * how full Arrange fills a day. Kept to one decimal, as the column stores it.
+ */
+export async function setCapacity(db: Db, projectId: string, hours: number) {
+  if (!Number.isFinite(hours) || hours < CAPACITY_RANGE.min || hours > CAPACITY_RANGE.max) {
+    throw new Error(`Hours a day is a number from ${CAPACITY_RANGE.min} to ${CAPACITY_RANGE.max}.`);
+  }
+  const planHoursPerDay = Math.round(hours * 10) / 10;
+  const [row] = await db.update(projects).set({ planHoursPerDay, updatedAt: new Date() }).where(eq(projects.id, projectId)).returning({ id: projects.id });
+  if (!row) throw new Error("The project no longer exists.");
 }
 
 const MAX_UI_PATHS = 50;
@@ -78,18 +95,34 @@ export async function updateProject(db: Db, projectId: string, input: ProjectEdi
     agentNotes: optionalText(input.agentNotes, 4_000, "agent notes"),
     demoSeedCommand: optionalText(input.demoSeedCommand, 2_000, "demo seed command"),
     uiPaths: globLines(input.uiPaths),
-    planBudget: planBudget(input),
   };
   const changed = Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined));
   await db.update(projects).set({ name, defaultBranch, ...changed, updatedAt: new Date() }).where(eq(projects.id, projectId));
 }
 
-/** The GitHub Project that holds a project's plan; title and url are missing when GitHub cannot be read. */
-export type PlanLink = { number: number; title?: string; url?: string };
+/**
+ * Which of the fields handoff reads the GitHub Project has: the Start and Target dates, a Size single select
+ * with all of S, M and L, and an Estimate number.
+ */
+export type PlanFieldsPresent = { start: boolean; target: boolean; size: boolean; estimate: boolean };
+
+/** The GitHub Project that holds a project's plan; title, url and fields are missing when GitHub cannot be read. */
+export type PlanLink = { number: number; title?: string; url?: string; fields?: PlanFieldsPresent };
+
+/** The fields a Project has, as Settings, Projects lists them. */
+function fieldsOf(project: PlanProject): PlanFieldsPresent {
+  const size = project.estimateFields?.size;
+  return {
+    start: Boolean(project.dateFields?.start),
+    target: Boolean(project.dateFields?.target),
+    size: Boolean(size && PLAN_SIZES.every((s) => size.options[s])),
+    estimate: Boolean(project.estimateFields?.estimate),
+  };
+}
 
 /**
  * Every project as Settings, Projects lists it, by name: repository, default branch, setup and
- * teardown commands, agent notes, demo seed command, UI paths, run count and the plan's GitHub Project. The Project's title and url are read from GitHub; without
+ * teardown commands, agent notes, demo seed command, UI paths, run count and the plan's GitHub Project. The Project's title, url and fields are read from GitHub; without
  * access, or when GitHub does not answer, the link keeps only its number.
  */
 export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined) {
@@ -105,7 +138,6 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
       agentNotes: projects.agentNotes,
       demoSeedCommand: projects.demoSeedCommand,
       uiPaths: projects.uiPaths,
-      planBudget: projects.planBudget,
       isDemo: projects.isDemo,
       planProjectNumber: projects.planProjectNumber,
       runCount: sql<number>`(select count(*)::int from runs r where r.project_id = "projects"."id")`,
@@ -116,7 +148,7 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
   const linkOf = async (owner: string, number: number | null): Promise<PlanLink | null> => {
     if (number === null) return null;
     const found = await readable?.getProject(owner, number).catch(() => undefined);
-    return found ? { number, title: found.title, url: found.url } : { number };
+    return found ? { number, title: found.title, url: found.url, fields: fieldsOf(found) } : { number };
   };
   return Promise.all(rows.map(async ({ planProjectNumber, ...row }) => ({ ...row, plan: await linkOf(row.repoOwner, planProjectNumber) })));
 }

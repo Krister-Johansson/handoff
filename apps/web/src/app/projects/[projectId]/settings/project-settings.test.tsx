@@ -38,7 +38,20 @@ vi.mock("@/app/projects/actions", () => ({
   listIssuesAction: vi.fn(),
   deleteGraphAction: vi.fn(),
   renameGraphAction: vi.fn(),
+  setCapacityAction: vi.fn(),
+  setPlanBudgetAction: vi.fn(),
 }));
+const forecastsForSettings = vi.hoisted(() =>
+  vi.fn(async () => ({
+    capacity: 8,
+    forecasts: {
+      S: { size: "S", source: "default", minutes: 30, parts: null, costUsd: null, runs: 0, measuredMinutes: null },
+      M: { size: "M", source: "runs", minutes: 50, parts: { agent: 30, queue: 5, waiting: 15 }, costUsd: 0.9, runs: 12, measuredMinutes: 50 },
+      L: { size: "L", source: "default", minutes: 120, parts: null, costUsd: null, runs: 0, measuredMinutes: null },
+    },
+  })),
+);
+vi.mock("@/server/forecasts", () => ({ forecastsForSettings }));
 vi.mock("@/app/projects/scheduler-actions", () => ({}));
 const getProject = vi.hoisted(() => vi.fn(async () => ({ number: 5, priorityOptions: ["High", "Low"] })));
 vi.mock("@/lib/github", () => ({ getProjects: () => ({ getProject }) }));
@@ -103,4 +116,14 @@ test("a demo project has no scheduler; its Scheduler section says so", async () 
   await open("scheduler", { ...project, isDemo: true });
   expect(screen.queryByRole("region", { name: "Scheduler" })).not.toBeInTheDocument();
   expect(screen.getByText("The demo project has no scheduler.")).toBeInTheDocument();
+});
+
+test("?tab=estimates shows the capacity, the forecasts from this project's runs and the plan budget", async () => {
+  await open("estimates", { ...project, planBudget: { files: 8, steps: 6 } } as typeof project);
+  expect(screen.getByRole("link", { name: "Estimates" })).toHaveAttribute("aria-current", "page");
+  expect(forecastsForSettings).toHaveBeenCalledWith(expect.anything(), "p1", expect.objectContaining({ getProject }));
+  expect(screen.getByRole("region", { name: "Capacity" })).toHaveTextContent("8h a day");
+  expect(within(screen.getByRole("region", { name: "Forecasts from finished runs" })).getByRole("row", { name: /^M/ })).toHaveTextContent("$0.90");
+  expect(within(screen.getByRole("region", { name: "Plan budget" })).getByLabelText("Files")).toHaveValue(8);
+  expect(screen.queryByRole("heading", { name: "Scheduler" })).not.toBeInTheDocument();
 });

@@ -33,14 +33,17 @@ test("the library is a group of Settings after Projects, one section per kind", 
   expect(within(library).getByRole("link", { name: "MCP servers" })).toHaveAttribute("aria-current", "page");
 });
 
-test("project settings has Runs with Graphs and Default library, and Plan with the Scheduler", () => {
+test("project settings has Runs with Graphs and Default library, and Plan with the Scheduler and Estimates", () => {
   render(<ProjectSettingsNav projectId="p1" active="library" />);
   const nav = screen.getByRole("navigation", { name: "Project settings sections" });
   expect(links(within(nav).getByRole("group", { name: "Runs" }))).toEqual([
     ["Graphs", "/projects/p1/settings?tab=graphs"],
     ["Default library", "/projects/p1/settings?tab=library"],
   ]);
-  expect(links(within(nav).getByRole("group", { name: "Plan" }))).toEqual([["Scheduler", "/projects/p1/settings?tab=scheduler"]]);
+  expect(links(within(nav).getByRole("group", { name: "Plan" }))).toEqual([
+    ["Scheduler", "/projects/p1/settings?tab=scheduler"],
+    ["Estimates", "/projects/p1/settings?tab=estimates"],
+  ]);
   expect(within(nav).getByRole("link", { name: "Default library" })).toHaveAttribute("aria-current", "page");
   expect(within(nav).getByRole("link", { name: "Graphs" })).not.toHaveAttribute("aria-current");
 });

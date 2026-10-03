@@ -50,16 +50,18 @@ export function libraryRedirectPath(params: SearchParams): string {
 }
 
 /**
- * The sections of a project's settings. Runs: Graphs and Default library. Plan: the Scheduler, and Plan
- * mode once issue 490 adds it (see PROJECT_SETTINGS_GROUPS in components/settings/settings-nav.tsx).
+ * The sections of a project's settings. Runs: Graphs and Default library. Plan: the Scheduler and Estimates
+ * (capacity, forecasts and plan budget), and Plan mode once issue 490 adds it (see PROJECT_SETTINGS_GROUPS in
+ * components/settings/settings-nav.tsx).
  */
-export const PROJECT_SETTINGS_TABS = ["graphs", "library", "scheduler"] as const;
+export const PROJECT_SETTINGS_TABS = ["graphs", "library", "scheduler", "estimates"] as const;
 export type ProjectSettingsTab = (typeof PROJECT_SETTINGS_TABS)[number];
 
 export const PROJECT_SETTINGS_TAB_LABEL: Record<ProjectSettingsTab, string> = {
   graphs: "Graphs",
   library: "Default library",
   scheduler: "Scheduler",
+  estimates: "Estimates",
 };
 
 /** The project settings tab from its search params; Graphs, the first section, unless another known tab is asked for. */

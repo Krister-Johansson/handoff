@@ -10,6 +10,8 @@ const actions = vi.hoisted(() => ({
   unlinkPlanAction: vi.fn(async () => ({ ok: true })),
   listGitHubProjectsAction: vi.fn(async () => ({ projects: [] })),
   setupPlanAction: vi.fn(async () => ({ ok: true })),
+  addEstimateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
+  addDateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
 }));
 vi.mock("@/app/projects/actions", () => actions);
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
@@ -140,4 +142,38 @@ test("Edit opens the edit form with the project's name, branch and setup command
   expect(within(dialog).getByLabelText("Name")).toHaveValue("handoff");
   expect(within(dialog).getByLabelText("Default branch")).toHaveValue("main");
   expect(within(dialog).getByLabelText("Setup command")).toHaveValue("pnpm install");
+});
+
+test("Plan on GitHub lists the fields and offers Add the fields when Size or Estimate is missing", async () => {
+  const fieldsOf = () => within(within(detail("Plan on GitHub")).getByRole("list", { name: "Fields" })).getAllByRole("listitem").map((li) => li.textContent);
+  const all = { start: true, target: true, size: true, estimate: true };
+  const { unmount } = render(<ProjectsSettings projects={[{ ...handoff, plan: { ...handoff.plan!, fields: all } }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(fieldsOf()).toEqual(["Start", "Target", "Size: S, M, L", "Estimate, Number"]);
+  expect(screen.queryByRole("button", { name: "Add the fields" })).not.toBeInTheDocument();
+  unmount();
+
+  actions.addEstimateFieldsAction.mockResolvedValueOnce({ ok: false, error: "GitHub refused the field." });
+  render(<ProjectsSettings projects={[{ ...handoff, plan: { ...handoff.plan!, fields: { ...all, size: false, estimate: false } } }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(fieldsOf()).toEqual(["Start", "Target", "No Size field", "No Estimate field"]);
+  fireEvent.click(within(detail("Plan on GitHub")).getByRole("button", { name: "Add the fields" }));
+  await waitFor(() => expect(actions.addEstimateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
+  expect(actions.addDateFieldsAction).not.toHaveBeenCalled();
+  expect(await within(detail("Plan on GitHub")).findByText("GitHub refused the field.")).toBeInTheDocument();
+});
+
+test("a Project without Start and Target gets them from Add the fields too", async () => {
+  render(<ProjectsSettings projects={[{ ...handoff, plan: { ...handoff.plan!, fields: { start: false, target: false, size: true, estimate: true } } }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  fireEvent.click(within(detail("Plan on GitHub")).getByRole("button", { name: "Add the fields" }));
+  await waitFor(() => expect(actions.addDateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
+  expect(actions.addEstimateFieldsAction).not.toHaveBeenCalled();
+});
+
+test("capacity, forecasts and the plan budget are in project settings, not here", () => {
+  render(<ProjectsSettings projects={[handoff]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(screen.queryByText("Plan budget", { selector: "dt" })).not.toBeInTheDocument();
+  expect(within(detail("Estimates")).getByRole("link", { name: "Project settings, Estimates" })).toHaveAttribute("href", "/projects/p1/settings?tab=estimates");
 });

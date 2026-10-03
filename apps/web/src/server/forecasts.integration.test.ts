@@ -1,8 +1,9 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { runs, type Db } from "@handoff/db";
+import { eq, projects, runs, type Db } from "@handoff/db";
 import { createTestDb, seedExecution, seedRun, truncateAll } from "@handoff/db/testing";
-import type { PlanSize } from "@handoff/github";
-import { loadForecasts } from "./forecasts.ts";
+import type { PlanSize, ProjectsPort } from "@handoff/github";
+import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { forecastsForSettings, loadForecasts } from "./forecasts.ts";
 
 const db: Db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -96,4 +97,27 @@ test("queue time falls back to claimed minus runnable for executions without que
 
   const { forecasts } = await loadForecasts(db, project.id, noSizes);
   expect(forecasts.S).toMatchObject({ source: "runs", minutes: 60, parts: { agent: 44, queue: 16, waiting: 0 } });
+});
+
+test("project settings count a run by its task's Size from the plan, and without GitHub by recorded sizes and proposals only", async () => {
+  const { project, finished } = await seeded();
+  const repo = { owner: "o", name: "r" };
+  const plan = new FakeProjects(new FakeGitHub());
+  const { number } = await plan.createProject("o", repo, "plan");
+  await plan.ensureEstimateFields("o", number);
+  const task = await plan.createIssue(repo, { project: number, title: "Add the column", body: "", labels: ["task"] });
+  plan.itemsOf(repo).get(task.number)!.size = "L";
+  await db.update(projects).set({ planProjectNumber: number, planHoursPerDay: 8 }).where(eq(projects.id, project.id));
+  await finished({ minutes: 30, issues: [task.number] });
+  await finished({ minutes: 20, issues: [99], proposal: "S" });
+
+  const online = await forecastsForSettings(db, project.id, plan);
+  expect(online.capacity).toBe(8);
+  expect([online.forecasts.L.runs, online.forecasts.S.runs]).toEqual([1, 1]);
+
+  // No GitHub, or GitHub that does not answer: the task's current Size is unknown, so only its run is left out.
+  for (const offline of [undefined, { listItems: () => Promise.reject(new Error("GitHub did not answer")) } as unknown as ProjectsPort]) {
+    const read = await forecastsForSettings(db, project.id, offline);
+    expect([read.forecasts.L.runs, read.forecasts.S.runs]).toEqual([0, 1]);
+  }
 });
