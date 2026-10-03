@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { eq, projects, runs } from "@handoff/db";
+import { eq, planPins, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { StartRefusal, startRun } from "./start-run.ts";
@@ -160,4 +160,17 @@ test("a run without a sized task, or with two tasks, records no size", async () 
   expect((await start([other])).size).toBeNull();
   expect((await start([first, second])).size).toBeNull();
   expect((await startRun(db, { projectId: project.id, graphName: "g", task: "No issue at all" }, { github, projects: plan })).size).toBeNull();
+});
+
+test("starting a run on a pinned task removes its pin", async () => {
+  const { project: seeded, start } = await project();
+  await db.insert(planPins).values([
+    { projectId: seeded.id, issue: 11, pinnedBy: "person", reason: "drop" },
+    { projectId: seeded.id, issue: 12, pinnedBy: "person", reason: "keep_here" },
+  ]);
+
+  await start([11]);
+
+  // The pin kept the task's place in the queue; once its run starts, the task has left the queue.
+  expect((await db.select({ issue: planPins.issue }).from(planPins)).map((p) => p.issue)).toEqual([12]);
 });

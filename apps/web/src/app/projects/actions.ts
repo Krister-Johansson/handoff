@@ -7,12 +7,13 @@ import { getDb } from "@/lib/db";
 import { planPath, runPath } from "@/lib/paths";
 import { projectSettingsPath } from "@/lib/settings-tab";
 import { LibrarySelectionSchema } from "@handoff/core";
-import { eq, getLibraryByNames, projects, setProjectLibrary } from "@handoff/db";
+import { eq, getLibraryByNames, PIN_REASONS, projects, setProjectLibrary } from "@handoff/db";
 import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
 import { addDateFields, addEstimateFields, listGitHubProjects, moveItem, moveToReady, moveToShaping, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { PLAN_MODES, setPlanMode } from "@/server/plan-mode";
+import { unpin, writeOrder } from "@/server/flow-order";
 import { deleteProject, setCapacity, setPlanBudget, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { linkDependencies } from "@/server/link-dependencies";
@@ -444,6 +445,35 @@ export async function saveArrangeAction(input: z.input<typeof SaveArrangeSchema>
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
+}
+
+const issues = z.array(z.number().int().positive()).max(500);
+const WriteOrderSchema = z.object({
+  projectId: z.string().uuid(),
+  shown: issues,
+  queue: issues,
+  pin: issues.optional(),
+  unpin: issues.optional(),
+  reason: z.enum(PIN_REASONS).optional(),
+});
+
+/**
+ * A drop, a rule-break dialog's choice, Optimize's Apply, and their Undo on the Flow: writes the queue's new
+ * order to Project order and pins or unpins tasks as the person's. The person's drop is the decision, so there
+ * is no approval card. A refusal is a sentence to show as it is, and a refused write changes no pin.
+ */
+export async function writeOrderAction(input: z.input<typeof WriteOrderSchema>): Promise<ActionState> {
+  const parsed = WriteOrderSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That order cannot be saved from here." };
+  const { projectId, ...write } = parsed.data;
+  return onPlan(projectId, (deps) => writeOrder(deps, projectId, { ...write, actor: "person" }));
+}
+
+/** The pin on a Flow card, or the Pinned tag in its row: the task stops keeping its place. */
+export async function unpinAction(input: z.input<typeof PlanTaskSchema>): Promise<ActionState> {
+  const parsed = PlanTaskSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That task cannot be unpinned from here." };
+  return onPlan(parsed.data.projectId, (deps) => unpin(deps.db, parsed.data.projectId, parsed.data.issue));
 }
 
 /** Add the fields, on the timeline's banner and in Settings, Projects: creates Size and Estimate on the plan's GitHub Project. */
