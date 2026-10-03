@@ -1,6 +1,7 @@
 import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "../projects/kinds.ts";
 import type {
   AdoptedProject,
+  ItemMove,
   NewPlanIssue,
   PlanAncestor,
   PlanDateFieldIds,
@@ -40,6 +41,10 @@ export type FakePlanItem = {
 
 type FakePlan = { login: string; project: PlanProject; items: Map<number, FakePlanItem> };
 
+/** A fake item's node id, from its issue number, and back. */
+const itemIdOf = (issue: number) => `PVTI_${issue}`;
+const issueOf = (itemId: string) => Number(itemId.slice("PVTI_".length));
+
 const keyOf = (repo: RepoRef) => `${repo.owner}/${repo.name}`.toLowerCase();
 
 /** Why `fields` cannot be written on the issue's item of the plan, as setPlanFields answers; undefined when they can. */
@@ -56,7 +61,8 @@ function fieldsProblem(plan: FakePlan | undefined, issue: number, fields: PlanFi
  * In-memory GitHub Projects for tests: one Project per repository. Issue titles, bodies, labels, state and
  * blockers live in the FakeGitHub it is given, so closing an issue there shows as closed in the plan.
  * Tests change `itemsOf(repo)` directly to simulate a person moving a card on GitHub's board. Project order
- * is the order items joined `itemsOf(repo)`.
+ * is the order of `itemsOf(repo)`: the order items joined, until moveItems reorders them. An item's id is
+ * `PVTI_<issue>`.
  */
 export class FakeProjects implements ProjectsPort {
   readonly plans = new Map<string, FakePlan>();
@@ -107,6 +113,7 @@ export class FakeProjects implements ProjectsPort {
           blockedBy: (issue.blockedBy ?? []).filter((n) => this.github.issues.get(n)?.state !== "closed"),
           blockers: [...(issue.blockedBy ?? [])],
           position: index + 1,
+          itemId: itemIdOf(issueNumber),
           priority: plan.project.priorityOptions ? item.priority : undefined,
           prNumbers: item.prNumbers ?? [],
           updatedAt: issue.updatedAt ?? "",
@@ -264,6 +271,28 @@ export class FakeProjects implements ProjectsPort {
     const fields = { start: plan.project.dateFields?.start ?? "field-start", target: plan.project.dateFields?.target ?? "field-target" };
     plan.project.dateFields = fields;
     return { ...fields };
+  }
+
+  /** Applies the moves one after another, as GitHub does; an unknown item throws after the moves before it. */
+  async moveItems(login: string, number: number, moves: ItemMove[]): Promise<void> {
+    const plan = [...this.plans.values()].find((p) => p.login === login && p.project.number === number);
+    if (!plan) throw new Error(`GitHub Project #${number} of ${login} not found`);
+    const order = [...plan.items.keys()].map(itemIdOf);
+    // Refills the same Map, so a test holding `itemsOf(repo)` sees the new order.
+    const place = () => {
+      const entries = order.map((id) => [issueOf(id), plan.items.get(issueOf(id))!] as const);
+      plan.items.clear();
+      for (const [issue, item] of entries) plan.items.set(issue, item);
+    };
+    for (const [index, { itemId, afterId }] of moves.entries()) {
+      if (!order.includes(itemId) || (afterId !== null && !order.includes(afterId))) {
+        place();
+        throw new Error(`GitHub moved ${index} of ${moves.length} items in Project order, then refused: no item ${afterId !== null && order.includes(itemId) ? afterId : itemId}`);
+      }
+      order.splice(order.indexOf(itemId), 1);
+      order.splice(afterId === null ? 0 : order.indexOf(afterId) + 1, 0, itemId);
+    }
+    place();
   }
 
   async lineage(_repo: RepoRef, issue: number): Promise<PlanAncestor[]> {

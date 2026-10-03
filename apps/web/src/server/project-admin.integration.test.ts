@@ -1,9 +1,10 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import { appendEvents, createNotification, eq, events, graphs, nodeExecutions, notifications, projects, questions, runs } from "@handoff/db";
+import { appendEvents, createNotification, eq, events, graphs, nodeExecutions, notifications, projects, questions, runs, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
+import { planModeOf } from "./plan-mode.ts";
 import { deleteProject, projectAttention, projectsForSettings, unlinkPlan, updateProject } from "./project-admin.ts";
 
 const db = createTestDb();
@@ -54,6 +55,17 @@ describe("updateProject", () => {
     await expect(updateProject(db, project.id, { name: "Bad Name", defaultBranch: "main" })).rejects.toThrow(/lowercase/);
     await expect(updateProject(db, project.id, { name: "other", defaultBranch: "main" })).rejects.toThrow(/already/);
     await expect(updateProject(db, project.id, { name: "sandbox", defaultBranch: " " })).rejects.toThrow(/branch/);
+  });
+});
+
+describe("plan mode", () => {
+  test("a project added after the migration plans in Flow mode, and the check refuses another mode", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    expect(await planModeOf(db, project.id)).toBe("flow");
+    const refused = await db.execute(sql`update projects set plan_mode = 'gantt' where id = ${project.id}`).catch((error: Error) => error);
+    expect(refused).toBeInstanceOf(Error);
+    expect(String((refused as Error & { cause?: unknown }).cause ?? refused)).toMatch(/projects_plan_mode_check/);
+    expect(await planModeOf(db, project.id)).toBe("flow");
   });
 });
 

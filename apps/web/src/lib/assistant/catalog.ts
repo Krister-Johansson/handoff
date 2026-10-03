@@ -113,7 +113,8 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "get_project",
     title: "Show a project",
-    description: "A project's graphs with their latest versions, the graph new runs use by default, and its latest runs with the graph version each runs on.",
+    description:
+      "A project's graphs with their latest versions, the graph new runs use by default, its plan mode (flow: an order of tasks and their blockers, no dates; timeline: dates and estimates), and its latest runs with the graph version each runs on.",
     input: z.object({ project }),
     kind: "data",
     confirm: false,

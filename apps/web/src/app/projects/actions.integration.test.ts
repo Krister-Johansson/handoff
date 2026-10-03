@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: (path: string) => void env.redirec
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { addDateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, startRunAction } = await import("./actions");
+const { addDateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, setPlanModeAction, startRunAction } = await import("./actions");
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -121,4 +121,28 @@ test("setPlanBudgetAction saves files and steps, keeps the default for one left 
     expect(await setPlanBudgetAction({ projectId: project.id, files: files!, steps: steps! })).toEqual({ ok: false, error: expect.stringMatching(/whole number from 1 to 500/) });
   }
   expect(await budget()).toBeNull();
+});
+
+test("setPlanModeAction stores Flow or Timeline and keeps Start, Target and Project order on GitHub", async () => {
+  const { project, plan, issue } = await readyTask();
+  const number = (await db.select({ n: projects.planProjectNumber }).from(projects).where(eq(projects.id, project.id)))[0]!.n!;
+  const later = await plan.createIssue(repo, { project: number, title: "Add the API", body: "Read the column.", labels: ["task"] });
+  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: "2026-10-09" })).toEqual({ ok: true });
+  const github = async () => (await plan.listItems("octo", number, repo)).map((i) => ({ number: i.number, position: i.position, start: i.start, target: i.target }));
+  const before = await github();
+  expect(before.map((i) => i.number)).toEqual([issue, later.number]);
+  const mode = async () => (await db.select({ mode: projects.planMode }).from(projects).where(eq(projects.id, project.id)))[0]?.mode;
+  expect(await mode()).toBe("flow");
+
+  expect(await setPlanModeAction({ projectId: project.id, mode: "timeline" })).toEqual({ ok: true });
+  expect(await mode()).toBe("timeline");
+  expect(await setPlanModeAction({ projectId: project.id, mode: "flow" })).toEqual({ ok: true });
+  expect(await mode()).toBe("flow");
+  // Switching writes nothing to GitHub: the dates stay on the items and Project order stays as it was.
+  expect(await github()).toEqual(before);
+  expect(before[0]).toMatchObject({ start: "2026-10-06", target: "2026-10-09" });
+
+  expect(await setPlanModeAction({ projectId: project.id, mode: "gantt" as "flow" })).toEqual({ ok: false, error: expect.any(String) });
+  expect(await setPlanModeAction({ projectId: "not a project", mode: "timeline" })).toEqual({ ok: false, error: expect.any(String) });
+  expect(await mode()).toBe("flow");
 });

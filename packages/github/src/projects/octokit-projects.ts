@@ -14,6 +14,7 @@ import {
   CreatePlanProjectDocument,
   IssuePlanDocument,
   LinkPlanRepositoryDocument,
+  MovePlanItemDocument,
   PlanItemsDocument,
   PlanOwnerIdsDocument,
   PlanProjectDocument,
@@ -46,15 +47,17 @@ import {
 import type { RepoRef } from "../types.ts";
 import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
+import { moveItemsDocument } from "./order-moves.ts";
 import { planFieldWrites, planItemIdsDocument, setManyPlanFieldsDocument, setPlanFieldsDocument } from "./plan-fields.ts";
-import type { AdoptedProject, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanFieldsChange, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
+import type { AdoptedProject, ItemMove, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanFieldsChange, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
 /**
- * Field writes sent in one request by setManyPlanFields. GitHub documents no cap on mutations per
- * request, but it ends a request that takes more than 10 seconds and runs a request's mutations one
- * after another, so a request stays small; Octokit's throttle spaces the requests one second apart.
+ * Field writes sent in one request by setManyPlanFields, and moves by moveItems. GitHub documents no cap
+ * on mutations per request, but it ends a request that takes more than 10 seconds and runs a request's
+ * mutations one after another, so a request stays small; Octokit's throttle spaces the requests one
+ * second apart.
  */
 const MUTATIONS_PER_REQUEST = 20;
 /** Issues looked up in one PlanItemIds query: at most 20 items each, well inside GitHub's node limit. */
@@ -378,6 +381,31 @@ export class OctokitProjects implements ProjectsPort {
     return changes.map(({ issue }) => ({ issue, result: "set" as const }));
   }
 
+  async moveItems(login: string, number: number, moves: ItemMove[]): Promise<void> {
+    if (moves.length === 0) return;
+    const project = await this.projectNode(login, number);
+    if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
+    let moved = 0;
+    for (let at = 0; at < moves.length; at += MUTATIONS_PER_REQUEST) {
+      const chunk = moves.slice(at, at + MUTATIONS_PER_REQUEST);
+      try {
+        // One move, as a drag writes, is the operation codegen checks; several go aliased in one request.
+        if (chunk.length === 1) await this.octokit.graphql(MovePlanItemDocument.toString(), { projectId: project.id, ...chunk[0]! });
+        else {
+          const { document, variables } = moveItemsDocument(chunk);
+          await this.octokit.graphql(document, { projectId: project.id, ...variables });
+        }
+      } catch (error) {
+        // GraphQL answers each move that ran with its payload and a failed one with null, next to the errors.
+        const { data, errors } = error as { data?: Record<string, unknown> | null; errors?: { message: string }[] };
+        const ran = data ? Object.values(data).filter((payload) => payload != null).length : 0;
+        const why = Array.isArray(errors) && errors.length ? errors.map((e) => e.message).join("; ") : (error as Error).message;
+        throw new Error(`GitHub moved ${moved + ran} of ${moves.length} items in Project order, then refused: ${why}`, { cause: error });
+      }
+      moved += chunk.length;
+    }
+  }
+
   /** The item id in the Project `projectId` of each issue that is one of its items, a hundred issues a request. */
   private async itemIdsOf(repo: RepoRef, projectId: string, issues: number[]): Promise<Map<number, string>> {
     const ids = new Map<number, string>();
@@ -561,6 +589,7 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
         .map((b) => b.number),
       blockers: present(issue.blockedBy.nodes).map((b) => b.number),
       position,
+      itemId: item.id,
       prNumbers: present(issue.closedByPullRequestsReferences?.nodes).map((pr) => pr.number),
       updatedAt: issue.updatedAt,
       priority: item.priority?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? (item.priority.name ?? undefined) : undefined,

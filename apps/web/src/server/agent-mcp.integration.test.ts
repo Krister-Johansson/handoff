@@ -490,6 +490,12 @@ test("get_project returns each graph's latest version", async () => {
   expect(detail.recent_runs).toEqual([expect.objectContaining({ id: run_id, graph: "linear", graph_version: 2 })]);
 });
 
+test("get_project returns the plan mode", async () => {
+  expect(await call("get_project", { project: "sandbox" })).toMatchObject({ name: "sandbox", plan_mode: "flow" });
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, projectId));
+  expect(await call("get_project", { project: "sandbox" })).toMatchObject({ plan_mode: "timeline" });
+});
+
 test("a pending step reports queued with its place", async () => {
   await registerWorker(db, { id: "worker-1", hostname: "box", caps: { cli: 1 } });
   const start = async (task: string) => (await call("start_run", { project: "sandbox", task })).run_id as string;

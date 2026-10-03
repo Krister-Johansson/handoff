@@ -18,6 +18,7 @@ import {
   RulerIcon,
   SunMoonIcon,
   TerminalIcon,
+  WaypointsIcon,
   type LucideIcon,
 } from "lucide-react";
 import { PROJECT_SETTINGS_TAB_LABEL, projectSettingsPath, settingsPath, SETTINGS_TAB_LABEL, type ProjectSettingsTab, type SettingsTab } from "@/lib/settings-tab";
@@ -119,7 +120,7 @@ export function SettingsNav({ active }: { active: SettingsTab }) {
 
 /**
  * The sections of a project's settings. Runs: what a run starts from. Plan: how the project's plan is
- * worked. Plan mode (issue 490) goes first in the Plan group, before the Scheduler.
+ * worked, Plan mode first.
  */
 const PROJECT_SETTINGS_GROUPS: { label: string; items: { tab: ProjectSettingsTab; icon: LucideIcon }[] }[] = [
   {
@@ -132,6 +133,7 @@ const PROJECT_SETTINGS_GROUPS: { label: string; items: { tab: ProjectSettingsTab
   {
     label: "Plan",
     items: [
+      { tab: "mode", icon: WaypointsIcon },
       { tab: "scheduler", icon: CalendarClockIcon },
       { tab: "estimates", icon: RulerIcon },
     ],

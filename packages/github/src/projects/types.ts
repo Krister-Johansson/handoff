@@ -49,7 +49,12 @@ export type PlanItem = {
   size?: PlanSize | undefined;
   /** Hours from the Estimate number field; undefined without a value, without the field, or at 0 or less. */
   estimate?: number | undefined;
+  /** The item's node id in the Project, for order writes. */
+  itemId?: string | undefined;
 };
+
+/** One move in Project order: the item goes right after `afterId`, or to the top for null. */
+export type ItemMove = { itemId: string; afterId: string | null };
 
 /** An iteration of a Project's iteration field: its title, first day (YYYY-MM-DD) and length in days. */
 export type PlanIteration = { title: string; startDate: string; duration: number };
@@ -187,6 +192,12 @@ export interface ProjectsPort {
    * keep their ids. Returns the ids. Throws when a field of that name exists with another type.
    */
   ensureEstimateFields(login: string, number: number): Promise<PlanEstimateFieldIds>;
+  /**
+   * Moves items of a user's Project in Project order, one move after another in the order given, 20
+   * moves a request after one read of the Project. Throws naming how many moved when GitHub refuses part
+   * way, and sends nothing after the refused request.
+   */
+  moveItems(login: string, number: number, moves: ItemMove[]): Promise<void>;
   /** Whether the token can write Projects: `project` among a classic token's scopes. */
   scopes(): Promise<{ project: boolean; classic: boolean }>;
 }

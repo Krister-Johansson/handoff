@@ -7,6 +7,8 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
           endCursor
         }
         nodes {
+          # The item's node id, which an order write names; a scalar on a node already fetched.
+          id
           status: fieldValueByName(name: "Status") {
             __typename
             ... on ProjectV2ItemFieldSingleSelectValue {
