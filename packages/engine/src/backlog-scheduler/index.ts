@@ -1,4 +1,4 @@
-export { candidates, type Candidate, type CandidateOptions, type IssueRun, type Skipped } from "./candidates.ts";
+export { candidates, orderTasks, skipReason, type Candidate, type CandidateOptions, type IssueRun, type Skipped } from "./candidates.ts";
 export { issueRuns, releasedRuns } from "./issue-runs.ts";
 export { projectHolds, type Hold } from "./holds.ts";
 export { nudgeScheduler, overlapKey, wakeOverlapHeld } from "./nudge.ts";

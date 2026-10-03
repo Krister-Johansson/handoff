@@ -22,22 +22,30 @@ export type Skipped = { number: number; title: string; reason: string };
 const ACTIVE: RunStatus[] = ["queued", "running", "waiting"];
 
 /**
- * The tasks the scheduler may start, in the order it starts them, and the Ready tasks it passes over
- * with the reason. Only open tasks in Ready count; epics, stories, other columns and closed issues
- * are neither candidates nor skipped.
+ * Every item in the order the scheduler reads them: Project order, or in Priority order the Priority
+ * field's options first, an item without a value after every option, and Project order within a rank.
  */
-export function candidates(items: PlanItem[], runs: ReadonlyMap<number, IssueRun>, opts: CandidateOptions): { candidates: Candidate[]; skipped: Skipped[] } {
-  const result = { candidates: [] as Candidate[], skipped: [] as Skipped[] };
+export function orderTasks<T extends PlanItem>(items: readonly T[], opts: CandidateOptions): T[] {
   const options = opts.order === "priority" ? (opts.priorityOptions ?? []) : [];
   // An item without a priority ranks after every option.
   const rank = (item: PlanItem) => {
     const at = item.priority === undefined ? -1 : options.indexOf(item.priority);
     return at === -1 ? options.length : at;
   };
-  const ordered = items
+  return items
     .map((item, index) => ({ item, rank: rank(item), position: item.position ?? index }))
-    .sort((a, b) => a.rank - b.rank || a.position - b.position);
-  for (const { item } of ordered) {
+    .sort((a, b) => a.rank - b.rank || a.position - b.position)
+    .map(({ item }) => item);
+}
+
+/**
+ * The tasks the scheduler may start, in the order it starts them, and the Ready tasks it passes over
+ * with the reason. Only open tasks in Ready count; epics, stories, other columns and closed issues
+ * are neither candidates nor skipped.
+ */
+export function candidates(items: PlanItem[], runs: ReadonlyMap<number, IssueRun>, opts: CandidateOptions): { candidates: Candidate[]; skipped: Skipped[] } {
+  const result = { candidates: [] as Candidate[], skipped: [] as Skipped[] };
+  for (const item of orderTasks(items, opts)) {
     if (item.kind !== "task" || item.status !== "Ready" || item.state !== "open") continue;
     const reason = skipReason(item, runs.get(item.number), opts);
     if (reason) result.skipped.push({ number: item.number, title: item.title, reason });
@@ -46,7 +54,8 @@ export function candidates(items: PlanItem[], runs: ReadonlyMap<number, IssueRun
   return result;
 }
 
-function skipReason(item: PlanItem, run: IssueRun | undefined, { skipLabel, released }: CandidateOptions): string | undefined {
+/** Why the scheduler passes over a Ready task, or undefined when it may start it. */
+export function skipReason(item: PlanItem, run: IssueRun | undefined, { skipLabel, released }: CandidateOptions): string | undefined {
   if (skipLabel && item.labels.includes(skipLabel)) return `labelled ${skipLabel}`;
   if (item.blockedBy.length > 0) return `blocked by ${item.blockedBy.map((n) => `#${n}`).join(", ")}`;
   if (run && ACTIVE.includes(run.status)) return `taken by run ${run.id.slice(0, 8)}`;
