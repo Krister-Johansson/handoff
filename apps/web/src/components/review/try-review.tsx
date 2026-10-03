@@ -8,13 +8,15 @@ import { Screenshot, type Shot } from "@/components/runs/screenshot";
 import { Tag } from "@/components/tag";
 import { TerminalOutput } from "@/components/terminal-output";
 import { Button } from "@/components/ui/button";
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { useRunEvents } from "@/lib/use-run-events";
 import { cn } from "@/lib/utils";
@@ -288,22 +290,7 @@ function Criterion({
   );
 }
 
-/**
- * Approve when every criterion works, or send back what does not, with an overall note. Once every
- * criterion of a run with criteria is checked as working, Approve sends in one click.
- */
-function Submit({
-  from,
-  questionId,
-  failed,
-  allWork,
-  oneClick,
-  note,
-  onNote,
-  error,
-  pending,
-  onAnswer,
-}: {
+type SubmitProps = {
   from: string;
   questionId: string;
   failed: number;
@@ -314,21 +301,87 @@ function Submit({
   error: string | undefined;
   pending: boolean;
   onAnswer: (option: Option) => void;
-}) {
-  if (oneClick)
-    return (
-      <span className="ml-auto flex items-center gap-2">
-        {error && (
-          <span role="alert" className="text-xs text-danger">
-            {error}
-          </span>
-        )}
-        <Button type="button" size="sm" disabled={pending} onClick={() => onAnswer("approve")}>
-          {pending ? <Spinner data-icon="inline-start" role="presentation" aria-label={undefined} aria-hidden /> : <CheckIcon data-icon="inline-start" />}
+};
+
+/** The Submit popover: the overall note, and Send back or Approve. */
+function SubmitPanel({ from, questionId, failed, allWork, note, onNote, error, pending, onAnswer }: SubmitProps) {
+  const summary = failed ? `${failed} ${failed === 1 ? "criterion does" : "criteria do"} not work; they go back to ${from}.` : allWork ? "Every criterion works." : "Check every criterion to approve.";
+  return (
+    <PopoverContent align="end" className="flex w-[min(25rem,calc(100vw-2rem))] flex-col gap-3">
+      <PopoverHeader>
+        <PopoverTitle>Submit</PopoverTitle>
+        <PopoverDescription>{summary}</PopoverDescription>
+      </PopoverHeader>
+      <Field data-invalid={error ? true : undefined}>
+        <FieldLabel htmlFor={`try-overall-${questionId}`}>Note (optional)</FieldLabel>
+        <Textarea id={`try-overall-${questionId}`} rows={2} value={note} onChange={(e) => onNote(e.target.value)} placeholder="Anything else the coder should know." />
+        {failed === 0 && <FieldDescription>{`Approve sends the note with the approval. Send back to ${from} sends it as the change to make.`}</FieldDescription>}
+        {error && <FieldError>{error}</FieldError>}
+      </Field>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" disabled={pending || (failed === 0 && !note.trim())} onClick={() => onAnswer("changes")}>
+          {`Send back to ${from}`}
+        </Button>
+        <Button type="button" disabled={pending || !allWork} onClick={() => onAnswer("approve")}>
           Approve
         </Button>
-      </span>
-    );
+      </div>
+    </PopoverContent>
+  );
+}
+
+/**
+ * Approve in one click, split with a chevron, Add a note, that opens the Submit popover. While a note
+ * is kept a dot sits on the chevron, and Approve sends the note.
+ */
+function SplitApprove(props: SubmitProps) {
+  const { questionId, note, error, pending, onAnswer } = props;
+  const kept = note.trim() !== "";
+  const keptId = `try-note-kept-${questionId}`;
+  return (
+    <span className="ml-auto flex items-center gap-2">
+      {error && (
+        <span role="alert" className="text-xs text-danger">
+          {error}
+        </span>
+      )}
+      <Popover>
+        <ButtonGroup>
+          <Button type="button" size="sm" disabled={pending} aria-describedby={kept ? keptId : undefined} onClick={() => onAnswer("approve")}>
+            {pending ? <Spinner data-icon="inline-start" role="presentation" aria-label={undefined} aria-hidden /> : <CheckIcon data-icon="inline-start" />}
+            Approve
+          </Button>
+          <ButtonGroupSeparator />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button type="button" size="icon-sm" aria-label="Add a note" disabled={pending} className="relative">
+                  <ChevronDownIcon />
+                  {kept && <span data-slot="note-kept" aria-hidden className="absolute top-1 right-1 size-1.5 rounded-full bg-primary-foreground" />}
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>Add a note</TooltipContent>
+          </Tooltip>
+        </ButtonGroup>
+        <SubmitPanel {...props} />
+      </Popover>
+      {kept && (
+        <span id={keptId} className="sr-only">
+          Approve sends the note with the approval.
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Approve when every criterion works, or send back what does not, with an overall note. Once every
+ * criterion of a run with criteria is checked as working, Approve sends in one click and its chevron
+ * opens the same popover.
+ */
+function Submit(props: SubmitProps) {
+  if (props.oneClick) return <SplitApprove {...props} />;
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -336,27 +389,7 @@ function Submit({
           Submit
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="flex w-[min(25rem,calc(100vw-2rem))] flex-col gap-3">
-        <PopoverHeader>
-          <PopoverTitle>Submit</PopoverTitle>
-          <PopoverDescription>
-            {failed ? `${failed} ${failed === 1 ? "criterion does" : "criteria do"} not work; they go back to ${from}.` : allWork ? "Every criterion works." : "Check every criterion to approve."}
-          </PopoverDescription>
-        </PopoverHeader>
-        <Field data-invalid={error ? true : undefined}>
-          <FieldLabel htmlFor={`try-overall-${questionId}`}>Note (optional)</FieldLabel>
-          <Textarea id={`try-overall-${questionId}`} rows={2} value={note} onChange={(e) => onNote(e.target.value)} placeholder="Anything else the coder should know." />
-          {error && <FieldError>{error}</FieldError>}
-        </Field>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="outline" disabled={pending || (failed === 0 && !note.trim())} onClick={() => onAnswer("changes")}>
-            {`Send back to ${from}`}
-          </Button>
-          <Button type="button" disabled={pending || !allWork} onClick={() => onAnswer("approve")}>
-            Approve
-          </Button>
-        </div>
-      </PopoverContent>
+      <SubmitPanel {...props} />
     </Popover>
   );
 }
