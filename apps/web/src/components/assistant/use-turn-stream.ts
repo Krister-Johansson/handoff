@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { viewOf } from "@/lib/assistant/catalog";
 import type { ChatMessage, PendingRequest, ReplyUpdate } from "@/lib/assistant/port";
 import type { AssistantTransport, TurnStreamEvent } from "@/lib/assistant/transport";
 
@@ -26,8 +27,11 @@ export function applyEvent(message: Reply, event: TurnStreamEvent): Reply {
   switch (event.type) {
     case "text":
       return { ...message, text: message.text + event.text };
-    case "tool_call":
-      return { ...message, calls: [...message.calls, { id: event.id, name: event.name, title: event.title, summary: event.summary, status: "running" }] };
+    case "tool_call": {
+      const view = viewOf(event.name);
+      const call = { id: event.id, name: event.name, title: event.title, summary: event.summary, status: "running" as const, args: event.args, ...(view ? { view } : {}) };
+      return { ...message, calls: [...message.calls, call] };
+    }
     case "tool_result": {
       const denied = message.requests.some((r) => r.toolUseId === event.id && r.status === "denied");
       return {

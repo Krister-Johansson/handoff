@@ -1,9 +1,15 @@
 import { expect, test } from "vitest";
-import { buildRunCardHtml } from "./bundle";
+import { buildRunCardHtml, buildSandboxProxyScript } from "./bundle";
 import { RUN_CARD_HTML } from "./run-card.generated";
+import { SANDBOX_PROXY_SCRIPT } from "./sandbox-proxy.generated";
 
 test("the committed run card is the bundle of its source; pnpm build:mcp-apps writes it again", async () => {
   expect(RUN_CARD_HTML).toBe(await buildRunCardHtml());
+});
+
+test("the committed sandbox proxy is the bundle of its source and imports nothing", async () => {
+  expect(SANDBOX_PROXY_SCRIPT).toBe(await buildSandboxProxyScript());
+  expect(SANDBOX_PROXY_SCRIPT).not.toMatch(/\bimport\s*\(|<\/script/i);
 });
 
 test("the run card is one HTML document that loads nothing from another origin", () => {

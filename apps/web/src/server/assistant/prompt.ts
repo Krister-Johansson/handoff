@@ -1,3 +1,4 @@
+import type { ChatProject } from "../../lib/assistant/catalog";
 import type { PageDescriptor } from "../../lib/assistant/page-tools";
 import { HANDOFF_INSTRUCTIONS } from "../agent-mcp";
 
@@ -28,13 +29,28 @@ function pageBlock(page: PageDescriptor): string {
 }
 
 /**
- * The prompt for one turn. A spoken question carries the instruction for a short answer that reads well
- * aloud, and a question asked on a page carries the page, in the prompt itself: Claude Code reuses the
- * system prompt when it resumes a conversation, so an instruction that changes per turn cannot live
- * there. A prompt that starts with a dash gets a space, so the CLI does not read it as a flag.
+ * The block that names the chat's project: tools that take a project use it when the call leaves the
+ * project out, so the model goes to it straight away instead of trying projects from list_projects.
  */
-export function turnPrompt(text: string, source: string, page?: PageDescriptor): string {
-  const message = page ? `${pageBlock(page)}\n${text}` : text;
+function projectBlock(project: ChatProject): string {
+  const name = attribute(project.name);
+  return [
+    `<project name="${name}">`,
+    `This chat is on project ${name}. Tools that take a project use ${name} when the call leaves project out, so do not look for the project with list_projects. Use another project only when the person names it or asks across projects; list_runs and list_inbox cover every project unless you pass project.`,
+    "</project>",
+  ].join("\n");
+}
+
+/**
+ * The prompt for one turn. A spoken question carries the instruction for a short answer that reads well
+ * aloud, a turn in a chat on a project carries the project, and a question asked on a page carries the
+ * page, in the prompt itself: Claude Code reuses the system prompt when it resumes a conversation, so an
+ * instruction that changes per turn cannot live there. A prompt that starts with a dash gets a space, so
+ * the CLI does not read it as a flag.
+ */
+export function turnPrompt(text: string, source: string, page?: PageDescriptor, project?: ChatProject): string {
+  const blocks = [...(project ? [projectBlock(project)] : []), ...(page ? [pageBlock(page)] : [])];
+  const message = [...blocks, text].join("\n");
   const prompt = source === "voice" ? `${SPOKEN}\n\n${message}` : message;
   return prompt.trimStart().startsWith("-") ? ` ${prompt}` : prompt;
 }

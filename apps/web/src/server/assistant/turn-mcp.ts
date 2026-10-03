@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
-import { annotationsOf, CATALOG, type ToolSpec } from "../../lib/assistant/catalog";
+import { annotationsOf, CATALOG, forChatProject, withChatProject, type ToolSpec } from "../../lib/assistant/catalog";
 import { pageSpecsOf, type PageToolSpec } from "../../lib/assistant/page-tools";
 import { registerDataTools, type HandoffMcpDeps } from "../agent-mcp";
 import { planViewRefusal } from "../plan-mode";
@@ -25,11 +25,14 @@ const decision = (value: { behavior: "allow"; updatedInput: unknown } | { behavi
  */
 export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServer {
   const server = new McpServer({ name: "handoff", version: "1.0.0" });
-  registerDataTools(server, { ...deps, actor: "assistant" }, { wrapUntrusted: true });
+  // In a chat on a project, a tool that needs a project uses the chat's when the call leaves it out.
+  registerDataTools(server, { ...deps, actor: "assistant" }, { wrapUntrusted: true, project: turn.project });
   // UI tools run in the person's browser: the call goes to the panel, and the page's answer comes back.
   // So do the tools of the page the person asked on, the ones it bound when the turn started.
   for (const spec of [...CATALOG.filter((t) => t.kind === "ui"), ...pageSpecsOf(turn.page)]) {
-    server.registerTool(spec.name, { title: spec.title, description: spec.description, inputSchema: spec.input.shape, annotations: annotationsOf(spec) }, async (args) => {
+    const { description, inputSchema } = forChatProject(spec, turn.project);
+    server.registerTool(spec.name, { title: spec.title, description, inputSchema, annotations: annotationsOf(spec) }, async (given) => {
+      const args = withChatProject(spec, given, turn.project);
       // Only the server knows a project's plan mode, so it refuses the other mode's Plan view here.
       const refusal = await planViewRefusal(deps.db, spec.name, args);
       if (refusal) return { content: [{ type: "text" as const, text: refusal }], isError: true };
@@ -48,17 +51,19 @@ export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServe
     async ({ tool_name, input, tool_use_id }) => {
       const spec = tool_name.startsWith(TOOL_PREFIX) ? specs.get(tool_name.slice(TOOL_PREFIX.length)) : undefined;
       if (!spec) return decision({ behavior: "deny", message: `${tool_name} is not one of handoff's tools.` });
-      if (!spec.confirm) return decision({ behavior: "allow", updatedInput: input });
+      // The card names the project the call runs in, also when the call left it to the chat's project.
+      const filled = withChatProject(spec, input, turn.project);
+      if (!spec.confirm) return decision({ behavior: "allow", updatedInput: filled });
       // A page tool the page would refuse gets no card: the page says why, and the reply tells the person.
       if (spec.kind === "page") {
-        const check = await turn.requestUi({ name: spec.name, args: input }, deps.uiTimeoutMs, { check: true });
+        const check = await turn.requestUi({ name: spec.name, args: filled }, deps.uiTimeoutMs, { check: true });
         if (check.isError) return decision({ behavior: "deny", message: `The page refused this, so the person was not asked: ${check.text}` });
       }
-      const parsed = spec.input.safeParse(input);
+      const parsed = spec.input.safeParse(filled);
       const summary = parsed.success ? spec.summarize(parsed.data) : spec.title;
-      const answer = await turn.requestApproval({ toolUseId: tool_use_id, name: spec.name, title: spec.title, summary, args: input }, deps.approvalTimeoutMs);
+      const answer = await turn.requestApproval({ toolUseId: tool_use_id, name: spec.name, title: spec.title, summary, args: filled }, deps.approvalTimeoutMs);
       return answer.approved
-        ? decision({ behavior: "allow", updatedInput: input })
+        ? decision({ behavior: "allow", updatedInput: filled })
         : decision({ behavior: "deny", message: `The person did not approve this${answer.note ? `: ${answer.note}` : "."} Do not try it again in this turn.` });
     },
   );

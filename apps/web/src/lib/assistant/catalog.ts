@@ -25,7 +25,15 @@ export type ToolSpec<I extends z.ZodRawShape = z.ZodRawShape> = {
   idempotent?: boolean;
   /** One sentence for the approval card and the tool card. */
   summarize: (args: z.infer<z.ZodObject<I>>) => string;
+  /**
+   * The ui:// resource of its MCP Apps view, which draws its result: _meta.ui.resourceUri on /api/mcp, and the
+   * card the assistant panel shows for the call.
+   */
+  view?: string;
 };
+
+/** The run card's ui:// resource: get_run's result drawn as a card. */
+export const RUN_CARD_URI = "ui://handoff/run-card.html";
 
 const spec = <I extends z.ZodRawShape>(s: ToolSpec<I>) => s as unknown as ToolSpec;
 
@@ -230,6 +238,7 @@ export const CATALOG: ToolSpec[] = [
     readOnly: true,
     untrusted: true,
     summarize: (a) => `Show run ${short(a.run_id)}`,
+    view: RUN_CARD_URI,
   }),
   spec({
     name: "get_run_events",
@@ -842,6 +851,11 @@ export function toolSpec(name: string): ToolSpec | PageToolSpec {
   return found;
 }
 
+/** The ui:// resource of a catalog tool's MCP Apps view, if it has one. */
+export function viewOf(name: string): string | undefined {
+  return BY_NAME.get(name)?.view;
+}
+
 /** The MCP annotations a tool's spec implies. */
 export function annotationsOf(spec: ToolSpec | PageToolSpec) {
   return {
@@ -851,4 +865,35 @@ export function annotationsOf(spec: ToolSpec | PageToolSpec) {
     ...(spec.idempotent !== undefined ? { idempotentHint: spec.idempotent } : {}),
     openWorldHint: spec.openWorld ?? false,
   };
+}
+
+/** The project of an assistant chat: tools that take a project use it when a call leaves the project out. */
+export type ChatProject = { id: string; name: string };
+
+/** The argument a tool takes the chat's project for: a required project (by name), or a UI tool's required project_id. An optional project stays a filter. */
+function chatProjectArgument(spec: ToolSpec | PageToolSpec): "project" | "project_id" | undefined {
+  const shape = spec.input.shape as Record<string, z.ZodType | undefined>;
+  for (const key of ["project", "project_id"] as const) {
+    const field = shape[key];
+    if (field && !field.safeParse(undefined).success) return key;
+  }
+  return undefined;
+}
+
+/** A tool's description and input as a chat on `project` sees them: its project argument is optional and says what it uses. */
+export function forChatProject(spec: ToolSpec | PageToolSpec, project: ChatProject | undefined): { description: string; inputSchema: z.ZodRawShape } {
+  const key = project && chatProjectArgument(spec);
+  const shape = spec.input.shape as Record<string, z.ZodType>;
+  if (!key) return { description: spec.description, inputSchema: shape };
+  return {
+    description: `${spec.description} Without ${key}, it uses ${project.name}, this chat's project.`,
+    inputSchema: { ...shape, [key]: shape[key]!.optional() },
+  };
+}
+
+/** A call's arguments with the chat's project filled in where the call left out the project argument its tool needs. */
+export function withChatProject(spec: ToolSpec | PageToolSpec, args: unknown, project: ChatProject | undefined): unknown {
+  const key = project && chatProjectArgument(spec);
+  if (!key || typeof args !== "object" || args === null || Array.isArray(args) || (args as Record<string, unknown>)[key] !== undefined) return args;
+  return { ...args, [key]: key === "project" ? project.name : project.id };
 }

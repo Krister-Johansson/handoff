@@ -299,6 +299,39 @@ test("a chat without a project takes the project of the first page a turn names,
   expect((await db.select().from(assistantConversations).where(eq(assistantConversations.id, conversation.id)))[0]!.projectId).toBe(run.projectId);
 });
 
+test("in a chat on a project, the turn names the project and a call that leaves project out uses it, with no list_projects detour", async () => {
+  await createProject(db, { name: "demo", repo: "octo/demo", defaultBranch: "main" });
+  await createProject(db, { name: "sandbox", repo: "octo/sandbox", defaultBranch: "main" });
+  const todo = await createProject(db, { name: "todooverkill", repo: "octo/todooverkill", defaultBranch: "main" });
+  const conversation = await createConversation(db, "what is the status for task #151?", { path: `/projects/${todo.id}/plan` });
+  const d = deps({ lines: [lines.init(), { $mcp: { tool: "get_project", arguments: {} } }, lines.result()] });
+  const turn = await startTurn(d, conversation.id, { text: "what is the status for task #151?", source: "typed" });
+  const events = watch(turn);
+  await turn.done;
+  // The model reads which project the chat is on in the person's message.
+  const argv = d.fake.invocations()[0]!.argv;
+  const prompt = argv[argv.indexOf("-p") + 1]!;
+  expect(prompt).toMatch(/^<project name="todooverkill">\nThis chat is on project todooverkill\./);
+  expect(prompt.endsWith("</project>\nwhat is the status for task #151?")).toBe(true);
+  // A call without project answers for the chat's project, and its card says so.
+  expect(events.find((e) => e.type === "tool_call")).toMatchObject({ name: "get_project", summary: "Show project todooverkill" });
+  const result = events.find((e) => e.type === "tool_result") as Extract<TurnEvent, { type: "tool_result" }>;
+  expect(result.isError).toBe(false);
+  expect(JSON.parse(result.result)).toMatchObject({ name: "todooverkill", repo: "octo/todooverkill" });
+});
+
+test("in a chat without a project, a call that leaves project out is refused as before", async () => {
+  await createProject(db, { name: "todooverkill", repo: "octo/todooverkill", defaultBranch: "main" });
+  const conversation = await createConversation(db, "what is the status for task #151?");
+  const d = deps({ lines: [lines.init(), { $mcp: { tool: "get_project", arguments: {} } }, lines.result()] });
+  const turn = await startTurn(d, conversation.id, { text: "what is the status for task #151?", source: "typed" });
+  const events = watch(turn);
+  await turn.done;
+  const argv = d.fake.invocations()[0]!.argv;
+  expect(argv[argv.indexOf("-p") + 1]).toBe("what is the status for task #151?");
+  expect(events.find((e) => e.type === "tool_result")).toMatchObject({ isError: true });
+});
+
 test("stopping a turn denies its open approvals and stores the turn as interrupted", async () => {
   const run = await sandboxRun();
   const d = deps({ lines: [lines.init(), delta("On it. "), { $mcp: { tool: "cancel_run", arguments: { run_id: run.id }, approve: true } }], hangAfterLine: 3 });

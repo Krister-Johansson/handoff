@@ -108,6 +108,31 @@ test("another project's runs, chats and name show under Other projects, and in A
   expect(all.groups.map((g) => g.id)).toEqual(["runs", "chats"]);
 });
 
+test("search kept to its project leaves out other projects' runs, chats and names, and counts what it left out", () => {
+  const only = { ...data, onlyProject: true };
+  const checkout = searchResults(only, "checkout", {});
+  expect(checkout.groups).toEqual([]);
+  expect(checkout.counts).toEqual({ all: 0, tasks: 0, runs: 0, pages: 0, chats: 0 });
+  expect(checkout.elsewhere).toBe(2);
+  expect(searchResults(only, "example", {})).toMatchObject({ groups: [], elsewhere: 1 });
+  // A filter counts only what it shows elsewhere.
+  expect(searchResults(only, "checkout", { filter: "chats" }).elsewhere).toBe(1);
+  // The project's own results and the pages of all projects stay.
+  const plan = searchResults(only, "plan", {});
+  expect(plan.groups.map((g) => [g.id, g.total])).toEqual([
+    ["tasks", 6],
+    ["runs", 3],
+    ["pages", 2],
+    ["chats", 1],
+  ]);
+  expect(plan.elsewhere).toBe(0);
+  expect(searchResults(only, "/sett", {}).groups.flatMap((g) => g.hits.map(titleOf))).toContain("Settings");
+  // All projects still finds them, in their groups.
+  const all = searchResults({ ...only, all: true }, "checkout", {});
+  expect(all.groups.map((g) => g.id)).toEqual(["runs", "chats"]);
+  expect(all.elsewhere).toBe(0);
+});
+
 test("an empty query finds nothing in All, and lists the whole kind under a filter", () => {
   expect(view("").groups).toEqual([]);
   expect(view("", { filter: "runs" }).groups[0]!.hits).toHaveLength(3);

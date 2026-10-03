@@ -75,6 +75,166 @@ test("a tool call shows as a card with its title, summary and result", async () 
   expect(card).toHaveTextContent('{"status":"waiting"}');
 });
 
+const RUN_CARD = "ui://handoff/run-card.html";
+const runCard = () => ({ uri: RUN_CARD, html: "<!doctype html><html><head></head><body></body></html>", prefersBorder: false, sandbox: "http://127.0.0.1:49152/sandbox?host=http%3A%2F%2Flocalhost%3A3000" });
+
+test("a get_run call shows the run card under the tool rows and above the reply's text", async () => {
+  transport.views.set(RUN_CARD, runCard());
+  render(<App />);
+  await openAndSend("How is run 7f3a?");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "tool_call", id: "u1", name: "get_run", title: "Show a run", summary: "Show run 7f3a1b2c", args: { run_id: "7f3a1b2c" } }));
+  act(() => transport.emit({ type: "tool_result", id: "u1", result: '{"id":"7f3a1b2c"}', isError: false }));
+  act(() => transport.emit({ type: "done", text: "It runs the coder again." }));
+  const frame = await within(panel()).findByTitle("Show run 7f3a1b2c");
+  await waitFor(() => expect(frame).toHaveAttribute("src", runCard().sandbox));
+  expect(transport.viewLoads).toEqual([RUN_CARD]);
+  const row = within(panel()).getByRole("group", { name: "Show a run" });
+  const text = within(panel()).getByText("It runs the coder again.");
+  expect(row.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(frame.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("when a call's view cannot be read, the card goes and the row keeps its raw result", async () => {
+  render(<App />);
+  await openAndSend("How is run 7f3a?");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "tool_call", id: "u1", name: "get_run", title: "Show a run", summary: "Show run 7f3a1b2c", args: { run_id: "7f3a1b2c" } }));
+  act(() => transport.emit({ type: "tool_result", id: "u1", result: '{"id":"7f3a1b2c"}', isError: false }));
+  await waitFor(() => expect(transport.viewLoads).toEqual([RUN_CARD]));
+  await waitFor(() => expect(within(panel()).queryByTitle("Show run 7f3a1b2c")).not.toBeInTheDocument());
+  expect(within(panel()).getByRole("group", { name: "Show a run" })).toHaveTextContent('{"id":"7f3a1b2c"}');
+});
+
+test("a failed get_run call keeps its row and draws no card", async () => {
+  transport.views.set(RUN_CARD, runCard());
+  render(<App />);
+  await openAndSend("How is run nope?");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "tool_call", id: "u1", name: "get_run", title: "Show a run", summary: "Show run nope", args: { run_id: "nope" } }));
+  act(() => transport.emit({ type: "tool_result", id: "u1", result: "There is no run nope.", isError: true }));
+  expect(within(panel()).getByRole("group", { name: "Show a run" })).toHaveTextContent("There is no run nope.");
+  expect(within(panel()).queryByTitle("Show run nope")).not.toBeInTheDocument();
+});
+
+test("a reloaded chat draws the run card again from the stored result", async () => {
+  transport.views.set(RUN_CARD, runCard());
+  transport.conversations = [fakeChat({ id: "c9", title: "How is run 7f3a?" })];
+  transport.stored.set("c9", {
+    conversation: { ...transport.conversations[0]!, turnId: null },
+    messages: [
+      { id: "m1", role: "user", content: { text: "How is run 7f3a?", source: "typed" } },
+      { id: "m2", role: "assistant", content: { text: "It runs.", calls: [{ id: "u1", name: "get_run", args: { run_id: "7f3a1b2c" }, result: '{"id":"7f3a1b2c"}' }], outcome: "done" } },
+    ],
+  });
+  window.localStorage.setItem(OPEN_CHAT_KEY, "c9");
+  render(<App />);
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  const frame = await within(panel()).findByTitle("Show run 7f3a1b2c");
+  await waitFor(() => expect(frame).toHaveAttribute("src", runCard().sandbox));
+});
+
+/** The panel's tool runner for views, as a card's frame reaches it. */
+const viewTools: { call?: ReturnType<typeof useAssistantPanel>["callViewTool"] } = {};
+const callViewTool: ReturnType<typeof useAssistantPanel>["callViewTool"] = (...args) => viewTools.call!(...args);
+function GrabViewTools() {
+  const { callViewTool: call } = useAssistantPanel();
+  useEffect(() => {
+    viewTools.call = call;
+  }, [call]);
+  return null;
+}
+
+/** A reply with a run card for call u1, which a view's tool call can then come from. */
+async function replyWithCard() {
+  transport.views.set(RUN_CARD, runCard());
+  render(
+    <App>
+      <GrabViewTools />
+    </App>,
+  );
+  await openAndSend("How is run 7f3a?");
+  act(() => transport.emit({ type: "turn", turnId: "t1" }));
+  act(() => transport.emit({ type: "tool_call", id: "u1", name: "get_run", title: "Show a run", summary: "Show run 7f3a1b2c", args: { run_id: "7f3a1b2c" } }));
+  act(() => transport.emit({ type: "tool_result", id: "u1", result: '{"id":"7f3a1b2c"}', isError: false }));
+  act(() => transport.emit({ type: "done", text: "It runs." }));
+  return within(panel()).findByTitle("Show run 7f3a1b2c");
+}
+
+const RUN = "7f3a1b2c-0000-4000-8000-000000000000";
+
+test("a view's call of a tool that needs approval puts an approval card under the view's card, and runs only after Approve", async () => {
+  transport.toolResults.set("cancel_run", { id: RUN, status: "cancelled" });
+  const frame = await replyWithCard();
+  let result: unknown;
+  act(() => void callViewTool("u1", { name: "cancel_run", arguments: { run_id: RUN } }).then((r) => (result = r)));
+  const card = await within(panel()).findByRole("group", { name: "Approve: Cancel a run" });
+  expect(within(card).getByText("Cancel run 7f3a1b2c")).toBeInTheDocument();
+  expect(frame.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  // The click in the view asked; nothing runs until the person approves here.
+  expect(transport.toolCalls).toEqual([]);
+  expect(within(panel()).queryByText("A browser agent asks")).not.toBeInTheDocument();
+  fireEvent.click(within(card).getByRole("button", { name: "Approve" }));
+  await waitFor(() => expect(result).toEqual({ content: [{ type: "text", text: JSON.stringify({ id: RUN, status: "cancelled" }, null, 2) }] }));
+  expect(transport.toolCalls).toEqual([{ name: "cancel_run", args: { run_id: RUN } }]);
+});
+
+test("a view's call the person denies does not run, and the view hears the note", async () => {
+  await replyWithCard();
+  let result: unknown;
+  act(() => void callViewTool("u1", { name: "cancel_run", arguments: { run_id: RUN } }).then((r) => (result = r)));
+  const card = await within(panel()).findByRole("group", { name: "Approve: Cancel a run" });
+  fireEvent.click(within(card).getByRole("button", { name: "Deny" }));
+  await waitFor(() => expect(result).toMatchObject({ isError: true, content: [{ type: "text", text: expect.stringMatching(/^The person did not approve this/) }] }));
+  expect(transport.toolCalls).toEqual([]);
+});
+
+test("a view's call of a read-only tool runs at once, without an approval card", async () => {
+  transport.toolResults.set("get_run", { id: RUN, status: "running" });
+  await replyWithCard();
+  let result: unknown;
+  act(() => void callViewTool("u1", { name: "get_run", arguments: { run_id: RUN } }).then((r) => (result = r)));
+  await waitFor(() => expect(result).toEqual({ content: [{ type: "text", text: JSON.stringify({ id: RUN, status: "running" }, null, 2) }] }));
+  expect(transport.toolCalls).toEqual([{ name: "get_run", args: { run_id: RUN } }]);
+  expect(within(panel()).queryByRole("group", { name: /^Approve:/ })).not.toBeInTheDocument();
+});
+
+test("in a chat on a project, a view's call that leaves out the project runs in the chat's project", async () => {
+  transport.views.set(RUN_CARD, runCard());
+  transport.conversations = [fakeChat({ id: "c9", title: "How is run 7f3a?", project: { id: "p1", name: "sandbox" } })];
+  transport.stored.set("c9", {
+    conversation: { ...transport.conversations[0]!, turnId: null },
+    messages: [
+      { id: "m1", role: "user", content: { text: "How is run 7f3a?", source: "typed" } },
+      { id: "m2", role: "assistant", content: { text: "It runs.", calls: [{ id: "u1", name: "get_run", args: { run_id: RUN }, result: '{"id":"7f3a1b2c"}' }], outcome: "done" } },
+    ],
+  });
+  window.localStorage.setItem(OPEN_CHAT_KEY, "c9");
+  render(
+    <App>
+      <GrabViewTools />
+    </App>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Assistant" }));
+  await within(panel()).findByTitle("Show run 7f3a1b2c");
+  let result: unknown;
+  act(() => void callViewTool("u1", { name: "list_backlog", arguments: {} }).then((r) => (result = r)));
+  await waitFor(() => expect(result).toBeDefined());
+  expect(transport.toolCalls).toEqual([{ name: "list_backlog", args: { project: "sandbox" } }]);
+});
+
+test("when the view's card goes, its open approval counts as denied", async () => {
+  await replyWithCard();
+  const controller = new AbortController();
+  let result: unknown;
+  act(() => void callViewTool("u1", { name: "cancel_run", arguments: { run_id: RUN } }, controller.signal).then((r) => (result = r)));
+  await within(panel()).findByRole("group", { name: "Approve: Cancel a run" });
+  act(() => controller.abort());
+  await waitFor(() => expect(within(panel()).queryByRole("group", { name: "Approve: Cancel a run" })).not.toBeInTheDocument());
+  expect(result).toMatchObject({ isError: true });
+  expect(transport.toolCalls).toEqual([]);
+});
+
 test("an approval card takes focus, and nothing is sent until Approve is clicked; Enter in the note does not approve", async () => {
   render(<App />);
   await openAndSend("Cancel run 7f3a");
