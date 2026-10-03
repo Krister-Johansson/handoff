@@ -3,6 +3,7 @@ import { planPath } from "../paths";
 import type { RunFilter } from "../plan/filters";
 import type { Zoom } from "../plan/timeline-scale";
 import type { PlanViewName } from "../project-tab";
+import { RUNS_FILTERS } from "../run-status-filter";
 import { projectSettingsPath } from "../settings-tab";
 import { toolSpec } from "./catalog";
 
@@ -42,6 +43,7 @@ const id = (value: string, what: string) => {
 };
 
 const TAB_FILTERS: Record<string, { param: string; values: string[] } | undefined> = {
+  runs: { param: "status", values: RUNS_FILTERS.map((f) => f.value) },
   issues: { param: "issues", values: ["todo", "started", "all"] },
   pulls: { param: "pr", values: ["open", "merged", "closed", "all", "archived"] },
 };

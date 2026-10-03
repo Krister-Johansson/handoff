@@ -34,6 +34,8 @@ test("set_project_tab navigates to the tab's route", () => {
   expect(plan("set_project_tab", { project_id: "p1", tab: "graphs" })).toEqual({ kind: "navigate", href: "/projects/p1/settings?tab=graphs" });
   expect(plan("set_project_tab", { project_id: "p1", tab: "issues", filter: "started" })).toEqual({ kind: "navigate", href: "/projects/p1/issues?issues=started" });
   expect(plan("set_project_tab", { project_id: "p1", tab: "pulls", filter: "merged" })).toEqual({ kind: "navigate", href: "/projects/p1/pulls?pr=merged" });
+  expect(plan("set_project_tab", { project_id: "p1", tab: "runs", filter: "waiting" })).toEqual({ kind: "navigate", href: "/projects/p1/runs?status=waiting" });
+  expect(() => plan("set_project_tab", { project_id: "p1", tab: "runs", filter: "cancelled" })).toThrow(/The runs tab filters by active, waiting, failed or done/);
   for (const path of ["/projects/p1/runs", "/projects/p1/plan", "/projects/p1/issues?issues=all", "/projects/p1/pulls", "/projects/p1/settings?tab=graphs", "/projects/p1/graphs/plan-review"]) {
     expect(plan("go_to", { path })).toEqual({ kind: "navigate", href: path });
   }

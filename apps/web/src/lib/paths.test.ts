@@ -1,9 +1,14 @@
 import { expect, test } from "vitest";
-import { graphPath, planPath, reviewPath, runPath } from "./paths";
+import { graphPath, planPath, reviewPath, runPath, runsPath } from "./paths";
 
 test("a run lives under its project, and a review under its run", () => {
   expect(runPath("p1", "r1")).toBe("/projects/p1/runs/r1");
   expect(reviewPath("p1", "r1", "q1")).toBe("/projects/p1/runs/r1/review/q1");
+});
+
+test("a project's runs take a status filter in the query", () => {
+  expect(runsPath("p1")).toBe("/projects/p1/runs");
+  expect(runsPath("p1", "waiting")).toBe("/projects/p1/runs?status=waiting");
 });
 
 test("the plan lives under its project, with the view, an epic and statuses in the query", () => {
