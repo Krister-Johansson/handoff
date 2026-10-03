@@ -1,10 +1,10 @@
 {
-  "id": "d4e8e354-e529-4f9b-ac62-0d72a9a80774",
-  "prevIds": [
-    "d0fd4dc0-6505-4703-ba61-d2269afbe261"
-  ],
   "version": "8",
   "dialect": "postgres",
+  "id": "3d74012d-284d-407c-a1f2-77ddc138d325",
+  "prevIds": [
+    "39d5212d-97c7-4139-b0d7-faeeed375d79"
+  ],
   "ddl": [
     {
       "values": [
@@ -262,6 +262,12 @@
     {
       "isRlsEnabled": false,
       "name": "scheduler_events",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "plan_pins",
       "entityType": "tables",
       "schema": "public"
     },
@@ -3833,6 +3839,71 @@
       "table": "scheduler_events"
     },
     {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "project_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "plan_pins"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "issue",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "plan_pins"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "pinned_by",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "plan_pins"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "reason",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "plan_pins"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "plan_pins"
+    },
+    {
       "nameExplicit": true,
       "columns": [
         {
@@ -4890,6 +4961,34 @@
       "table": "scheduler_events"
     },
     {
+      "nameExplicit": false,
+      "columns": [
+        "project_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "projects",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "plan_pins_project_id_projects_id_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "plan_pins"
+    },
+    {
+      "columns": [
+        "project_id",
+        "issue"
+      ],
+      "nameExplicit": false,
+      "name": "plan_pins_pkey",
+      "entityType": "pks",
+      "schema": "public",
+      "table": "plan_pins"
+    },
+    {
       "columns": [
         "id"
       ],
@@ -5352,6 +5451,13 @@
       "entityType": "checks",
       "schema": "public",
       "table": "project_schedulers"
+    },
+    {
+      "value": "\"reason\" in ('drop', 'keep_here', 'set_order')",
+      "name": "plan_pins_reason_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "plan_pins"
     }
   ],
   "renames": []

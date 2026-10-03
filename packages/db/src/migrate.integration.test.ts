@@ -40,6 +40,7 @@ describe("migrations", () => {
       "notification_reads",
       "notifications",
       "permission_requests",
+      "plan_pins",
       "previews",
       "project_schedulers",
       "projects",

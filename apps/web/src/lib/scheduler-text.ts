@@ -1,3 +1,5 @@
+import type { Hold } from "@handoff/engine/backlog-scheduler";
+
 type EventLike = { type: string; payload: Record<string, unknown> };
 type Settings = { maxRuns?: number; order?: string; graphName?: string; skipLabel?: string | null };
 
@@ -115,5 +117,18 @@ export function describeSchedulerEvent({ type, payload: p }: EventLike): string 
       return `Let the scheduler take #${String(p.issue)} again${fromPart(p.by)}`;
     default:
       return type;
+  }
+}
+
+/** Why a hold keeps the scheduler from starting runs: "Run 1a2b3c4d failed at coder". */
+export function holdText(hold: Hold): string {
+  const run = `Run ${short(hold.runId)}`;
+  switch (hold.kind) {
+    case "failed":
+      return `${run} failed at ${hold.nodeKey}`;
+    case "loop":
+      return `${run} ran out of rounds at ${hold.nodeKey}`;
+    case "permission":
+      return `${run} asks permission to use ${hold.toolName} at ${hold.nodeKey}`;
   }
 }

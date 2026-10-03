@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test, vi } from "vitest";
-import { eq, projects, runs } from "@handoff/db";
+import { eq, planPins, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion } from "@/server/graphs";
@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: (path: string) => void env.redirec
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { addDateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, setPlanModeAction, startRunAction } = await import("./actions");
+const { addDateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, setPlanModeAction, startRunAction, unpinAction, writeOrderAction } = await import("./actions");
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -145,4 +145,26 @@ test("setPlanModeAction stores Flow or Timeline and keeps Start, Target and Proj
   expect(await setPlanModeAction({ projectId: project.id, mode: "gantt" as "flow" })).toEqual({ ok: false, error: expect.any(String) });
   expect(await setPlanModeAction({ projectId: "not a project", mode: "timeline" })).toEqual({ ok: false, error: expect.any(String) });
   expect(await mode()).toBe("flow");
+});
+
+test("writeOrderAction saves the order and pins the card as the person's drop, and unpinAction removes the pin", async () => {
+  const { project, plan, issue } = await readyTask();
+  const number = (await db.select({ n: projects.planProjectNumber }).from(projects).where(eq(projects.id, project.id)))[0]!.n!;
+  const later = (await plan.createIssue(repo, { project: number, title: "Add the API", body: "", labels: ["task"] })).number;
+  plan.itemsOf(repo).get(later)!.status = "Ready";
+  const pins = async () => db.select({ issue: planPins.issue, pinnedBy: planPins.pinnedBy, reason: planPins.reason }).from(planPins);
+
+  expect(await writeOrderAction({ projectId: project.id, shown: [issue, later], queue: [later, issue], pin: [later] })).toEqual({ ok: true });
+  expect((await plan.listItems("octo", number, repo)).map((i) => i.number)).toEqual([later, issue]);
+  expect(await pins()).toEqual([{ issue: later, pinnedBy: "person", reason: "drop" }]);
+
+  // The page showed the old order: the write is refused with the sentence and nothing changes.
+  expect(await writeOrderAction({ projectId: project.id, shown: [issue, later], queue: [later, issue], pin: [later] })).toEqual({
+    ok: false,
+    error: "The order changed on GitHub since the page loaded. The Flow now shows the new order.",
+  });
+
+  expect(await unpinAction({ projectId: project.id, issue: later })).toEqual({ ok: true });
+  expect(await pins()).toEqual([]);
+  expect(await writeOrderAction({ projectId: project.id, shown: [], queue: [], reason: "nap" as "drop" })).toEqual({ ok: false, error: expect.any(String) });
 });
