@@ -14,11 +14,13 @@ export const issuePath = (projectId: string, number: number) => `/projects/${pro
 
 /**
  * The project and its section a dashboard path is under, such as p1 and runs for /projects/p1/runs/r1;
- * undefined outside a project. The section is undefined on the project's Home page.
+ * undefined outside a project. The section is undefined on the project's Home page. The graph editor,
+ * /projects/<id>/graphs/<name>, is under project settings, where the project's graphs are listed.
  */
 export function projectAt(pathname: string): { projectId: string; section?: ProjectSection } | undefined {
-  const [, root, projectId, section] = pathname.split("/");
+  const [, root, projectId, segment] = pathname.split("/");
   if (root !== "projects" || !projectId) return undefined;
+  const section = segment === "graphs" ? "settings" : segment;
   return { projectId, section: (PROJECT_SECTIONS as readonly string[]).includes(section ?? "") ? (section as ProjectSection) : undefined };
 }
 

@@ -23,7 +23,7 @@ export async function importRepoAction(_: RepoImportState, form: FormData): Prom
   const gitEnv = (await getGitHub()?.gitAuthEnv({ owner, name }).catch(() => undefined)) ?? {};
   try {
     const report = await importSkillRepository(getDb(), { repo, group, gitEnv });
-    revalidatePath("/library");
+    revalidatePath("/settings");
     return { report, repo };
   } catch (error) {
     return { error: (error as Error).message.split("\n")[0], repo };

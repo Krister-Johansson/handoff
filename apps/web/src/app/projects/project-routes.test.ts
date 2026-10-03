@@ -20,7 +20,7 @@ const open = (query: Record<string, string>) => ProjectPage({ params: Promise.re
 test("an old ?tab= link redirects to its route", async () => {
   await expect(open({ tab: "issues", issues: "started" })).rejects.toThrow("redirect /projects/p1/issues?issues=started");
   await expect(open({ tab: "pulls", pr: "merged" })).rejects.toThrow("redirect /projects/p1/pulls?pr=merged");
-  await expect(open({ tab: "graphs" })).rejects.toThrow("redirect /projects/p1/graphs");
+  await expect(open({ tab: "graphs" })).rejects.toThrow("redirect /projects/p1/settings?tab=graphs");
   await expect(open({ tab: "settings" })).rejects.toThrow("redirect /projects/p1/settings");
   await expect(open({ tab: "runs" })).rejects.toThrow("redirect /projects/p1/runs");
   await expect(open({ tab: "nowhere" })).rejects.toThrow("redirect /projects/p1/runs");

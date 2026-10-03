@@ -1,7 +1,7 @@
 import { ZOOMS, type Zoom } from "./plan/timeline-scale";
 
-/** A project's pages under /projects/<id>, in the order the sidebar lists them. */
-export const PROJECT_SECTIONS = ["runs", "plan", "issues", "pulls", "graphs", "settings"] as const;
+/** A project's pages under /projects/<id>, in the order the sidebar lists them. Its graphs are a section of its settings. */
+export const PROJECT_SECTIONS = ["runs", "plan", "issues", "pulls", "settings"] as const;
 export type ProjectSection = (typeof PROJECT_SECTIONS)[number];
 
 /** The tabs of the project page before each became its own route; old links still carry them as ?tab=. */
@@ -9,10 +9,11 @@ const OLD_TABS: readonly string[] = ["runs", "issues", "pulls", "graphs", "setti
 
 /**
  * Where an old project link (/projects/<id>?tab=...) goes now: the tab's route with the other
- * search params kept, or Runs when it names no tab.
+ * search params kept, or Runs when it names no tab. Graphs is a section of project settings.
  */
 export function oldTabPath(projectId: string, params: Record<string, string | string[] | undefined>): string {
   const tab = typeof params.tab === "string" && OLD_TABS.includes(params.tab) ? params.tab : "runs";
+  if (tab === "graphs") return `/projects/${projectId}/settings?tab=graphs`;
   const rest = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (key === "tab" || value === undefined) continue;

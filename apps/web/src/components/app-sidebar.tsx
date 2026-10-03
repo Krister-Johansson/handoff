@@ -3,7 +3,7 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CircleDotIcon, GitForkIcon, GitPullRequestIcon, HouseIcon, InboxIcon, LibraryIcon, ListTreeIcon, PlayIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
+import { CircleDotIcon, GitPullRequestIcon, HouseIcon, InboxIcon, ListTreeIcon, PlayIcon, SettingsIcon, SlidersHorizontalIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -36,7 +36,6 @@ const PROJECT_ITEMS: { section: ProjectSection | undefined; label: string; icon:
   { section: "plan", label: "Plan", icon: ListTreeIcon },
   { section: "issues", label: "Issues", icon: CircleDotIcon },
   { section: "pulls", label: "Pull requests", icon: GitPullRequestIcon },
-  { section: "graphs", label: "Graphs", icon: GitForkIcon },
   { section: "settings", label: "Project settings", icon: SlidersHorizontalIcon },
 ];
 
@@ -85,8 +84,10 @@ function NavItem({
 }
 
 /**
- * The dashboard's sidebar: the project switcher, the open project's pages, the pages across projects
- * (Inbox and Library), then Settings and the worker status. Collapsed it is a column of icons.
+ * The dashboard's sidebar: the project switcher, the open project's pages, the Inbox across projects,
+ * then Settings and the worker status. A project's graphs are in its Project settings and the library
+ * is in Settings, so the graph editor marks Project settings and a library entry marks Settings.
+ * Collapsed it is a column of icons.
  */
 export function AppSidebar({
   projects,
@@ -160,14 +161,13 @@ export function AppSidebar({
                     <SidebarMenuBadge className="top-1.5! h-[18px] min-w-[18px] rounded-full bg-danger-dot px-1.5 text-[11px] font-semibold text-white!">{inboxCount}</SidebarMenuBadge>
                   ))}
               </NavItem>
-              <NavItem href="/library" label="Library" icon={LibraryIcon} current={inSection(pathname, "/library")} />
             </SidebarMenu>
           </nav>
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu className="gap-0.5">
-          <NavItem href="/settings" label="Settings" icon={SettingsIcon} current={inSection(pathname, "/settings")} />
+          <NavItem href="/settings" label="Settings" icon={SettingsIcon} current={inSection(pathname, "/settings") || inSection(pathname, "/library")} />
           <SidebarMenuItem>
             <SidebarMenuButton asChild tooltip={workerLabel(worker.live)}>
               <Link href="/settings?tab=worker">

@@ -87,7 +87,7 @@ Known limits, to address when a real project needs them:
 - A run cannot drop one of its issues. If only some of them should ship, cancel the run and start separate runs.
 - An issue blocked by another issue in the same run is still refused at start, although both would ship in one pull request.
 
-The library (**Library** in the dashboard) holds skills, MCP servers and subagents that nodes enable by name. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.
+The library holds skills, MCP servers and subagents that nodes enable by name. In the dashboard it is the Library group of **Settings**: Skills, Agents, MCP servers and Groups. A project's graphs are listed in its **Project settings**, under Graphs, and each opens in the graph editor. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.
 
 ## The Plan
 

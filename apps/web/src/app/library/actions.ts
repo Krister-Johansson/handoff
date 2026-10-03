@@ -7,6 +7,7 @@ import { deleteLibraryEntry, getLibraryByNames, recordMcpCheck, setMcpAllowedToo
 import { checkMcpServer, type McpCheck } from "@handoff/engine/mcp-check";
 import { getDb } from "@/lib/db";
 import { getOAuthStore } from "@/lib/oauth-store";
+import { LIBRARY_TAB_OF, settingsPath } from "@/lib/settings-tab";
 import { addMcpServerFromUrl } from "@/server/mcp-add";
 import { parseAgentForm, parseGroupForm, parseMcpForm, parseSkillForm, type FormResult } from "@/lib/library-forms";
 
@@ -21,7 +22,7 @@ type Kind = keyof typeof SEGMENT;
 async function save<T>(kind: Kind, form: FormData, result: FormResult<T>, write: (data: T) => Promise<{ name: string; version: number }>): Promise<FormState> {
   if (!result.ok) return { ok: false, errors: result.errors, values: valuesOf(form) };
   const row = await write(result.data);
-  revalidatePath("/library");
+  revalidatePath("/settings");
   revalidatePath(`/library/${SEGMENT[kind]}/${row.name}`);
   if (form.get("$new")) redirect(`/library/${SEGMENT[kind]}/${row.name}`);
   return { ok: true, message: `Saved version ${row.version}.` };
@@ -58,7 +59,7 @@ export async function testMcpServerAction(_: McpTestState, form: FormData): Prom
       same([saved.command, saved.args, saved.url, saved.env, saved.headers], [config.command, config.args, config.url, config.env, config.headers])
     ) {
       await recordMcpCheck(getDb(), saved.name, check);
-      revalidatePath("/library");
+      revalidatePath("/settings");
     }
   }
   return { check };
@@ -68,7 +69,7 @@ export async function testMcpServerAction(_: McpTestState, form: FormData): Prom
 export async function saveMcpToolsAction(name: string, tools: string[]): Promise<{ ok: true } | { error: string }> {
   const row = await setMcpAllowedTools(getDb(), name, tools);
   if (!row) return { error: `There is no MCP server named ${name}.` };
-  revalidatePath("/library");
+  revalidatePath("/settings");
   revalidatePath(`/library/mcp/${encodeURIComponent(name)}`);
   return { ok: true };
 }
@@ -79,7 +80,7 @@ export async function checkSavedMcpAction(name: string): Promise<{ check: McpChe
   if (!server) return { error: `There is no MCP server named ${name}.` };
   const check = await checkMcpServer(server, { secrets: process.env, oauth: getOAuthStore() });
   await recordMcpCheck(getDb(), name, check);
-  revalidatePath("/library");
+  revalidatePath("/settings");
   return { check };
 }
 
@@ -96,8 +97,8 @@ export async function deleteEntry(form: FormData): Promise<void> {
   const name = String(form.get("name"));
   if (kind !== "skill" && kind !== "mcp" && kind !== "agent" && kind !== "group") return;
   await deleteLibraryEntry(getDb(), kind, name);
-  revalidatePath("/library");
-  redirect(`/library?tab=${SEGMENT[kind]}`);
+  revalidatePath("/settings");
+  redirect(settingsPath(LIBRARY_TAB_OF[kind]));
 }
 
 export type AddFromUrlState = { error?: string; manual?: { name: string; url: string }; message?: string; values?: { url: string; name: string } };
@@ -109,7 +110,7 @@ export async function addMcpFromUrlAction(_: AddFromUrlState, form: FormData): P
   const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host") ?? "localhost:3000"}`;
   const result = await addMcpServerFromUrl(getDb(), getOAuthStore(), values, origin);
   if ("redirect" in result) {
-    revalidatePath("/library");
+    revalidatePath("/settings");
     redirect(result.redirect);
   }
   return { ...result, values };

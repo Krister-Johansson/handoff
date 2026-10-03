@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { ReactNode } from "react";
 import { headers } from "next/headers";
-import { liveWorkers } from "@handoff/db";
+import { listLibraryIndex, liveWorkers } from "@handoff/db";
+import { LibrarySection } from "@/components/library/library-section";
 import { PageHeader } from "@/components/page-header";
 import { AgentConnection } from "@/components/settings/agent-connection";
 import { NotificationSettingsLoader } from "@/components/settings/notification-settings-loader";
@@ -22,7 +23,7 @@ import { projectsForSettings } from "@/server/project-admin";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDb } from "@/lib/db";
 import { getProjects } from "@/lib/github";
-import { parseSettingsTab, SETTINGS_TAB_LABEL, type SettingsTab } from "@/lib/settings-tab";
+import { isLibraryTab, parseSettingsTab, SETTINGS_TAB_LABEL, settingsPath, type SettingsTab } from "@/lib/settings-tab";
 import { schedulerStates } from "@/server/scheduler-card";
 
 export const dynamic = "force-dynamic";
@@ -81,7 +82,8 @@ async function projectRows() {
 }
 
 /** The open section with what it reads on the server; only the open section reads anything. */
-async function OpenSection({ tab, adding, origin }: { tab: SettingsTab; adding: boolean; origin: string }) {
+async function openSection({ tab, adding, origin, query }: { tab: SettingsTab; adding: boolean; origin: string; query: string }) {
+  if (isLibraryTab(tab)) return <LibrarySection tab={tab} index={await listLibraryIndex(getDb())} query={query} />;
   switch (tab) {
     case "projects":
       return <ProjectsSettings key={adding ? "adding" : "list"} projects={await projectRows()} adding={adding} />;
@@ -133,15 +135,16 @@ async function OpenSection({ tab, adding, origin }: { tab: SettingsTab; adding: 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const params = await searchParams;
   const tab = parseSettingsTab(params);
+  const query = typeof params.q === "string" ? params.q.trim() : "";
   const h = await headers();
   const origin = `${h.get("x-forwarded-proto") ?? "http"}://${h.get("host") ?? "localhost:3000"}`;
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
-      <PageHeader crumbs={[{ label: "Settings", href: "/settings" }, { label: SETTINGS_TAB_LABEL[tab] }]} title="Settings" description="Settings for this dashboard and its projects." />
-      <div className="grid items-start gap-6 md:grid-cols-[200px_minmax(0,1fr)]">
+    <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6 max-sm:px-4">
+      <PageHeader crumbs={[{ label: "Settings", href: "/settings" }, ...(isLibraryTab(tab) ? [{ label: "Library", href: settingsPath("skills") }] : []), { label: SETTINGS_TAB_LABEL[tab] }]} title="Settings" description="Settings for this dashboard and its projects." />
+      <div className="grid items-start gap-6 max-md:gap-3.5 md:grid-cols-[200px_minmax(0,1fr)]">
         <SettingsNav active={tab} />
         <div className="flex min-w-0 flex-col gap-4">
-          <OpenSection tab={tab} adding={params.add === "1"} origin={origin} />
+          {await openSection({ tab, adding: params.add === "1", origin, query })}
         </div>
       </div>
     </main>
