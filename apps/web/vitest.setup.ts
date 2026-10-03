@@ -1,6 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
+
+// The top bar's search reads through server actions, which reach the database; component tests get no data.
+vi.mock("@/app/search/actions", () => ({
+  searchRecordsAction: async () => ({ projectId: null, projects: [], runs: [], chats: [] }),
+  searchTasksAction: async () => ({ tasks: [], sources: [] }),
+}));
 
 // jsdom has neither; Radix (checkbox, popover) and cmdk use them.
 globalThis.ResizeObserver ??= class {

@@ -67,13 +67,13 @@ function scoreOf(title: string, rest: string[], term: string): { score: number; 
 }
 
 type Scored = { hit: SearchHit; score: number };
-/** A hit before it is matched. */
-type Unmatched = { [K in Kind]: Omit<Extract<SearchHit, { kind: K }>, "match"> }[Kind];
+/** A result without the part of the query it matched, as Recent keeps it. */
+export type SearchItem = { [K in Kind]: Omit<Extract<SearchHit, { kind: K }>, "match"> }[Kind];
 
 /** Every hit of the data for the term, best first within each kind; `prefix` # matches task numbers by their leading digits. */
 function hitsOf(data: SearchData, { prefix, term }: ParsedQuery): Scored[] {
   const scored: Scored[] = [];
-  const add = (hit: Unmatched, title: string, rest: string[]) => {
+  const add = (hit: SearchItem, title: string, rest: string[]) => {
     if (!term) {
       scored.push({ hit: { ...hit, match: { title: null, number: 0 } } as SearchHit, score: 0 });
       return;

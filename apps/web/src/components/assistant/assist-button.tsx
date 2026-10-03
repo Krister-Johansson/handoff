@@ -4,6 +4,7 @@ import type { Ref } from "react";
 import { ChevronDownIcon, MessageSquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import { useModKey } from "@/lib/platform";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
@@ -24,6 +25,7 @@ export function AssistButton({
   available: boolean;
   onClick: () => void;
 }) {
+  const mod = useModKey();
   const label = expanded ? "Hide the assistant" : waiting ? "Assistant, an approval waits" : "Assistant";
   return (
     <TooltipProvider>
@@ -45,7 +47,7 @@ export function AssistButton({
         </TooltipTrigger>
         <TooltipContent side="left" className="flex items-center gap-1.5">
           {expanded ? "Hide" : available ? "Assistant" : "Assistant (off)"}
-          <Kbd>⌘</Kbd>
+          <Kbd>{mod}</Kbd>
           <Kbd>J</Kbd>
         </TooltipContent>
       </Tooltip>
