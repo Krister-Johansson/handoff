@@ -49,6 +49,11 @@ export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServe
       const spec = tool_name.startsWith(TOOL_PREFIX) ? specs.get(tool_name.slice(TOOL_PREFIX.length)) : undefined;
       if (!spec) return decision({ behavior: "deny", message: `${tool_name} is not one of handoff's tools.` });
       if (!spec.confirm) return decision({ behavior: "allow", updatedInput: input });
+      // A page tool the page would refuse gets no card: the page says why, and the reply tells the person.
+      if (spec.kind === "page") {
+        const check = await turn.requestUi({ name: spec.name, args: input }, deps.uiTimeoutMs, { check: true });
+        if (check.isError) return decision({ behavior: "deny", message: `The page refused this, so the person was not asked: ${check.text}` });
+      }
       const parsed = spec.input.safeParse(input);
       const summary = parsed.success ? spec.summarize(parsed.data) : spec.title;
       const answer = await turn.requestApproval({ toolUseId: tool_use_id, name: spec.name, title: spec.title, summary, args: input }, deps.approvalTimeoutMs);

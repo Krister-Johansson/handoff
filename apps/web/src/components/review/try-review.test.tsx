@@ -250,15 +250,18 @@ async function withAssistant(overrides: Partial<ComponentProps<typeof TryReview>
   await waitFor(() => expect(transport.turns).toHaveLength(1));
   act(() => transport.emit({ type: "turn", turnId: "t1" }));
   let next = 1;
-  const call = async (name: string, args: unknown = {}) => {
+  const send = async (type: "ui_call" | "ui_check", name: string, args: unknown = {}) => {
     const requestId = `u${next++}`;
-    act(() => transport.emit({ type: "ui_call", requestId, name, args }));
+    act(() => transport.emit({ type, requestId, name, args }));
     await waitFor(() => expect(transport.uiReplies.find((r) => r.requestId === requestId)).toBeDefined());
     const { text, isError } = transport.uiReplies.find((r) => r.requestId === requestId)!;
     return { text, isError };
   };
+  const call = (name: string, args: unknown = {}) => send("ui_call", name, args);
+  /** What the turn asks before a card goes up: whether the page would refuse the call. */
+  const check = (name: string, args: unknown = {}) => send("ui_check", name, args);
   const whereAmI = async () => JSON.parse((await call("where_am_i")).text) as { page?: { kind: string; tools: { name: string }[]; state: { data: Record<string, unknown> } } };
-  return { call, whereAmI, transport };
+  return { call, check, whereAmI, transport };
 }
 
 const cursor = () => screen.getByRole("button", { name: / of 3$/ });
@@ -337,6 +340,24 @@ test("page_submit approve is refused while a criterion is unticked, and after ap
   actions.answerReviewAction.mockRejectedValueOnce(redirectTo(`/projects/p1/runs/${RUN}`));
   expect(await call("page_submit", { option: "approve" })).toEqual({ text: "Approved: every criterion works. The run page opens.", isError: false });
   expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "approve", note: "", comments: [] });
+});
+
+test("before its card, page_submit is checked against what the page would refuse, and the check changes and sends nothing", async () => {
+  const { call, check, whereAmI } = await withAssistant();
+  await call("page_mark_criterion", { index: 1, works: true });
+
+  expect(await check("page_submit", { option: "approve" })).toEqual({ text: "Check every criterion to approve. Not marked as working: 2, 3.", isError: true });
+  expect(await check("page_submit", { option: "changes" })).toEqual({ text: "Say what to change: mark a criterion that does not work, or add a note.", isError: true });
+  expect(await check("page_submit", { option: "changes", note: "The sidebar stays empty." })).toEqual({ text: "page_submit can run on this page.", isError: false });
+  // A tool without a check of its own passes.
+  expect(await check("page_restart_app")).toEqual({ text: "page_restart_app can run on this page.", isError: false });
+
+  await call("page_mark_criterion", { index: 2, works: true });
+  await call("page_mark_criterion", { index: 3, works: true });
+  expect(await check("page_submit", { option: "approve" })).toEqual({ text: "page_submit can run on this page.", isError: false });
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+  expect(actions.restartTryItAction).not.toHaveBeenCalled();
+  expect((await whereAmI()).page?.state.data).toMatchObject({ note: "" });
 });
 
 test("page_submit changes sends the failing criteria as comments with the note", async () => {

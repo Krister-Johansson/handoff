@@ -7,7 +7,7 @@ import { CHOICES, CHOICE_TITLES, locationOf, type Choice, type Finding, type Fin
 import { numberOn, type LineComment, type Side } from "@/lib/line-comments";
 import type { useReviewDraft } from "@/lib/use-review-draft";
 import type { ViewState } from "@/lib/viewed";
-import { submitReviewTool } from "./send-review";
+import { reviewRefusal, submitReviewTool } from "./send-review";
 
 type Mode = "changes" | "whole";
 type Layout = "unified" | "split";
@@ -153,8 +153,12 @@ const ANSWERED: DraftTools = {
 /** How many findings have each choice, in words. */
 const tallyText = (choices: Choice[]) => CHOICES.map(({ choice, title }) => `${title} ${choices.filter((c) => c === choice).length}`).join(", ");
 
+/** The Fix now findings by their place from 0, as a review sends them; undefined when the review has no findings. */
+const fixNowOf = ({ findings, picks }: Review) => (findings?.comments.length ? picks.fixNow.map((f) => f.index).sort((a, b) => a - b) : undefined);
+
 /** The tools that change the person's drafts and marks, and send the review. */
-function draftTools({ questionId, runId, from, files, findings, picks, comments, draft, view, viewed }: Review): DraftTools {
+function draftTools(review: Review): DraftTools {
+  const { questionId, runId, from, files, findings, picks, comments, draft, view, viewed } = review;
   return {
     page_mark_viewed: async ({ path, viewed: on }) => {
       const file = files[findFile(files, { path })]!;
@@ -205,7 +209,7 @@ function draftTools({ questionId, runId, from, files, findings, picks, comments,
         option,
         note: draft.note,
         comments,
-        findings: findings?.comments.length ? picks.fixNow.map((f) => f.index).sort((a, b) => a - b) : undefined,
+        findings: fixNowOf(review),
         target: from,
         onSending: draft.onSending,
         onFailed: draft.onFailed,
@@ -253,5 +257,7 @@ function describe({ questionId, runId, from, files, findings, picks, readOnly, c
  * comment, choosing what to do with each finding and submitting.
  */
 export function useCodeReviewTools(review: Review) {
-  usePageTools("code_review", { ...viewTools(review), ...(review.readOnly ? ANSWERED : draftTools(review)) }, () => describe(review));
+  usePageTools("code_review", { ...viewTools(review), ...(review.readOnly ? ANSWERED : draftTools(review)) }, () => describe(review), {
+    page_submit_review: ({ option }) => reviewRefusal({ option, note: review.draft.note, comments: review.comments, findings: fixNowOf(review) }),
+  });
 }

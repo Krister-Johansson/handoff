@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { useOptionalAssistant, useOptionalAssistantPanel } from "@/components/assistant/assistant-provider";
 import { setNotificationVoice } from "@/lib/notify";
 import { approvalAnswer } from "@/lib/voice/approval-answer";
+import { confirmQuestion } from "@/lib/voice/confirm-question";
 import { isTyping } from "@/lib/voice/is-typing";
 import { readVoicePrefs, useVoicePrefs } from "@/lib/voice/prefs";
 import { languageName } from "@/lib/voice/recognition";
@@ -28,7 +29,12 @@ export type Bubble = {
   misheard?: string;
   /** A card answered by voice, and the words that answered it. */
   answered?: { requestId: string; said: string };
+  /** Listening once more, for the answer to the question the reply ended with. */
+  answering?: boolean;
 };
+
+/** Whether a reply ends by asking something, so the bubble listens once more for the answer. */
+const asksBack = (text: string) => text.trimEnd().replace(/[*_)\]]+$/, "").endsWith("?");
 
 /** Content a page offers to read aloud: its run summary, plan or review, or acceptance criteria. */
 
@@ -142,6 +148,35 @@ export function VoiceProvider({
   const supported = Boolean(support.recognition) && (support.onDeviceCheck || prefs.allowServerRecognition);
   const { start: startInput, stop, abort, install, state } = input;
 
+  // The answer the bubble waits to listen for once the reply's question is spoken. Stopping the
+  // speech (Escape, Stop, Ctrl+M, Close) drops it, so the microphone opens only when asked to.
+  const answerAfterSpeech = useRef<(() => void) | undefined>(undefined);
+  const cancelAnswer = useCallback(() => {
+    answerAfterSpeech.current?.();
+    answerAfterSpeech.current = undefined;
+  }, []);
+  const listenForAnswer = useCallback(
+    (question: string) => {
+      cancelAnswer();
+      const listen = () => {
+        answerAfterSpeech.current = undefined;
+        const shown = latest.current.bubble;
+        if (!shown.open || shown.question !== question || shown.approval) return;
+        setBubble((b) => ({ ...b, answering: true }));
+        void startInput("command");
+      };
+      const speaking = latest.current.speaker;
+      if (!speaking?.isSpeaking()) return listen();
+      const off = speaking.subscribe(() => {
+        if (speaking.isSpeaking()) return;
+        off();
+        listen();
+      });
+      answerAfterSpeech.current = off;
+    },
+    [cancelAnswer, startInput],
+  );
+
   // Speech nobody asked for just now (a notification, a reply in the panel) waits while the microphone
   // is open, so the dashboard never talks over the person, and is said once listening ends.
   const micOpen = state === "listening" || state === "starting";
@@ -166,6 +201,7 @@ export function VoiceProvider({
   const start = useCallback(
     async (requested?: ListenMode) => {
       if (!supported) return;
+      cancelAnswer();
       // Never listen while speaking: asking to listen stops the speech first, so the microphone never hears the dashboard.
       if (speaker?.isSpeaking()) speaker.stop();
       const listenMode = requested ?? (isTyping(document.activeElement) ? "dictation" : "command");
@@ -174,7 +210,7 @@ export function VoiceProvider({
       if (listenMode === "command") setBubble((b) => (b.approval ? { ...b, open: true, notice: undefined } : { open: true }));
       await startInput(listenMode);
     },
-    [speaker, startInput, supported],
+    [cancelAnswer, speaker, startInput, supported],
   );
   const toggle = useCallback(() => {
     if (state === "listening" || state === "starting") stop();
@@ -189,8 +225,11 @@ export function VoiceProvider({
     },
     [abort, speaker],
   );
-  const stopSpeaking = useCallback(() => speaker?.stop(), [speaker]);
-  // The bubble's question gets its reply spoken, and an approval is read out with how to answer it.
+  const stopSpeaking = useCallback(() => {
+    cancelAnswer();
+    speaker?.stop();
+  }, [cancelAnswer, speaker]);
+  // The bubble's question gets its reply spoken, and a confirmation card is read out with how to answer it.
   const onReply = assistant?.onReply;
   const onRequest = assistant?.onRequest;
   useEffect(() => {
@@ -199,13 +238,18 @@ export function VoiceProvider({
       const shown = latest.current.bubble;
       // A streaming reply is spoken only when it is done; its text stays on screen.
       if (!reply.done || !reply.text) return;
-      if (shown.open && shown.question) say(spokenReply(reply.text));
-      else if (readVoicePrefs().speakReplies) sayWhenQuiet(spokenReply(reply.text), "reply");
+      if (!shown.open || !shown.question) {
+        if (readVoicePrefs().speakReplies) sayWhenQuiet(spokenReply(reply.text), "reply");
+        return;
+      }
+      say(spokenReply(reply.text));
+      // A reply that asks something back is answered by voice too: the bubble listens once more.
+      if (asksBack(reply.text)) listenForAnswer(shown.question);
     });
     const offRequest = onRequest((request) => {
       if (!latest.current.bubble.open) return;
       setBubble((b) => ({ ...b, approval: { requestId: request.requestId }, misheard: undefined }));
-      say(`${request.title}: ${request.summary}. Say yes or no.`);
+      say(`${confirmQuestion(request)} Say yes or no.`);
       // Once the card is read out, listen once for the answer; Ctrl+M listens again after that.
       const listen = () => {
         const shown = latest.current.bubble;
@@ -223,13 +267,14 @@ export function VoiceProvider({
       offReply();
       offRequest();
     };
-  }, [onReply, onRequest, say, sayWhenQuiet, startInput]);
+  }, [onReply, onRequest, say, sayWhenQuiet, startInput, listenForAnswer]);
 
   const closeBubble = useCallback(() => {
+    cancelAnswer();
     abort();
     speaker?.stop();
     setBubble(CLOSED);
-  }, [abort, speaker]);
+  }, [abort, cancelAnswer, speaker]);
 
 
   const value = useMemo<VoiceContextValue>(

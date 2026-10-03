@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, 
 import Link from "next/link";
 import { BotIcon, Loader2Icon, MinusIcon, ShieldQuestionIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useOptionalVoice } from "@/components/voice/voice-provider";
 import type { ChatMessage } from "@/lib/assistant/port";
 import { useModKey } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -133,6 +134,8 @@ export function AssistantPanel() {
   const top = useHeaderHeight();
   const button = useRef<HTMLButtonElement>(null);
   const open = assistant.isOpen;
+  // On a phone the voice bubble takes the bottom of the screen, so the assist button hides while it is open.
+  const bubbleOpen = useOptionalVoice()?.bubble.open ?? false;
   // Closing from inside the panel hands focus back to the assist button, which shows again.
   const close = () => {
     assistant.close();
@@ -183,7 +186,7 @@ export function AssistantPanel() {
           <PanelBody />
         </dialog>
       )}
-      {(!open || mode === "float") && (
+      {(!open || mode === "float") && !(mode === "phone" && bubbleOpen) && (
         <AssistButton ref={button} expanded={open} waiting={waiting} available={assistant.available} onClick={() => (open ? close() : assistant.open())} />
       )}
     </>

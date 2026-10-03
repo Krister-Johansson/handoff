@@ -12,7 +12,7 @@ import { quoteRanges } from "@/lib/quote-ranges";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { useReviewDraft } from "@/lib/use-review-draft";
 import { CARD, PROSE } from "./styles";
-import { submitReviewTool } from "./send-review";
+import { reviewRefusal, submitReviewTool } from "./send-review";
 import { SubmitReview } from "./submit-review";
 
 type Comment = { quote: string; body: string };
@@ -244,6 +244,7 @@ export function PlanReview({ questionId, runId, from, markdown, options, overlap
       page_submit_review: ({ option }) => submitReviewTool({ questionId, runId, option, note, comments, target: from, onSending, onFailed }),
     },
     () => ({ questionId, runId, from, comments, note }),
+    { page_submit_review: ({ option }) => reviewRefusal({ option, note, comments }) },
   );
 
   return (

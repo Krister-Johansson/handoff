@@ -158,15 +158,18 @@ async function withAssistant() {
   await waitFor(() => expect(transport.turns).toHaveLength(1));
   act(() => transport.emit({ type: "turn", turnId: "t1" }));
   let next = 1;
-  const call = async (name: string, args: unknown = {}) => {
+  const send = async (type: "ui_call" | "ui_check", name: string, args: unknown = {}) => {
     const requestId = `u${next++}`;
-    act(() => transport.emit({ type: "ui_call", requestId, name, args }));
+    act(() => transport.emit({ type, requestId, name, args }));
     await waitFor(() => expect(transport.uiReplies.find((r) => r.requestId === requestId)).toBeDefined());
     const { text, isError } = transport.uiReplies.find((r) => r.requestId === requestId)!;
     return { text, isError };
   };
+  const call = (name: string, args: unknown = {}) => send("ui_call", name, args);
+  /** What the turn asks before a card goes up: whether the page would refuse the call. */
+  const check = (name: string, args: unknown = {}) => send("ui_check", name, args);
   const whereAmI = async () => JSON.parse((await call("where_am_i")).text) as { page?: { kind: string; tools: { name: string }[]; state: { data: Record<string, unknown> } } };
-  return { call, whereAmI };
+  return { call, check, whereAmI };
 }
 
 test("page_comment_on_passage adds a comment for a quote in the plan and refuses one that is not there", async () => {
@@ -188,6 +191,15 @@ test("page_comment_on_passage adds a comment for a quote in the plan and refuses
 
 /** What a server action that redirects rejects with in the browser, once Next has started the navigation. */
 const redirectTo = (path: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${path};303;` });
+
+test("before its card, page_submit_review is checked against what the page would refuse, and the check sends nothing", async () => {
+  const { call, check } = await withAssistant();
+  expect(await check("page_submit_review", { option: "changes" })).toEqual({ text: "Add a comment or an overall comment first, so there is something to fix.", isError: true });
+  expect(await check("page_submit_review", { option: "approve" })).toEqual({ text: "page_submit_review can run on this page.", isError: false });
+  await call("page_set_note", { note: "Use SQLite." });
+  expect(await check("page_submit_review", { option: "changes" })).toEqual({ text: "page_submit_review can run on this page.", isError: false });
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+});
 
 test("page_submit_review approve sends approve", async () => {
   const { call } = await withAssistant();

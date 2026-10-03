@@ -2,12 +2,13 @@
 
 import { useEffect, useLayoutEffect, useReducer, useRef } from "react";
 import { useOptionalPageRegistry } from "@/components/assistant/assistant-provider";
-import type { PageHandlers, PageKind } from "./page-tools";
-import type { OpenPage, PageToolHandler } from "./run-page-tool";
+import type { PageChecks, PageHandlers, PageKind } from "./page-tools";
+import type { OpenPage, PageToolCheck, PageToolHandler } from "./run-page-tool";
 
 /**
  * Offers the open page's tools to the assistant while the page is mounted: `handlers` act in the page,
- * `describe` returns its state for where_am_i. The registration changes only when the kind or the set
+ * `describe` returns its state for where_am_i, and `checks` say why the page would refuse a tool that asks
+ * first, before its card goes up. The registration changes only when the kind or the set
  * of bound tools does; the handlers and describe always see the page's latest state. Outside an
  * AssistantProvider it does nothing. The kind alone decides the handlers' types: NoInfer keeps
  * TypeScript from inferring it from the handlers too, which loses their arguments' types.
@@ -16,15 +17,15 @@ import type { OpenPage, PageToolHandler } from "./run-page-tool";
  * browser agent can send the next call before React renders, and its handler would otherwise act on
  * the state before the last call.
  */
-export function usePageTools<K extends PageKind>(kind: K, handlers: NoInfer<PageHandlers<K>>, describe: () => unknown) {
+export function usePageTools<K extends PageKind>(kind: K, handlers: NoInfer<PageHandlers<K>>, describe: () => unknown, checks: NoInfer<PageChecks<K>> = {}) {
   const registerPage = useOptionalPageRegistry();
-  const latest = useRef({ handlers: handlers as Partial<Record<string, PageToolHandler>>, describe });
+  const latest = useRef({ handlers: handlers as Partial<Record<string, PageToolHandler>>, describe, checks: checks as Partial<Record<string, PageToolCheck>> });
   // Calls waiting for the next render, and the render a call asks for so that one always comes.
   const rendered = useRef<(() => void)[]>([]);
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   const queue = useRef<Promise<unknown> | undefined>(undefined);
   useLayoutEffect(() => {
-    latest.current = { handlers: handlers as Partial<Record<string, PageToolHandler>>, describe };
+    latest.current = { handlers: handlers as Partial<Record<string, PageToolHandler>>, describe, checks: checks as Partial<Record<string, PageToolCheck>> };
     for (const resolve of rendered.current.splice(0)) resolve();
   });
   // A page that leaves releases the calls waiting on it.
@@ -53,9 +54,12 @@ export function usePageTools<K extends PageKind>(kind: K, handlers: NoInfer<Page
       queue.current = result.catch(() => undefined);
       return result;
     };
+    const names = bound.split(" ").filter(Boolean);
+    const check = (name: string) => (args: never) => latest.current.checks[name]?.(args);
     const page: OpenPage = {
       kind,
-      handlers: Object.fromEntries(bound.split(" ").filter(Boolean).map((name) => [name, call(name)])),
+      handlers: Object.fromEntries(names.map((name) => [name, call(name)])),
+      checks: Object.fromEntries(names.map((name) => [name, check(name)])),
       describe: () => latest.current.describe(),
     };
     return registerPage(page);

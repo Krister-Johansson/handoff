@@ -53,14 +53,23 @@ type Review = {
 };
 
 /**
+ * Why a review cannot be sent as it is: request changes and approve after fixes with nothing to fix.
+ * page_submit_review's check asks this before its card goes up.
+ */
+export function reviewRefusal({ option, note, comments, findings }: Pick<Review, "option" | "note" | "comments" | "findings">): string | undefined {
+  if (!sendsBack(option) || note.trim() || comments.length > 0 || findings?.length) return undefined;
+  return findings ? NOTHING_PICKED : NOTHING_TO_FIX;
+}
+
+/**
  * Sends a review, as the Send review button and page_submit_review both do. Request changes and
  * approve after fixes need a Fix now finding, a comment or an overall comment. Resolves to why the
  * review was not sent; once sent, the action redirects to the run page, which reaches the caller as
  * Next's redirect error.
  */
 export async function sendReview({ questionId, runId, option, note, comments, findings, onSending, onFailed }: Review): Promise<string | undefined> {
-  const picked = sendsBack(option) ? findings : undefined;
-  if (sendsBack(option) && !note.trim() && comments.length === 0 && !picked?.length) return findings ? NOTHING_PICKED : NOTHING_TO_FIX;
+  const refusal = reviewRefusal({ option, note, comments, findings });
+  if (refusal) return refusal;
   // A sent review redirects to the run, so the draft goes first and comes back if the send fails.
   onSending?.();
   const result = await answerReviewAction({ questionId, runId, option, note: note.trim(), comments, ...(findings ? { findings } : {}) });

@@ -5,7 +5,7 @@ import type { ChatMessage, PendingRequest, ReplyUpdate } from "@/lib/assistant/p
 import type { AssistantTransport, TurnStreamEvent } from "@/lib/assistant/transport";
 
 type Reply = Extract<ChatMessage, { role: "assistant" }>;
-type UiCall = Extract<TurnStreamEvent, { type: "ui_call" }>;
+type UiCall = Extract<TurnStreamEvent, { type: "ui_call" | "ui_check" }>;
 
 /** An empty reply that fills as its turn streams. */
 export const streamingReply = (id: string): ChatMessage => ({ id, role: "assistant", text: "", calls: [], requests: [], status: "streaming" });
@@ -85,7 +85,7 @@ export function useTurnStream({
 
   /**
    * Follows a turn's stream into the reply `replyId`. `live` is the stream of a turn this page started:
-   * its UI tool calls run here. A followed turn's earlier UI calls are not run again.
+   * its UI tool calls, and its checks before a page tool's card, run here. A followed turn's earlier UI calls are not run again.
    */
   const follow = useCallback(
     async (replyId: string, start: (onEvent: (event: TurnStreamEvent) => void, signal: AbortSignal) => Promise<void>, { live, turn }: { live: boolean; turn?: string }) => {
@@ -111,7 +111,7 @@ export function useTurnStream({
         if (event.type === "done") for (const listener of replyListeners.current) listener({ id: replyId, text: event.text || text, done: true });
         update((m) => applyEvent(m, event));
         if (event.type === "confirm") for (const listener of requestListeners.current) listener(requestOf(event));
-        if (event.type === "ui_call" && live) {
+        if ((event.type === "ui_call" || event.type === "ui_check") && live) {
           const turn = turnId.current;
           void runUi(event).then(async (outcome) => {
             if (outcome.note) {

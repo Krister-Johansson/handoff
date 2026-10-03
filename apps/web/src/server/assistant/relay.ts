@@ -9,6 +9,8 @@ export type TurnEvent =
   | { type: "confirm"; requestId: string; toolUseId: string | undefined; name: string; title: string; summary: string; args: unknown; expiresAt?: string }
   | { type: "confirmed"; requestId: string; approved: boolean; note?: string }
   | { type: "ui_call"; requestId: string; name: string; args: unknown }
+  /** Asks the page whether it would refuse a page tool call, before the call's card goes up; the page runs nothing. */
+  | { type: "ui_check"; requestId: string; name: string; args: unknown }
   | { type: "done"; text: string; costUsd?: number }
   | { type: "interrupted"; text: string }
   | { type: "error"; message: string };
@@ -83,8 +85,11 @@ export class LiveTurn {
     return true;
   }
 
-  /** Asks the page to run a UI tool and waits for its answer; no answer in time is an error for the model. */
-  requestUi(call: { name: string; args: unknown }, timeoutMs: number): Promise<UiResult> {
+  /**
+   * Asks the page to run a UI tool, or with `check` only whether it would refuse the call, and waits for
+   * its answer; no answer in time is an error for the model.
+   */
+  requestUi(call: { name: string; args: unknown }, timeoutMs: number, { check = false }: { check?: boolean } = {}): Promise<UiResult> {
     if (this.ended) return Promise.resolve({ text: "The turn has ended.", isError: true });
     const requestId = randomUUID();
     return new Promise<UiResult>((resolve) => {
@@ -95,7 +100,7 @@ export class LiveTurn {
       };
       const timer = setTimeout(() => settle({ text: "The page did not answer. The person may have closed the dashboard.", isError: true }), timeoutMs);
       this.pendingUi.set(requestId, { resolve: settle, timer });
-      this.emit({ type: "ui_call", requestId, ...call });
+      this.emit({ type: check ? "ui_check" : "ui_call", requestId, ...call });
     });
   }
 
