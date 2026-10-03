@@ -355,3 +355,109 @@ test("reorderFlow lays the flow out in a new queue, keeping the places of items 
     { issue: 1, lane: 1, start: 30, end: 90 },
   ]);
 });
+
+/** A story or an epic as listItems returns it. */
+const parentItem = (number: number, kind: "story" | "epic", parent?: number) => task(number, { kind, status: undefined, parent, position: 0 });
+
+test("layoutFlow links each card to the next card of its story in flow order", () => {
+  const flow = layoutFlow(
+    input({
+      lanes: 2,
+      tasks: [
+        parentItem(40, "story"),
+        task(9, { parent: 40, status: "Running" }),
+        task(10, { parent: 40, position: 3 }),
+        task(11, { parent: 40, position: 5 }),
+        // Shaping cards take part like Ready and running cards.
+        task(13, { parent: 40, position: 6, status: "Shaping" }),
+        // Project order puts #12 before #10, so the flow starts it first: the chain follows the flow, not the tree.
+        task(12, { parent: 40, position: 1 }),
+        parentItem(50, "story"),
+        task(20, { parent: 50, position: 2 }),
+        task(21, { parent: 50, position: 4 }),
+      ],
+      runs: [run(9, 0, 0, 4)],
+    }),
+  );
+
+  // #9 runs from Now in slot 1 and #12 starts with it in slot 2; the running card comes first.
+  expect(placed(flow)).toEqual([
+    { issue: 9, lane: 1, start: 0, end: 60 },
+    { issue: 12, lane: 2, start: 0, end: 60 },
+    { issue: 20, lane: 1, start: 60, end: 120 },
+    { issue: 10, lane: 2, start: 60, end: 120 },
+    { issue: 21, lane: 1, start: 120, end: 180 },
+    { issue: 11, lane: 2, start: 120, end: 180 },
+    { issue: 13, lane: 1, start: 180, end: 240 },
+  ]);
+  expect(flow.chains).toEqual([
+    { parent: 40, issues: [9, 12, 10, 11, 13] },
+    { parent: 50, issues: [20, 21] },
+  ]);
+  expect(flow.then).toEqual([
+    { from: 9, to: 12 },
+    { from: 12, to: 10 },
+    { from: 10, to: 11 },
+    { from: 11, to: 13 },
+    { from: 20, to: 21 },
+  ]);
+});
+
+test("no then link where the next task is blocked by the one before it", () => {
+  const flow = layoutFlow(input({ tasks: [parentItem(40, "story"), task(10, { parent: 40 }), task(11, { parent: 40, blockedBy: [10] }), task(12, { parent: 40 })] }));
+
+  expect(flow.chains).toEqual([{ parent: 40, issues: [10, 11, 12] }]);
+  // The blocker arrow already joins #10 and #11.
+  expect(flow.arrows).toEqual([{ from: 10, to: 11 }]);
+  expect(flow.then).toEqual([{ from: 11, to: 12 }]);
+});
+
+test("skipped, done and waiting tasks drop out and the chain joins the cards on either side", () => {
+  const flow = layoutFlow(
+    input({
+      tasks: [
+        parentItem(40, "story"),
+        task(30, { parent: 40, state: "closed", status: "Done" }),
+        task(31, { parent: 40 }),
+        // #32 waits for #99, which is not in the order; #33 has the skip label; #34 is in review; #36's latest run was cancelled.
+        task(32, { parent: 40, blockedBy: [99] }),
+        task(33, { parent: 40, labels: ["task", "human"] }),
+        task(34, { parent: 40, status: "In review" }),
+        task(36, { parent: 40 }),
+        task(35, { parent: 40 }),
+      ],
+      latest: new Map([[36, { id: "r36", status: "cancelled" }]]),
+    }),
+  );
+
+  expect(flow.cards.map((c) => c.issue)).toEqual([31, 35]);
+  expect(flow.chains).toEqual([{ parent: 40, issues: [31, 35] }]);
+  expect(flow.then).toEqual([{ from: 31, to: 35 }]);
+});
+
+test("storyless tasks chain by epic and unparented tasks do not chain", () => {
+  const flow = layoutFlow(
+    input({
+      tasks: [
+        parentItem(1, "epic"),
+        parentItem(5, "story", 1),
+        task(12, { parent: 5 }),
+        task(10, { parent: 1 }),
+        task(11, { parent: 1 }),
+        task(20),
+        task(21),
+        // A parent that is a task, or not in the plan, is no story.
+        task(22, { parent: 20 }),
+        task(23, { parent: 98 }),
+        task(24, { parent: 98 }),
+      ],
+    }),
+  );
+
+  expect(flow.cards).toHaveLength(8);
+  expect(flow.chains).toEqual([
+    { parent: 1, issues: [10, 11] },
+    { parent: 5, issues: [12] },
+  ]);
+  expect(flow.then).toEqual([{ from: 10, to: 11 }]);
+});

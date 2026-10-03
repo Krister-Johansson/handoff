@@ -2,6 +2,7 @@ import type { StepProgress } from "@handoff/core";
 import { orderTasks, skipReason, type IssueRun } from "@handoff/engine/candidates";
 import type { PlanItem, PlanSize } from "@handoff/github";
 import { ruleBreaks, type RuleBreak } from "./flow-order";
+import { storyChains, thenLinks, type StoryChain, type ThenLink } from "./story-order";
 
 /** An active run of the project: queued, running or waiting. */
 export type FlowRun = {
@@ -72,6 +73,10 @@ export type Flow = {
   rows: FlowRow[];
   /** From a blocker's card end to the start of the card it blocks. */
   arrows: { from: number; to: number }[];
+  /** Each story's cards in the flow's order; a storyless task's under its epic. */
+  chains: StoryChain[];
+  /** From each card to the next card of its story, where no blocker arrow already joins them. */
+  then: ThenLink[];
   /** Tasks placed before an open blocker in the queue; the flow still starts each after its blockers. */
   breaks: RuleBreak[];
   /** Why the scheduler is held; the cards sit as if the hold cleared now. */
@@ -247,5 +252,6 @@ export function layoutFlow(input: FlowInput): Flow {
       return { issue: t.number, tags };
     });
 
-  return { queue, ready: ready.map((t) => t.number), cards, lanes, rows, arrows, breaks, held: input.held, end: Math.max(0, ...cards.map((c) => c.end)) };
+  const chains = storyChains(cards, queue, input.tasks);
+  return { queue, ready: ready.map((t) => t.number), cards, lanes, rows, arrows, chains, then: thenLinks(chains, input.tasks), breaks, held: input.held, end: Math.max(0, ...cards.map((c) => c.end)) };
 }
