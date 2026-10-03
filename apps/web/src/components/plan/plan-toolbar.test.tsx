@@ -270,3 +270,20 @@ test("Flow mode links to the Plan mode settings", () => {
   expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
   expect(screen.queryByRole("radiogroup", { name: "Zoom" })).not.toBeInTheDocument();
 });
+
+test("the Flow's toolbar has Optimize before Flow mode, and the selection the tree's tick boxes make", () => {
+  const { unmount } = renderTab({ plan: flowPlan, view: "flow" });
+  const optimize = screen.getByRole("button", { name: "Optimize" });
+  expect(optimize.compareDocumentPosition(screen.getByRole("link", { name: "Flow mode" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select #41" }));
+  expect(screen.getByText("1 selected")).toBeInTheDocument();
+  fireEvent.click(optimize);
+  expect(screen.getByRole("status", { name: "Optimize preview" })).toHaveTextContent("in story #41 Shaping with the assistant.");
+
+  unmount();
+
+  // The tree view has no tick boxes and no Optimize.
+  renderTab({ plan: flowPlan, view: "tree" });
+  expect(screen.queryByRole("button", { name: "Optimize" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+});
