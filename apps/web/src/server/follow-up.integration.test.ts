@@ -58,8 +58,8 @@ test("with a plan, the follow-up issue is a sub-issue of the run's issue and hol
   expect(created.body).not.toContain("Crashes on an empty list.");
   expect(plan.itemsOf(repo).get(issue.number)?.status).toBe("Shaping");
 
-  // The review shows the issue, and a second one is not opened.
-  expect((await getReview(db, gate.runId, gate.questionId))!.followUp).toEqual(issue);
+  // The review shows the issue with the findings it holds, and a second one is not opened.
+  expect((await getReview(db, gate.runId, gate.questionId))!.followUp).toEqual({ ...issue, findings: [0, 2] });
   await expect(createFollowUp({ db, github, projects: plan }, { ...gate, findings: [1] })).rejects.toThrow(`#${issue.number}`);
 });
 

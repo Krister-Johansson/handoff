@@ -279,7 +279,7 @@ export const CATALOG: ToolSpec[] = [
     name: "answer_question",
     title: "Answer a question",
     description:
-      "Answers a question a run asked, which lets it continue. The option must be one the question lists (get_run shows them): approve, changes or fix (approve once the comments are fixed) for a review. At a Try it gate, give criteria: a verdict for each acceptance criterion. Only answer with the user's decision.",
+      "Answers a question a run asked, which lets it continue. The option must be one the question lists (get_run shows them): approve, changes or fix (approve once the comments are fixed) for a review. At a code review with findings, changes and fix send the findings marked fix_now back to the coder unless findings names others. At a Try it gate, give criteria: a verdict for each acceptance criterion. Only answer with the user's decision.",
     input: z.object({
       question_id: z.string(),
       answer: z.string().min(1).optional().describe("The answer or note; required unless criteria answer a Try it gate"),
@@ -300,6 +300,10 @@ export const CATALOG: ToolSpec[] = [
         )
         .optional()
         .describe("For a review: comments on quoted passages or on lines of files"),
+      findings: z
+        .array(z.number().int().positive())
+        .optional()
+        .describe("For a code review with findings: the findings to send back to the coder with changes or fix, by index from 1 as get_run lists them. Without it, every finding marked fix_now (Blocking and Should fix) goes back; [] sends none."),
     }),
     kind: "data",
     confirm: true,

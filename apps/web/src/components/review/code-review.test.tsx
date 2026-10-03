@@ -318,18 +318,117 @@ test("findings are grouped by severity", () => {
   expect(within(within(summary).getByRole("region", { name: "Follow-up" })).getByText("Link the ADR.")).toBeInTheDocument();
 });
 
-test("Create follow-up issue opens one issue with the chosen findings", async () => {
+/** The choice control of one finding, by where it is. */
+const choiceOf = (where: string) => screen.getByRole("radiogroup", { name: `What to do with ${where}` });
+const choose = (where: string, choice: "Fix now" | "Follow-up" | "Skip") => fireEvent.click(within(choiceOf(where)).getByRole("radio", { name: choice }));
+const picked = (where: string) => within(choiceOf(where)).getByRole("radio", { checked: true }).textContent;
+const tally = () => within(screen.getByRole("list", { name: "Choices" })).getAllByRole("listitem").map((li) => li.textContent);
+
+test("each finding gets one choice: Blocking and Should fix start on Fix now, Follow-up on Follow-up, and the footer counts them", () => {
+  render(<CodeReview {...props} findings={graded} />);
+  expect(picked("src/b.ts:2")).toBe("Fix now");
+  expect(picked("src/a.ts:10")).toBe("Fix now");
+  expect(picked("docs/notes.md")).toBe("Follow-up");
+  expect(tally()).toEqual(["Fix now 2", "Follow-up 1", "Skip 0"]);
+  expect(screen.getByText("Takes the 1 Follow-up finding.")).toBeInTheDocument();
+  expect(screen.getByText(/Fix now findings go back to coder-1 when you send the review\./)).toBeInTheDocument();
+
+  choose("src/a.ts:10", "Skip");
+  choose("src/b.ts:2", "Follow-up");
+  expect(picked("src/a.ts:10")).toBe("Skip");
+  expect(tally()).toEqual(["Fix now 0", "Follow-up 2", "Skip 1"]);
+  expect(screen.getByText("Takes the 2 Follow-up findings.")).toBeInTheDocument();
+  // A finding on a line in the diff carries its choice there too.
+  expect(within(fileA()).getByText("Skip")).toBeInTheDocument();
+});
+
+test("Request changes sends the Fix now findings with the line comments and the overall comment", async () => {
+  render(<CodeReview {...props} findings={graded} />);
+  fireEvent.click(within(fileA()).getByRole("button", { name: "Select line 9" }));
+  fireEvent.change(within(fileA()).getByLabelText("Comment on src/a.ts line 9"), { target: { value: "Explain this." } });
+  fireEvent.click(within(fileA()).getByRole("button", { name: "Add comment" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  const dialog = screen.getByRole("dialog");
+  expect(dialog).toHaveTextContent("Findings and comments go back to coder-1.");
+  expect(dialog).toHaveTextContent("2 findings and 1 comment will be sent to coder-1.");
+  const list = within(dialog).getByRole("list", { name: "Goes back to coder-1" });
+  expect(within(list).getAllByRole("listitem").map((li) => li.textContent)).toEqual(["b.ts:2Crashes on an empty list.", "a.ts:10Name the constant."]);
+  fireEvent.change(screen.getByLabelText("Overall comment"), { target: { value: "Close." } });
+  fireEvent.click(screen.getByRole("radio", { name: /Request changes/ }));
+  expect(screen.getByRole("radio", { name: /Request changes/ })).toHaveAccessibleName(/Send the Fix now findings and your comments back to coder-1/);
+  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
+  await waitFor(() =>
+    expect(actions.answerReviewAction).toHaveBeenCalledWith({
+      questionId: "q1",
+      runId: "r1",
+      option: "changes",
+      note: "Close.",
+      comments: [{ path: "src/a.ts", side: "new", line: 9, quote: "line 9", body: "Explain this." }],
+      findings: [0, 1],
+    }),
+  );
+});
+
+test("Approve after fixes sends the Fix now findings alone, and says there is nothing to fix only with nothing to send", async () => {
+  render(<CodeReview {...props} findings={graded} />);
+  choose("src/a.ts:10", "Skip");
+  choose("src/b.ts:2", "Follow-up");
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("Nothing will be sent to coder-1 yet.");
+  fireEvent.click(screen.getByRole("radio", { name: /Approve after fixes/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
+  expect(await screen.findByText("Pick Fix now on a finding, or add a comment or an overall comment, so there is something to fix.")).toBeInTheDocument();
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+
+  choose("src/b.ts:2", "Fix now");
+  expect(screen.getByRole("dialog")).toHaveTextContent("1 finding will be sent to coder-1.");
+  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "fix", note: "", comments: [], findings: [1] }));
+});
+
+test("Approve with Fix now findings picked warns they will not be sent and reads Approve anyway", async () => {
+  render(<CodeReview {...props} findings={graded} />);
+  fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
+  fireEvent.click(screen.getByRole("radio", { name: /^Approve Let the run go on/ }));
+  expect(screen.getByRole("alert")).toHaveTextContent("The 2 Fix now findings will not be sent.");
+  expect(screen.getByRole("alert")).toHaveTextContent("Approve lets the run go on as it is. Pick Approve after fixes to send them, or set them to Follow-up or Skip.");
+  expect(screen.getByRole("dialog")).toHaveTextContent("Approve sends nothing back to coder-1.");
+  expect(screen.queryByRole("list", { name: "Goes back to coder-1" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Send review" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Approve anyway" }));
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "approve", note: "", comments: [] }));
+});
+
+test("Create follow-up issue takes the Follow-up findings, and they then say which issue holds them", async () => {
   followUp.createFollowUpAction.mockResolvedValue({ ok: true, issue: { number: 57, url: "https://github.com/o/r/issues/57" } });
   render(<CodeReview {...props} findings={graded} />);
-  // Follow-up findings start picked; a person adds or drops the others.
-  expect(screen.getByRole("checkbox", { name: "Pick docs/notes.md for a follow-up issue" })).toBeChecked();
-  expect(screen.getByRole("checkbox", { name: "Pick src/b.ts:2 for a follow-up issue" })).not.toBeChecked();
-  fireEvent.click(screen.getByRole("checkbox", { name: "Pick src/a.ts:10 for a follow-up issue" }));
+  choose("src/a.ts:10", "Follow-up");
   fireEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
   await waitFor(() => expect(followUp.createFollowUpAction).toHaveBeenCalledTimes(1));
   expect(followUp.createFollowUpAction).toHaveBeenCalledWith({ runId: "r1", questionId: "q1", findings: [0, 2] });
   expect(await screen.findByRole("link", { name: "#57" })).toHaveAttribute("href", "https://github.com/o/r/issues/57");
+  expect(screen.getByText(/has the 2 Follow-up findings\./)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Create follow-up issue" })).not.toBeInTheDocument();
+  // The findings in the issue say so instead of offering a choice; the others stay editable.
+  expect(screen.queryByRole("radiogroup", { name: "What to do with src/a.ts:10" })).not.toBeInTheDocument();
+  expect(screen.getAllByText("In #57")).toHaveLength(2);
+  expect(picked("src/b.ts:2")).toBe("Fix now");
+});
+
+test("an answered review does not say the Fix now findings go back, and its choices still pick a follow-up issue's findings", () => {
+  render(<CodeReview {...props} findings={graded} answered={[]} />);
+  expect(screen.queryByText(/Fix now findings go back/)).not.toBeInTheDocument();
+  choose("src/a.ts:10", "Follow-up");
+  expect(screen.getByText("Takes the 2 Follow-up findings.")).toBeInTheDocument();
+});
+
+test("a finding's choice survives leaving the page with the draft", () => {
+  const { unmount } = render(<CodeReview {...props} findings={graded} />);
+  choose("src/b.ts:2", "Skip");
+  unmount();
+  render(<CodeReview {...props} findings={graded} />);
+  expect(picked("src/b.ts:2")).toBe("Skip");
 });
 
 test("a code review without findings says the reviewer found nothing", () => {
@@ -541,12 +640,12 @@ test("where_am_i lists the code reviewer's findings by severity and says the fol
       by: "code_review-1",
       verdict: "request_changes",
       items: [
-        { index: 1, severity: "should_fix", path: "src/a.ts", line: 10, body: "Name the constant." },
-        { index: 2, severity: "blocking", path: "src/b.ts", line: 2, body: "Crashes on an empty list." },
-        { index: 3, severity: "follow_up", path: "docs/notes.md", body: "Link the ADR." },
+        { index: 1, severity: "should_fix", path: "src/a.ts", line: 10, body: "Name the constant.", choice: "fix_now" },
+        { index: 2, severity: "blocking", path: "src/b.ts", line: 2, body: "Crashes on an empty list.", choice: "fix_now" },
+        { index: 3, severity: "follow_up", path: "docs/notes.md", body: "Link the ADR.", choice: "follow_up" },
       ],
       followUp: null,
-      followUpNote: "The person opens a follow-up issue from picked findings with the Create follow-up issue button. No page tool does it.",
+      followUpNote: "The person opens a follow-up issue from the Follow-up findings with the Create follow-up issue button. No page tool does it.",
     },
   });
 
@@ -554,4 +653,24 @@ test("where_am_i lists the code reviewer's findings by severity and says the fol
   fireEvent.click(screen.getByRole("button", { name: "Create follow-up issue" }));
   expect(await screen.findByRole("link", { name: "#57" })).toBeInTheDocument();
   expect((await whereAmI()).page?.state.data).toMatchObject({ findings: { followUp: { number: 57, url: "https://github.com/o/r/issues/57" } } });
+});
+
+test("page_set_finding_choice changes a finding's choice, and page_submit_review sends the Fix now findings", async () => {
+  const { call, whereAmI } = await withAssistant({ findings: graded });
+  expect(await call("page_set_finding_choice", { index: 1, choice: "skip" })).toEqual({ text: "Set finding 1, src/a.ts:10, to Skip. Fix now 1, Follow-up 1, Skip 1.", isError: false });
+  expect(picked("src/a.ts:10")).toBe("Skip");
+  expect(await call("page_set_finding_choice", { index: 4, choice: "skip" })).toEqual({ text: "There is no finding 4. The findings run from 1 to 3.", isError: true });
+  expect((await whereAmI()).page?.state.data).toMatchObject({ findings: { items: [{ index: 1, choice: "skip" }, { index: 2, choice: "fix_now" }, { index: 3, choice: "follow_up" }] } });
+
+  actions.answerReviewAction.mockRejectedValueOnce(redirectTo("/projects/p1/runs/r1"));
+  expect(await call("page_submit_review", { option: "fix" })).toEqual({ text: "Approved after fixes: sent 1 finding back to coder-1. The run page opens.", isError: false });
+  expect(actions.answerReviewAction).toHaveBeenLastCalledWith({ questionId: "q1", runId: "r1", option: "fix", note: "", comments: [], findings: [1] });
+});
+
+test("page_submit_review with only Follow-up and skipped findings and nothing typed is refused", async () => {
+  const { call } = await withAssistant({ findings: graded });
+  await call("page_set_finding_choice", { index: 1, choice: "follow_up" });
+  await call("page_set_finding_choice", { index: 2, choice: "skip" });
+  expect(await call("page_submit_review", { option: "changes" })).toEqual({ text: "Pick Fix now on a finding, or add a comment or an overall comment, so there is something to fix.", isError: true });
+  expect(actions.answerReviewAction).not.toHaveBeenCalled();
 });

@@ -83,7 +83,12 @@ test("the handoff skill says get_run has the whole command of a permission promp
 test("the handoff skill says run_again starts from the branch or from scratch and supersedes the run", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   expect(skill).toMatch(/`run_again`[^\n]*supersedes[^\n]*`from: "branch"`[^\n]*`from: "scratch"`/);
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.13.0");
+});
+
+test("the handoff skill says a code review sends its Fix now findings with answer_question, and the plugin is 0.14.0", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  expect(skill).toMatch(/`answer_question`[^\n]*`fix_now`[^\n]*`findings`/);
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.14.0");
 });
 
 test("the plugin ships a setup skill that walks through setup_project", () => {

@@ -69,10 +69,13 @@ function RunSteps({ href }: { href: string }) {
   );
 }
 
-/** Line comments from an answered code review, in the shape the diff shows them. */
+/**
+ * The person's line comments from an answered code review, in the shape the diff shows them. The code
+ * reviewer's findings they sent back carry an author and already sit on their lines as findings.
+ */
 const lineComments = (answered: Answered): LineComment[] =>
   answered.comments.flatMap((c) =>
-    c.path && c.line !== undefined ? [{ path: c.path, side: c.side ?? "new", line: c.line, ...(c.endLine !== undefined ? { endLine: c.endLine } : {}), quote: c.quote ?? "", body: c.body }] : [],
+    c.path && c.line !== undefined && !c.author ? [{ path: c.path, side: c.side ?? "new", line: c.line, ...(c.endLine !== undefined ? { endLine: c.endLine } : {}), quote: c.quote ?? "", body: c.body }] : [],
   );
 
 function ReviewBody({ review, runId, tokens }: { review: Review; runId: string; tokens: Record<string, LineTokens> | undefined }) {

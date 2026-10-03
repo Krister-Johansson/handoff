@@ -38,7 +38,7 @@ const submitReview = spec({
   name: "page_submit_review",
   title: "Submit the review",
   description:
-    "Submits the review with the drafted comments and the overall comment: changes requests changes, approve lets the work through, fix approves after the comments are fixed, split accepts the split a planner proposed where the review offers it. changes and fix need a comment or an overall comment.",
+    "Submits the review with the drafted comments and the overall comment: changes requests changes, approve lets the work through, fix approves after the comments are fixed, split accepts the split a planner proposed where the review offers it. On a code review with findings, changes and fix also send the findings whose choice is fix_now, and approve sends none. changes and fix need a Fix now finding, a comment or an overall comment.",
   input: z.object({ option: z.enum(["changes", "approve", "fix", "split"]) }),
   confirm: true,
   readOnly: false,
@@ -216,6 +216,17 @@ const TOOLS = {
       summarize: (a) => `Remove the comment on line ${a.line} of ${a.path}`,
     }),
     setNote,
+    spec({
+      name: "page_set_finding_choice",
+      title: "Choose what to do with a finding",
+      description:
+        "Sets what happens to one of the code reviewer's findings, by its index from 1 as where_am_i lists them: fix_now sends it back to the coder when the review is submitted with changes or fix, follow_up leaves it for the follow-up issue, skip drops it. Blocking and Should fix findings start on fix_now, Follow-up ones on follow_up.",
+      input: z.object({ index, choice: z.enum(["fix_now", "follow_up", "skip"]) }),
+      confirm: false,
+      readOnly: false,
+      idempotent: true,
+      summarize: (a) => `Set finding ${a.index} to ${a.choice === "fix_now" ? "Fix now" : a.choice === "follow_up" ? "Follow-up" : "Skip"}`,
+    }),
     submitReview,
   ],
   plan_review: [

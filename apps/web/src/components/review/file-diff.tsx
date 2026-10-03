@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { diffRows, type DiffRow } from "@/lib/diff-rows";
 import type { EarlierComment } from "@/lib/earlier";
-import type { Finding } from "@/lib/findings";
+import { CHOICE_TITLES, type Choice, type Finding } from "@/lib/findings";
 import { numberOn, rangeLabel, type LineComment, type LineSelection, type Side } from "@/lib/line-comments";
 import type { LineTokens } from "@/lib/highlight-types";
 import { cn } from "@/lib/utils";
@@ -151,13 +151,19 @@ function EarlierNote({ comment, outdated }: { comment: EarlierComment; outdated?
   );
 }
 
-/** A comment from the code reviewing agent, set apart from the person's own comments. */
-function FindingNote({ finding, by, loose }: { finding: Finding; by: string; loose?: boolean }) {
+/** A finding's choice as a tag on its comment, coloured as the summary colours it. */
+const CHOICE_TAGS: Record<Choice, string> = { fix_now: "bg-attention-bg text-attention", follow_up: "bg-background/70 text-active", skip: "bg-secondary text-secondary-foreground" };
+
+/** A comment from the code reviewing agent, set apart from the person's own comments, with what the person chose for it. */
+function FindingNote({ finding, by, choice, loose }: { finding: Finding; by: string; choice?: Choice | undefined; loose?: boolean }) {
   return (
     <div className={cn(NOTE, "border-active-dot/30 bg-active-bg")}>
       <BotIcon className="mt-0.5 size-3.5 shrink-0 text-active" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className={WHO}>{`${by}${finding.line !== undefined ? (loose ? ` · line ${finding.line}, outside the diff` : ` · L${finding.line}`) : ""}`}</span>
+        <span className={WHO}>
+          {`${by}${finding.line !== undefined ? (loose ? ` · line ${finding.line}, outside the diff` : ` · L${finding.line}`) : ""}`}
+          {choice && <span className={cn("ml-1.5 inline-flex h-[17px] items-center rounded-[4px] px-1.5 align-[1px] font-sans text-[10px] font-medium", CHOICE_TAGS[choice])}>{CHOICE_TITLES[choice]}</span>}
+        </span>
         <div className={PROSE_TIGHT}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{finding.body}</ReactMarkdown>
         </div>
@@ -166,8 +172,11 @@ function FindingNote({ finding, by, loose }: { finding: Finding; by: string; loo
   );
 }
 
-/** The code reviewing agent's findings on one file: on their lines, or loose at the top of the file. */
-export type PlacedFindings = { by: string; anchored: { line: number; finding: Finding }[]; loose: Finding[] };
+/**
+ * The code reviewing agent's findings on one file: on their lines, or loose at the top of the file,
+ * with what the person chose for each.
+ */
+export type PlacedFindings = { by: string; anchored: { line: number; finding: Finding }[]; loose: Finding[]; choiceOf?: ((finding: Finding) => Choice | undefined) | undefined };
 
 type DiffProps = {
   file: DiffFile;
@@ -238,7 +247,7 @@ function DiffTable({ file, mode, layout, selection, comments, earlier, findings,
     for (const comment of comments.filter((c) => at(c.side, c.endLine ?? c.line)))
       rows.push(note(`comment:${comment.side}:${comment.line}:${comment.body}`, <InlineComment comment={comment} onRemove={onRemove && (() => onRemove(comment))} />));
     for (const placed of findings?.anchored.filter((f) => at("new", f.line)) ?? [])
-      rows.push(note(`finding:${placed.line}:${placed.finding.body}`, <FindingNote finding={placed.finding} by={findings!.by} />));
+      rows.push(note(`finding:${placed.line}:${placed.finding.body}`, <FindingNote finding={placed.finding} by={findings!.by} choice={findings!.choiceOf?.(placed.finding)} />));
     for (const placed of earlier.anchored.filter((e) => at("new", e.line))) rows.push(note(`earlier:${placed.line}:${placed.comment.body}`, <EarlierNote comment={placed.comment} />));
     if (selection && at(selection.side, selection.end))
       rows.push(
@@ -408,7 +417,7 @@ export function FileDiff({ index, open, onToggle, view, onViewed, ...diff }: Fil
   return (
     <section id={`review-file-${index}`} aria-label={file.path} className="scroll-mt-[120px] overflow-hidden rounded-lg border bg-card">
       <FileHeader index={index} open={open} onToggle={onToggle} view={view} onViewed={onViewed} file={file} comments={comments} found={found} />
-      {open && findings?.loose.map((finding) => <FindingNote key={`loose:${finding.line}:${finding.body}`} finding={finding} by={findings.by} loose />)}
+      {open && findings?.loose.map((finding) => <FindingNote key={`loose:${finding.line}:${finding.body}`} finding={finding} by={findings.by} choice={findings.choiceOf?.(finding)} loose />)}
       {open && earlier.outdated.map((comment) => <EarlierNote key={`outdated:${comment.line}:${comment.body}`} comment={comment} outdated />)}
       {open &&
         (file.collapsed ? (

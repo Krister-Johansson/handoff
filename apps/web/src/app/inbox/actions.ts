@@ -78,20 +78,23 @@ const ReviewAnswerSchema = z.object({
       }),
     )
     .max(200),
+  /** The code reviewer's findings to send back with changes or fix, by their place in the review from 0. */
+  findings: z.array(z.number().int().nonnegative()).max(200).optional(),
 });
 
 /**
- * Answers a human gate's review: approve, changes with comments on quoted passages or lines of files,
- * or a planner's split as proposed, which opens the later parts' issues first. Returns to the run.
+ * Answers a human gate's review: approve, changes with comments on quoted passages or lines of files
+ * and the code reviewer's findings the person picked, or a planner's split as proposed, which opens the
+ * later parts' issues first. Returns to the run.
  */
 export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchema>): Promise<InboxActionState> {
   const parsed = ReviewAnswerSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That review cannot be sent." };
-  const { questionId, runId, option, note, comments } = parsed.data;
-  if (option !== "approve" && option !== "split" && !note && comments.length === 0) return { ok: false, error: "Say what to change: add a comment or a note." };
+  const { questionId, runId, option, note, comments, findings = [] } = parsed.data;
+  if (option !== "approve" && option !== "split" && !note && comments.length === 0 && findings.length === 0) return { ok: false, error: "Say what to change: pick a finding, add a comment or a note." };
   try {
     if (option === "split") await splitPlan({ db: getDb(), github: getGitHub(), projects: getProjects() }, { runId, questionId, answeredBy: "dashboard", note });
-    else await answerQuestion(getDb(), questionId, { answer: note || (option === "approve" ? "Approved." : "Changes requested."), option, comments, answeredBy: "dashboard" });
+    else await answerQuestion(getDb(), questionId, { answer: note || (option === "approve" ? "Approved." : "Changes requested."), option, comments, findings, answeredBy: "dashboard" });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

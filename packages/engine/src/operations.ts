@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
-import { PlanPartSchema, remember, RunStateSchema, type PlanPart, type RunState } from "@handoff/core";
+import { PlanPartSchema, remember, ReviewerOutputSchema, RunStateSchema, type PlanPart, type ReviewerOutput, type RunState } from "@handoff/core";
 import type { PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
@@ -148,14 +148,61 @@ export async function restartTryIt(db: Db, questionId: string) {
   await wakeByToken(db, questionId, { reason: "preview" });
 }
 
-/** Records a person's answer and wakes the Human gate waiting on it. */
-type Answer = { answer: string; option?: string; answeredBy: string; comments?: QuestionComment[] };
+/**
+ * Records a person's answer and wakes the Human gate waiting on it. `findings` are the code reviewer's
+ * findings to send back with changes or fix, by their place in the review from 0; without it, every
+ * Blocking and Should fix finding goes back.
+ */
+type Answer = { answer: string; option?: string; answeredBy: string; comments?: QuestionComment[]; findings?: number[] | undefined };
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+type Reader = Db | Tx;
+
+/** What a review question shows; a code review names the step that reviewed the code in `from`. */
+type ReviewShown = { from?: string; kind?: string };
+
+/**
+ * The verdict and findings of the code reviewing step a code review question shows: that step's latest
+ * execution before the question was asked. Undefined when the question reviews something else.
+ */
+export async function reviewFindingsOf(db: Reader, question: { runId: string; createdAt: Date; context: Record<string, unknown> }): Promise<{ by: string; findings: ReviewerOutput } | undefined> {
+  const review = question.context.review as ReviewShown | undefined;
+  if (review?.kind !== "code" || !review.from) return undefined;
+  const [step] = await db
+    .select({ output: nodeExecutions.output })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, question.runId), eq(nodeExecutions.nodeKey, review.from), lt(nodeExecutions.createdAt, question.createdAt)))
+    .orderBy(desc(nodeExecutions.createdAt))
+    .limit(1);
+  const parsed = ReviewerOutputSchema.safeParse(step?.output);
+  return parsed.success ? { by: review.from, findings: parsed.data } : undefined;
+}
+
+/** Whether a finding goes back to the coder unless the person picks otherwise: every Blocking and Should fix one. */
+export const fixNowByDefault = (finding: { severity?: string | undefined }) => finding.severity !== "follow_up";
+
+/** The findings a review answer sends back, as comments on their files attributed to the step that found them. */
+async function findingComments(tx: Tx, questionId: string, input: Answer): Promise<QuestionComment[]> {
+  if (input.option !== "changes" && input.option !== "fix") return [];
+  const [question] = await tx.select({ runId: questions.runId, createdAt: questions.createdAt, context: questions.context }).from(questions).where(eq(questions.id, questionId));
+  const found = question ? await reviewFindingsOf(tx, question) : undefined;
+  if (!found) {
+    if (input.findings?.length) throw new Error("This review has no code review findings.");
+    return [];
+  }
+  const all = found.findings.comments;
+  const missing = input.findings?.find((i) => i < 0 || i >= all.length);
+  if (missing !== undefined) throw new Error(`There is no finding ${missing + 1}. The review has ${all.length}.`);
+  const picked = input.findings ? [...new Set(input.findings)].sort((a, b) => a - b).map((i) => all[i]!) : all.filter(fixNowByDefault);
+  return picked.map((f) => ({ path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body, author: found.by }));
+}
 
 export async function answerQuestion(db: Db, questionId: string, input: Answer) {
   // Accepting a split opens the later parts' issues first, which needs GitHub: splitRun answers it.
   if (input.option === "split") throw new Error("Split as proposed opens an issue for each later part first; accept a split through the split, not as a plain answer.");
-  return db.transaction((tx) => answerIn(tx, questionId, input));
+  return db.transaction(async (tx) => {
+    const findings = await findingComments(tx, questionId, input);
+    return answerIn(tx, questionId, { ...input, comments: [...findings, ...(input.comments ?? [])] });
+  });
 }
 
 /** Records a person's answer to an open question and wakes the step that waits on it. */
@@ -170,6 +217,7 @@ async function answerIn(tx: Tx, questionId: string, input: Answer, extra: { type
         // Code keeps its indentation; a quote from prose is trimmed.
         ...(c.quote?.trim() ? { quote: c.path ? c.quote : c.quote.trim() } : {}),
         body: c.body.trim(),
+        ...(c.author ? { author: c.author } : {}),
       }),
     )
     .filter((c) => c.body);

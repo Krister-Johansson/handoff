@@ -1,4 +1,5 @@
-import { ReviewerOutputSchema, runPath, type DiffFile, type PlanOverlap } from "@handoff/core";
+import { runPath, type DiffFile, type PlanOverlap } from "@handoff/core";
+import { reviewFindingsOf } from "@handoff/engine/operations";
 import { and, asc, desc, eq, events, isNotNull, lt, nodeExecutions, projects, questions, reviewViews, runs, sql, type Db } from "@handoff/db";
 
 /** What the gate showed for review; a code review also carries the branch's changed files. */
@@ -16,22 +17,6 @@ async function earlierRounds(db: Db, question: typeof questions.$inferSelect) {
     .orderBy(asc(questions.createdAt));
 }
 
-/**
- * The verdict and comments of the code reviewing step a code review shows: its latest execution
- * before the question was asked. Undefined when the gate reviews something else, such as a coder's work.
- */
-async function findingsOf(db: Db, question: typeof questions.$inferSelect, review: ReviewContext) {
-  if (review.kind !== "code") return undefined;
-  const [step] = await db
-    .select({ output: nodeExecutions.output })
-    .from(nodeExecutions)
-    .where(and(eq(nodeExecutions.runId, question.runId), eq(nodeExecutions.nodeKey, review.from), lt(nodeExecutions.createdAt, question.createdAt)))
-    .orderBy(desc(nodeExecutions.createdAt))
-    .limit(1);
-  const parsed = ReviewerOutputSchema.safeParse(step?.output);
-  return parsed.success ? parsed.data : undefined;
-}
-
 /** The issue a person opened from this question's findings, recorded as `review.follow_up` on the run. */
 async function followUpOf(db: Db, question: typeof questions.$inferSelect) {
   const rows = await db
@@ -40,8 +25,10 @@ async function followUpOf(db: Db, question: typeof questions.$inferSelect) {
     .where(and(eq(events.runId, question.runId), eq(events.type, "review.follow_up"), sql`${events.payload}->>'questionId' = ${question.id}`))
     .orderBy(desc(events.seq))
     .limit(1);
-  const payload = rows[0]?.payload as { number?: unknown; url?: unknown } | undefined;
-  return typeof payload?.number === "number" && typeof payload.url === "string" ? { number: payload.number, url: payload.url } : undefined;
+  const payload = rows[0]?.payload as { number?: unknown; url?: unknown; findings?: unknown } | undefined;
+  if (typeof payload?.number !== "number" || typeof payload.url !== "string") return undefined;
+  const findings = Array.isArray(payload.findings) ? payload.findings.filter((i): i is number => typeof i === "number") : undefined;
+  return { number: payload.number, url: payload.url, ...(findings ? { findings } : {}) };
 }
 
 /** A human gate's review question with its run, or undefined when there is none with that id on that run. */
@@ -59,7 +46,7 @@ export async function getReview(db: Db, runId: string, questionId: string) {
   const [views, earlier, findings, followUp] = await Promise.all([
     db.select({ path: reviewViews.path, blobSha: reviewViews.blobSha, viewedAt: reviewViews.viewedAt }).from(reviewViews).where(eq(reviewViews.runId, runId)),
     earlierRounds(db, q),
-    findingsOf(db, q, review),
+    reviewFindingsOf(db, q).then((found) => found?.findings),
     review.kind === "code" ? followUpOf(db, q) : undefined,
   ]);
   const overlaps = ((q.context as { overlaps?: PlanOverlap[] }).overlaps ?? []).map((o) => ({ ...o, href: runPath(row.projectId, o.runId) }));

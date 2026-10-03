@@ -379,6 +379,37 @@ test("a review gate lists approve, changes and fix, and answer_question refuses 
   expect((await db.select().from(questions).where(eq(questions.id, question!.id)))[0]).toMatchObject({ option: "fix", answeredBy: "claude-code" });
 });
 
+test("a code review gate lists the reviewer's findings, and answer_question sends the Fix now ones it names, or every Blocking and Should fix one", async () => {
+  const runId = await startedRun();
+  const comments = [
+    { path: "src/a.ts", line: 2, body: "Name the constant.", severity: "should_fix" },
+    { path: "src/b.ts", body: "Crashes on an empty list.", severity: "blocking" },
+    { path: "docs/notes.md", body: "Link the ADR.", severity: "follow_up" },
+  ];
+  await seedExecution(db, runId, { nodeKey: "review", nodeType: "code_review", status: "passed", output: { verdict: "approve", comments } });
+  const ask = async (attempt: number) => {
+    const gate = await seedExecution(db, runId, { nodeKey: "code_gate", nodeType: "human_gate", executorKind: "human", status: "waiting", attempt });
+    const review = { from: "review", kind: "code", markdown: "Verdict: approve", backTo: "coder" };
+    const [question] = await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "Review the code from review", options: ["approve", "changes", "fix"], context: { reason: "approval", review } }).returning();
+    return question!;
+  };
+  const first = await ask(1);
+  expect((await call("get_run", { run_id: runId })).questions[0].findings).toEqual([
+    { index: 1, severity: "should_fix", path: "src/a.ts", line: 2, body: "Name the constant.", fix_now: true },
+    { index: 2, severity: "blocking", path: "src/b.ts", body: "Crashes on an empty list.", fix_now: true },
+    { index: 3, severity: "follow_up", path: "docs/notes.md", body: "Link the ADR.", fix_now: false },
+  ]);
+  expect(await call("answer_question", { question_id: first.id, answer: "Fix the crash.", option: "changes", findings: [2] })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, first.id)))[0]?.comments).toEqual([{ path: "src/b.ts", body: "Crashes on an empty list.", author: "review" }]);
+
+  const second = await ask(2);
+  expect(await call("answer_question", { question_id: second.id, answer: "Fix them, then go on.", option: "fix" })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, second.id)))[0]?.comments).toEqual([
+    { path: "src/a.ts", line: 2, body: "Name the constant.", author: "review" },
+    { path: "src/b.ts", body: "Crashes on an empty list.", author: "review" },
+  ]);
+});
+
 test("answer_question with split accepts a planner's split: the later parts' issues open and the run narrows to the first", async () => {
   const runId = await startedRun();
   const gate = await seedExecution(db, runId, { nodeKey: "plan_gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
