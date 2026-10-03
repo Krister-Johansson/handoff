@@ -21,6 +21,7 @@ import { issueRuns, nudgeScheduler, overlapKey, projectHolds, type Candidate, ty
 import type { ProjectsPort } from "@handoff/github";
 import { getProjectDetail } from "./graphs";
 import { projectsAccessProblem } from "./plan";
+import { holdText } from "../lib/scheduler-text";
 
 export type SchedulerDeps = { db: Db; projects: ProjectsPort | undefined };
 
@@ -261,16 +262,5 @@ function idleOf(last: CheckResult): { reason: string; text: string } {
 
 /** Each hold with its sentence and the run page that clears it. */
 function holdViews(projectId: string, holds: Hold[]): HoldView[] {
-  return holds.map((hold): HoldView => {
-    const run = `Run ${short(hold.runId)}`;
-    const href = runPath(projectId, hold.runId);
-    switch (hold.kind) {
-      case "failed":
-        return { ...hold, text: `${run} failed at ${hold.nodeKey}`, href };
-      case "loop":
-        return { ...hold, text: `${run} ran out of rounds at ${hold.nodeKey}`, href };
-      case "permission":
-        return { ...hold, text: `${run} asks permission to use ${hold.toolName} at ${hold.nodeKey}`, href };
-    }
-  });
+  return holds.map((hold): HoldView => ({ ...hold, text: holdText(hold), href: runPath(projectId, hold.runId) }));
 }
