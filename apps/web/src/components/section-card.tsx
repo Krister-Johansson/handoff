@@ -10,26 +10,38 @@ export function SectionCard({
   title,
   description,
   action,
+  actionBelowOnNarrow,
   children,
   className,
 }: {
   title?: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
+  /** Under 1024 px the action goes under the description and wraps, for a wide action such as a search with buttons. */
+  actionBelowOnNarrow?: boolean;
   children: ReactNode;
   className?: string;
 }) {
   return (
     <Card className={cn("gap-0 py-0", className)}>
       {(title || description || action) && (
-        <CardHeader className="gap-0.5 px-5 py-4">
+        <CardHeader className={cn("gap-0.5 px-5 py-4", actionBelowOnNarrow && "max-lg:grid-cols-1!")}>
           {title && (
             <CardTitle className="text-sm font-semibold">
               <h2>{title}</h2>
             </CardTitle>
           )}
           {description && <CardDescription className="text-[13px]">{description}</CardDescription>}
-          {action && <CardAction className="flex items-center gap-2">{action}</CardAction>}
+          {action && (
+            <CardAction
+              className={cn(
+                "flex items-center gap-2",
+                actionBelowOnNarrow && "flex-wrap max-lg:col-start-1 max-lg:row-span-1 max-lg:row-start-auto max-lg:mt-2.5 max-lg:justify-self-stretch",
+              )}
+            >
+              {action}
+            </CardAction>
+          )}
         </CardHeader>
       )}
       {children}

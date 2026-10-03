@@ -42,23 +42,24 @@ test("the project group links to each project route and marks the current one", 
     ["Plan", "/projects/p1/plan"],
     ["Issues", "/projects/p1/issues"],
     ["Pull requests", "/projects/p1/pulls"],
-    ["Graphs", "/projects/p1/graphs"],
     ["Project settings", "/projects/p1/settings"],
   ]);
   expect(current()).toEqual(["Issues"]);
   // Runs counts the project's active runs.
   expect(within(project).getByText("2")).toBeInTheDocument();
-  expect(links(screen.getByRole("navigation", { name: "All projects" }))).toEqual([
-    ["Inbox", "/inbox"],
-    ["Library", "/library"],
-  ]);
+  // Graphs is in Project settings and the library in Settings, so neither has an item of its own.
+  expect(links(screen.getByRole("navigation", { name: "All projects" }))).toEqual([["Inbox", "/inbox"]]);
+  expect(screen.queryByRole("link", { name: "Graphs" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Library" })).not.toBeInTheDocument();
 
   // The Plan page and a run page mark their items too.
-  // The project's own address is its Home.
+  // The project's own address is its Home. The graph editor and a library entry belong to the settings.
   for (const [pathname, item] of [
     ["/projects/p1", "Home"],
     ["/projects/p1/plan", "Plan"],
     ["/projects/p1/runs/r1", "Runs"],
+    ["/projects/p1/graphs/plan-review", "Project settings"],
+    ["/library/skills/tdd", "Settings"],
   ] as const) {
     cleanup();
     renderSidebar({ pathname });
@@ -123,6 +124,10 @@ test("picking another project keeps the page type", () => {
   const run = renderSidebar({ pathname: "/projects/p1/runs/r1" });
   expect(openSwitcher(/^Project: handoff/)[0]).toEqual(["example-shopexample-org/example-shop", "/projects/p2/runs"]);
   run.unmount();
+  // From the graph editor, the other project's settings, where its graphs are.
+  const editor = renderSidebar({ pathname: "/projects/p1/graphs/plan-review" });
+  expect(openSwitcher(/^Project: handoff/)[0]).toEqual(["example-shopexample-org/example-shop", "/projects/p2/settings"]);
+  editor.unmount();
   renderSidebar({ pathname: "/library", lastProjectId: "p1" });
   expect(openSwitcher(/^Project: handoff/)[0]).toEqual(["example-shopexample-org/example-shop", "/projects/p2"]);
 });

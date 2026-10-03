@@ -19,7 +19,7 @@ const existing = {
   files: [{ path: "mocking.md", content: "# Mocks" }],
 };
 
-const header = { crumbs: [{ label: "Library", href: "/library" }, { label: "tdd" }], title: "tdd" };
+const header = { crumbs: [{ label: "Settings", href: "/settings" }, { label: "Skills", href: "/settings?tab=skills" }, { label: "tdd" }], title: "tdd" };
 
 const submitted = async (save = /^Save/) => {
   fireEvent.click(screen.getByRole("button", { name: save }));

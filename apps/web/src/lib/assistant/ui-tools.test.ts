@@ -29,11 +29,17 @@ test("set_project_tab navigates to the tab's route", () => {
   expect(plan("set_project_tab", { project_id: "p1", tab: "runs" })).toEqual({ kind: "navigate", href: "/projects/p1/runs" });
   expect(plan("set_project_tab", { project_id: "p1", tab: "plan" })).toEqual({ kind: "navigate", href: "/projects/p1/plan" });
   expect(plan("set_project_tab", { project_id: "p1", tab: "settings" })).toEqual({ kind: "navigate", href: "/projects/p1/settings" });
+  // Graphs is a section of project settings.
+  expect(plan("set_project_tab", { project_id: "p1", tab: "graphs" })).toEqual({ kind: "navigate", href: "/projects/p1/settings?tab=graphs" });
   expect(plan("set_project_tab", { project_id: "p1", tab: "issues", filter: "started" })).toEqual({ kind: "navigate", href: "/projects/p1/issues?issues=started" });
   expect(plan("set_project_tab", { project_id: "p1", tab: "pulls", filter: "merged" })).toEqual({ kind: "navigate", href: "/projects/p1/pulls?pr=merged" });
-  for (const path of ["/projects/p1/runs", "/projects/p1/plan", "/projects/p1/issues?issues=all", "/projects/p1/pulls", "/projects/p1/graphs", "/projects/p1/settings"]) {
+  for (const path of ["/projects/p1/runs", "/projects/p1/plan", "/projects/p1/issues?issues=all", "/projects/p1/pulls", "/projects/p1/settings?tab=graphs", "/projects/p1/graphs/plan-review"]) {
     expect(plan("go_to", { path })).toEqual({ kind: "navigate", href: path });
   }
+  // The old Graphs and Library pages only redirect now.
+  expect(() => plan("go_to", { path: "/projects/p1/graphs" })).toThrow(/no page/);
+  expect(() => plan("go_to", { path: "/library" })).toThrow(/no page/);
+  expect(plan("go_to", { path: "/settings?tab=skills" })).toEqual({ kind: "navigate", href: "/settings?tab=skills" });
   expect(() => plan("set_project_tab", { project_id: "p1", tab: "issues", filter: "merged" })).toThrow(/The issues tab filters by todo, started or all/);
   expect(() => plan("set_project_tab", { project_id: "p1", tab: "graphs", filter: "all" })).toThrow(/The graphs tab has no filter/);
 });

@@ -35,7 +35,7 @@ export async function importSkillAction(_: ImportState, form: FormData): Promise
   } catch (error) {
     return { error: (error as Error).message };
   }
-  revalidatePath("/library");
+  revalidatePath("/settings");
   revalidatePath(`/library/skills/${result.name}`);
   if (form.get("$stay")) return { result };
   redirect(`/library/skills/${result.name}`);
@@ -50,7 +50,7 @@ export async function syncRepoAction(_: SyncState, form: FormData): Promise<Sync
   const want = form.getAll("want").map(String);
   try {
     const report = await syncSkillsShRepo(getDb(), client, { repo, want });
-    revalidatePath("/library");
+    revalidatePath("/settings");
     revalidatePath(`/library/skills-sh/${repo}`);
     return { report };
   } catch (error) {

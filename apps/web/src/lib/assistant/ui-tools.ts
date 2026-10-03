@@ -3,6 +3,7 @@ import { planPath } from "../paths";
 import type { RunFilter } from "../plan/filters";
 import type { Zoom } from "../plan/timeline-scale";
 import type { PlanViewName } from "../project-tab";
+import { projectSettingsPath } from "../settings-tab";
 import { toolSpec } from "./catalog";
 
 /** The catalog's tools that run in the person's browser instead of on the server. */
@@ -20,7 +21,7 @@ const PAGES = [
   "/",
   "/projects",
   `/projects/${S}`,
-  `/projects/${S}/(runs|plan|issues|pulls|graphs|settings)`,
+  `/projects/${S}/(runs|plan|issues|pulls|settings)`,
   `/projects/${S}/graphs/${S}`,
   `/projects/${S}/runs/${S}`,
   `/projects/${S}/runs/${S}/(review|try)/${S}`,
@@ -29,7 +30,6 @@ const PAGES = [
   "/inbox",
   "/notifications",
   "/settings",
-  "/library",
   `/library/(agents|groups|mcp|skills)/${S}`,
   `/library/skills-sh/${S}(/${S})?`,
 ].map((p) => new RegExp(`^${p}$`));
@@ -85,6 +85,8 @@ export function planUiTool(name: string, args: unknown, origin: string): UiPlan 
         if (!filters.values.includes(a.filter)) throw new UiToolError(`The ${a.tab} tab filters by ${filters.values.slice(0, -1).join(", ")} or ${filters.values.at(-1)}.`);
         query.set(filters.param, a.filter);
       }
+      // The graphs are a section of project settings.
+      if (a.tab === "graphs") return navigate(projectSettingsPath(id(a.project_id!, "project"), "graphs"));
       const search = query.toString();
       return navigate(`/projects/${id(a.project_id!, "project")}/${a.tab}${search ? `?${search}` : ""}`);
     }
