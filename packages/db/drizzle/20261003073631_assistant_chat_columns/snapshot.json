@@ -1,9 +1,9 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "8d9a2cb7-42a5-42fe-83f6-4d86a2852a91",
+  "id": "d0fd4dc0-6505-4703-ba61-d2269afbe261",
   "prevIds": [
-    "fb5e7df6-766b-48ae-8ff0-c67f62bffe6d"
+    "5b92cd9a-0357-4639-86b8-fc4588d16c92"
   ],
   "ddl": [
     {
@@ -586,6 +586,19 @@
       "generated": null,
       "identity": null,
       "name": "plan_hours_per_day",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'flow'",
+      "generated": null,
+      "identity": null,
+      "name": "plan_mode",
       "entityType": "columns",
       "schema": "public",
       "table": "projects"
@@ -5301,6 +5314,13 @@
     {
       "value": "\"plan_hours_per_day\" between 1 and 24",
       "name": "projects_plan_hours_per_day_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "projects"
+    },
+    {
+      "value": "\"plan_mode\" in ('flow', 'timeline')",
+      "name": "projects_plan_mode_check",
       "entityType": "checks",
       "schema": "public",
       "table": "projects"
