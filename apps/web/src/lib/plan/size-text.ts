@@ -135,3 +135,16 @@ export function flowChipOf(task: SizedTask): Chip {
   if (proposed) return { kind: "proposal", size: proposed, text: "", label: `Size ${proposed}, proposed by the planner. ${change}`, title: "Proposed by the planner" };
   return { kind: "none", size: undefined, text: "Size", label: `Set a size for #${task.number}`, title: undefined };
 }
+
+/**
+ * The sizes of a story's, an epic's or a column's tasks counted, as a Flow project shows them in place of a
+ * sum of hours: "2 S, 1 M, 1 unsized", sizes with none left out. A task counts by its Size field; a planner's
+ * proposal or a manual estimate alone leaves it unsized. Undefined when no task has a size.
+ */
+export function sizeCountOf(tasks: readonly SizedTask[]): { text: string; title: string } | undefined {
+  const counts = SIZES.map((size) => [size, tasks.filter((t) => t.size === size).length] as const).filter(([, n]) => n > 0);
+  if (counts.length === 0) return undefined;
+  const unsized = tasks.filter((t) => !t.size).length;
+  const text = [...counts.map(([size, n]) => `${n} ${size}`), ...(unsized > 0 ? [`${unsized} unsized`] : [])].join(", ");
+  return { text, title: `${plural(tasks.length, "task")}: ${text}` };
+}
