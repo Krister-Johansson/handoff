@@ -144,6 +144,7 @@ export function AssistantPanel() {
   };
   const waiting =
     panel.agentRequests.length > 0 ||
+    panel.viewRequests.length > 0 ||
     (panel.chats?.conversations.some((c) => c.state === "approval") ?? false) ||
     panel.messages.some((m) => m.role === "assistant" && m.requests.some((r) => r.status === "open"));
   const header = <PanelHeader floating={mode === "float"} onClose={close} />;
@@ -250,7 +251,7 @@ function PanelBody() {
             ))}
           </section>
         )}
-        {panel.messages.length ? <MessageList messages={panel.messages} /> : <Empty />}
+        {panel.messages.length ? <MessageList messages={panel.messages} views={{ load: panel.loadView, callTool: panel.callViewTool, requests: panel.viewRequests }} /> : <Empty />}
       </div>
       <div className="flex flex-none flex-col gap-2 border-t bg-card px-4 pt-2 pb-3.5">
         <p

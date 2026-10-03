@@ -1,5 +1,5 @@
 import type { PageDescriptor } from "../page-tools";
-import type { AssistantTransport, ChatListQuery, ConversationSummary, StoredConversation, TurnStreamEvent } from "../transport";
+import type { AppViewResource, AssistantTransport, ChatListQuery, ConversationSummary, StoredConversation, TurnStreamEvent } from "../transport";
 
 /** A chat for the tests, with the fields they leave out filled in. */
 export function fakeChat(chat: Partial<ConversationSummary> & { id: string; title: string }): ConversationSummary {
@@ -84,6 +84,22 @@ export class FakeAssistantTransport implements AssistantTransport {
   }
   async stop(turnId: string) {
     this.stops.push(turnId);
+  }
+  /** The views a test gives; any other view fails to load, as when the dashboard does not answer. */
+  readonly views = new Map<string, AppViewResource>();
+  readonly viewLoads: string[] = [];
+  async view(uri: string) {
+    this.viewLoads.push(uri);
+    const view = this.views.get(uri);
+    if (!view) throw new Error(`There is no view ${uri}.`);
+    return view;
+  }
+  /** What each server tool a view calls returns; a tool without one answers {}. */
+  readonly toolResults = new Map<string, unknown>();
+  readonly toolCalls: { name: string; args: unknown }[] = [];
+  async callTool(name: string, args: unknown) {
+    this.toolCalls.push({ name, args });
+    return this.toolResults.get(name) ?? {};
   }
 
   /** Sends an event of the running turn to the panel; a terminal one ends the turn. */

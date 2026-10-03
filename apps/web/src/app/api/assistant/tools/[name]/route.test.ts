@@ -38,6 +38,17 @@ test("a tool reaches the plan on GitHub Projects through the dashboard's Project
   expect(runTool).toHaveBeenCalledWith(expect.objectContaining({ projects: plan }), "start_run", { project: "sandbox", issues: [12] });
 });
 
+test("a call from an MCP Apps view in the assistant panel is the person's, made on the dashboard", async () => {
+  const { POST } = await import("./route");
+  const request = new Request("http://127.0.0.1:3000/api/assistant/tools/cancel_run?via=view", {
+    method: "POST",
+    headers: { origin: "http://127.0.0.1:3000", host: "127.0.0.1:3000", "content-type": "application/json" },
+    body: JSON.stringify({ run_id: "r1" }),
+  });
+  await POST(request, { params: Promise.resolve({ name: "cancel_run" }) });
+  expect(runTool).toHaveBeenCalledWith(expect.objectContaining({ actor: "dashboard" }), "cancel_run", { run_id: "r1" });
+});
+
 test("a tool that fails answers with its message", async () => {
   runTool.mockRejectedValueOnce(new Error("There is no project nowhere."));
   const response = await call("get_project", { project: "nowhere" });

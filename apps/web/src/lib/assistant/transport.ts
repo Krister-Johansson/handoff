@@ -1,3 +1,4 @@
+import type { McpUiResourceCsp, McpUiResourcePermissions } from "@modelcontextprotocol/ext-apps";
 import type { AssistantContent } from "@handoff/db";
 import type { PageDescriptor } from "./page-tools";
 import type { TurnEvent } from "@/server/assistant/relay";
@@ -47,6 +48,26 @@ export type AssistantTransport = {
   stop(turnId: string): Promise<void>;
   /** Follows a running turn from its first event, as after a reload; settles when its stream ends. */
   follow(turnId: string, onEvent: (event: TurnStreamEvent) => void, signal?: AbortSignal): Promise<void>;
+  /** The MCP Apps view of a tool, by its ui:// resource, to draw its calls as cards. Throws when there is none. */
+  view(uri: string): Promise<AppViewResource>;
+  /**
+   * Runs one of the catalog's server tools for a view, after any approval it needs; resolves to the tool's
+   * result and throws its error.
+   */
+  callTool(name: string, args: unknown): Promise<unknown>;
+};
+
+/**
+ * A tool's MCP Apps view as the panel draws it: the view's HTML with the CSP, permissions and border its resource
+ * declares, and the address of the sandbox proxy page that frames it.
+ */
+export type AppViewResource = {
+  uri: string;
+  html: string;
+  csp?: McpUiResourceCsp;
+  permissions?: McpUiResourcePermissions;
+  prefersBorder?: boolean;
+  sandbox: string;
 };
 
 const json = async <T,>(response: Response): Promise<T> => {
@@ -75,6 +96,9 @@ async function readEvents(body: ReadableStream<Uint8Array>, onEvent: (event: Tur
     }
   }
 }
+
+/** The views read so far, by their ui:// resource. */
+const views = new Map<string, Promise<AppViewResource>>();
 
 /** The transport over the dashboard's own /api/assistant routes. */
 export const httpTransport: AssistantTransport = {
@@ -120,5 +144,18 @@ export const httpTransport: AssistantTransport = {
     // A turn that ended in the meantime has nothing to follow; its reply is stored.
     if (!response.ok || !response.body) return;
     await readEvents(response.body, onEvent);
+  },
+  view(uri) {
+    // Each view is read once per page load; a failed read is tried again by the next card.
+    let view = views.get(uri);
+    if (!view) {
+      view = fetch(`/api/assistant/views?uri=${encodeURIComponent(uri)}`).then((r) => json<AppViewResource>(r));
+      views.set(uri, view);
+      view.catch(() => views.delete(uri));
+    }
+    return view;
+  },
+  async callTool(name, args) {
+    return (await json<{ result: unknown }>(await post(`/api/assistant/tools/${encodeURIComponent(name)}?via=view`, args))).result;
   },
 };

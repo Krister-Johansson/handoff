@@ -1,7 +1,19 @@
 import type { RefObject } from "react";
 
-/** A tool call in a reply, as the panel shows it. */
-export type ToolCallView = { id: string; name: string; title: string; summary: string; status: "running" | "done" | "failed" | "denied"; result?: string };
+/**
+ * A tool call in a reply, as the panel shows it. A tool with an MCP Apps view names its ui:// resource in `view`,
+ * and the panel draws the call as that card from its arguments and result.
+ */
+export type ToolCallView = {
+  id: string;
+  name: string;
+  title: string;
+  summary: string;
+  status: "running" | "done" | "failed" | "denied";
+  result?: string;
+  args?: unknown;
+  view?: string;
+};
 
 /** A state-changing call waiting for, or answered by, the person. */
 export type PendingRequest = {
@@ -15,6 +27,8 @@ export type PendingRequest = {
   note?: string;
   /** When an open card counts as denied. */
   expiresAt?: string;
+  /** For a call an MCP Apps view made: the tool call whose card the view is. */
+  viewCallId?: string;
 };
 
 export type ChatMessage =

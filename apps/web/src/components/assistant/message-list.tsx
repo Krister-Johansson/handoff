@@ -6,16 +6,17 @@ import remarkGfm from "remark-gfm";
 import { AlertCircleIcon, ArrowUpRightIcon, MicIcon } from "lucide-react";
 import type { ChatMessage } from "@/lib/assistant/port";
 import { ApprovalCard } from "./approval-card";
-import { ToolRows } from "./tool-rows";
+import { ReplyCalls, type ViewHost } from "./reply-calls";
 
 export const REPLY_PROSE =
   "prose prose-sm max-w-none text-[13px] leading-[1.55] text-foreground dark:prose-invert prose-p:my-1.5 prose-ul:my-1.5 prose-li:my-0.5 prose-pre:my-1.5 prose-a:underline-offset-[3px] prose-code:rounded prose-code:border prose-code:bg-muted prose-code:px-1 prose-code:text-[11.5px] prose-code:font-normal prose-code:before:content-none prose-code:after:content-none";
 
 /**
  * The conversation: the person's messages as bubbles (marked when said by voice), and each reply's
- * tool rows, approval cards, navigation notes and text at full width.
+ * tool rows, the cards of tools with an MCP Apps view (`views`), approval cards, navigation notes and text
+ * at full width.
  */
-export function MessageList({ messages }: { messages: ChatMessage[] }) {
+export function MessageList({ messages, views }: { messages: ChatMessage[]; views?: ViewHost }) {
   const end = useRef<HTMLDivElement>(null);
   const last = messages.at(-1);
   const tail = last?.role === "assistant" ? `${last.text.length}:${last.calls.length}:${last.requests.length}:${last.notes?.length ?? 0}` : String(messages.length);
@@ -39,7 +40,7 @@ export function MessageList({ messages }: { messages: ChatMessage[] }) {
           </div>
         ) : (
           <div key={message.id} className="flex flex-col gap-2">
-            <ToolRows calls={message.calls} />
+            <ReplyCalls calls={message.calls} views={views} />
             {message.requests.map((request) => (
               <ApprovalCard key={request.requestId} request={request} />
             ))}
