@@ -6,7 +6,7 @@ import type { AssistantCall, Db } from "@handoff/db";
 import type { GitHubPort } from "@handoff/github";
 import { CATALOG, type ToolSpec } from "../../lib/assistant/catalog";
 import { pageSpecsOf, pageToolSpec, type PageDescriptor, type PageToolSpec } from "../../lib/assistant/page-tools";
-import { getConversation, setConversationSession, storeMessage } from "./conversations";
+import { claimProject, getConversation, setConversationSession, storeMessage } from "./conversations";
 import { SYSTEM_PROMPT, turnPrompt } from "./prompt";
 import type { AssistantConfig } from "./env";
 import { closeTurn, openTurn, type LiveTurn } from "./relay";
@@ -44,6 +44,8 @@ function describeCall(name: string, args: unknown) {
 export async function startTurn(deps: TurnDeps, conversationId: string, input: { text: string; source: string; page?: PageDescriptor }): Promise<LiveTurn & { done: Promise<void> }> {
   const conversation = await getConversation(deps.db, conversationId);
   if (!conversation) throw new Error(`There is no conversation ${conversationId}.`);
+  // A chat started outside a project takes the project of the first page a later message names.
+  if (!conversation.projectId && input.page) await claimProject(deps.db, conversationId, input.page.path);
   const turn = openTurn(conversationId, input.page);
   await storeMessage(deps.db, {
     conversationId,

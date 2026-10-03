@@ -92,3 +92,19 @@ test("handoff gc removes assistant conversations older than the given days and t
   expect(existsSync(join(project, `${old}.jsonl`))).toBe(false);
   expect(existsSync(join(project, `${recent}.jsonl`))).toBe(true);
 });
+
+test("handoff gc keeps pinned assistant chats however long ago they were used", async () => {
+  const home = mkdtempSync(join(tmpdir(), "handoff-home-"));
+  const session = "aaaaaaaa-0000-4000-8000-000000000003";
+  const longAgo = new Date(Date.now() - 400 * 86_400_000);
+  const [pinned] = await db.insert(assistantConversations).values({ title: "Pinned", cliSessionId: session, pinnedAt: longAgo, updatedAt: longAgo }).returning();
+  await db.insert(assistantConversations).values({ title: "Unpinned", updatedAt: longAgo });
+  const project = join(home, "assistant", "claude-config", "projects", "-Users-x--handoff-assistant-cwd");
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, `${session}.jsonl`), "{}");
+
+  const removed = await gcAssistantConversations(db, { assistantHome: join(home, "assistant"), olderThanDays: 30 });
+  expect(removed.conversations).toBe(1);
+  expect((await db.select().from(assistantConversations)).map((c) => c.id)).toEqual([pinned!.id]);
+  expect(existsSync(join(project, `${session}.jsonl`))).toBe(true);
+});

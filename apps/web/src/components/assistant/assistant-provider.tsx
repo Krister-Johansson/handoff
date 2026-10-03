@@ -8,11 +8,36 @@ import { runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
 import { pageDescriptor, runUiTool } from "@/lib/assistant/run-ui-tool";
 import { pageToolsOnWebMcp, registerWebMcp, type WebMcpHost } from "@/lib/assistant/webmcp";
 import { useWebMcpEnabled } from "@/lib/assistant/webmcp-pref";
-import type { AssistantPort, ChatMessage, PendingRequest, ReplyUpdate, ToolCallView } from "@/lib/assistant/port";
-import { httpTransport, type AssistantTransport, type ConversationSummary, type StoredMessage, type TurnStreamEvent } from "@/lib/assistant/transport";
+import type { AssistantPort, ChatMessage, PendingRequest, ToolCallView } from "@/lib/assistant/port";
+import { httpTransport, type AssistantTransport, type ConversationSummary, type StoredConversation, type StoredMessage } from "@/lib/assistant/transport";
+import { streamingReply, useTurnStream } from "./use-turn-stream";
 
 /** How long a browser agent's approval card waits for the person before the call is denied. */
 const AGENT_APPROVAL_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Where this browser keeps the open chat's id, so a reload opens it again. The panel lives in the root
+ * layout and stays open across pages, so the open chat belongs to the browser, not to a page's address.
+ */
+export const OPEN_CHAT_KEY = "handoff.assistant.chat";
+
+function rememberOpenChat(id: string | undefined) {
+  try {
+    if (id) window.localStorage.setItem(OPEN_CHAT_KEY, id);
+    else window.localStorage.removeItem(OPEN_CHAT_KEY);
+  } catch {
+    // Storage can be blocked; the chat then starts anew after a reload.
+  }
+}
+
+function recallOpenChat(): string | undefined {
+  try {
+    return window.localStorage.getItem(OPEN_CHAT_KEY) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 
 /** What the panel needs on top of the port: the messages, the conversations and switching between them. */
 type PanelState = {
@@ -24,6 +49,8 @@ type PanelState = {
   /** Why the assistant is unavailable: no OAuth token, or switched off in Settings. */
   offReason: "no-token" | "off";
   conversationId: string | undefined;
+  /** The open chat as the list shows it: its title and project. Undefined until the first message starts one. */
+  conversation: ConversationSummary | undefined;
   conversations: ConversationSummary[] | undefined;
   loadConversations(): Promise<void>;
   openConversation(id: string): Promise<void>;
@@ -89,53 +116,6 @@ function messageView(stored: StoredMessage): ChatMessage {
   return { id: stored.id, role: "assistant", text: reply.text, calls: reply.calls.map(callView), requests: [], status, ...(reply.error ? { error: reply.error } : {}) };
 }
 
-/** Applies one event of the running turn to the reply it belongs to. */
-function applyEvent(message: Extract<ChatMessage, { role: "assistant" }>, event: TurnStreamEvent): Extract<ChatMessage, { role: "assistant" }> {
-  switch (event.type) {
-    case "text":
-      return { ...message, text: message.text + event.text };
-    case "tool_call":
-      return { ...message, calls: [...message.calls, { id: event.id, name: event.name, title: event.title, summary: event.summary, status: "running" }] };
-    case "tool_result": {
-      const denied = message.requests.some((r) => r.toolUseId === event.id && r.status === "denied");
-      return {
-        ...message,
-        calls: message.calls.map((c) => (c.id === event.id ? { ...c, status: denied ? "denied" : event.isError ? "failed" : "done", result: event.result } : c)),
-      };
-    }
-    case "confirm":
-      return {
-        ...message,
-        requests: [
-          ...message.requests,
-          {
-            requestId: event.requestId,
-            toolUseId: event.toolUseId,
-            name: event.name,
-            title: event.title,
-            summary: event.summary,
-            args: event.args,
-            status: "open",
-            ...(event.expiresAt ? { expiresAt: event.expiresAt } : {}),
-          },
-        ],
-      };
-    case "confirmed":
-      return {
-        ...message,
-        requests: message.requests.map((r) => (r.requestId === event.requestId ? { ...r, status: event.approved ? "approved" : "denied", ...(event.note ? { note: event.note } : {}) } : r)),
-      };
-    case "done":
-      return { ...message, text: event.text || message.text, status: "done" };
-    case "interrupted":
-      return { ...message, status: "stopped" };
-    case "error":
-      return { ...message, status: "error", error: event.message };
-    default:
-      return message;
-  }
-}
-
 /**
  * Owns the assistant for the whole dashboard: the open conversation, its messages as they stream, the
  * approval cards, and the panel's open state. It lives in the root layout, so a navigation the
@@ -154,18 +134,16 @@ export function AssistantProvider({
 }) {
   const [isOpen, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [conversationId, setConversationId] = useState<string>();
+  const [conversation, setConversation] = useState<ConversationSummary>();
+  const conversationId = conversation?.id;
   const [conversations, setConversations] = useState<ConversationSummary[]>();
-  const [streaming, setStreaming] = useState(false);
   const router = useRouter();
   const [agentRequests, setAgentRequests] = useState<PendingRequest[]>([]);
   const [agentActivity, setAgentActivity] = useState<string>();
   const agentPending = useRef(new Map<string, (answer: { approved: boolean; note?: string }) => void>());
   const webMcpEnabled = useWebMcpEnabled();
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const turnId = useRef<string | undefined>(undefined);
-  const replyListeners = useRef(new Set<(reply: ReplyUpdate) => void>());
-  const requestListeners = useRef(new Set<(request: PendingRequest) => void>());
+  const loads = useRef(0);
   // The open page's tools. The last registration wins; removing one clears it only if it is still the open page.
   // pageVersion changes with every registration and removal, so the page's WebMCP tools follow the open page.
   const pageRef = useRef<OpenPage | undefined>(undefined);
@@ -201,75 +179,45 @@ export function AssistantProvider({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // UI tools run here, in the page, while the conversation stays on screen; page tools run in the page that is open now.
+  const runUi = useCallback(
+    (call: { requestId: string; name: string; args: unknown }) =>
+      isPageToolName(call.name) ? runPageTool(openPage(), call) : runUiTool(call, { push: (href) => router.push(href), page: openPage }),
+    [router, openPage],
+  );
+  const { streaming, turnId, follow, release, onReply, onRequest } = useTurnStream({ transport, setMessages, runUi });
+
   const send = useCallback(
     async (text: string, opts?: { source?: "voice" | "typed" }) => {
       const message = text.trim();
       if (!message || streaming || !available) return;
-      setStreaming(true);
       const replyId = `reply-${Date.now()}`;
       const source = opts?.source ?? "typed";
-      setMessages((list) => [
-        ...list,
-        { id: `user-${Date.now()}`, role: "user", text: message, ...(source === "voice" ? { source } : {}) },
-        { id: replyId, role: "assistant", text: "", calls: [], requests: [], status: "streaming" },
-      ]);
-      try {
-        const id = conversationId ?? (await transport.create(message)).id;
-        if (!conversationId) setConversationId(id);
-        let text = "";
-        // The page the person asks on goes with the message, so the turn offers that page's tools.
-        await transport.turn(id, message, source, pageDescriptor(openPage()), (event) => {
-          if (event.type === "turn") {
-            turnId.current = event.turnId;
-            return;
+      setMessages((list) => [...list, { id: `user-${Date.now()}`, role: "user", text: message, ...(source === "voice" ? { source } : {}) }, streamingReply(replyId)]);
+      await follow(
+        replyId,
+        async (onEvent, signal) => {
+          let id = conversationId;
+          if (!id) {
+            // A new chat belongs to the project of the page it was started on.
+            const created = await transport.create(message, window.location.pathname);
+            if (signal.aborted) return;
+            id = created.id;
+            setConversation(created);
+            rememberOpenChat(created.id);
           }
-          if (event.type === "text") {
-            text += event.text;
-            for (const listener of replyListeners.current) listener({ id: replyId, text, done: false });
-          }
-          if (event.type === "done") for (const listener of replyListeners.current) listener({ id: replyId, text: event.text || text, done: true });
-          setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? applyEvent(m, event) : m)));
-          if (event.type === "confirm") {
-            const request: PendingRequest = {
-              requestId: event.requestId,
-              toolUseId: event.toolUseId,
-              name: event.name,
-              title: event.title,
-              summary: event.summary,
-              args: event.args,
-              status: "open",
-              ...(event.expiresAt ? { expiresAt: event.expiresAt } : {}),
-            };
-            for (const listener of requestListeners.current) listener(request);
-          }
-          if (event.type === "ui_call") {
-            // UI tools run here, in the page, while the conversation stays on screen; page tools run in the page that is open now.
-            const turn = turnId.current;
-            const running: Promise<{ text: string; isError: boolean; note?: string }> = isPageToolName(event.name)
-              ? runPageTool(openPage(), event)
-              : runUiTool(event, { push: (href) => router.push(href), page: openPage });
-            void running.then(async (outcome) => {
-              if (outcome.note) {
-                const note = { id: event.requestId, text: outcome.note };
-                setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? { ...m, notes: [...(m.notes ?? []), note] } : m)));
-              }
-              if (turn) await transport.uiReply(turn, event.requestId, { text: outcome.text, isError: outcome.isError });
-            });
-          }
-        });
-      } catch (error) {
-        setMessages((list) => list.map((m) => (m.id === replyId && m.role === "assistant" ? { ...m, status: "error", error: (error as Error).message } : m)));
-      } finally {
-        turnId.current = undefined;
-        setStreaming(false);
-      }
+          // The page the person asks on goes with the message, so the turn offers that page's tools.
+          await transport.turn(id, message, source, pageDescriptor(openPage()), onEvent, signal);
+        },
+        { live: true },
+      );
     },
-    [available, conversationId, streaming, transport, router, openPage],
+    [available, conversationId, streaming, transport, openPage, follow],
   );
 
   const stop = useCallback(async () => {
     if (turnId.current) await transport.stop(turnId.current);
-  }, [transport]);
+  }, [transport, turnId]);
 
   const respond = useCallback(
     async (requestId: string, decision: { approve: boolean; note?: string }) => {
@@ -278,17 +226,8 @@ export function AssistantProvider({
       if (!turnId.current) return;
       await transport.reply(turnId.current, requestId, { approved: decision.approve, ...(decision.note ? { note: decision.note } : {}) });
     },
-    [transport],
+    [transport, turnId],
   );
-
-  const onReply = useCallback((cb: (reply: ReplyUpdate) => void) => {
-    replyListeners.current.add(cb);
-    return () => void replyListeners.current.delete(cb);
-  }, []);
-  const onRequest = useCallback((cb: (request: PendingRequest) => void) => {
-    requestListeners.current.add(cb);
-    return () => void requestListeners.current.delete(cb);
-  }, []);
 
   // Asks the person about a browser agent's call on an approval card in the panel; no answer in time denies it.
   const approveForAgent = useEffectEvent((call: { name: string; title: string; summary: string; args: unknown }) => {
@@ -359,23 +298,69 @@ export function AssistantProvider({
     [available, streaming, send, stop, onReply, onRequest, respond, open, close, isOpen],
   );
 
-  const loadConversations = useCallback(async () => setConversations(await transport.list()), [transport]);
-  const openConversation = useCallback(
-    async (id: string) => {
-      const stored = await transport.load(id);
-      setConversationId(id);
-      setMessages(stored.messages.map(messageView));
+  const loadConversations = useCallback(async () => setConversations((await transport.list()).conversations), [transport]);
+  // Shows a loaded chat in the panel: its messages, and its running turn when it still answers.
+  const showChat = useCallback(
+    (id: string, stored: StoredConversation) => {
+      setConversation(stored.conversation);
+      rememberOpenChat(id);
+      const messages = stored.messages.map(messageView);
+      const running = stored.conversation.turnId;
+      if (!running) {
+        setMessages(messages);
+        return;
+      }
+      const replyId = `reply-${running}`;
+      setMessages([...messages, streamingReply(replyId)]);
+      void follow(replyId, (onEvent, signal) => transport.follow(running, onEvent, signal), { live: false, turn: running });
     },
-    [transport],
+    [transport, follow],
+  );
+  const loadChat = useCallback(
+    async (id: string) => {
+      const load = ++loads.current;
+      const stored = await transport.load(id);
+      if (load === loads.current) showChat(id, stored);
+    },
+    [transport, showChat],
+  );
+  /** Opens a chat, letting go of the one that streams. Throws when there is no such chat. */
+  const openConversation = useCallback(
+    (id: string) => {
+      release();
+      return loadChat(id);
+    },
+    [release, loadChat],
   );
   const newConversation = useCallback(() => {
-    setConversationId(undefined);
+    release();
+    loads.current++;
+    setConversation(undefined);
     setMessages([]);
+    rememberOpenChat(undefined);
     focusComposer();
-  }, [focusComposer]);
+  }, [focusComposer, release]);
+
+  // After a reload, the chat that was open opens again.
+  const restored = useEffectEvent((id: string, stored: StoredConversation) => showChat(id, stored));
+  useEffect(() => {
+    const id = recallOpenChat();
+    if (!id) return;
+    const load = ++loads.current;
+    transport.load(id).then(
+      (stored) => {
+        if (load === loads.current) restored(id, stored);
+      },
+      // A chat that is gone is forgotten, unless another chat opened meanwhile.
+      () => {
+        if (recallOpenChat() === id) rememberOpenChat(undefined);
+      },
+    );
+  }, [transport]);
+
   const panel = useMemo<PanelState>(
-    () => ({ messages, agentRequests, agentActivity, offReason, conversationId, conversations, loadConversations, openConversation, newConversation }),
-    [messages, agentRequests, agentActivity, offReason, conversationId, conversations, loadConversations, openConversation, newConversation],
+    () => ({ messages, agentRequests, agentActivity, offReason, conversationId, conversation, conversations, loadConversations, openConversation, newConversation }),
+    [messages, agentRequests, agentActivity, offReason, conversationId, conversation, conversations, loadConversations, openConversation, newConversation],
   );
 
   return (

@@ -276,6 +276,20 @@ test("the person's message is stored with the page it was asked on", async () =>
   ]);
 });
 
+test("a chat without a project takes the project of the first page a turn names, and keeps it", async () => {
+  const run = await sandboxRun();
+  const other = await createProject(db, { name: "other", repo: "octo/other", defaultBranch: "main" });
+  const conversation = await createConversation(db, "What failed?");
+  const elsewhere = await startTurn(deps({ lines: [lines.init(), lines.result()] }), conversation.id, { text: "What failed?", source: "typed" });
+  await elsewhere.done;
+  expect((await db.select().from(assistantConversations).where(eq(assistantConversations.id, conversation.id)))[0]!.projectId).toBeNull();
+  const onRun = await startTurn(deps({ lines: [lines.init(), lines.result()] }), conversation.id, { text: "Open graph view", source: "typed", page: { ...runPage, path: `/runs/${run.id}` } });
+  await onRun.done;
+  const onOther = await startTurn(deps({ lines: [lines.init(), lines.result()] }), conversation.id, { text: "And here?", source: "typed", page: { ...runPage, path: `/projects/${other.id}/runs/${run.id}` } });
+  await onOther.done;
+  expect((await db.select().from(assistantConversations).where(eq(assistantConversations.id, conversation.id)))[0]!.projectId).toBe(run.projectId);
+});
+
 test("stopping a turn denies its open approvals and stores the turn as interrupted", async () => {
   const run = await sandboxRun();
   const d = deps({ lines: [lines.init(), delta("On it. "), { $mcp: { tool: "cancel_run", arguments: { run_id: run.id }, approve: true } }], hangAfterLine: 3 });

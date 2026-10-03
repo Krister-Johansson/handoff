@@ -1,12 +1,11 @@
 import { PageDescriptorSchema } from "@/lib/assistant/page-tools";
-import { TurnRunningError, type TurnEvent } from "@/server/assistant/relay";
+import { TurnRunningError } from "@/server/assistant/relay";
 import { liveTurnDeps, unavailableMessage } from "@/server/assistant/live";
+import { turnEventStream } from "@/server/assistant/sse";
 import { startTurn } from "@/server/assistant/turn";
 import { isSameLocalOrigin } from "@/server/local-request";
 
 export const dynamic = "force-dynamic";
-
-const TERMINAL = new Set<TurnEvent["type"]>(["done", "interrupted", "error"]);
 
 /**
  * Starts a turn of a conversation and streams it as server-sent events: text deltas, tool calls and
@@ -29,24 +28,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   } catch (error) {
     return Response.json({ error: (error as Error).message }, { status: error instanceof TurnRunningError ? 409 : 400 });
   }
-  const encoder = new TextEncoder();
-  let unsubscribe = () => {};
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      let n = 0;
-      controller.enqueue(encoder.encode(`event: turn\ndata: ${JSON.stringify({ type: "turn", turnId: turn.id })}\n\n`));
-      unsubscribe = turn.subscribe((event) => {
-        controller.enqueue(encoder.encode(`id: ${n++}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
-        if (TERMINAL.has(event.type)) {
-          unsubscribe();
-          controller.close();
-        }
-      });
-    },
-    // The panel went away: the turn goes on and its reply is stored; only the stream ends.
-    cancel() {
-      unsubscribe();
-    },
-  });
-  return new Response(stream, { headers: { "content-type": "text/event-stream", "cache-control": "no-cache, no-transform" } });
+  return turnEventStream(turn);
 }
