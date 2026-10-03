@@ -107,6 +107,11 @@ export class LiveTurn {
     return true;
   }
 
+  /** Whether an approval card waits for the person. */
+  get waitsForApproval(): boolean {
+    return this.pending.size > 0;
+  }
+
   /** Denies every open approval and ends every waiting UI call, as stopping the turn does. */
   denyAll(note: string) {
     for (const pending of [...this.pending.values()]) pending.resolve({ approved: false, note });
@@ -135,6 +140,17 @@ export function closeTurn(turn: LiveTurn) {
 }
 
 export const findTurn = (id: string) => turns().get(id);
+
+/** What a conversation is doing now: answering while a turn runs, approval while one of its cards waits. */
+export type ChatState = "answering" | "approval";
+
+/** The running turn of a conversation, if one runs, and its state. Turns live in this process's memory. */
+export function liveTurnOf(conversationId: string): { turn: LiveTurn; state: ChatState } | undefined {
+  for (const turn of turns().values()) {
+    if (turn.conversationId === conversationId) return { turn, state: turn.waitsForApproval ? "approval" : "answering" };
+  }
+  return undefined;
+}
 
 /** The running turn a bearer token belongs to. */
 export function turnByToken(authorization: string | null): LiveTurn | undefined {

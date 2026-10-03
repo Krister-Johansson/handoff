@@ -2,7 +2,8 @@ import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { and, assistantConversations, eq, inArray, isNotNull, lt, projects, runs, type Db } from "@handoff/db";
+import { removeSessionTranscripts } from "@handoff/cli-adapter";
+import { and, assistantConversations, eq, inArray, isNotNull, isNull, lt, projects, runs, type Db } from "@handoff/db";
 import { releaseWorktree, type WorkdirProvider } from "@handoff/engine";
 
 /**
@@ -62,23 +63,14 @@ export function dashboardAssistantHome(handoffHome: string | undefined): string 
  * The dashboard's assistant keeps its conversations in Postgres and Claude's transcripts under
  * <assistant home>/claude-config/projects, one <session id>.jsonl (and a folder of the same name) per
  * conversation. Removes conversations not used for `olderThanDays`, with their messages and transcripts.
+ * Pinned conversations stay however long ago they were used.
  */
 export async function gcAssistantConversations(db: Db, opts: { assistantHome: string; olderThanDays: number }): Promise<{ conversations: number; transcripts: string[] }> {
   const cutoff = new Date(Date.now() - opts.olderThanDays * 86_400_000);
-  const gone = await db.delete(assistantConversations).where(lt(assistantConversations.updatedAt, cutoff)).returning({ session: assistantConversations.cliSessionId });
-  const sessions = new Set(gone.flatMap((c) => (c.session ? [c.session] : [])));
-  const root = join(opts.assistantHome, "claude-config", "projects");
-  const transcripts: string[] = [];
-  if (sessions.size && existsSync(root)) {
-    for (const project of readdirSync(root)) {
-      for (const entry of readdirSync(join(root, project))) {
-        if (sessions.has(entry.replace(/\.jsonl$/, ""))) {
-          const path = join(root, project, entry);
-          rmSync(path, { recursive: true, force: true });
-          transcripts.push(path);
-        }
-      }
-    }
-  }
-  return { conversations: gone.length, transcripts };
+  const gone = await db
+    .delete(assistantConversations)
+    .where(and(lt(assistantConversations.updatedAt, cutoff), isNull(assistantConversations.pinnedAt)))
+    .returning({ session: assistantConversations.cliSessionId });
+  const sessions = gone.flatMap((c) => (c.session ? [c.session] : []));
+  return { conversations: gone.length, transcripts: removeSessionTranscripts(join(opts.assistantHome, "claude-config"), sessions) };
 }

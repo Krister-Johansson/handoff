@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { useState, type ReactNode } from "react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
-import { FakeAssistantTransport } from "@/lib/assistant/testing/fake-assistant-transport";
+import { FakeAssistantTransport, fakeChat } from "@/lib/assistant/testing/fake-assistant-transport";
 import { AssistantButton } from "./assistant-button";
 import { AssistantProvider } from "./assistant-provider";
 import { AssistantSheet } from "./assistant-sheet";
@@ -130,11 +130,11 @@ test("the panel stays open with its messages across a navigation", async () => {
 
 test("the picker lists earlier conversations newest first and opens one", async () => {
   transport.conversations = [
-    { id: "c9", title: "Merge the queue", updatedAt: "2026-10-01T12:00:00Z" },
-    { id: "c8", title: "What failed?", updatedAt: "2026-10-01T10:00:00Z" },
+    fakeChat({ id: "c9", title: "Merge the queue", updatedAt: "2026-10-01T12:00:00Z" }),
+    fakeChat({ id: "c8", title: "What failed?", updatedAt: "2026-10-01T10:00:00Z" }),
   ];
   transport.stored.set("c8", {
-    conversation: transport.conversations[1]!,
+    conversation: { ...transport.conversations[1]!, turnId: null },
     messages: [
       { id: "m1", role: "user", content: { text: "What failed?", source: "typed" } },
       { id: "m2", role: "assistant", content: { text: "The coder of run 7f3a failed.", calls: [], outcome: "done" } },
@@ -320,9 +320,9 @@ test("switched off in Settings, the panel says so and links to the setting", asy
 });
 
 test("a message asked by voice is marked Sent by voice", async () => {
-  transport.conversations = [{ id: "c8", title: "What needs me?", updatedAt: "2026-10-02T10:00:00Z" }];
+  transport.conversations = [fakeChat({ id: "c8", title: "What needs me?", updatedAt: "2026-10-02T10:00:00Z" })];
   transport.stored.set("c8", {
-    conversation: transport.conversations[0]!,
+    conversation: { ...transport.conversations[0]!, turnId: null },
     messages: [
       { id: "m1", role: "user", content: { text: "What needs me?", source: "voice" } },
       { id: "m2", role: "assistant", content: { text: "Nothing.", calls: [], outcome: "done" } },

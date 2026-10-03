@@ -7,3 +7,4 @@ export * from "./claude/chat-runner.ts";
 export * from "./stream-json/parser.ts";
 export * from "./events.ts";
 export * from "./processes.ts";
+export * from "./claude/transcripts.ts";
