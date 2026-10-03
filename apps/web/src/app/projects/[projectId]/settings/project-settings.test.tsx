@@ -40,6 +40,7 @@ vi.mock("@/app/projects/actions", () => ({
   renameGraphAction: vi.fn(),
   setCapacityAction: vi.fn(),
   setPlanBudgetAction: vi.fn(),
+  setPlanModeAction: vi.fn(),
 }));
 const forecastsForSettings = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -126,4 +127,13 @@ test("?tab=estimates shows the capacity, the forecasts from this project's runs 
   expect(within(screen.getByRole("region", { name: "Forecasts from finished runs" })).getByRole("row", { name: /^M/ })).toHaveTextContent("$0.90");
   expect(within(screen.getByRole("region", { name: "Plan budget" })).getByLabelText("Files")).toHaveValue(8);
   expect(screen.queryByRole("heading", { name: "Scheduler" })).not.toBeInTheDocument();
+});
+
+test("?tab=mode shows the Plan mode with the project's mode picked", async () => {
+  await open("mode", { ...project, planMode: "timeline" } as typeof project);
+  expect(screen.getByRole("link", { name: "Plan mode" })).toHaveAttribute("aria-current", "page");
+  const section = screen.getByRole("region", { name: "Plan mode" });
+  expect(within(section).getByRole("radio", { name: "Timeline" })).toBeChecked();
+  expect(within(section).getByRole("radio", { name: "Flow" })).not.toBeChecked();
+  expect(screen.queryByRole("heading", { name: "Graphs" })).not.toBeInTheDocument();
 });

@@ -12,6 +12,7 @@ import type { IssueSummary } from "@handoff/github";
 import { getGitHub, getProjects } from "@/lib/github";
 import { addDateFields, addEstimateFields, listGitHubProjects, moveItem, moveToReady, moveToShaping, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "@/server/shaping";
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
+import { PLAN_MODES, setPlanMode } from "@/server/plan-mode";
 import { deleteProject, setCapacity, setPlanBudget, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { linkDependencies } from "@/server/link-dependencies";
@@ -310,6 +311,26 @@ export async function setPlanBudgetAction(input: z.input<typeof PlanBudgetSchema
     return { ok: false, error: (error as Error).message };
   }
   revalidatePath(projectSettingsPath(projectId));
+  return { ok: true };
+}
+
+const PlanModeSchema = z.object({ projectId: z.string().uuid(), mode: z.enum(PLAN_MODES) });
+
+/**
+ * Project settings' Plan mode: Flow or Timeline. The Plan page shows the view that matches it, so it is
+ * refreshed too. Nothing is written to GitHub.
+ */
+export async function setPlanModeAction(input: z.input<typeof PlanModeSchema>): Promise<ActionState> {
+  const parsed = PlanModeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That project's plan mode cannot be changed from here." };
+  const { projectId, mode } = parsed.data;
+  try {
+    await setPlanMode(getDb(), projectId, mode);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  revalidatePath(projectSettingsPath(projectId));
+  revalidatePath(planPath(projectId));
   return { ok: true };
 }
 
