@@ -1,4 +1,4 @@
-const YES = /^(yes|yeah|yep|approve|approved|ok|okay|sure|go ahead|do it)\b/;
+const YES = /^(yes|yeah|yep|approve|approved|confirm|confirmed|ok|okay|sure|go ahead|do it)\b/;
 const NO = /^(no|nope|deny|denied|don't|do not|stop|cancel)\b/;
 
 /** A spoken answer to an approval card: yes, no with the rest as the note, or neither. */

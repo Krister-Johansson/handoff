@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, 
 import Link from "next/link";
 import { BotIcon, Loader2Icon, MinusIcon, ShieldQuestionIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useOptionalVoice } from "@/components/voice/voice-provider";
 import type { ChatMessage } from "@/lib/assistant/port";
 import { useModKey } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -121,6 +122,15 @@ export function usePanelMode(): PanelMode {
 const DESCRIPTION = "Ask about your projects and runs, or have the assistant act on them. Changes wait for your approval.";
 
 /**
+ * Whether the assist button shows: not beside an open docked or phone panel, and not on a phone while the
+ * voice bubble is open, which takes the bottom of the screen.
+ */
+function useAssistButtonShown(open: boolean, mode: PanelMode) {
+  const bubbleOpen = useOptionalVoice()?.bubble.open ?? false;
+  return (!open || mode === "float") && !(mode === "phone" && bubbleOpen);
+}
+
+/**
  * The assistant: the assist button in the bottom right corner and the panel it opens. From 1280 px the
  * panel docks as a column beside the page, which narrows to make room, and the button hides while it
  * is open. Below that it floats above the button, which turns into Hide; on a phone it fills the width
@@ -133,6 +143,7 @@ export function AssistantPanel() {
   const top = useHeaderHeight();
   const button = useRef<HTMLButtonElement>(null);
   const open = assistant.isOpen;
+  const buttonShown = useAssistButtonShown(open, mode);
   // Closing from inside the panel hands focus back to the assist button, which shows again.
   const close = () => {
     assistant.close();
@@ -184,7 +195,7 @@ export function AssistantPanel() {
           <PanelBody />
         </dialog>
       )}
-      {(!open || mode === "float") && (
+      {buttonShown && (
         <AssistButton ref={button} expanded={open} waiting={waiting} available={assistant.available} onClick={() => (open ? close() : assistant.open())} />
       )}
     </>

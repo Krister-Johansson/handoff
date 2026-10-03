@@ -4,12 +4,12 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2Icon, MicIcon, MicOffIcon, PanelRightOpenIcon, PowerIcon, SettingsIcon, ShieldCheckIcon, ShieldQuestionIcon, SquareIcon, Volume2Icon, XIcon } from "lucide-react";
+import { MicIcon, MicOffIcon, PanelRightOpenIcon, PowerIcon, SettingsIcon, ShieldCheckIcon, ShieldQuestionIcon, SquareIcon, Volume2Icon, XIcon } from "lucide-react";
 import { ApprovalCard } from "@/components/assistant/approval-card";
 import { useOptionalAssistant, useOptionalAssistantPanel } from "@/components/assistant/assistant-provider";
-import { ToolRows } from "@/components/assistant/tool-rows";
 import { Button } from "@/components/ui/button";
 import type { ChatMessage, PendingRequest } from "@/lib/assistant/port";
+import { confirmQuestion } from "@/lib/voice/confirm-question";
 import { cn } from "@/lib/utils";
 import { useVoice, type Bubble } from "./voice-provider";
 import { VoiceWave } from "./voice-wave";
@@ -154,39 +154,49 @@ function OffBubble({ notice, switchedOff, onClose }: { notice: string; switchedO
   );
 }
 
-/** The reply so far: its tool rows, approval cards (with how a spoken answer went) and text. */
-function ReplyBody({ reply, bubble }: { reply: Reply; bubble: Bubble }) {
-  if (!reply.calls.length && !reply.requests.length && !reply.text && reply.status !== "error") return null;
+/**
+ * The confirmation cards, the reply's and those of calls an MCP Apps view made (with how a spoken
+ * answer went), and once the turn is done the reply's text. No tool rows: the footer says Thinking
+ * while the assistant works.
+ */
+function ReplyBody({ reply, cards, bubble }: { reply: Reply | undefined; cards: PendingRequest[]; bubble: Bubble }) {
+  const text = !reply || reply.status === "streaming" ? "" : reply.text;
+  if (!cards.length && !text && reply?.status !== "error") return null;
   const byVoice = (request: PendingRequest) => (bubble.answered?.requestId === request.requestId && request.status !== "open" ? bubble.answered.said : undefined);
   return (
     <div className="flex max-h-[280px] flex-col gap-2.5 overflow-auto border-t px-3.5 pt-3 pb-3.5 [&>*]:shrink-0">
-      <ToolRows calls={reply.calls} />
-      {reply.requests.map((request) => (
+      {cards.map((request) => (
         <div key={request.requestId} className="flex flex-col gap-1.5">
-          <ApprovalCard request={request} />
+          <ApprovalCard request={request} question={confirmQuestion(request)} />
           {byVoice(request) && (
             <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground [&_svg]:size-3">
               <ShieldCheckIcon aria-hidden />
-              {`${request.status === "approved" ? "Approved" : "Denied"} by voice: "${byVoice(request)}"`}
+              {`${request.status === "approved" ? "Confirmed" : "Cancelled"} by voice: "${byVoice(request)}"`}
             </p>
           )}
         </div>
       ))}
-      {reply.text && (
+      {text && (
         <div className={REPLY}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{reply.text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
         </div>
       )}
-      {reply.status === "error" && <p className="text-xs text-danger">{reply.error ?? "The reply failed."}</p>}
+      {reply?.status === "error" && <p className="text-xs text-danger">{reply.error ?? "The reply failed."}</p>}
     </div>
   );
 }
 
-type StatusKind = "approval" | "listening" | "speaking" | "working" | "done";
+const NO_CARDS: PendingRequest[] = [];
 
-/** What the footer is about: an approval to answer, listening, speaking, the assistant working, or done. */
-function statusKind(reply: Reply | undefined, bubble: Bubble, listening: boolean, speaking: boolean): StatusKind {
-  if (reply?.requests.some((r) => r.status === "open")) return "approval";
+type StatusKind = "approval" | "listening" | "answering" | "speaking" | "working" | "done";
+
+/**
+ * What the footer is about: a card to answer, listening for a question or for the answer to the
+ * reply's question, speaking, the assistant working, or done.
+ */
+function statusKind(reply: Reply | undefined, cards: PendingRequest[], bubble: Bubble, listening: boolean, speaking: boolean): StatusKind {
+  if (cards.some((r) => r.status === "open")) return "approval";
+  if (listening && bubble.answering) return "answering";
   if (listening && !bubble.question) return "listening";
   if (speaking) return "speaking";
   return reply?.status === "streaming" ? "working" : "done";
@@ -217,13 +227,22 @@ function SpeakingStatus({ onStop }: { onStop: () => void }) {
   );
 }
 
-function WorkingStatus({ reply }: { reply: Reply | undefined }) {
-  const running = reply?.calls.findLast((c) => c.status === "running");
+function WorkingStatus() {
   return (
     <Footer>
-      {running ? <Loader2Icon aria-hidden className="animate-spin text-active motion-reduce:animate-none" /> : <span aria-hidden className="size-1.5 rounded-full bg-active-dot" />}
-      {running ? `Calling ${running.title}` : "Thinking"}
+      <span aria-hidden className="size-1.5 rounded-full bg-active-dot" />
+      Thinking
       <EscCloses />
+    </Footer>
+  );
+}
+
+function AnsweringStatus({ heard }: { heard: string }) {
+  return (
+    <Footer tone="ask">
+      <VoiceWave />
+      <b className="font-medium text-foreground">Listening for your answer</b>
+      {heard && <span className="ml-auto min-w-0 truncate">{heard}</span>}
     </Footer>
   );
 }
@@ -238,7 +257,7 @@ function KeyStatus({ keys, ask }: { keys: ReactNode; ask: boolean }) {
 }
 
 /** The footer: how to answer an approval, how to stop listening or speaking, or what the assistant is doing. */
-function Status({ kind, reply, bubble, listening }: { kind: StatusKind; reply: Reply | undefined; bubble: Bubble; listening: boolean }) {
+function Status({ kind, bubble, listening }: { kind: StatusKind; bubble: Bubble; listening: boolean }) {
   const voice = useVoice();
   const footers: Record<StatusKind, () => ReactNode> = {
     approval: () => <ApprovalStatus bubble={bubble} listening={listening} />,
@@ -254,7 +273,8 @@ function Status({ kind, reply, bubble, listening }: { kind: StatusKind; reply: R
       />
     ),
     speaking: () => <SpeakingStatus onStop={voice.stopSpeaking} />,
-    working: () => <WorkingStatus reply={reply} />,
+    answering: () => <AnsweringStatus heard={voice.interim} />,
+    working: () => <WorkingStatus />,
     done: () => (
       <KeyStatus
         ask
@@ -279,7 +299,7 @@ function headerIcon(kind: StatusKind) {
       </StateIcon>
     );
   }
-  if (kind === "listening") {
+  if (kind === "listening" || kind === "answering") {
     return (
       <StateIcon tone="live">
         <VoiceWave />
@@ -289,11 +309,12 @@ function headerIcon(kind: StatusKind) {
   return <StateIcon tone={kind === "speaking" ? "live" : "plain"}>{kind === "speaking" ? <Volume2Icon /> : <MicIcon />}</StateIcon>;
 }
 
-function QuestionBubble({ bubble, reply }: { bubble: Bubble; reply: Reply | undefined }) {
+function QuestionBubble({ bubble, reply, viewCards }: { bubble: Bubble; reply: Reply | undefined; viewCards: PendingRequest[] }) {
   const voice = useVoice();
   const assistant = useOptionalAssistant();
   const listening = voice.mode === "command" && (voice.state === "listening" || voice.state === "starting");
-  const kind = statusKind(reply, bubble, listening, voice.speech.speaking && voice.speech.priority === "reply");
+  const cards = [...(reply?.requests ?? []), ...viewCards];
+  const kind = statusKind(reply, cards, bubble, listening, voice.speech.speaking && voice.speech.priority === "reply");
   const actions = (
     <>
       {bubble.question && assistant?.available && (
@@ -326,16 +347,17 @@ function QuestionBubble({ bubble, reply }: { bubble: Bubble; reply: Reply | unde
           </span>
         )}
       </Header>
-      {reply && <ReplyBody reply={reply} bubble={bubble} />}
-      <Status kind={kind} reply={reply} bubble={bubble} listening={listening} />
+      <ReplyBody reply={reply} cards={cards} bubble={bubble} />
+      <Status kind={kind} bubble={bubble} listening={listening} />
     </Frame>
   );
 }
 
 /**
- * The voice bubble at the bottom centre: what was heard or asked, the assistant's tool calls and
- * reply (spoken as well), and an approval card that a spoken yes or no answers. The panel stays
- * closed; Open in panel shows the whole conversation. Escape stops speech, then closes it.
+ * The voice bubble at the bottom centre: what was heard or asked, Thinking while the assistant works,
+ * then its reply (spoken as well), and a confirmation card that a spoken yes or no answers. It shows
+ * no tool calls. The panel stays closed; Open in panel shows the whole conversation. Escape stops
+ * speech, then closes it.
  */
 export function VoiceBubble() {
   const voice = useVoice();
@@ -345,5 +367,5 @@ export function VoiceBubble() {
   if (voice.state === "blocked" && voice.error) return <BlockedBubble message={voice.error} onClose={voice.closeBubble} />;
   if (bubble.notice) return <OffBubble notice={bubble.notice} switchedOff={panel?.offReason === "off"} onClose={voice.closeBubble} />;
   const reply = bubble.since === undefined ? undefined : panel?.messages.slice(bubble.since).find((m): m is Reply => m.role === "assistant");
-  return <QuestionBubble bubble={bubble} reply={reply} />;
+  return <QuestionBubble bubble={bubble} reply={reply} viewCards={panel?.viewRequests ?? NO_CARDS} />;
 }

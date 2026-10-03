@@ -69,6 +69,7 @@ test("approve puts a confirm page tool on a card with the spec's summary and all
   const events: TurnEvent[] = [];
   turn.subscribe((e) => {
     events.push(e);
+    if (e.type === "ui_check") setTimeout(() => turn.answerUi(e.requestId, { text: "page_submit_review can run on this page.", isError: false }), 10);
     if (e.type === "confirm") setTimeout(() => turn.answer(e.requestId, { approved: true }), 10);
   });
   const ask = async (tool_name: string, input: Record<string, unknown>) => {
@@ -86,6 +87,9 @@ test("approve puts a confirm page tool on a card with the spec's summary and all
       summary: "Request changes, sending the comments back",
       args: { option: "changes" },
     });
+    // The page checked the call before its card went up.
+    expect(events.map((e) => e.type)).toEqual(["ui_check", "confirm", "confirmed"]);
+    expect(events[0]).toMatchObject({ type: "ui_check", name: "page_submit_review", args: { option: "changes" } });
 
     // A page tool this turn's page did not bind is not one of this turn's tools.
     expect(await ask("mcp__handoff__page_save_graph", {})).toMatchObject({ behavior: "deny" });
@@ -141,6 +145,30 @@ test("in a chat on a project, an approval card and a UI call name the chat's pro
 
     await rpc(turn.token, "tools/call", { name: "set_project_tab", arguments: { tab: "plan" } });
     expect(events.find((e) => e.type === "ui_call")).toMatchObject({ name: "set_project_tab", args: { tab: "plan", project_id: todooverkill.id } });
+  } finally {
+    closeTurn(turn);
+  }
+});
+
+const tryPage = { kind: "try" as const, path: "/projects/p1/runs/r1/try/q1", heading: "Try it", tools: ["page_submit"] };
+
+test("approve refuses a page tool the page would refuse, with the page's reason and no card", async () => {
+  const turn = openTurn("c1", tryPage);
+  const events: TurnEvent[] = [];
+  turn.subscribe((e) => {
+    events.push(e);
+    if (e.type === "ui_check") setTimeout(() => turn.answerUi(e.requestId, { text: "Check every criterion to approve. Not marked as working: 2.", isError: true }), 10);
+  });
+  try {
+    const { content } = (await rpc(turn.token, "tools/call", {
+      name: "approve",
+      arguments: { tool_name: "mcp__handoff__page_submit", input: { option: "approve" }, tool_use_id: "toolu_1" },
+    })) as { content: { text: string }[] };
+    expect(JSON.parse(content[0]!.text)).toEqual({
+      behavior: "deny",
+      message: "The page refused this, so the person was not asked: Check every criterion to approve. Not marked as working: 2.",
+    });
+    expect(events.map((e) => e.type)).toEqual(["ui_check"]);
   } finally {
     closeTurn(turn);
   }

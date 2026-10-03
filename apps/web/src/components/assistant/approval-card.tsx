@@ -26,18 +26,23 @@ function TimeLeft({ expiresAt }: { expiresAt: string }) {
   );
 }
 
+/** A summary as the rest of a sentence: "Cancel run 7f3a" becomes "cancel run 7f3a", "PR #5" stays. */
+const lowerFirst = (text: string) => (/^[A-Z][a-z]/.test(text) ? text[0]!.toLowerCase() + text.slice(1) : text);
+
 const ICON = { open: ShieldQuestionIcon, approved: ShieldCheckIcon, denied: ShieldXIcon };
 const ICON_TONE = { open: "text-attention", approved: "text-success", denied: "text-muted-foreground" };
 
-function CardHead({ request }: { request: PendingRequest }) {
+const ANSWERED = { approval: { approved: "Approved", denied: "Denied" }, confirm: { approved: "Confirmed", denied: "Cancelled" } } as const;
+
+function CardHead({ request, question }: { request: PendingRequest; question: string | undefined }) {
   const Icon = ICON[request.status];
   return (
     <div className="flex min-h-5 items-center gap-[7px]">
       <Icon aria-hidden className={cn("size-[15px]", ICON_TONE[request.status])} />
-      <span className="font-semibold">{request.title}</span>
+      <span className="font-semibold">{question ?? request.title}</span>
       {request.status !== "open" && (
         <Tag tone={request.status === "approved" ? "success" : "outline"} className="ml-auto">
-          {request.status === "approved" ? "Approved" : "Denied"}
+          {ANSWERED[question ? "confirm" : "approval"][request.status]}
         </Tag>
       )}
       {request.status === "open" && request.expiresAt && <TimeLeft expiresAt={request.expiresAt} />}
@@ -57,6 +62,21 @@ function Arguments({ args }: { args: unknown }) {
       </summary>
       <pre className="mt-1.5 overflow-auto rounded-md border bg-subtle px-2.5 py-1.5 font-mono text-[11px] leading-[1.55] text-foreground/85">{JSON.stringify(args, null, 2)}</pre>
     </details>
+  );
+}
+
+/** Confirm and Cancel, with no note: a spoken "no" carries the note instead. */
+function ConfirmAnswer({ onAnswer }: { onAnswer: (approve: boolean, note: string) => void }) {
+  return (
+    <div className="mt-0.5 flex gap-2">
+      <Button type="button" size="sm" onClick={() => onAnswer(true, "")}>
+        <CheckIcon data-icon="inline-start" />
+        Confirm
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={() => onAnswer(false, "")}>
+        Cancel
+      </Button>
+    </div>
   );
 }
 
@@ -87,9 +107,10 @@ function Answer({ requestId, onAnswer }: { requestId: string; onAnswer: (approve
 /**
  * A state-changing call waiting for the person: what it will do, its arguments as sent, the time left,
  * and Approve or Deny with a note. It takes focus when it appears. Approving needs a click (or Space on
- * the button). Once answered it turns neutral with the answer.
+ * the button). Once answered it turns neutral with the answer. With `question` (the voice bubble) it
+ * is a confirmation card: titled with the question, answered with Confirm or Cancel and no note.
  */
-export function ApprovalCard({ request }: { request: PendingRequest }) {
+export function ApprovalCard({ request, question }: { request: PendingRequest; question?: string }) {
   const assistant = useAssistant();
   const [sent, setSent] = useState(false);
   const card = useRef<HTMLDivElement>(null);
@@ -104,15 +125,15 @@ export function ApprovalCard({ request }: { request: PendingRequest }) {
     <div
       ref={card}
       role="group"
-      aria-label={`Approve: ${request.title}`}
+      aria-label={question ?? `Approve: ${request.title}`}
       tabIndex={-1}
       className={cn(
         "flex flex-col gap-2 rounded-md border px-3 pt-2.5 pb-3 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         request.status === "open" ? "border-attention-dot/45 bg-attention-bg" : "border-border bg-card",
       )}
     >
-      <CardHead request={request} />
-      <p>{request.summary}</p>
+      <CardHead request={request} question={question} />
+      <p>{question ? `${request.title}: ${lowerFirst(request.summary)}` : request.summary}</p>
       <Arguments args={request.args} />
       {request.note && (
         <p className="flex gap-1.5 text-[12.5px] text-foreground/85">
@@ -120,7 +141,7 @@ export function ApprovalCard({ request }: { request: PendingRequest }) {
           {request.note}
         </p>
       )}
-      {request.status === "open" && !sent && <Answer requestId={request.requestId} onAnswer={answer} />}
+      {request.status === "open" && !sent && (question ? <ConfirmAnswer onAnswer={answer} /> : <Answer requestId={request.requestId} onAnswer={answer} />)}
     </div>
   );
 }

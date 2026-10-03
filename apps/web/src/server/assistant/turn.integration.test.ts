@@ -236,12 +236,21 @@ test("a confirm page tool waits for the person's approval and runs only after it
       const approved = ++cards === 1;
       setTimeout(() => turn.answer(e.requestId, approved ? { approved } : { approved, note: "Not yet." }), 20);
     }
+    if (e.type === "ui_check") setTimeout(() => turn.answerUi(e.requestId, { text: "page_submit can run on this page.", isError: false }), 20);
     if (e.type === "ui_call") setTimeout(() => turn.answerUi(e.requestId, { text: "Approved. The run goes on.", isError: false }), 20);
   });
   await turn.done;
   expect(events.find((e) => e.type === "confirm")).toMatchObject({ name: "page_submit", title: "Submit Try it", summary: "Approve the app", args: { option: "approve" } });
-  // The page runs the tool once, after the approval, and never after the denial.
-  expect(events.map((e) => e.type).filter((t) => ["confirm", "confirmed", "ui_call"].includes(t))).toEqual(["confirm", "confirmed", "ui_call", "confirm", "confirmed"]);
+  // The page checks the call before each card, runs the tool once, after the approval, and never after the denial.
+  expect(events.map((e) => e.type).filter((t) => ["ui_check", "confirm", "confirmed", "ui_call"].includes(t))).toEqual([
+    "ui_check",
+    "confirm",
+    "confirmed",
+    "ui_call",
+    "ui_check",
+    "confirm",
+    "confirmed",
+  ]);
   const results = events.filter((e) => e.type === "tool_result");
   expect(results[0]).toMatchObject({ isError: false, result: "Approved. The run goes on." });
   expect(results[1]).toMatchObject({ isError: true, result: expect.stringContaining("Not yet.") });

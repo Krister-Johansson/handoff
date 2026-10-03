@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
 import { toolSpec, viewOf } from "@/lib/assistant/catalog";
 import { isPageToolName } from "@/lib/assistant/page-tools";
-import { runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
+import { checkPageTool, runPageTool, type OpenPage } from "@/lib/assistant/run-page-tool";
 import { pageDescriptor, runUiTool } from "@/lib/assistant/run-ui-tool";
 import { runViewTool, type ViewToolCall, type ViewToolResult } from "@/lib/assistant/view-tools";
 import { pageToolsOnWebMcp, registerWebMcp, type WebMcpHost } from "@/lib/assistant/webmcp";
@@ -233,10 +233,15 @@ export function AssistantProvider({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // UI tools run here, in the page, while the conversation stays on screen; page tools run in the page that is open now.
+  // UI tools run here, in the page, while the conversation stays on screen; page tools run in the page that is open now,
+  // which also checks a page tool before its card goes up.
   const runUi = useCallback(
-    (call: { requestId: string; name: string; args: unknown }) =>
-      isPageToolName(call.name) ? runPageTool(openPage(), call) : runUiTool(call, { push: (href) => router.push(href), page: openPage }),
+    (call: { type: "ui_call" | "ui_check"; requestId: string; name: string; args: unknown }) =>
+      call.type === "ui_check"
+        ? Promise.resolve(checkPageTool(openPage(), call))
+        : isPageToolName(call.name)
+          ? runPageTool(openPage(), call)
+          : runUiTool(call, { push: (href) => router.push(href), page: openPage }),
     [router, openPage],
   );
   const onStreamChange = useCallback(() => void chatsChanged(), [chatsChanged]);

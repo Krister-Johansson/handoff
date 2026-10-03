@@ -484,6 +484,16 @@ export function TryReview({ questionId, runId, executionId, eventsAfter, from, a
     onAnswer: (option: Option) => startSubmit(async () => void (await send(option, note))),
   };
 
+  // Why page_submit would be refused now: the same rules as the popover's buttons, said in words.
+  const submitRefusal = (option: Option, overall: string) => {
+    if (option === "approve" && !allWork) {
+      const unchecked = checks.flatMap((c, i) => (c.works === true ? [] : [i + 1]));
+      return `Check every criterion to approve. Not marked as working: ${unchecked.join(", ")}.`;
+    }
+    if (option === "changes" && failed.length === 0 && !overall.trim()) return "Say what to change: mark a criterion that does not work, or add a note.";
+    return undefined;
+  };
+
   usePageTools(
     "try",
     {
@@ -514,13 +524,9 @@ export function TryReview({ questionId, runId, executionId, eventsAfter, from, a
       page_submit: readOnly
         ? undefined
         : async ({ option, note: given }) => {
-            // The same rules as the popover's buttons, said in words.
             const overall = given ?? note;
-            if (option === "approve" && !allWork) {
-              const unchecked = checks.flatMap((c, i) => (c.works === true ? [] : [i + 1]));
-              throw new Error(`Check every criterion to approve. Not marked as working: ${unchecked.join(", ")}.`);
-            }
-            if (option === "changes" && failed.length === 0 && !overall.trim()) throw new Error("Say what to change: mark a criterion that does not work, or add a note.");
+            const refusal = submitRefusal(option, overall);
+            if (refusal) throw new Error(refusal);
             if (given !== undefined) setNote(given);
             try {
               const error = await send(option, overall);
@@ -555,6 +561,7 @@ export function TryReview({ questionId, runId, executionId, eventsAfter, from, a
       app: readOnly ? { status: "stopped" } : { status: preview.status, url: preview.url ?? null, error: preview.error ?? null },
       readOnly,
     }),
+    { page_submit: ({ option, note: given }) => submitRefusal(option, given ?? note) },
   );
 
   return (

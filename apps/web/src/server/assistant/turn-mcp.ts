@@ -54,6 +54,11 @@ export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServe
       // The card names the project the call runs in, also when the call left it to the chat's project.
       const filled = withChatProject(spec, input, turn.project);
       if (!spec.confirm) return decision({ behavior: "allow", updatedInput: filled });
+      // A page tool the page would refuse gets no card: the page says why, and the reply tells the person.
+      if (spec.kind === "page") {
+        const check = await turn.requestUi({ name: spec.name, args: filled }, deps.uiTimeoutMs, { check: true });
+        if (check.isError) return decision({ behavior: "deny", message: `The page refused this, so the person was not asked: ${check.text}` });
+      }
       const parsed = spec.input.safeParse(filled);
       const summary = parsed.success ? spec.summarize(parsed.data) : spec.title;
       const answer = await turn.requestApproval({ toolUseId: tool_use_id, name: spec.name, title: spec.title, summary, args: filled }, deps.approvalTimeoutMs);

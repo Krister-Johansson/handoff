@@ -522,3 +522,11 @@ type ToolOf<K extends PageKind> = (typeof TOOLS)[K][number];
 export type PageHandlers<K extends PageKind> = {
   [T in ToolOf<K> as T["name"]]: ((args: z.infer<T["input"]>) => string | Promise<string>) | undefined;
 };
+
+/**
+ * Checks a page runs before a tool's card goes up: why the page would refuse the call now, or
+ * undefined when it would run. Only tools that ask first need one; a check changes nothing.
+ */
+export type PageChecks<K extends PageKind> = {
+  [T in ToolOf<K> as T["name"]]?: (args: z.infer<T["input"]>) => string | undefined;
+};
