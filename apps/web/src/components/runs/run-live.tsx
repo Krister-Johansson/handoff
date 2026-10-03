@@ -205,8 +205,10 @@ export function RunLive({
       if (event.type.startsWith("cli.") && event.nodeExecutionId) setLiveCli((list) => [...list.slice(-3_000), event]);
       const runStatus = runStatusFromEvent(event.type);
       if (runStatus) setStatus(runStatus);
-      // The server-rendered header (cost, duration, PR, Cancel or Run again) only changes when the run ends.
+      // The server-rendered header (cost, duration, PR, Cancel or Run again) only changes when the run ends,
+      // and a failed run's cards (repair, a stuck loop) go once a repair or a decision sets it running again.
       if (runStatus === "succeeded" || runStatus === "failed" || runStatus === "cancelled") router.refresh();
+      if (event.type === "loop.resolved" || event.type === "node.repair_requested") router.refresh();
       if (event.type === "node.waiting") {
         setStatus((s) => (s === "running" ? "waiting" : s));
         // A gate's question is read on the server; refreshing brings it to the banner and the drawer.

@@ -91,6 +91,16 @@ test("the page refreshes once when the run finishes, so the header shows the fin
   expect(refresh).toHaveBeenCalledTimes(1);
 });
 
+test.each(["loop.resolved", "node.repair_requested"])("the badge leaves failed on %s, and the page refreshes its failed run's cards", (type) => {
+  refresh.mockClear();
+  render(<RunLive {...common} initialStatus="failed" initialExecutions={[{ ...executions[0]!, status: "failed" }]} />);
+  expect(screen.getByRole("status")).toHaveTextContent("failed");
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 1, type, payload: { nodeKey: "planner" }, nodeExecutionId: "e1", createdAt: "2026-10-03T10:00:00Z" }));
+  expect(screen.getByRole("status")).toHaveTextContent("running");
+  expect(screen.getByRole("status")).not.toHaveTextContent("failed");
+  expect(refresh).toHaveBeenCalled();
+});
+
 test("steps show their outcome, and a passed event brings the next step's summary live", () => {
   render(
     <RunLive

@@ -16,7 +16,22 @@ vi.mock("next/navigation", async (importOriginal) => ({
 
 /** What a server action that redirects rejects with in the browser, once Next has started the navigation. */
 const redirectTo = (path: string) => Object.assign(new Error("NEXT_REDIRECT"), { digest: `NEXT_REDIRECT;push;${path};303;` });
+class FakeEventSource {
+  static instances: FakeEventSource[] = [];
+  onmessage: ((e: MessageEvent) => void) | null = null;
+  constructor(public url: string) {
+    FakeEventSource.instances.push(this);
+  }
+  addEventListener() {}
+  close() {}
+  emit(data: unknown) {
+    this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(data) }));
+  }
+}
+
 beforeEach(() => {
+  FakeEventSource.instances = [];
+  vi.stubGlobal("EventSource", FakeEventSource);
   actions.answerReviewAction.mockReset().mockResolvedValue({ ok: true });
   actions.restartTryItAction.mockReset().mockResolvedValue({ ok: true });
   Element.prototype.scrollIntoView = vi.fn();
@@ -28,6 +43,8 @@ const running = { id: "p1", url: "http://localhost:41000", status: "running" as 
 const props = {
   questionId: QUESTION,
   runId: RUN,
+  executionId: "gate-1",
+  eventsAfter: 40,
   from: "coder-1",
   acceptance: ["A user can create a new project", "The project shows in the sidebar", "pnpm lint passes"],
   preview: running,
@@ -65,12 +82,37 @@ test("marking a criterion as working collapses it and moves on to the next one t
   expect(screen.getByRole("button", { name: /2 of 3/ })).toBeInTheDocument();
 });
 
-test("approving needs every criterion to work", async () => {
+test("Approve submits in one click when every criterion works", async () => {
   render(<TryReview {...props} />);
-  for (const name of props.acceptance) fireEvent.click(within(section(name)).getByRole("checkbox", { name: "Works" }));
-  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  for (const name of props.acceptance.slice(0, -1)) fireEvent.click(within(section(name)).getByRole("checkbox", { name: "Works" }));
+  // With a criterion still to check, Submit opens the choice.
+  expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  fireEvent.click(within(section(props.acceptance.at(-1)!)).getByRole("checkbox", { name: "Works" }));
+  expect(screen.queryByRole("button", { name: "Submit" })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Approve" }));
   await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: QUESTION, runId: RUN, option: "approve", note: "", comments: [] }));
+});
+
+test("the app link updates when the app is started again", async () => {
+  render(<TryReview {...props} />);
+  const stream = FakeEventSource.instances.at(-1)!;
+  expect(stream.url).toBe(`/api/runs/${RUN}/events?after=40`);
+  fireEvent.click(screen.getByRole("button", { name: "Start the app again" }));
+  await waitFor(() => expect(actions.restartTryItAction).toHaveBeenCalled());
+  // Another step's app does not change the gate's link.
+  act(() => stream.emit({ seq: 41, type: "preview.started", payload: { id: "p0", url: "http://localhost:42000" }, nodeExecutionId: "demo-1", createdAt: "2026-10-03T10:00:00Z" }));
+  expect(screen.getByRole("link", { name: /Open the app/ })).toHaveAttribute("href", "http://localhost:41000");
+  act(() => stream.emit({ seq: 42, type: "preview.started", payload: { id: "p2", url: "http://localhost:41007" }, nodeExecutionId: "gate-1", createdAt: "2026-10-03T10:00:01Z" }));
+  expect(screen.getByRole("link", { name: /Open the app/ })).toHaveAttribute("href", "http://localhost:41007");
+  act(() => stream.emit({ seq: 43, type: "preview.failed", payload: { error: "port 41007 is taken" }, nodeExecutionId: "gate-1", createdAt: "2026-10-03T10:00:02Z" }));
+  expect(screen.queryByRole("link", { name: /Open the app/ })).not.toBeInTheDocument();
+  expect(screen.getByText("port 41007 is taken")).toBeInTheDocument();
+});
+
+test("an answered Try it does not follow the run's events", () => {
+  FakeEventSource.instances = [];
+  render(<TryReview {...props} answered={{ option: "approve", comments: [] }} />);
+  expect(FakeEventSource.instances).toHaveLength(0);
 });
 
 test("a criterion that does not work stays open for what is wrong, and goes back to the coder", async () => {

@@ -41,6 +41,8 @@ export default async function TryPage({ params }: { params: Promise<{ projectId:
       <TryReview
         questionId={review.id}
         runId={runId}
+        executionId={review.executionId}
+        eventsAfter={review.eventsAfter}
         from={review.backTo}
         acceptance={review.acceptance}
         preview={review.preview}

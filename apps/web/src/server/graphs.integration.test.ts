@@ -103,6 +103,19 @@ describe("graph versions", () => {
     const v1 = await getGraphVersion(db, project.id, "g", 1);
     expect((v1?.document as typeof linear).nodes[1]!.attributes.label).toBe("Code");
   });
+
+  test("the editor opens the version asked for, the latest without one, and nothing for a version the graph does not have", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const edited = structuredClone(linear);
+    edited.nodes[1]!.attributes.label = "Implement";
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: edited });
+    const pinned = await getGraphForEdit(db, project.id, "g", 1);
+    expect(pinned?.version).toBe(1);
+    expect((pinned?.document as typeof linear).nodes[1]!.attributes.label).toBe("Code");
+    expect((await getGraphForEdit(db, project.id, "g"))?.version).toBe(2);
+    expect(await getGraphForEdit(db, project.id, "g", 7)).toBeUndefined();
+  });
 });
 
 describe("renaming and deleting graphs", () => {
