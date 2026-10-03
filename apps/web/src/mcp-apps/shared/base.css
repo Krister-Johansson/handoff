@@ -1,4 +1,4 @@
-/* The run card as an MCP Apps view: the dashboard's colour tokens (src/app/globals.css) under an hf- prefix,
+/* The views of MCP Apps and the run card: the dashboard's colour tokens (src/app/globals.css) under an hf- prefix,
    so the host's own style variables (--color-*, --font-*) never clash with them. The host's fonts are used when it
    sends them. Light by default; the host's theme sets data-theme on the root. */
 

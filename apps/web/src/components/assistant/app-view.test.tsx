@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 import type { ToolCallView } from "@/lib/assistant/port";
 import type { AppViewResource } from "@/lib/assistant/transport";
-import { RUN_CARD_HTML } from "@/mcp-apps/run-card.generated";
+import { RUN_CARD_HTML } from "@/mcp-apps/views.generated";
 import { sandboxProxyPage } from "@/mcp-apps/sandbox/proxy-page";
 import { McpAppView } from "./app-view";
 

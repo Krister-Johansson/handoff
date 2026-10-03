@@ -45,7 +45,7 @@ pnpm demo           # seeds a demo run with simulated Claude events
 pnpm handoff <cmd>  # project add, graph import, run, runs, answer, run repair|cancel, library, gc
 pnpm docker:runner  # builds the runner image for HANDOFF_WORKSPACE=docker
 pnpm --filter @handoff/github codegen   # after editing packages/github/src/queries/*.graphql
-pnpm build:mcp-apps # after editing apps/web/src/mcp-apps; writes the run card's HTML that /api/mcp serves
+pnpm build:mcp-apps # after editing apps/web/src/mcp-apps; writes the views' HTML (one shared script) that /api/mcp and the assistant panel serve, and the sandbox proxy
 ```
 
 Docker tests run with `HANDOFF_TEST_DOCKER=1` (CI sets it).

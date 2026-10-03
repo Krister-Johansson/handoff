@@ -34,6 +34,14 @@ export type ToolSpec<I extends z.ZodRawShape = z.ZodRawShape> = {
 
 /** The run card's ui:// resource: get_run's result drawn as a card. */
 export const RUN_CARD_URI = "ui://handoff/run-card.html";
+/** The Needs you list's: list_inbox's and list_attention's results in the Inbox's groups. */
+export const NEEDS_YOU_URI = "ui://handoff/needs-you.html";
+/** The permission card's: answer_permission's decision with the request it answers. */
+export const PERMISSION_CARD_URI = "ui://handoff/permission-card.html";
+/** The question card's: answer_question's answer with the question it answers. */
+export const QUESTION_CARD_URI = "ui://handoff/question-card.html";
+/** The Plan list's: list_plan's tree. */
+export const PLAN_LIST_URI = "ui://handoff/plan-list.html";
 
 const spec = <I extends z.ZodRawShape>(s: ToolSpec<I>) => s as unknown as ToolSpec;
 
@@ -262,6 +270,7 @@ export const CATALOG: ToolSpec[] = [
     readOnly: true,
     untrusted: true,
     summarize: () => "List what needs attention",
+    view: NEEDS_YOU_URI,
   }),
   spec({
     name: "list_inbox",
@@ -274,6 +283,7 @@ export const CATALOG: ToolSpec[] = [
     readOnly: true,
     untrusted: true,
     summarize: (a) => `Show the Inbox${a.project ? ` for ${a.project}` : ""}`,
+    view: NEEDS_YOU_URI,
   }),
   spec({
     name: "list_notifications",
@@ -352,6 +362,7 @@ export const CATALOG: ToolSpec[] = [
       a.criteria
         ? `Answer the Try it gate: ${a.criteria.filter((c) => !c.works).length} of ${a.criteria.length} criteria do not work`
         : `Answer the question${a.option ? ` with ${a.option}` : ""}: ${a.answer ?? ""}`,
+    view: QUESTION_CARD_URI,
   }),
   spec({
     name: "answer_permission",
@@ -368,6 +379,7 @@ export const CATALOG: ToolSpec[] = [
     readOnly: false,
     idempotent: false,
     summarize: (a) => (a.decision === "allow" ? "Allow the permission request once" : `Deny the permission request${a.message ? `: ${a.message}` : ""}`),
+    view: PERMISSION_CARD_URI,
   }),
   spec({
     name: "repair_run",
@@ -462,6 +474,7 @@ export const CATALOG: ToolSpec[] = [
     readOnly: true,
     untrusted: true,
     summarize: (a) => `Show the plan of ${a.project}${a.epic ? ` for epic #${a.epic}` : ""}`,
+    view: PLAN_LIST_URI,
   }),
   spec({
     name: "list_github_projects",

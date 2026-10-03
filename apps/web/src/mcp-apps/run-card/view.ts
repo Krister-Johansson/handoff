@@ -1,8 +1,11 @@
 /**
  * The run card: get_run's answer drawn as the assistant chat's run card (Claude Design, shell/ChatPanel). Plain DOM,
  * because the view is one HTML document a host loads in a sandboxed iframe; every text from a run or GitHub goes in
- * as text, never as markup.
+ * as text, never as markup. A permission or a question the run waits for is a card of its own, answered from here.
  */
+import { valueOf, type ViewHost } from "../shared/app";
+import { permissionCard, questionCard } from "../shared/cards";
+import { el, icon, ICONS, link } from "../shared/dom";
 
 type Step = {
   node: string;
@@ -27,36 +30,20 @@ export type RunCardData = {
   issues: { number: number; title: string; url: string }[];
   cost_usd: number;
   steps: Step[];
-  questions?: { question: string }[];
-  permissions?: { asks: string; detail?: string | null }[];
+  questions?: { id: string; node?: string; question: string; options?: string[]; review_url?: string; try?: { url?: string } }[];
+  permissions?: { id: string; node: string; asks: string; detail?: string | null; input?: unknown }[];
   failed?: { node: string; code: string | null; error: string | null } | null;
   stuck?: { node: string; attempts: number } | null;
 };
 
-type ToolResult = { content?: { type: string; text?: string }[]; structuredContent?: unknown; isError?: boolean };
-
-/** Opens a dashboard or GitHub address through the host; false when the host does not open links. */
-export type OpenLink = (url: string) => Promise<boolean>;
-
 const isRun = (value: unknown): value is RunCardData =>
   typeof value === "object" && value !== null && typeof (value as RunCardData).id === "string" && Array.isArray((value as RunCardData).steps);
 
-/**
- * The run in a get_run result, or the text to show instead. The run is the JSON in the text block, which every
- * client gets; the dashboard's assistant wraps it as { source, data }.
- */
-export function runOfResult(result: ToolResult): { run: RunCardData } | { error: string } {
-  const text = result.content?.find((c) => c.type === "text")?.text ?? "";
-  if (result.isError) return { error: text || "get_run failed." };
-  if (isRun(result.structuredContent)) return { run: result.structuredContent };
-  try {
-    const value = JSON.parse(text) as unknown;
-    const run = isRun(value) ? value : (value as { data?: unknown } | null)?.data;
-    if (isRun(run)) return { run };
-  } catch {
-    // Not JSON: fall through to the text itself.
-  }
-  return { error: text || "get_run returned no run." };
+/** The run in a get_run result, or the text to show instead. */
+export function runOfResult(result: Parameters<typeof valueOf>[0]): { run: RunCardData } | { error: string } {
+  const shown = valueOf(result, "get_run");
+  if (!shown.ok) return { error: shown.error };
+  return isRun(shown.value) ? { run: shown.value } : { error: "get_run returned no run." };
 }
 
 const TONES: Record<string, string> = {
@@ -73,50 +60,6 @@ const TONES: Record<string, string> = {
 };
 const toneOf = (status: string) => TONES[status] ?? "neutral";
 const ACTIVE = new Set(["queued", "running", "waiting"]);
-
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, ...children: (Node | string | null | undefined | false)[]) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  for (const child of children) if (child) node.append(child);
-  return node;
-}
-
-/** An SVG icon from lucide's paths, drawn inline so the view loads nothing. */
-function icon(paths: string[]) {
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" })) {
-    svg.setAttribute(name, value);
-  }
-  for (const d of paths) {
-    const path = document.createElementNS(ns, "path");
-    path.setAttribute("d", d);
-    svg.append(path);
-  }
-  return svg;
-}
-const PLAY = ["M6 3l14 9-14 9V3z"];
-const EXTERNAL = ["M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"];
-
-/**
- * A link that opens in the person's browser. When the host opens links (ui/open-link), the click asks it to;
- * otherwise it is a plain link to a new tab.
- */
-function link(href: string, className: string | undefined, open: OpenLink | undefined, ...children: (Node | string)[]) {
-  const a = el("a", className, ...children);
-  a.href = href;
-  a.target = "_blank";
-  a.rel = "noopener noreferrer";
-  if (open) {
-    a.addEventListener("click", (event) => {
-      event.preventDefault();
-      void open(href).then((opened) => {
-        if (!opened) window.open(href, "_blank", "noopener");
-      });
-    });
-  }
-  return a;
-}
 
 /** Each node once, at its latest attempt, in the order the run first reached it. */
 function latestSteps(steps: Step[]) {
@@ -141,14 +84,13 @@ const WAITS_ON: Record<string, string> = {
   overlap: "Waits for another run that changes the same files",
 };
 
-/** What the run waits on or why it stopped, in one sentence, with its tone; null when it just runs or is done. */
+/**
+ * What the run waits on or why it stopped, in one sentence, with its tone; null when it just runs or is done. The
+ * permissions and questions it waits for follow as cards.
+ */
 function waitsOn(run: RunCardData): { text: string; tone: string } | null {
   if (run.failed) return { text: `Failed at ${run.failed.node}: ${run.failed.error ?? run.failed.code ?? "no reason given"}`, tone: "danger" };
   if (run.stuck) return { text: `Stuck at ${run.stuck.node}: its loop used all ${run.stuck.attempts} attempts.`, tone: "attention" };
-  const permission = run.permissions?.[0];
-  if (permission) return { text: `${WAITS_ON.permission}: ${[permission.asks, permission.detail].filter(Boolean).join(", ")}`, tone: "attention" };
-  const question = run.questions?.[0];
-  if (question) return { text: `${WAITS_ON.question}: ${question.question}`, tone: "attention" };
   if (!ACTIVE.has(run.status)) return null;
   const waiting = run.steps.find((s) => s.state === "waiting" && s.waiting_on);
   if (waiting?.waiting_on) return { text: WAITS_ON[waiting.waiting_on] ?? `Waits on ${waiting.waiting_on.replaceAll("_", " ")}`, tone: "attention" };
@@ -186,7 +128,8 @@ function meta(parts: (HTMLElement | null)[]) {
 }
 
 /** Draws the run card into `root`, replacing what was there. */
-export function renderRunCard(root: HTMLElement, run: RunCardData, open?: OpenLink, now = Date.now()) {
+export function renderRunCard(root: HTMLElement, run: RunCardData, host: ViewHost = {}, now = Date.now()) {
+  const { open } = host;
   const shortId = run.id.slice(0, 8);
   const tone = toneOf(run.status);
   const steps = latestSteps(run.steps);
@@ -204,7 +147,7 @@ export function renderRunCard(root: HTMLElement, run: RunCardData, open?: OpenLi
     el(
       "div",
       "rc-h",
-      el("span", "k", icon(PLAY), "Run", el("span", "mono", shortId)),
+      el("span", "k", icon(ICONS.play), "Run", el("span", "mono", shortId)),
       el("span", `pill t-${tone}`, el("span", "dot"), run.status.replaceAll("_", " ")),
       elapsed && el("span", "tm", elapsed),
     ),
@@ -231,21 +174,21 @@ export function renderRunCard(root: HTMLElement, run: RunCardData, open?: OpenLi
 
   if (waits) card.append(el("p", `rc-w t-${waits.tone}`, waits.text));
 
+  // What waits for the person, as the Inbox's cards: the permissions with the whole command, then the questions.
+  const asks = [
+    ...(run.permissions ?? []).map((p) => permissionCard({ ...p, url: run.url }, host)),
+    ...(run.questions ?? []).map((q) => questionCard({ id: q.id, node: q.node, question: q.question, options: q.options ?? [], url: run.url, review_url: q.review_url, try_url: q.try?.url }, host)),
+  ];
+  if (asks.length) card.append(el("div", "rc-asks", ...asks));
+
   card.append(
     el(
       "div",
       "rc-f",
       link(run.url, "btn btn-outline", open, "Open run"),
-      run.pr && link(run.pr.url, "btn", open, icon(EXTERNAL), `PR #${run.pr.number}`),
+      run.pr && link(run.pr.url, "btn", open, icon(ICONS.external), `PR #${run.pr.number}`),
       el("span", "src", "get_run"),
     ),
   );
   root.replaceChildren(card);
-}
-
-/** A line in place of the card: while the run loads, or the tool's error. */
-export function renderState(root: HTMLElement, text: string, error = false) {
-  const line = el("p", error ? "state err" : "state", text);
-  if (error) line.setAttribute("role", "alert");
-  root.replaceChildren(line);
 }

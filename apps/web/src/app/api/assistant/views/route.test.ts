@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { RUN_CARD_HTML } from "@/mcp-apps/run-card.generated";
+import { RUN_CARD_HTML } from "@/mcp-apps/views.generated";
 import { GET } from "./route";
 
 vi.mock("@/server/mcp-apps-sandbox", () => ({ sandboxProxyOrigin: async () => "http://127.0.0.1:49152" }));
