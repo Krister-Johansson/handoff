@@ -9,7 +9,7 @@ import { AssistantProvider } from "./assistant-provider";
 import { CHATS_COOKIE } from "@/lib/assistant/chats-cookie";
 
 const nav = vi.hoisted(() => ({ pathname: "/" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname, useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname, useSearchParams: () => new URLSearchParams(), useRouter: () => ({ push: vi.fn() }) }));
 
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 const handoff = { id: "p1", name: "handoff" };
