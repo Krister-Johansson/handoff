@@ -94,12 +94,13 @@ export async function listProjectGraphs(db: Db, projectId: string) {
     .orderBy(graphs.name);
 }
 
-export async function getGraphForEdit(db: Db, projectId: string, name: string) {
+/** The graph version the editor opens: the one asked for, such as a run's pinned version, or else the latest. */
+export async function getGraphForEdit(db: Db, projectId: string, name: string, version?: number) {
   const [row] = await db
     .select({ version: graphVersions.version, document: graphVersions.document, versionId: graphVersions.id })
     .from(graphVersions)
     .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
-    .where(and(eq(graphs.projectId, projectId), eq(graphs.name, name)))
+    .where(and(eq(graphs.projectId, projectId), eq(graphs.name, name), version === undefined ? undefined : eq(graphVersions.version, version)))
     .orderBy(desc(graphVersions.version))
     .limit(1);
   return row;

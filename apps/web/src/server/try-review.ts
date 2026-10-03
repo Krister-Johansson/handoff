@@ -7,12 +7,13 @@ type Edge = { source: string; target: string; attributes?: { port?: string } };
 
 /**
  * A Try it gate's question as its page shows it: the app, the run's acceptance criteria, the demo's
- * screenshots and warnings, the step that gets the work back, and the answer once there is one. Undefined for a
- * question that is not a Try it gate's.
+ * screenshots and warnings, the step that gets the work back, the gate's execution and the run's last
+ * event (the app's later starts follow it), and the answer once there is one. Undefined for a question
+ * that is not a Try it gate's.
  */
 export async function getTryReview(db: Db, runId: string, questionId: string) {
   const [row] = await db
-    .select({ question: questions, task: runs.task, projectId: projects.id, projectName: projects.name, nodeKey: nodeExecutions.nodeKey, document: graphVersions.document })
+    .select({ question: questions, task: runs.task, lastSeq: runs.nextEventSeq, projectId: projects.id, projectName: projects.name, nodeKey: nodeExecutions.nodeKey, document: graphVersions.document })
     .from(questions)
     .innerJoin(runs, eq(runs.id, questions.runId))
     .innerJoin(projects, eq(projects.id, runs.projectId))
@@ -31,6 +32,9 @@ export async function getTryReview(db: Db, runId: string, questionId: string) {
     projectId: row.projectId,
     projectName: row.projectName,
     nodeKey: row.nodeKey,
+    executionId: q.nodeExecutionId,
+    // Read with the question, so an app started after this read arrives as a later event.
+    eventsAfter: row.lastSeq,
     backTo,
     acceptance: context.acceptance ?? [],
     preview: context.preview ?? ({ status: "failed", error: "The app has not started yet." } satisfies TryPreview),

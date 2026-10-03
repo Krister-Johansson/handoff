@@ -9,6 +9,10 @@ export const PROJECTS_SETTINGS_PATH = "/settings?tab=projects";
 /** A project's page: its Home page without a section, else the section's route. */
 export const projectPath = (projectId: string, section?: ProjectSection) => `/projects/${projectId}${section ? `/${section}` : ""}`;
 
+/** A graph in its editor: its latest version, or the version given, such as the one a run is pinned to. */
+export const graphPath = (projectId: string, name: string, version?: number) =>
+  `/projects/${projectId}/graphs/${encodeURIComponent(name)}${version === undefined ? "" : `?version=${version}`}`;
+
 /** An issue's page in handoff: a task, a story, an epic or an issue outside the plan. */
 export const issuePath = (projectId: string, number: number) => `/projects/${projectId}/issues/${number}`;
 

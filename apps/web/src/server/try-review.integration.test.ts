@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, questions } from "@handoff/db";
+import { appendEvents, eq, events, questions, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs";
 import { getTryReview } from "./try-review";
@@ -33,6 +33,8 @@ test("a Try it question reads as the app, the criteria, the screenshots, the war
     projectId: project.id,
     projectName: "sandbox",
     nodeKey: "try",
+    executionId: question.nodeExecutionId,
+    eventsAfter: expect.any(Number),
     backTo: "the coder",
     acceptance: ["A user can create a new project"],
     preview: { id: "p1", url: "http://localhost:41000", status: "running" },
@@ -42,6 +44,14 @@ test("a Try it question reads as the app, the criteria, the screenshots, the war
   });
   await db.update(questions).set({ answer: "Approved.", option: "approve", answeredBy: "krister", answeredAt: new Date() }).where(eq(questions.id, question.id));
   expect((await getTryReview(db, run.id, question.id))!.answered).toMatchObject({ option: "approve", comments: [] });
+});
+
+test("a Try it question names its gate's execution and the run's last event, so the page follows the app's later starts", async () => {
+  const { run, question } = await asked({ reason: "try", acceptance: [] });
+  await db.transaction((tx) => appendEvents(tx, run.id, [{ type: "preview.started", payload: { id: "p1", url: "http://localhost:41000" }, nodeExecutionId: question.nodeExecutionId }]));
+  const [{ last } = { last: 0 }] = await db.select({ last: sql<number>`max(${events.seq})::int` }).from(events).where(eq(events.runId, run.id));
+  expect(await getTryReview(db, run.id, question.id)).toMatchObject({ executionId: question.nodeExecutionId, eventsAfter: last });
+  expect(last).toBeGreaterThan(0);
 });
 
 test("a question that is not a Try it gate is not found here", async () => {

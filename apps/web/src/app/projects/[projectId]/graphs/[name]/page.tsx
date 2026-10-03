@@ -12,10 +12,23 @@ import { libraryChoices } from "@/server/library-choices";
 
 export const dynamic = "force-dynamic";
 
-export default async function GraphEditorPage({ params }: { params: Promise<{ projectId: string; name: string }> }) {
-  const { projectId, name } = await params;
+/** The version in `?version=`, as a run's link to its pinned graph gives it; undefined for none or a malformed one. */
+function versionOf(value: string | string[] | undefined): number | undefined {
+  const version = typeof value === "string" && /^[1-9]\d*$/.test(value) ? Number(value) : undefined;
+  return version !== undefined && Number.isSafeInteger(version) ? version : undefined;
+}
+
+export default async function GraphEditorPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ projectId: string; name: string }>;
+  searchParams: Promise<{ version?: string | string[] }>;
+}) {
+  const [{ projectId, name }, query] = await Promise.all([params, searchParams]);
   const db = getDb();
-  const [graph, library, versions] = await Promise.all([getGraphForEdit(db, projectId, name), libraryChoices(db), listGraphVersions(db, projectId, name)]);
+  // A run's graph link opens the version the run is pinned to; without one the editor opens the latest.
+  const [graph, library, versions] = await Promise.all([getGraphForEdit(db, projectId, name, versionOf(query.version)), libraryChoices(db), listGraphVersions(db, projectId, name)]);
   if (!graph) notFound();
   const [project] = await db.select({ id: projects.id, name: projects.name }).from(projects).where(eq(projects.id, projectId));
   // The graphs are listed in project settings; the editor keeps its own full page.

@@ -7,12 +7,11 @@ import { SectionCard } from "@/components/section-card";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import { getDb } from "@/lib/db";
+import { graphPath } from "@/lib/paths";
 import { projectPage, repoUrl, sectionCrumbs } from "@/server/project-page";
 import { runLines } from "@/server/run-lines";
 
 export const dynamic = "force-dynamic";
-
-const graphPath = (projectId: string, name: string) => `/projects/${projectId}/graphs/${encodeURIComponent(name)}`;
 
 /** The project's runs, under the project header: its repository, default branch and graph, Edit graph and New run. */
 export default async function ProjectRunsPage({ params }: { params: Promise<{ projectId: string }> }) {

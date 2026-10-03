@@ -58,8 +58,8 @@ export async function createExecution(tx: DbTx, graph: CompiledGraph, runId: str
 }
 
 /**
- * Follows matching out-edges: loop guards (exhaustion routes to the gate), fan-in joins recorded in
- * edge_traversals, and a new node execution per edge taken.
+ * Follows matching out-edges: loop guards (exhaustion routes to the gate), fan-in joins and loop edges
+ * recorded in edge_traversals, and a new node execution per edge taken.
  */
 async function route(
   tx: DbTx,
@@ -143,6 +143,10 @@ async function route(
 
     const exec = await createExecution(tx, graph, row.runId, target, trigger);
     created++;
+    // A loop edge taken sends the work back; the traversal records that this execution sent it, already consumed.
+    if (edge.loop && trigger.kind === "edge") {
+      await tx.insert(edgeTraversals).values({ runId: row.runId, edgeKey: edge.key, fromExecutionId: row.id, toNodeKey: target, consumedByExecutionId: exec.id });
+    }
     events.push({ type: "edge.taken", payload: { edgeKey: edge.key, from: row.nodeKey, to: target }, nodeExecutionId: row.id });
     events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
   }

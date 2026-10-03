@@ -13,8 +13,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
+import { useRunEvents } from "@/lib/use-run-events";
 import { cn } from "@/lib/utils";
 import { CARD } from "./styles";
 import { isNextNavigation } from "./send-review";
@@ -30,6 +32,10 @@ type Answered = { option: string | null; comments: { quote?: string | undefined;
 type Props = {
   questionId: string;
   runId: string;
+  /** The gate's execution, whose events say when its app starts again. */
+  executionId: string;
+  /** The run's last event when the page was read; the app's later starts arrive after it. */
+  eventsAfter: number;
   /** The step that gets the work back when something does not work. */
   from: string;
   acceptance: string[];
@@ -282,12 +288,16 @@ function Criterion({
   );
 }
 
-/** Approve when every criterion works, or send back what does not, with an overall note. */
+/**
+ * Approve when every criterion works, or send back what does not, with an overall note. Once every
+ * criterion of a run with criteria is checked as working, Approve sends in one click.
+ */
 function Submit({
   from,
   questionId,
   failed,
   allWork,
+  oneClick,
   note,
   onNote,
   error,
@@ -298,12 +308,27 @@ function Submit({
   questionId: string;
   failed: number;
   allWork: boolean;
+  oneClick: boolean;
   note: string;
   onNote: (note: string) => void;
   error: string | undefined;
   pending: boolean;
   onAnswer: (option: Option) => void;
 }) {
+  if (oneClick)
+    return (
+      <span className="ml-auto flex items-center gap-2">
+        {error && (
+          <span role="alert" className="text-xs text-danger">
+            {error}
+          </span>
+        )}
+        <Button type="button" size="sm" disabled={pending} onClick={() => onAnswer("approve")}>
+          {pending ? <Spinner data-icon="inline-start" role="presentation" aria-label={undefined} aria-hidden /> : <CheckIcon data-icon="inline-start" />}
+          Approve
+        </Button>
+      </span>
+    );
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -342,8 +367,22 @@ function Submit({
  * working collapses it and moves on to the next one to check; one that does not work stays open for
  * what is wrong, which goes back to the coder.
  */
-export function TryReview({ questionId, runId, from, acceptance, preview, shots, warnings = [], answered }: Props) {
+export function TryReview({ questionId, runId, executionId, eventsAfter, from, acceptance, preview: initialPreview, shots, warnings = [], answered }: Props) {
   const readOnly = answered !== undefined;
+  // The app as the gate's latest start left it, from the run's events; the page's own until one arrives.
+  const [started, setStarted] = useState<TryPreview>();
+  const preview = started ?? initialPreview;
+  useRunEvents(
+    runId,
+    eventsAfter,
+    (event) => {
+      if (event.nodeExecutionId !== executionId) return;
+      const payload = (event.payload ?? {}) as { id?: string; url?: string; error?: string };
+      if (event.type === "preview.started" && payload.url) setStarted({ ...(payload.id ? { id: payload.id } : {}), url: payload.url, status: "running" });
+      if (event.type === "preview.failed") setStarted({ status: "failed", error: payload.error ?? "The app did not start." });
+    },
+    !readOnly,
+  );
   const [checks, setChecks] = useState<Check[]>(() => answeredChecks(acceptance, answered));
   const [closed, setClosed] = useState<ReadonlySet<number>>(() => new Set(checks.flatMap((c, i) => (c.works === true ? [i] : []))));
   const [current, go] = useCursor(acceptance.length);
@@ -404,6 +443,7 @@ export function TryReview({ questionId, runId, from, acceptance, preview, shots,
     questionId,
     failed: failed.length,
     allWork,
+    oneClick: allWork && acceptance.length > 0,
     note,
     onNote: setNote,
     error: submitError,

@@ -46,7 +46,16 @@ export function statusFromEvent(type: string): string | undefined {
 
 export function runStatusFromEvent(type: string): string | undefined {
   return (
-    { "run.started": "running", "run.succeeded": "succeeded", "run.failed": "failed", "run.cancelled": "cancelled", "node.waiting": undefined } as Record<
+    {
+      "run.started": "running",
+      "run.succeeded": "succeeded",
+      "run.failed": "failed",
+      "run.cancelled": "cancelled",
+      // A repair and a decision on a stuck loop both set a failed run running again.
+      "loop.resolved": "running",
+      "node.repair_requested": "running",
+      "node.waiting": undefined,
+    } as Record<
       string,
       string | undefined
     >

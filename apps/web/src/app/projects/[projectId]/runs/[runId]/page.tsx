@@ -17,7 +17,7 @@ import { stuckLoop, type StuckLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
 import type { RunQueue } from "@/lib/run-now";
 import { projectMergeQueue } from "@/server/merge-queue";
-import { runPath } from "@/lib/paths";
+import { graphPath, runPath } from "@/lib/paths";
 import { formatCost, formatDuration } from "@/lib/format";
 import { getRunDetail } from "@/server/queries";
 import { StartedByScheduler } from "@/components/scheduler/scheduler-tag";
@@ -151,7 +151,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
               <StartedByScheduler startedBy={run.startedBy} place={scheduledPlace(events)} />
               <RunLineage projectId={project.id} continues={RunStateSchema.shape.previousRun.parse(run.state.previousRun)?.runId ?? null} supersededBy={run.supersededBy} />
               {graph && (
-                <Link href={`/projects/${project.id}/graphs/${graph.name}`} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
+                <Link href={graphPath(project.id, graph.name, graph.version)} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
                   <GitForkIcon aria-hidden />
                   <span>
                     <span className="font-mono">{graph.name}</span> v{graph.version}
