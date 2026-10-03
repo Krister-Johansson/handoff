@@ -11,6 +11,7 @@ test("go_to accepts a dashboard path or the dashboard's absolute URL and refuses
   expect(plan("go_to", { path: `${origin}/projects/p1/runs/r1/review/q1` })).toEqual({ kind: "navigate", href: "/projects/p1/runs/r1/review/q1" });
   expect(plan("go_to", { path: "/library/skills-sh/vercel/skills" })).toEqual({ kind: "navigate", href: "/library/skills-sh/vercel/skills" });
   expect(plan("go_to", { path: "/settings/" })).toEqual({ kind: "navigate", href: "/settings" });
+  expect(plan("go_to", { path: "/chats" })).toEqual({ kind: "navigate", href: "/chats" });
 
   expect(() => plan("go_to", { path: "https://example.com/inbox" })).toThrow(/only opens pages of this dashboard/);
   expect(() => plan("go_to", { path: "//example.com/inbox" })).toThrow(/only opens pages of this dashboard/);

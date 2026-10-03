@@ -15,4 +15,8 @@ Element.prototype.scrollTo ??= () => {};
 window.matchMedia ??= (query: string) =>
   ({ matches: false, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }) as MediaQueryList;
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // The assistant keeps the open chat in local storage; each test starts without one.
+  window.localStorage.clear();
+});

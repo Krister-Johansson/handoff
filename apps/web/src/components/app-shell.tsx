@@ -50,11 +50,11 @@ export function AppShell({
                   {children}
                 </div>
                 {overlay && (
-                  // Below 1280 px the open assistant is a 384 px sheet over the right of the page; the
-                  // overlay centres on what the sheet leaves visible.
+                  // From 768 to 1280 px the open assistant floats 400 px wide over the right of the page;
+                  // the overlay centres on what the panel leaves visible.
                   <div
                     data-assistant={assistantOpen ? "open" : undefined}
-                    className="sticky bottom-4 z-40 h-0 sm:bottom-6 sm:data-[assistant=open]:pr-96 xl:data-[assistant=open]:pr-0"
+                    className="sticky bottom-4 z-40 h-0 sm:bottom-6 md:data-[assistant=open]:pr-[424px] xl:data-[assistant=open]:pr-0"
                   >
                     <div className="relative">{overlay}</div>
                   </div>

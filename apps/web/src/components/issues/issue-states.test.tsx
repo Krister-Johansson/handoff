@@ -6,7 +6,6 @@ import { NOW, PROJECT_REF, waitingRun } from "./testing/issue-fixtures";
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/projects/p1/issues/16" }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
-vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => null }));
 vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => null }));
 vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 

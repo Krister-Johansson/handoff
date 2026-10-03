@@ -1,5 +1,6 @@
 import { index, jsonb, pgEnum, pgTable, text, uuid } from "drizzle-orm/pg-core";
-import { createdAt, id, updatedAt } from "./columns.ts";
+import { createdAt, id, tstz, updatedAt } from "./columns.ts";
+import { projects } from "./projects.ts";
 
 export const assistantRole = pgEnum("assistant_role", ["user", "assistant"]);
 
@@ -14,7 +15,10 @@ export type AssistantContent =
   | { text: string; source: string; page?: { kind: string; path: string } }
   | { text: string; calls: AssistantCall[]; outcome: "done" | "interrupted" | "error"; error?: string; costUsd?: number; usage?: unknown };
 
-/** A conversation with the dashboard's assistant. Its turns resume one Claude Code session. */
+/**
+ * A conversation with the dashboard's assistant. Its turns resume one Claude Code session. Its project is
+ * the first project a page it was asked on names; a chat asked only outside a project has none.
+ */
 export const assistantConversations = pgTable(
   "assistant_conversations",
   {
@@ -24,6 +28,9 @@ export const assistantConversations = pgTable(
     /** The Claude Code session the first turn started; later turns resume it. */
     cliSessionId: text("cli_session_id"),
     model: text("model"),
+    projectId: uuid("project_id").references(() => projects.id, { onDelete: "set null" }),
+    /** When the person pinned the chat; `handoff gc` keeps pinned chats. */
+    pinnedAt: tstz("pinned_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

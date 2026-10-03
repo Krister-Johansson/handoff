@@ -10,7 +10,6 @@ vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToSha
 vi.mock("@/app/projects/issue-actions", () => ({ assignAction: vi.fn(), assignableAction: vi.fn(), startIssueRunAction: vi.fn() }));
 vi.mock("@/components/assistant/assistant-provider", () => ({ useOptionalAssistant: () => undefined }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => null }));
-vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => null }));
 vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => null }));
 vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 

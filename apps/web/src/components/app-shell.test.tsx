@@ -7,7 +7,6 @@ import { PageHeader } from "./page-header";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/projects/p1/runs", useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/components/notification-bell", () => ({ NotificationBell: () => <button type="button">Notifications</button> }));
-vi.mock("@/components/assistant/assistant-button", () => ({ AssistantButton: () => <button type="button">Assistant</button> }));
 vi.mock("@/components/voice/voice-button", () => ({ VoiceButton: () => <button type="button">Listen</button> }));
 vi.mock("@/components/voice/voice-transcript", () => ({ VoiceTranscript: () => null }));
 
