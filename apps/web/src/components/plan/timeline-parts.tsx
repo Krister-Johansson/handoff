@@ -2,7 +2,7 @@
 
 import { useState, useSyncExternalStore, useTransition, type ReactNode, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarClockIcon, CalendarIcon, ClockAlertIcon, InfoIcon,
+import { CalendarClockIcon, CalendarIcon, ClockAlertIcon,
  LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon, TimerIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
-import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -33,6 +32,7 @@ import { chartRange } from "@/lib/plan/timeline-rows";
 import { defaultZoom, shortDay, timeScale, ZOOMS, type Zoom } from "@/lib/plan/timeline-scale";
 import { cn } from "@/lib/utils";
 import type { StartRunContext } from "./plan-actions";
+import { LegendPopover } from "./legend-popover";
 import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
 
 
@@ -68,36 +68,21 @@ const LEGEND: { label: string; swatch: string }[] = [
 /** The timeline's legend in a popover, with how bars move. */
 function Legend() {
   return (
-    <Popover>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button variant="outline" size="icon-sm" aria-label="Legend">
-              <InfoIcon />
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent>Legend</TooltipContent>
-      </Tooltip>
-      <PopoverContent align="end" className="w-64 gap-2.5 text-xs" aria-label="Legend">
-        <PopoverHeader>
-          <PopoverTitle className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Legend</PopoverTitle>
-        </PopoverHeader>
-        <ul className="grid grid-flow-col grid-cols-2 grid-rows-5 gap-x-3 gap-y-1.5">
-          {LEGEND.map((l) => (
-            <li key={l.label} className="inline-flex items-center gap-2">
-              <span aria-hidden className={cn("w-3.5 shrink-0", l.swatch)} />
-              {l.label}
-            </li>
-          ))}
-        </ul>
-        <Separator />
-        <p className="flex gap-2 leading-snug text-muted-foreground">
-          <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
-          Drag a task&apos;s bar to move its Start, or its end to set a manual estimate. Each drop saves to GitHub with Undo.
-        </p>
-      </PopoverContent>
-    </Popover>
+    <LegendPopover className="w-64">
+      <ul className="grid grid-flow-col grid-cols-2 grid-rows-5 gap-x-3 gap-y-1.5">
+        {LEGEND.map((l) => (
+          <li key={l.label} className="inline-flex items-center gap-2">
+            <span aria-hidden className={cn("w-3.5 shrink-0", l.swatch)} />
+            {l.label}
+          </li>
+        ))}
+      </ul>
+      <Separator />
+      <p className="flex gap-2 leading-snug text-muted-foreground">
+        <MoveHorizontalIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+        Drag a task&apos;s bar to move its Start, or its end to set a manual estimate. Each drop saves to GitHub with Undo.
+      </p>
+    </LegendPopover>
   );
 }
 

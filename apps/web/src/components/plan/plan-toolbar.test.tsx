@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { PlanTab } from "./plan-tab";
-import { epic, person, planView, run, story, task, timelineOf, unplannedIssue } from "./testing/plan-fixtures";
+import { epic, flowOf, person, planView, run, story, task, timelineOf, unplannedIssue } from "./testing/plan-fixtures";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -238,4 +238,34 @@ test("under 640 px the timeline's toolbar shows the range it lists in place of T
   } finally {
     window.matchMedia = wide;
   }
+});
+
+/** The same plan in a Flow project: loadPlan sets its flow. */
+const flowPlan = { ...plan, flow: flowOf(view) };
+
+test("a Flow project's toggle is Tree, Board and Flow, with no Timeline", () => {
+  renderTab({ plan: flowPlan, view: "tree" });
+  const toggle = screen.getByRole("radiogroup", { name: "View" });
+  expect(within(toggle).getAllByRole("radio").map((r) => r.getAttribute("aria-label"))).toEqual(["Tree", "Board", "Flow"]);
+  fireEvent.click(within(toggle).getByRole("radio", { name: "Flow" }));
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=flow", { scroll: false });
+});
+
+test("Flow mode links to the Plan mode settings", () => {
+  renderTab({ plan: flowPlan, view: "flow" });
+  expect(screen.getByRole("radio", { name: "Flow" })).toHaveAttribute("aria-checked", "true");
+  expect(screen.getByRole("grid", { name: "Flow" })).toBeInTheDocument();
+  const mode = screen.getByRole("link", { name: "Flow mode" });
+  expect(mode).toHaveAttribute("href", "/projects/p1/settings?tab=mode");
+  expect(mode).toHaveAttribute("title", "Plan mode: Flow. Change it in Project settings");
+
+  fireEvent.click(screen.getByRole("button", { name: "Legend" }));
+  const legend = screen.getByRole("dialog", { name: "Legend" });
+  for (const item of ["Running, steps done", "Waits on you", "Next in order", "Waits for a blocker", "Slot", "Pinned", "Blocks", "Placed before its blocker"]) {
+    expect(within(legend).getByText(item)).toBeInTheDocument();
+  }
+  expect(within(legend).getByText("Length follows the size: S, M or L. Flow has no dates.")).toBeInTheDocument();
+  // The Timeline's own controls belong to a Timeline project.
+  expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("radiogroup", { name: "Zoom" })).not.toBeInTheDocument();
 });

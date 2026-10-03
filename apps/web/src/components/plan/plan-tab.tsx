@@ -13,14 +13,17 @@ import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTi
 import { formatAgo } from "@/lib/format";
 import { planPath } from "@/lib/paths";
 import { filterPlan, isFiltered, type NarrowedPlan, type PlanFilters as Filters } from "@/lib/plan/filters";
+import type { SchedulerBrief } from "@/lib/plan/flow-text";
 import { deriveSpans, type Timeline } from "@/lib/plan/schedule";
 import { searchPlan, type SearchResult } from "@/lib/plan/search";
 import type { Zoom } from "@/lib/plan/timeline-scale";
-import type { PlanViewName } from "@/lib/project-tab";
+import type { PlanModeName, PlanViewName } from "@/lib/project-tab";
 import type { StartRunContext } from "./plan-actions";
 import { Assigning, SearchQuery, Sizing, type AssignControl } from "./plan-context";
 import { PlanBoard } from "./plan-board";
 import { PlanEmpty } from "./plan-empty";
+import { FlowControls } from "./flow-parts";
+import { PlanFlow } from "./plan-flow";
 import { FilterChips, PlanFilters } from "./plan-filters";
 import { PlanRefresher } from "./plan-refresher";
 import { PlanSearchField } from "./plan-search";
@@ -33,12 +36,18 @@ import { useCollapsed } from "./use-collapsed";
 /** How long the search waits after the last key before it writes ?q= to the URL. */
 const URL_DELAY = 150;
 
+/** The Timeline and the Flow show the plan's rows, without the unplanned issues. */
+const byRow = (view: PlanViewName) => view === "timeline" || view === "flow";
+
+/** What the search counts in a view: the Flow has the Timeline's rows. */
+const matchKey = (view: PlanViewName) => (view === "flow" ? "timeline" : view);
+
 /** Filters that leave nothing to show, with the way back to the whole plan. */
 function NoMatches({ projectId, view, q }: { projectId: string; view: PlanViewName; q: string }) {
   return (
     <Empty className="rounded-lg border py-10">
       <EmptyHeader>
-        <EmptyTitle>{view === "timeline" ? "No items match these filters" : "No tasks match these filters"}</EmptyTitle>
+        <EmptyTitle>{byRow(view) ? "No items match these filters" : "No tasks match these filters"}</EmptyTitle>
       </EmptyHeader>
       <EmptyContent>
         <Button variant="outline" size="sm" asChild>
@@ -82,6 +91,8 @@ type PlanTabProps = {
   signals: PlanSignals;
   /** The scheduler's next tasks with their place in its order, for the tree's Next tags. */
   next?: Record<number, number> | undefined;
+  /** Whether the scheduler is on and its Claude slots, for the Flow's header. */
+  scheduler?: SchedulerBrief | undefined;
   start: StartRunContext;
   /** When the page read GitHub, in epoch milliseconds. */
   readAt: number;
@@ -106,7 +117,7 @@ function nothingToShow({ project, plan, view, filters, narrowed, found, onClearS
     return <PlanEmpty reason="empty" project={{ id: project.id, name: project.name, repo: `${project.repoOwner}/${project.repoName}` }} />;
   }
   // The board shows its columns whatever the filters leave; the timeline has no place for unplanned issues.
-  const count = (p: Pick<NarrowedPlan, "epics" | "unparented" | "unplanned">) => p.epics.length + p.unparented.length + (view === "timeline" ? 0 : p.unplanned.length);
+  const count = (p: Pick<NarrowedPlan, "epics" | "unparented" | "unplanned">) => p.epics.length + p.unparented.length + (byRow(view) ? 0 : p.unplanned.length);
   if (view !== "board" && count(narrowed) === 0 && isFiltered(filters)) return <NoMatches projectId={project.id} view={view} q={filters.q} />;
   if (found.active && (view === "board" ? found.matches.board : count(found)) === 0) return <NoSearchMatch q={filters.q.trim()} onClear={onClearSearch} />;
   return undefined;
@@ -127,6 +138,9 @@ function PlanBody(props: BodyProps) {
   const shared = { projectId: project.id, repoUrl: `https://github.com/${project.repoOwner}/${project.repoName}`, needsYou: signals.needsYou, skipped: signals.skipped, ...start };
   const shown = found.active ? found : narrowed;
   const searchOpen = found.active ? found.open : undefined;
+  if (view === "flow" && plan.flow) {
+    return <PlanFlow {...shared} epics={shown.epics} unparented={shown.unparented} flow={plan.flow} scheduler={props.scheduler} searchOpen={searchOpen} />;
+  }
   switch (view) {
     case "board":
       return <PlanBoard {...shared} project={plan.project} board={shown.board} epics={plan.epics} now={readAt} searching={found.active} />;
@@ -196,6 +210,8 @@ function firstIn(body: HTMLElement | null, match: boolean): HTMLElement | null {
  */
 export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
   const { project, plan, view, zoom, filters, readAt, signals } = props;
+  // loadPlan lays out a flow for a project in Flow mode only.
+  const mode: PlanModeName = plan.flow ? "flow" : "timeline";
   const voice = useOptionalVoice();
   const narrow = useNarrow();
   const todayRef = useRef<(() => void) | null>(null);
@@ -236,23 +252,26 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
           <PlanToolbar
             projectId={project.id}
             view={view}
+            mode={mode}
             filters={current}
             expand={view !== "board" && <ExpandCollapse projectId={project.id} rows={rowsOf(narrowed, view)} searching={found.active} />}
             search={
               <PlanSearchField
                 value={query}
                 onChange={setQuery}
-                count={found.matches[view]}
-                hint={view !== "timeline"}
+                count={found.matches[matchKey(view)]}
+                hint={!byRow(view)}
                 onLeave={() => firstIn(body.current, false)?.focus()}
                 onFirstMatch={() => firstIn(body.current, true)?.focus()}
                 className="max-w-90 min-w-36 flex-1 basis-40"
               />
             }
             filterButtons={<PlanFilters projectId={project.id} view={view} filters={current} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
-            timeline={
-              view === "timeline" && (
+            controls={
+              view === "timeline" ? (
                 <TimelineControls projectId={project.id} filters={current} timeline={timeline} zoom={zoom} narrow={narrow} onToday={() => todayRef.current?.()} />
+              ) : (
+                view === "flow" && <FlowControls projectId={project.id} />
               )
             }
           />

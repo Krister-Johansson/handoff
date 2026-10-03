@@ -2,27 +2,33 @@
 
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ChartGanttIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, KanbanIcon, ListTreeIcon } from "lucide-react";
+import { ChartGanttIcon, ChevronsDownUpIcon, ChevronsUpDownIcon, KanbanIcon, ListTreeIcon, WaypointsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { planPath } from "@/lib/paths";
 import type { PlanFilters } from "@/lib/plan/filters";
-import type { PlanViewName } from "@/lib/project-tab";
+import type { PlanModeName, PlanViewName } from "@/lib/project-tab";
 import { SEGMENTED, SEGMENTED_ITEM } from "./segmented";
 import { useCollapsed } from "./use-collapsed";
 
+type ViewChoice = { value: PlanViewName; label: string; icon: ReactNode };
 
-const VIEWS: { value: PlanViewName; label: string; icon: ReactNode }[] = [
+const TREE_AND_BOARD: ViewChoice[] = [
   { value: "tree", label: "Tree", icon: <ListTreeIcon /> },
   { value: "board", label: "Board", icon: <KanbanIcon /> },
-  { value: "timeline", label: "Timeline", icon: <ChartGanttIcon /> },
 ];
+/** The third view follows the plan mode; there is no switch between Flow and Timeline on the Plan page. */
+const MODE_VIEW: Record<PlanModeName, ViewChoice> = {
+  timeline: { value: "timeline", label: "Timeline", icon: <ChartGanttIcon /> },
+  flow: { value: "flow", label: "Flow", icon: <WaypointsIcon /> },
+};
 
-/** Tree, Board or Timeline; under 640 px icons only, each keeping its name for screen readers and as a tooltip. */
-function ViewToggle({ projectId, view, filters }: { projectId: string; view: PlanViewName; filters: PlanFilters }) {
+/** Tree, Board and Timeline or Flow; under 640 px icons only, each keeping its name for screen readers and as a tooltip. */
+function ViewToggle({ projectId, view, filters, mode }: { projectId: string; view: PlanViewName; filters: PlanFilters; mode: PlanModeName }) {
   const router = useRouter();
+  const views = [...TREE_AND_BOARD, MODE_VIEW[mode]];
   return (
     <ToggleGroup
       type="single"
@@ -32,7 +38,7 @@ function ViewToggle({ projectId, view, filters }: { projectId: string; view: Pla
       onValueChange={(v) => v && router.replace(planPath(projectId, { ...filters, view: v as PlanViewName }), { scroll: false })}
       aria-label="View"
     >
-      {VIEWS.map((v) => (
+      {views.map((v) => (
         <Tooltip key={v.value}>
           <TooltipTrigger asChild>
             <ToggleGroupItem value={v.value} aria-label={v.label} className={SEGMENTED_ITEM}>
@@ -93,32 +99,35 @@ export function ExpandCollapse({ projectId, rows, searching }: { projectId: stri
 
 /**
  * The Plan page's one toolbar row: the view, Expand all and Collapse all, the search, the filters, and in
- * Timeline its own controls at the right end. It wraps by groups on narrow screens.
+ * Timeline or Flow that view's own controls at the right end. It wraps by groups on narrow screens.
  */
 export function PlanToolbar({
   projectId,
   view,
+  mode,
   filters,
   expand,
   search,
   filterButtons,
-  timeline,
+  controls,
 }: {
   projectId: string;
   view: PlanViewName;
+  /** The project's plan mode, which names the third view. */
+  mode: PlanModeName;
   filters: PlanFilters;
   expand?: ReactNode;
   search?: ReactNode;
   filterButtons: ReactNode;
-  timeline?: ReactNode;
+  controls?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-2.5">
-      <ViewToggle projectId={projectId} view={view} filters={filters} />
+      <ViewToggle projectId={projectId} view={view} filters={filters} mode={mode} />
       {expand}
       {search}
       {filterButtons}
-      {timeline}
+      {controls}
     </div>
   );
 }

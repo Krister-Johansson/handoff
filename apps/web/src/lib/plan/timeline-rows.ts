@@ -1,5 +1,5 @@
 import type { PlanItem, PlanProject } from "@handoff/github";
-import type { PlanEpic, PlanProgress, PlanTask } from "@/server/plan";
+import type { PlanEpic, PlanProgress, PlanStory, PlanTask } from "@/server/plan";
 import type { ActualStrip, DaySpan, Timeline, TimelineItem } from "./schedule";
 import { dayOfInstant, shortDay, visibleRange } from "./timeline-scale";
 
@@ -193,3 +193,18 @@ export function arrowPath(from: Placed, to: Placed): string {
 
 /** A loose item keeps its own kind; anything that is neither an epic nor a story is drawn as a task. */
 const kindOf = (item: PlanItem): TimelineRowKind => (item.kind === "story" || item.kind === "epic" ? item.kind : "task");
+
+/** The width of the Timeline's fixed left column; the Flow's is wider for the tags under a task's title. */
+export const LABEL_WIDTH = 280;
+
+/** A row's name: "Task #57 Add the migration", or Unparented for the group's heading. */
+export const rowLabel = (row: TimelineRow) => (row.item ? `${KIND_NAME[row.kind]} #${row.item.number} ${row.item.title}` : "Unparented");
+/** Epics and the Unparented heading sit on a muted band. */
+export const isHead = (row: TimelineRow) => row.kind === "epic" || row.kind === "group";
+
+/** The tasks a story or an epic sums: an epic's through its stories and its own. */
+export function tasksOf(item: PlanItem): PlanTask[] {
+  const stories = "stories" in item ? (item.stories as PlanStory[]) : [];
+  const own = "tasks" in item ? (item.tasks as PlanTask[]) : [];
+  return [...stories.flatMap((s) => s.tasks), ...own];
+}
