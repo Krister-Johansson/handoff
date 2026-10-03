@@ -38,6 +38,11 @@ export function previousRunOf(run: RunLike): PreviousRun {
   });
 }
 
+/** Where a project's code is fetched from: its local clone when it has one, else its GitHub repository. */
+export function defaultRemote(project: Pick<typeof projects.$inferSelect, "localClonePath" | "repoOwner" | "repoName">): string {
+  return project.localClonePath ?? `https://github.com/${project.repoOwner}/${project.repoName}.git`;
+}
+
 /**
  * Where the worker puts a run's worktree: its branch, from the base branch, or from the branch of the
  * run it continues.

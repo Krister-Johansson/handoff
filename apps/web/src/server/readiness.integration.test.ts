@@ -111,3 +111,15 @@ test("a launch file that does not parse says why", async () => {
   const launchCheck = (await projectReadiness(db, github, project.id)).checks.find((c) => c.id === "launch")!;
   expect(launchCheck).toMatchObject({ status: "todo", detail: expect.stringMatching(/not valid JSON/) });
 });
+
+test("without a launch file the project's App launch setting starts the app, and the fix names both ways", async () => {
+  const project = await createProject(db, { name: "sample", repo: "octo/sample", defaultBranch: "main" });
+  const github = new FakeGitHub();
+  const launchCheck = async () => (await projectReadiness(db, github, project.id)).checks.find((c) => c.id === "launch")!;
+  expect((await launchCheck()).fix).toMatch(/Project settings, App launch/);
+  await db
+    .update(projects)
+    .set({ launch: { name: "app", runtimeExecutable: "pnpm", runtimeArgs: ["dev"], args: [], port: 3000, env: {} } })
+    .where(eq(projects.id, project.id));
+  expect(await launchCheck()).toMatchObject({ status: "ok", title: "The app starts", detail: expect.stringMatching(/App launch setting.*pnpm dev/) });
+});

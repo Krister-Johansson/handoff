@@ -478,7 +478,7 @@ function MakeStart({ node, graph, dispatch }: { node: FlowNode; graph: FlowGraph
 const GATE_MODE_HELP: Record<ReturnType<typeof gateMode>, string> = {
   approval: "You review the output that reaches in, comment on it, then approve or ask for changes.",
   question: "The planner's or coder's question is asked; the answer goes back on answered.",
-  try: "The gate starts the run's app from .claude/launch.json. You open it, check each acceptance criterion, then approve or send back what does not work.",
+  try: "The gate starts the run's app from .claude/launch.json, or from Project settings, App launch. You open it, check each acceptance criterion, then approve or send back what does not work.",
 };
 
 /** Each notification kind's switch label and what it means. */

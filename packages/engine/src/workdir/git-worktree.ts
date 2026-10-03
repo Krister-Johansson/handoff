@@ -45,6 +45,10 @@ export class GitWorktreeProvider implements WorkdirProvider {
       const baseSha = await this.git(mirror, ["rev-parse", `origin/${spec.baseBranch}`]);
       if (existsSync(path)) return { path, baseSha };
       mkdirSync(join(this.options.root, "worktrees"), { recursive: true });
+      if (spec.detached) {
+        await this.git(mirror, ["worktree", "add", "-q", "--detach", path, baseSha]);
+        return { path, baseSha };
+      }
       const branchExists = (await this.git(mirror, ["branch", "--list", spec.branchName])) !== "";
       await this.git(
         mirror,

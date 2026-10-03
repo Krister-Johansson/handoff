@@ -64,6 +64,129 @@ function inside(root: string, rel: string): string | undefined {
   return [root.replace(/\/+$/, ""), ...parts].join("/");
 }
 
+/** The name of the configuration a project's App launch setting holds, as handoff records it and copies it to a file. */
+export const SETTING_CONFIGURATION = "app";
+
+/**
+ * A command line split into words as a POSIX shell splits it, without running a shell: single and double
+ * quotes keep a word whole, and a backslash escapes the next character outside single quotes. Throws when
+ * a quote is not closed.
+ */
+export function splitCommand(line: string): string[] {
+  const words: string[] = [];
+  let word: string | undefined;
+  let quote: "'" | '"' | undefined;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (quote === "'") {
+      if (ch === "'") quote = undefined;
+      else word = (word ?? "") + ch;
+    } else if (quote === '"') {
+      if (ch === '"') quote = undefined;
+      else if (ch === "\\" && i + 1 < line.length && '"\\$`'.includes(line[i + 1]!)) word = (word ?? "") + line[++i]!;
+      else word = (word ?? "") + ch;
+    } else if (ch === "'" || ch === '"') {
+      quote = ch;
+      word ??= "";
+    } else if (ch === "\\" && i + 1 < line.length) {
+      word = (word ?? "") + line[++i]!;
+    } else if (/\s/.test(ch)) {
+      if (word !== undefined) words.push(word);
+      word = undefined;
+    } else {
+      word = (word ?? "") + ch;
+    }
+  }
+  if (quote) throw new Error(`The command has a ${quote === "'" ? "single" : "double"} quote that is not closed.`);
+  if (word !== undefined) words.push(word);
+  return words;
+}
+
+/** A word as a shell reads it back: as it is when plain, else in single quotes. */
+const quoteWord = (word: string) => (/^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`);
+
+/** The words a configuration runs, program first: `node <program> <args>` for a node script. */
+const commandWords = (config: LaunchConfiguration) => (config.program ? ["node", config.program, ...config.args] : [config.runtimeExecutable!, ...config.runtimeArgs]);
+
+/** A configuration's command as one line, which splitCommand turns back into the same words. */
+export const commandLine = (config: LaunchConfiguration) => commandWords(config).map(quoteWord).join(" ");
+
+/** The App launch form in Project settings, as typed: one configuration, the command on one line. */
+export type LaunchForm = { command: string; cwd: string; port: string; anyPort: boolean; url: string; env: { name: string; value: string }[] };
+export type LaunchFormField = "command" | "cwd" | "port" | "url" | "env";
+export type LaunchFormResult = { ok: true; configuration: LaunchConfiguration } | { ok: false; errors: Partial<Record<LaunchFormField, string>> };
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** The form as a launch configuration, or what to fix in each field. Empty environment rows are dropped. */
+export function configurationFromForm(form: LaunchForm): LaunchFormResult {
+  const errors: Partial<Record<LaunchFormField, string>> = {};
+  let words: string[] = [];
+  try {
+    words = splitCommand(form.command);
+    if (words.length === 0) errors.command = "Type the command that starts the app, such as pnpm dev.";
+  } catch (error) {
+    errors.command = (error as Error).message;
+  }
+  const cwd = form.cwd.trim().replace(/^\.\/?$/, "");
+  if (cwd && inside("/r", cwd) === undefined) errors.cwd = "The working directory is a path inside the repository, such as apps/web.";
+  const port = Number(form.port.trim());
+  if (!/^\d+$/.test(form.port.trim()) || port < 1 || port > 65535) errors.port = "The port is a whole number from 1 to 65535.";
+  const url = form.url.trim();
+  if (url && !/^https?:\/\/[^/\s]+/.test(url)) errors.url = "Opens at is an http:// or https:// address, such as http://localhost:3000/shop.";
+  const rows = form.env.map((r) => ({ name: r.name.trim(), value: r.value })).filter((r) => r.name || r.value);
+  const env: Record<string, string> = {};
+  for (const { name } of rows) {
+    if (!ENV_NAME.test(name)) errors.env ??= `${name || "A variable"} is not a variable name: use letters, digits and _, not starting with a digit.`;
+    else if (name === "PORT") errors.env ??= "Handoff sets PORT itself; leave it out.";
+    else if (name in env) errors.env ??= `${name} is there twice.`;
+    else env[name] = rows.find((r) => r.name === name)!.value;
+  }
+  if (Object.keys(errors).length) return { ok: false, errors };
+  const [program, ...args] = words;
+  return {
+    ok: true,
+    configuration: {
+      name: SETTING_CONFIGURATION,
+      runtimeExecutable: program!,
+      runtimeArgs: args,
+      args: [],
+      ...(cwd ? { cwd } : {}),
+      port,
+      ...(form.anyPort ? {} : { autoPort: false }),
+      ...(url ? { url } : {}),
+      env,
+    },
+  };
+}
+
+/** A configuration as the form shows it. */
+export function formFromConfiguration(config: LaunchConfiguration): LaunchForm {
+  return {
+    command: commandLine(config),
+    cwd: config.cwd ?? "",
+    port: String(config.port),
+    anyPort: config.autoPort !== false,
+    url: config.url ?? "",
+    env: Object.entries(config.env).map(([name, value]) => ({ name, value })),
+  };
+}
+
+/** A launch file holding one configuration, as Copy as launch.json gives it: the fields a file needs, nothing empty. */
+export function launchFileText(config: LaunchConfiguration): string {
+  const { name, runtimeExecutable, runtimeArgs, program, args, cwd, port, autoPort, url, env } = config;
+  const entry = {
+    name,
+    ...(program ? { program, ...(args.length ? { args } : {}) } : { runtimeExecutable, runtimeArgs }),
+    ...(cwd ? { cwd } : {}),
+    port,
+    ...(autoPort === false ? { autoPort } : {}),
+    ...(url ? { url } : {}),
+    ...(Object.keys(env).length ? { env } : {}),
+  };
+  return `${JSON.stringify({ version: "0.0.1", configurations: [entry] }, null, 2)}\n`;
+}
+
 /** The process that runs a configuration in a run's worktree, on `port`, and where it is reached. */
 export type PreviewCommand = { command: string; args: string[]; cwd: string; env: Record<string, string>; url: string };
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
+import { AppLaunchSettings } from "@/components/projects/app-launch-settings";
 import { DefaultLibrary } from "@/components/projects/default-library";
 import { NewGraphDialog } from "@/components/projects/forms";
 import { GraphList } from "@/components/projects/graph-list";
@@ -9,10 +10,11 @@ import { SchedulerSettings } from "@/components/scheduler/scheduler-settings";
 import { EstimateSettings } from "@/components/settings/estimate-settings";
 import { ProjectSettingsNav } from "@/components/settings/settings-nav";
 import { getDb } from "@/lib/db";
-import { getProjects } from "@/lib/github";
+import { getGitHub, getProjects } from "@/lib/github";
 import { PROJECTS_SETTINGS_PATH } from "@/lib/paths";
 import { parseProjectSettingsTab, projectSettingsPath, projectSettingsTabLabel, type ProjectSettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
+import { loadAppLaunch } from "@/server/app-launch";
 import { forecastsForSettings } from "@/server/forecasts";
 import { listProjectGraphs, TEMPLATES } from "@/server/graphs";
 import { libraryChoices } from "@/server/library-choices";
@@ -50,6 +52,11 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
       );
     case "library":
       return <DefaultLibrary key={JSON.stringify(project.library)} projectId={project.id} available={await libraryChoices(getDb())} initial={project.library} />;
+    case "launch": {
+      const view = await loadAppLaunch(getDb(), getGitHub(), project.id);
+      // A save gives the section its stored setting again.
+      return <AppLaunchSettings key={JSON.stringify(view.saved)} view={view} />;
+    }
     case "mode":
       // A save gives the section its stored mode again.
       return <PlanModeSettings key={project.planMode} projectId={project.id} initial={project.planMode} />;
@@ -95,7 +102,7 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
 
 /**
  * What a project's runs start from and how its plan is worked, one section at a time beside a side menu
- * as in Settings: Graphs and the Default library, then Plan mode, the Scheduler and Estimates (Plan budget in a
+ * as in Settings: Graphs, the Default library and App launch, then Plan mode, the Scheduler and Estimates (Plan budget in a
  * Flow project). The repository, branch, setup
  * command and GitHub Project are managed in Settings, Projects.
  */

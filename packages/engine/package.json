@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./operations": "./src/operations.ts",
     "./runs": "./src/runs.ts",
+    "./launch-test": "./src/preview/launch-test.ts",
     "./start-run": "./src/start-run.ts",
     "./backlog-scheduler": "./src/backlog-scheduler/index.ts",
     "./candidates": "./src/backlog-scheduler/candidates.ts",

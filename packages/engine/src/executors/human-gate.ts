@@ -223,6 +223,7 @@ async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<Prev
         signal: ctx.signal,
         // The app gets what the run's demo gave it, so a feature that needs a key works for the person too.
         passEnv: demoPassEnv(ctx),
+        launch: ctx.project.launch,
         ...(deps.docker ? { docker: deps.docker } : {}),
       },
     );

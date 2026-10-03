@@ -6,8 +6,12 @@ import type { MaterializedLibrary } from "./library/materialize.ts";
 export type RunRow = typeof runs.$inferSelect;
 export type ProjectRow = typeof projects.$inferSelect;
 
-/** `startFrom` is the branch a new run branch starts at instead of the base branch: the branch of the run it continues. */
-export type WorkdirSpec = { runId: string; remoteUrl: string; baseBranch: string; branchName: string; startFrom?: string };
+/**
+ * `startFrom` is the branch a new run branch starts at instead of the base branch: the branch of the run it
+ * continues. `detached` checks out the base branch's head with no branch of its own, for a worktree that
+ * makes no commits, such as a Test start's; `branchName` is then unused.
+ */
+export type WorkdirSpec = { runId: string; remoteUrl: string; baseBranch: string; branchName: string; startFrom?: string; detached?: boolean };
 /** Where a run's code lives. `container` is set when commands must run inside a Docker container. */
 export type Workdir = { path: string; baseSha: string; container?: string };
 

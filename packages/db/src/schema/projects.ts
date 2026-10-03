@@ -5,6 +5,20 @@ import { githubInstallations } from "./github-installations.ts";
 
 export type ProjectLibrary = { skills: string[]; mcp: string[]; agents: string[]; groups: string[] };
 
+/** One configuration of a .claude/launch.json, as @handoff/core's LaunchConfigurationSchema reads it. */
+export type ProjectLaunch = {
+  name: string;
+  runtimeExecutable?: string;
+  runtimeArgs: string[];
+  program?: string;
+  args: string[];
+  port: number;
+  cwd?: string;
+  env: Record<string, string>;
+  autoPort?: boolean;
+  url?: string;
+};
+
 /** How a project plans its work: Flow orders tasks without dates; Timeline gives them dates and estimates. */
 export const PLAN_MODES = ["flow", "timeline"] as const;
 export type PlanMode = (typeof PLAN_MODES)[number];
@@ -30,6 +44,11 @@ export const projects = pgTable(
     teardownCommand: text("teardown_command"),
     /** A command run in a run's worktree after the app's compose services start and before the app, for a Demo step: seeds data to show. */
     demoSeedCommand: text("demo_seed_command"),
+    /**
+     * How a run's app starts when the repository has no .claude/launch.json: one configuration of that file,
+     * set in Project settings, App launch. The file wins when there is one. Plain text; never secrets.
+     */
+    launch: jsonb("launch").$type<ProjectLaunch>(),
     /** Globs of the files a person sees in the app. A Demo step set to UI changes skips a change that touches none. Null: the defaults. */
     uiPaths: text("ui_paths").array(),
     /** The most files and steps a planner's plan may have before it proposes a split. Null: the defaults, 15 files and 12 steps. */

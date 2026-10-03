@@ -18,6 +18,7 @@ test("pages are the current project's routes and settings sections, the pages of
     ["Project settings", "handoff", "/projects/p1/settings"],
     ["Graphs", "handoff › Project settings", "/projects/p1/settings?tab=graphs"],
     ["Default library", "handoff › Project settings", "/projects/p1/settings?tab=library"],
+    ["App launch", "handoff › Project settings", "/projects/p1/settings?tab=launch"],
     ["Plan mode", "handoff › Project settings", "/projects/p1/settings?tab=mode"],
     ["Scheduler", "handoff › Project settings", "/projects/p1/settings?tab=scheduler"],
     ["Estimates", "handoff › Project settings", "/projects/p1/settings?tab=estimates"],

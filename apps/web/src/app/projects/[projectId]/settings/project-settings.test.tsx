@@ -55,7 +55,22 @@ const forecastsForSettings = vi.hoisted(() =>
 vi.mock("@/server/forecasts", () => ({ forecastsForSettings }));
 vi.mock("@/app/projects/scheduler-actions", () => ({}));
 const getProject = vi.hoisted(() => vi.fn(async () => ({ number: 5, priorityOptions: ["High", "Low"] })));
-vi.mock("@/lib/github", () => ({ getProjects: () => ({ getProject }) }));
+vi.mock("@/lib/github", () => ({ getProjects: () => ({ getProject }), getGitHub: () => undefined }));
+const loadAppLaunch = vi.hoisted(() =>
+  vi.fn(async () => ({
+    projectId: "p1",
+    projectName: "handoff",
+    branch: "main",
+    docker: false,
+    detected: { kind: "none" },
+    saved: null,
+    services: null,
+    seedCommand: null,
+    test: null,
+  })),
+);
+vi.mock("@/server/app-launch", () => ({ loadAppLaunch }));
+vi.mock("@/app/projects/launch-actions", () => ({}));
 const loadSchedulerCard = vi.hoisted(() => vi.fn(async () => cardOf()));
 vi.mock("@/server/scheduler-card", () => ({ loadSchedulerCard }));
 
@@ -127,6 +142,15 @@ test("?tab=estimates shows the capacity, the forecasts from this project's runs 
   expect(within(screen.getByRole("region", { name: "Forecasts from finished runs" })).getByRole("row", { name: /^M/ })).toHaveTextContent("$0.90");
   expect(within(screen.getByRole("region", { name: "Plan budget" })).getByLabelText("Files")).toHaveValue(8);
   expect(screen.queryByRole("heading", { name: "Scheduler" })).not.toBeInTheDocument();
+});
+
+test("?tab=launch shows App launch, read for this project from the repository and the database", async () => {
+  await open("launch");
+  expect(screen.getByRole("link", { name: "App launch" })).toHaveAttribute("aria-current", "page");
+  expect(loadAppLaunch).toHaveBeenCalledWith(expect.anything(), undefined, "p1");
+  const section = screen.getByRole("region", { name: "App launch" });
+  expect(section).toHaveTextContent("Handoff does not know how to start this app");
+  expect(screen.queryByRole("heading", { name: "Graphs" })).not.toBeInTheDocument();
 });
 
 test("?tab=mode shows the Plan mode with the project's mode picked", async () => {

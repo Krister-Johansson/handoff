@@ -4,7 +4,17 @@ import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import { demoConfiguration, LAUNCH_FILE, parseLaunchFile, passEnvProblem, pickEnv, previewCommand } from "@handoff/core";
+import {
+  demoConfiguration,
+  LAUNCH_FILE,
+  LaunchConfigurationSchema,
+  parseLaunchFile,
+  passEnvProblem,
+  pickEnv,
+  previewCommand,
+  type LaunchConfiguration,
+  type PreviewCommand,
+} from "@handoff/core";
 import { and, eq, inArray, previews, type Db } from "@handoff/db";
 import { commandEnv, shell } from "../contract/checks.ts";
 import type { Workdir } from "../types.ts";
@@ -17,8 +27,20 @@ const SERVICES_TIMEOUT_MS = 5 * 60_000;
 const SEED_TIMEOUT_MS = 10 * 60_000;
 const COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
 
-/** A run's app could not start; the message says why in terms a person can act on. */
-export class PreviewError extends Error {}
+/**
+ * A run's app could not start; the message says why in terms a person can act on. `summary` is that
+ * sentence alone and `log` the end of the output it quotes, when there is one; the message holds both.
+ */
+export class PreviewError extends Error {
+  readonly summary: string;
+  constructor(
+    summary: string,
+    readonly log?: string,
+  ) {
+    super(log ? `${summary}\n${log}` : summary);
+    this.summary = summary;
+  }
+}
 
 export type PreviewRow = typeof previews.$inferSelect;
 
@@ -37,6 +59,12 @@ const docker: DockerExec = async (args, cwd) => {
 
 const tail = (text: string, lines = 20) => text.trimEnd().split("\n").slice(-lines).join("\n");
 
+/** The repository's compose file, by the names Docker Compose looks for; undefined without one. */
+export const composeFileOf = (root: string) => COMPOSE_FILES.find((name) => existsSync(join(root, name)));
+
+/** The end of an app's output so far: its last `lines` lines, or "" before it wrote any. */
+export const logTail = (logPath: string, lines = 20) => (existsSync(logPath) ? tail(readFileSync(logPath, "utf8"), lines) : "");
+
 /**
  * Starts the backing services in the repository's compose file, once per project: every run's app
  * shares them. Services already up are kept as they are (--no-recreate), so a run from another worktree
@@ -45,7 +73,7 @@ const tail = (text: string, lines = 20) => text.trimEnd().split("\n").slice(-lin
  * says so. Without a compose file there is nothing to do.
  */
 export async function ensureServices(root: string, projectId: string, exec: DockerExec = docker, note?: (message: string) => void): Promise<void> {
-  const file = COMPOSE_FILES.find((name) => existsSync(join(root, name)));
+  const file = composeFileOf(root);
   if (!file) return;
   if ((await exec(["info"], root)).exitCode !== 0) {
     throw new PreviewError(`Docker is not running, and this repository's ${file} needs it for the app's services. Start Docker and try again.`);
@@ -56,19 +84,168 @@ export async function ensureServices(root: string, projectId: string, exec: Dock
     note?.(`A port the services in ${file} need is already in use, most likely by another Docker stack of this repository, so handoff uses the services running there.`);
     return;
   }
-  throw new PreviewError(`The services in ${file} did not start:\n${tail(up.output)}`);
+  throw new PreviewError(`The services in ${file} did not start:`, tail(up.output));
 }
 
+/** Where a configuration came from: the repository's launch file, or the project's App launch setting. */
+export type LaunchSource = "file" | "setting";
+
+/** How a message names the switch that makes the app keep its own port, where the person sets it. */
+const exactPortSwitch = (source: LaunchSource) => (source === "file" ? `autoPort is false in ${LAUNCH_FILE}` : "Any free port is off in App launch");
+
 /** A free port from the system, or `wanted` when the app must have it and it is free. */
-async function portFor(wanted: number, exact: boolean): Promise<number> {
+async function portFor(wanted: number, exact: boolean, source: LaunchSource): Promise<number> {
   const server = createServer();
   const port = await new Promise<number | undefined>((resolve) => {
     server.once("error", () => resolve(undefined));
     server.listen(exact ? wanted : 0, () => resolve((server.address() as { port: number }).port));
   });
   await new Promise((resolve) => server.close(resolve));
-  if (port === undefined) throw new PreviewError(`The app must listen on port ${wanted} (autoPort is false in ${LAUNCH_FILE}), but port ${wanted} is in use.`);
+  if (port === undefined) throw new PreviewError(`The app must listen on port ${wanted} (${exactPortSwitch(source)}), but port ${wanted} is in use.`);
   return port;
+}
+
+/**
+ * The configuration to start from the worktree at `root`: the repository's launch file wins, then the
+ * project's App launch setting. Throws PreviewError when there is neither, or when the one there is wrong.
+ */
+export function launchConfigurationFor(root: string, opts: { configuration?: string; launch?: unknown }): { config: LaunchConfiguration; source: LaunchSource } {
+  const file = join(root, LAUNCH_FILE);
+  if (existsSync(file)) {
+    let launch;
+    try {
+      launch = parseLaunchFile(readFileSync(file, "utf8"));
+    } catch (error) {
+      throw new PreviewError((error as Error).message);
+    }
+    const config = opts.configuration ? launch.configurations.find((c) => c.name === opts.configuration) : demoConfiguration(launch);
+    if (!config) throw new PreviewError(`${LAUNCH_FILE} has no configuration named ${opts.configuration}.`);
+    return { config, source: "file" };
+  }
+  if (opts.launch) {
+    const setting = LaunchConfigurationSchema.safeParse(opts.launch);
+    if (!setting.success || (!setting.data.runtimeExecutable && !setting.data.program)) {
+      throw new PreviewError("The project's App launch setting cannot be read. Open Project settings, App launch, and save it again.");
+    }
+    return { config: setting.data, source: "setting" };
+  }
+  throw new PreviewError(
+    `This repository has no ${LAUNCH_FILE} and the project has no App launch setting, so handoff does not know how to start the app. ` +
+      "Set the command in Project settings, App launch, or add the file as Claude Code desktop describes: https://code.claude.com/docs/en/desktop",
+  );
+}
+
+/** What one step of starting an app is doing, for a person watching it start. */
+export type LaunchStepEvent = { step: "services" | "seed" | "app"; status: "running" | "done" | "failed"; detail: string };
+
+/** A started app: its process group's leader, its port, where it is reached and where its output goes. */
+export type LaunchedApp = { pid: number | undefined; port: number; url: string; logPath: string };
+
+export type LaunchAppOptions = {
+  /** The worktree to start the app from. */
+  root: string;
+  projectId: string;
+  config: LaunchConfiguration;
+  source: LaunchSource;
+  /** Variables that name the worktree the app runs from, such as the run's identity. */
+  identity: Record<string, string>;
+  seedCommand?: string | null;
+  passEnv?: readonly string[];
+  readyTimeoutMs?: number;
+  signal?: AbortSignal;
+  docker?: DockerExec;
+  note?: (message: string) => void;
+  /** Told as each step starts and ends. */
+  onStep?: (event: LaunchStepEvent) => void;
+  /** Told once the app's process is spawned, before it is up. */
+  onSpawn?: (app: LaunchedApp) => Promise<void>;
+};
+
+/**
+ * Starts an app from a worktree and waits until it accepts connections: the compose services, the seed
+ * command, then the app in its own process group with a minimal environment, on a free port passed in
+ * PORT (or its own port when it must have it). An app that does not come up is stopped, and PreviewError
+ * says why, with the end of its output.
+ */
+export async function launchApp(o: LaunchAppOptions): Promise<LaunchedApp> {
+  const step = (s: LaunchStepEvent["step"], status: LaunchStepEvent["status"], detail: string) => o.onStep?.({ step: s, status, detail });
+  const passEnv = o.passEnv ?? [];
+
+  const compose = composeFileOf(o.root);
+  let shared = false;
+  step("services", "running", compose ? `Starting the services in ${compose}` : "None in the repository");
+  try {
+    await ensureServices(o.root, o.projectId, o.docker, (message) => ((shared = true), o.note?.(message)));
+  } catch (error) {
+    step("services", "failed", (error as PreviewError).summary ?? (error as Error).message);
+    throw error;
+  }
+  step("services", "done", compose ? (shared ? `${compose}: already running in another stack` : `${compose}: up`) : "None in the repository");
+
+  const seedCommand = o.seedCommand?.trim();
+  if (seedCommand) {
+    step("seed", "running", `\`${seedCommand}\``);
+    const seed = await shell(seedCommand, o.root, SEED_TIMEOUT_MS, undefined, passEnv, o.signal, o.identity);
+    if (seed.timedOut || seed.exitCode !== 0) {
+      const why = seed.timedOut ? `timed out after ${SEED_TIMEOUT_MS / 60_000} minutes` : `exited ${seed.exitCode}`;
+      step("seed", "failed", `\`${seedCommand}\` ${why}`);
+      throw new PreviewError(`The project's demo seed command \`${seedCommand}\` ${why}:`, tail(seed.output));
+    }
+    step("seed", "done", `\`${seedCommand}\` exited 0`);
+  } else {
+    step("seed", "done", "None");
+  }
+
+  let port: number;
+  let cmd: PreviewCommand;
+  try {
+    port = await portFor(o.config.port, o.config.autoPort === false, o.source);
+    cmd = previewCommand(o.config, { root: o.root, port });
+  } catch (error) {
+    const message = error instanceof PreviewError ? error.summary : (error as Error).message;
+    step("app", "failed", message);
+    throw error instanceof PreviewError ? error : new PreviewError(message);
+  }
+  const logPath = join(await gitDirOf(o.root), `handoff-preview-${randomUUID()}.log`);
+  step("app", "running", `Waiting for port ${port}`);
+
+  const log = openSync(logPath, "a");
+  // The app is code the agent wrote: it gets the same minimal environment as test commands, without CI,
+  // plus the worktree's identity and the variables passEnv names.
+  const { CI: _ci, ...base } = commandEnv();
+  const env = { ...base, ...pickEnv(passEnv, process.env), ...o.identity, ...cmd.env };
+  const child = spawn(cmd.command, cmd.args, { cwd: cmd.cwd, env: env as NodeJS.ProcessEnv, stdio: ["ignore", log, log], detached: true });
+  closeSync(log);
+  child.unref();
+  let exit: number | null | undefined;
+  let spawnError: Error | undefined;
+  child.once("exit", (code, signal) => (exit = code ?? (signal ? -1 : null)));
+  child.once("error", (error) => (spawnError = error));
+  const app = { pid: child.pid, port, url: cmd.url, logPath };
+  await o.onSpawn?.(app);
+
+  const fail = async (detail: string, summary: string, withLog = true): Promise<never> => {
+    if (child.pid) await stopGroup(child.pid);
+    step("app", "failed", detail);
+    throw new PreviewError(summary, withLog ? logTail(logPath) || undefined : undefined);
+  };
+  const deadline = Date.now() + (o.readyTimeoutMs ?? READY_TIMEOUT_MS);
+  for (;;) {
+    if (spawnError) return fail(`Could not start: ${spawnError.message}`, `The app could not start: ${spawnError.message}`, false);
+    if (exit !== undefined) return fail(`Exited with code ${exit}`, `The app exited with code ${exit} before it was up:`);
+    if (o.signal?.aborted) return fail("Stopped", "The step that started the app was stopped.", false);
+    if (await listening(port)) break;
+    if (Date.now() > deadline) {
+      const fix = o.source === "file" ? `set autoPort to false in ${LAUNCH_FILE}` : "turn off Any free port in App launch";
+      return fail(
+        `Started, but nothing listened on port ${port}`,
+        `The app did not listen on port ${port} in time. Handoff passes the port in PORT, as Claude Code desktop does; make the dev command read PORT instead of a fixed port, or ${fix}.`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  step("app", "done", `Listening on port ${port}`);
+  return app;
 }
 
 /** Whether something accepts connections on `port`, over IPv4 or IPv6 (a dev server on localhost may bind either). */
@@ -109,7 +286,7 @@ const signalGroup = (pid: number, signal: NodeJS.Signals) => {
 };
 
 /** Stops a process group: SIGTERM, then SIGKILL for whatever is left after a grace period. */
-async function stopGroup(pid: number) {
+export async function stopGroup(pid: number) {
   signalGroup(pid, "SIGTERM");
   const deadline = Date.now() + STOP_GRACE_MS;
   while (alive(pid) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
@@ -132,79 +309,41 @@ export type StartPreviewOptions = {
   seedCommand?: string | null;
   /** Names of variables the seed command and the app get from the worker's own environment. Never values. */
   passEnv?: readonly string[];
+  /** The project's App launch setting: how to start the app when the repository has no launch file. */
+  launch?: unknown;
 };
 
 /**
- * Starts a run's app from its worktree, as the repository's `.claude/launch.json` says, and waits until
- * it accepts connections. The app gets a free port in PORT (or its own port when autoPort is false),
- * the project's compose services, and a minimal environment without the worker's tokens. It runs in its
- * own process group, which stopPreview ends. Throws PreviewError saying what to fix when it cannot start.
+ * Starts a run's app from its worktree, as the repository's `.claude/launch.json` says, or else as the
+ * project's App launch setting says, and waits until it accepts connections. The app gets a free port in
+ * PORT (or its own port when autoPort is false), the project's compose services, and a minimal environment
+ * without the worker's tokens. It runs in its own process group, which stopPreview ends. Throws
+ * PreviewError saying what to fix when it cannot start.
  */
 export async function startPreview(deps: { db: Db; workerId: string }, opts: StartPreviewOptions): Promise<PreviewRow> {
   const { db, workerId } = deps;
   if (opts.workdir.container) throw new PreviewError("Previews do not run in Docker workspaces yet; use the git worktree workspace.");
-  const file = join(opts.workdir.path, LAUNCH_FILE);
-  if (!existsSync(file)) {
-    throw new PreviewError(`This repository has no ${LAUNCH_FILE}, so handoff does not know how to start the app. Add one as Claude Code desktop describes: https://code.claude.com/docs/en/desktop`);
-  }
-  let launch;
-  try {
-    launch = parseLaunchFile(readFileSync(file, "utf8"));
-  } catch (error) {
-    throw new PreviewError((error as Error).message);
-  }
-  const config = opts.configuration ? launch.configurations.find((c) => c.name === opts.configuration) : demoConfiguration(launch);
-  if (!config) throw new PreviewError(`${LAUNCH_FILE} has no configuration named ${opts.configuration}.`);
-
-  const passEnv = opts.passEnv ?? [];
-  const problem = passEnvProblem(passEnv);
+  const { config, source } = launchConfigurationFor(opts.workdir.path, opts);
+  const problem = passEnvProblem(opts.passEnv ?? []);
   if (problem) throw new PreviewError(problem);
-  const identity = runIdentity(opts.runId, opts.workdir.path);
 
-  await ensureServices(opts.workdir.path, opts.projectId, opts.docker, opts.note);
-  if (opts.seedCommand?.trim()) {
-    const seed = await shell(opts.seedCommand, opts.workdir.path, SEED_TIMEOUT_MS, undefined, passEnv, opts.signal, identity);
-    if (seed.timedOut) throw new PreviewError(`The project's demo seed command \`${opts.seedCommand}\` timed out after ${SEED_TIMEOUT_MS / 60_000} minutes:\n${tail(seed.output)}`);
-    if (seed.exitCode !== 0) throw new PreviewError(`The project's demo seed command \`${opts.seedCommand}\` exited ${seed.exitCode}:\n${tail(seed.output)}`);
-  }
-  const port = await portFor(config.port, config.autoPort === false);
-  const cmd = previewCommand(config, { root: opts.workdir.path, port });
   const id = randomUUID();
-  const logPath = join(await gitDirOf(opts.workdir.path), `handoff-preview-${id}.log`);
-  await db.insert(previews).values({ id, runId: opts.runId, nodeExecutionId: opts.nodeExecutionId ?? null, configuration: config.name, workerId, port, url: cmd.url, logPath });
-
-  const log = openSync(logPath, "a");
-  // The app is code the agent wrote: it gets the same minimal environment as test commands, without CI,
-  // plus the run's identity and the variables passEnv names.
-  const { CI: _ci, ...base } = commandEnv();
-  const env = { ...base, ...pickEnv(passEnv, process.env), ...identity, ...cmd.env };
-  const child = spawn(cmd.command, cmd.args, { cwd: cmd.cwd, env: env as NodeJS.ProcessEnv, stdio: ["ignore", log, log], detached: true });
-  closeSync(log);
-  child.unref();
-  let exit: number | null | undefined;
-  let spawnError: Error | undefined;
-  child.once("exit", (code, signal) => (exit = code ?? (signal ? -1 : null)));
-  child.once("error", (error) => (spawnError = error));
-  await db.update(previews).set({ pid: child.pid ?? null }).where(eq(previews.id, id));
-
-  const fail = async (message: string): Promise<never> => {
-    if (child.pid) await stopGroup(child.pid);
-    await db.update(previews).set({ status: "failed", error: message, stoppedAt: new Date() }).where(eq(previews.id, id));
-    throw new PreviewError(message);
-  };
-  const output = () => (existsSync(logPath) ? tail(readFileSync(logPath, "utf8")) : "");
-  const deadline = Date.now() + (opts.readyTimeoutMs ?? READY_TIMEOUT_MS);
-  for (;;) {
-    if (spawnError) return fail(`The app could not start: ${spawnError.message}`);
-    if (exit !== undefined) return fail(`The app exited with code ${exit} before it was up:\n${output()}`);
-    if (opts.signal?.aborted) return fail("The step that started the app was stopped.");
-    if (await listening(port)) break;
-    if (Date.now() > deadline) {
-      return fail(
-        `The app did not listen on port ${port} in time. Handoff passes the port in PORT, as Claude Code desktop does; make the dev command read PORT instead of a fixed port, or set autoPort to false in ${LAUNCH_FILE}.\n${output()}`,
-      );
-    }
-    await new Promise((r) => setTimeout(r, 200));
+  let inserted = false;
+  try {
+    await launchApp({
+      ...opts,
+      root: opts.workdir.path,
+      config,
+      source,
+      identity: runIdentity(opts.runId, opts.workdir.path),
+      onSpawn: async (app) => {
+        await db.insert(previews).values({ id, runId: opts.runId, nodeExecutionId: opts.nodeExecutionId ?? null, configuration: config.name, workerId, pid: app.pid ?? null, port: app.port, url: app.url, logPath: app.logPath });
+        inserted = true;
+      },
+    });
+  } catch (error) {
+    if (inserted && error instanceof PreviewError) await db.update(previews).set({ status: "failed", error: error.message, stoppedAt: new Date() }).where(eq(previews.id, id));
+    throw error;
   }
   const [row] = await db.update(previews).set({ status: "running" }).where(eq(previews.id, id)).returning();
   return row!;

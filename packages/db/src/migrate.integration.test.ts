@@ -32,6 +32,7 @@ describe("migrations", () => {
       "github_installations",
       "graph_versions",
       "graphs",
+      "launch_tests",
       "library_agents",
       "library_groups",
       "library_mcp_servers",
