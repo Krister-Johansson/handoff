@@ -1,7 +1,8 @@
 /**
  * Pure operations on the Flow's queue, the task numbers in the order the scheduler would start them
- * (docs/plans/flow.md, Decisions 8 and 10). Each returns a new queue with the same tasks; none reads
- * or writes pins beyond the set it is given.
+ * (docs/plans/flow.md, Decisions 8 and 10). Each returns a new queue with the same tasks. A drop is
+ * moveTo, or one of the rule-break dialog's choices, then carryDependents when its checkbox is on, then
+ * keepPins.
  */
 
 /** Each task's open blockers, by issue number. */
@@ -10,7 +11,7 @@ export type Blockers = ReadonlyMap<number, readonly number[]>;
 /** "Move to the next free slot": the task goes right after the last of its blockers in the queue. */
 export function afterBlockers(queue: readonly number[], issue: number, blockers: Blockers): number[] {
   const last = Math.max(-1, ...(blockers.get(issue) ?? []).map((b) => queue.indexOf(b)));
-  if (last < queue.indexOf(issue)) return [...queue];
+  if (!queue.includes(issue) || last < queue.indexOf(issue)) return [...queue];
   const rest = queue.filter((n) => n !== issue);
   rest.splice(last, 0, issue);
   return rest;
@@ -48,12 +49,13 @@ export function blockersFirst(queue: readonly number[], issue: number, index: nu
 
 /** The tasks with each one after its blockers among them, else in the order given. */
 function inBlockerOrder(tasks: readonly number[], blockers: Blockers): number[] {
-  const left = [...tasks];
+  const left = new Set(tasks);
   const ordered: number[] = [];
-  while (left.length > 0) {
+  while (left.size > 0) {
     // A cycle of blockers has no task to take first; the first one left then goes.
-    const at = Math.max(0, left.findIndex((n) => (blockers.get(n) ?? []).every((b) => !left.includes(b))));
-    ordered.push(...left.splice(at, 1));
+    const next = [...left].find((n) => (blockers.get(n) ?? []).every((b) => !left.has(b))) ?? left.values().next().value!;
+    left.delete(next);
+    ordered.push(next);
   }
   return ordered;
 }
@@ -90,18 +92,20 @@ export function carryDependents(queue: readonly number[], issue: number, blocks:
   visit(issue);
   const at = queue.indexOf(issue);
   const carried = queue.filter((n, index) => index < at && waiting.has(n) && !pins.has(n));
-  const rest = queue.filter((n) => !carried.includes(n));
+  const moving = new Set(carried);
+  const rest = queue.filter((n) => !moving.has(n));
   rest.splice(rest.indexOf(issue) + 1, 0, ...carried);
   return rest;
 }
 
 /**
  * Each pinned task back at its place from before the operation, and the other tasks in the places
- * left, in their order after it. `before` and `after` hold the same tasks. Every order operation ends with this; a task the operation itself
- * pins, such as a dropped card, is left out of `pins`.
+ * left, in their order after it. `before` and `after` hold the same tasks. Every order operation ends
+ * with this; a task the operation itself pins, such as a dropped card, is left out of `pins`.
  */
 export function keepPins(before: readonly number[], after: readonly number[], pins: ReadonlySet<number>): number[] {
-  const stay = new Set(before.filter((n) => pins.has(n) && after.includes(n)));
+  const present = new Set(after);
+  const stay = new Set(before.filter((n) => pins.has(n) && present.has(n)));
   const places: (number | undefined)[] = after.map(() => undefined);
   before.forEach((n, index) => {
     if (stay.has(n)) places[index] = n;
