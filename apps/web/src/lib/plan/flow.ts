@@ -1,6 +1,7 @@
 import type { StepProgress } from "@handoff/core";
 import { orderTasks, skipReason, type IssueRun } from "@handoff/engine/candidates";
 import type { PlanItem, PlanSize } from "@handoff/github";
+import { ruleBreaks, type RuleBreak } from "./flow-order";
 
 /** An active run of the project: queued, running or waiting. */
 export type FlowRun = {
@@ -69,6 +70,8 @@ export type Flow = {
   rows: FlowRow[];
   /** From a blocker's card end to the start of the card it blocks. */
   arrows: { from: number; to: number }[];
+  /** Tasks placed before an open blocker in the queue; the flow still starts each after its blockers. */
+  breaks: RuleBreak[];
   /** Why the scheduler is held; the cards sit as if the hold cleared now. */
   held: string[];
   /** The latest card end, in minutes from now. */
@@ -201,6 +204,8 @@ export function layoutFlow(input: FlowInput): Flow {
   }
 
   const cardOf = new Map(cards.map((c) => [c.issue, c]));
+  const breaks = ruleBreaks(queue, new Map(queue.map((n) => [n, byNumber.get(n)!.blockedBy])));
+  const waitsFor = new Map(breaks.map((b) => [b.issue, b.waitsFor]));
   const arrows = cards.flatMap((c) => (byNumber.get(c.issue)?.blockedBy ?? []).filter((b) => cardOf.has(b)).map((from) => ({ from, to: c.issue })));
   const rows = input.tasks
     .filter((t) => t.kind === "task")
@@ -216,11 +221,13 @@ export function layoutFlow(input: FlowInput): Flow {
         ...(next !== undefined ? [`Next ${next}`] : []),
         ...(next !== undefined && input.pins.has(t.number) ? ["Pinned"] : []),
         ...(card?.after !== undefined ? [`After #${card.after}`] : []),
+        // A task without a card already names the issue it waits for outside the order.
+        ...(card && waitsFor.has(t.number) ? [`Waits for ${waitsFor.get(t.number)!.map((n) => `#${n}`).join(", ")}`] : []),
         ...((next !== undefined || shapingSet.has(t.number)) && !placeable.has(t.number) ? [`Waits for #${outside(t)}, not in the order`] : []),
         ...(input.held.length > 0 && t.number === queue[0] ? ["Waits for the hold"] : []),
       ];
       return { issue: t.number, tags };
     });
 
-  return { queue, cards, lanes, rows, arrows, held: input.held, end: Math.max(0, ...cards.map((c) => c.end)) };
+  return { queue, cards, lanes, rows, arrows, breaks, held: input.held, end: Math.max(0, ...cards.map((c) => c.end)) };
 }
