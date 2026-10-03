@@ -9,15 +9,19 @@ import type { PlanEpic, PlanTask } from "@/server/plan";
 import { unpinAction, writeOrderAction } from "@/app/projects/actions";
 import { switchToProjectOrderAction } from "@/app/projects/scheduler-actions";
 import { Tag } from "@/components/tag";
+import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { layoutFlow, reorderFlow, type Flow, type FlowCard, type FlowInput } from "@/lib/plan/flow";
 import { moveTo, ruleBreaks } from "@/lib/plan/flow-order";
 import { matchesQuery } from "@/lib/plan/search";
-import { DEFAULT_SIZE, lowerFirst, runsText, schedulerNote, type SchedulerBrief } from "@/lib/plan/flow-text";
+import { optimize } from "@/lib/plan/optimize";
+import { isMixed, isTicked, scopeName, scopeOf, selectionTree, togglePick, type SelectionTree } from "@/lib/plan/selection";
+import { appliedSentence, DEFAULT_SIZE, lowerFirst, runsText, schedulerNote, tasksText, type SchedulerBrief } from "@/lib/plan/flow-text";
 import { arrowPath, isHead, itemsOf, progressOf, rowLabel, tasksOf, timelineRows, type Placed, type TimelineRow } from "@/lib/plan/timeline-rows";
 import { cn } from "@/lib/utils";
 import { TaskActions, type StartRunContext } from "./plan-actions";
-import { useSearchQuery } from "./plan-context";
+import { OptimizePreview } from "./optimize-preview";
+import { useFlowSelection, useSearchQuery, type FlowSelectionControl } from "./plan-context";
 import { PlanFlowList } from "./plan-flow-list";
 import { PinButton, PinnedTag, PinSquare, RowTag, SizeBox, SlotSquare } from "./flow-parts";
 import { PriorityOrderDialog } from "./priority-order-dialog";
@@ -90,8 +94,11 @@ function usePaneWidth(scroller: RefObject<HTMLDivElement | null>) {
   return width;
 }
 
-/** What a card says to a screen reader: the task, its place and its slot, a running card's steps and what it waits for. */
-function cardName(card: FlowCard, task: PlanItem, breaks: ReadonlyMap<number, number[]>): string {
+/**
+ * What a card says to a screen reader: the task, its place and its slot, a running card's steps and what it
+ * waits for, and in Optimize's preview the place it moves from.
+ */
+function cardName(card: FlowCard, task: PlanItem, breaks: ReadonlyMap<number, number[]>, was?: number): string {
   const head = `#${task.number} ${task.title}`;
   if (card.kind === "running") {
     const steps = card.progress && card.progress.total > 0 ? `, ${card.progress.done} of ${card.progress.total} steps` : "";
@@ -99,7 +106,8 @@ function cardName(card: FlowCard, task: PlanItem, breaks: ReadonlyMap<number, nu
   }
   const place = card.kind === "next" ? `Next ${card.next}` : "Shaping";
   const waits = breaks.get(task.number);
-  return `${head}, ${place}, slot ${card.lane}${card.pinned ? ", pinned" : ""}${waits ? `, waits for ${waits.map((n) => `#${n}`).join(", ")}` : ""}`;
+  const moved = was !== undefined ? `, moved by Optimize from Next ${was}` : "";
+  return `${head}, ${place}, slot ${card.lane}${card.pinned ? ", pinned" : ""}${waits ? `, waits for ${waits.map((n) => `#${n}`).join(", ")}` : ""}${moved}`;
 }
 
 /** What waits on a person, as the row says it: a run that asks for a review, an answer or a permission. */
@@ -206,6 +214,7 @@ function CardView({
   drag,
   lifted,
   quiet,
+  was,
   onUnpin,
 }: {
   card: FlowCard;
@@ -217,6 +226,8 @@ function CardView({
   drag: DragProps | undefined;
   lifted: boolean;
   quiet: boolean;
+  /** In Optimize's preview, the Next place the card moves from. */
+  was: number | undefined;
   onUnpin: (issue: number) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -234,13 +245,15 @@ function CardView({
             data-card={card.kind}
             data-waiting={waiting || undefined}
             data-break={breaks.has(task.number) || undefined}
-            aria-label={cardName(card, task, breaks)}
+            data-preview={was !== undefined || undefined}
+            aria-label={cardName(card, task, breaks, was)}
             {...drag}
             className={cn(
               CARD,
               CARD_TONE[card.kind],
               waiting && "border-dashed ring-[3px] ring-attention-dot/30",
               breaks.has(task.number) && "border-l-[5px] border-l-danger-dot",
+              was !== undefined && "border-dashed ring-2 ring-active-dot/25",
               drag && "cursor-grab touch-none select-none hover:ring-1 hover:ring-foreground/60",
               lifted && "z-[7] cursor-grabbing shadow-lg ring-1 ring-foreground/60",
             )}
@@ -334,6 +347,8 @@ type CardDrag = {
   /** While a card moves or a dialog asks about a drop, hover cards stay closed. */
   quiet: boolean;
   onUnpin: (issue: number) => void;
+  /** Optimize's preview: each moved task's old Next place, and its old box on the axis. */
+  preview?: { was: ReadonlyMap<number, number>; ghosts: ReadonlyMap<number, { left: number; width: number }> } | undefined;
 };
 
 /** What a task's row shows on the axis: its card, with the wait before it; Done; or Not in the order. */
@@ -360,19 +375,33 @@ function TaskCell({
 }) {
   const card = cards.get(task.number);
   const moving = drag.moving?.issue === task.number ? drag.moving : undefined;
+  const ghost = moving?.ghost ?? drag.preview?.ghosts.get(task.number);
   if (card) {
     return (
       <>
         {card.after !== undefined && <WaitBox card={card} flow={flow} axis={axis} row={row} />}
-        {moving && (
+        {ghost && (
           <span
             aria-hidden
             data-ghost
+            title={moving ? undefined : "Where it is now"}
             className="absolute z-[1] rounded-[5px] border-[1.5px] border-dashed border-muted-foreground bg-foreground/5"
-            style={{ ...moving.ghost, top: (row.height - CARD_HEIGHT) / 2, height: CARD_HEIGHT }}
+            style={{ ...ghost, top: (row.height - CARD_HEIGHT) / 2, height: CARD_HEIGHT }}
           />
         )}
-        <CardView card={card} task={task} row={row} axis={axis} breaks={breaks} items={items} drag={drag.propsOf(card)} lifted={moving !== undefined} quiet={drag.quiet} onUnpin={drag.onUnpin} />
+        <CardView
+          card={card}
+          task={task}
+          row={row}
+          axis={axis}
+          breaks={breaks}
+          items={items}
+          drag={drag.propsOf(card)}
+          lifted={moving !== undefined}
+          quiet={drag.quiet}
+          was={card.kind === "next" ? drag.preview?.was.get(task.number) : undefined}
+          onUnpin={drag.onUnpin}
+        />
         {moving?.tip && <DragTip tip={moving.tip} left={boxOf(axis, card).left} />}
       </>
     );
@@ -401,10 +430,15 @@ function TaskCell({
 /** The tags a task's row shows under its title; Done and Not in the order show on the axis, Shaping in the status pill. */
 const ON_AXIS = new Set(["Done", "Not in the order", "Shaping"]);
 
-/** A Flow row's left cell: the tree's row with the task's size, and its tags under the title. */
+/** A row's tick box: ticked, half ticked when something under it is, or not. */
+type Tick = { checked: boolean | "indeterminate"; onClick: () => void };
+
+/** A Flow row's left cell: the tick box, the tree's row with the task's size, and its tags under the title. */
 function FlowRowLabel({
   row,
   tags,
+  tick,
+  was,
   projectId,
   start,
   onToggle,
@@ -412,6 +446,9 @@ function FlowRowLabel({
 }: {
   row: TimelineRow;
   tags: string[];
+  tick: Tick | undefined;
+  /** In Optimize's preview, the Next place the task moves from. */
+  was: number | undefined;
   projectId: string;
   start: StartRunContext;
   onToggle: () => void;
@@ -423,13 +460,14 @@ function FlowRowLabel({
     <RowLabel
       row={row}
       width={LABEL}
+      lead={tick && item && <Checkbox aria-label={`Select #${item.number}`} checked={tick.checked} onCheckedChange={tick.onClick} className="bg-card" />}
       onToggle={onToggle}
       aside={task && <SizeBox task={task} />}
       menu={task ? <TaskActions task={task} projectId={projectId} start={start} compact /> : item && <ItemMenu item={item} />}
       below={
         shown.length > 0 && (
           <div className="flex min-w-0 items-center gap-1 overflow-hidden">
-            {shown.map((t) => (t === "Pinned" && task ? <PinnedTag key={t} issue={task.number} onUnpin={onUnpin} /> : <RowTag key={t} text={t} />))}
+            {shown.map((t) => (t === "Pinned" && task ? <PinnedTag key={t} issue={task.number} onUnpin={onUnpin} /> : <RowTag key={t} text={t} was={t.startsWith("Next ") ? was : undefined} />))}
           </div>
         )
       }
@@ -569,16 +607,30 @@ const issuesText = (list: readonly number[]) => {
 const sameList = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((n, i) => n === b[i]);
 
 /** A new order of the queue to write: the queue GitHub holds and the new one, the pins before and after, and the pin changes. */
-type OrderChange = {
-  issue: number;
+type OrderWrite = {
   shown: number[];
   queue: number[];
   before: ReadonlySet<number>;
   pins: ReadonlySet<number>;
   pin?: number[] | undefined;
   unpin?: number[] | undefined;
+  reason?: "keep_here" | undefined;
+};
+
+/** A drop's write: the task that moved, and Keep it here's blockers. */
+type OrderChange = OrderWrite & {
+  issue: number;
   /** Keep it here: the task stays where it was dropped, before the blockers it waits for. */
   keep?: { waitsFor: number[] } | undefined;
+};
+
+/** What a write's toasts say: while it saves, after it is refused, and once GitHub took it, with its Undo. */
+type WriteText = {
+  saving: string;
+  back: string;
+  title: string;
+  description: string;
+  undo?: (() => void) | undefined;
 };
 
 /** A drop of `issue` that gives `queue`: the card is pinned at its new place. */
@@ -606,8 +658,8 @@ const undoOf = (c: OrderChange): OrderChange => ({
 type Local = { input: FlowInput; queue?: number[] | undefined; pins?: ReadonlySet<number> | undefined; order?: "project" | undefined };
 
 /**
- * The Flow's writes (docs/plans/flow.md, Decision 9), the timeline's useMoves pattern: a drop, a dialog's choice
- * and their Undo write the queue's new order at once, with a saving toast, then one that names the move with
+ * The Flow's writes (docs/plans/flow.md, Decision 9), the timeline's useMoves pattern: a drop, a dialog's choice,
+ * Optimize's Apply and their Undo write the queue's new order at once, with a saving toast, then one that names the move with
  * Undo, or one that says GitHub refused it with Try again. The cards show the new order until the next read
  * from GitHub, and go back when the write is refused. The pin on a card unpins it the same way.
  */
@@ -627,12 +679,9 @@ function useOrderWrites(projectId: string, input: FlowInput) {
 
   const put = (patch: Omit<Local, "input">) => setLocal((s) => ({ ...(s.input === latest.current ? s : { input: latest.current }), ...patch }));
 
-  const save = (c: OrderChange, undo = false) => {
-    const n = c.issue;
-    const from = c.shown.indexOf(n) + 1;
-    const to = c.queue.indexOf(n) + 1;
-    const moved = `#${n} ${c.keep || from === to ? "stays at" : "moves to"} Next ${to}`;
-    const id = toast.loading("Saving the order to GitHub", { description: undo ? `#${n} goes back to Next ${to}` : moved });
+  /** Writes the order with the toasts `text` names; the cards show it at once and go back when GitHub refuses it. */
+  const commit = (c: OrderWrite, text: WriteText) => {
+    const id = toast.loading("Saving the order to GitHub", { description: text.saving });
     put({ queue: c.queue, pins: c.pins });
     startTransition(async () => {
       const result = await writeOrderAction({
@@ -641,28 +690,52 @@ function useOrderWrites(projectId: string, input: FlowInput) {
         queue: c.queue,
         ...(c.pin ? { pin: c.pin } : {}),
         ...(c.unpin ? { unpin: c.unpin } : {}),
-        ...(c.keep ? { reason: "keep_here" as const } : {}),
+        ...(c.reason ? { reason: c.reason } : {}),
       });
       if (!result.ok) {
         put({ queue: c.shown, pins: c.before });
         toast.error("GitHub did not take the order", {
           id,
-          description: `#${n} is back at Next ${from}.${result.error ? ` ${result.error}` : ""}`,
-          action: { label: "Try again", onClick: () => save(c, undo) },
+          description: `${text.back}${result.error ? ` ${result.error}` : ""}`,
+          action: { label: "Try again", onClick: () => commit(c, text) },
         });
         return;
       }
       startTransition(() => router.refresh());
-      if (undo) {
-        toast.success(`Put #${n} back at Next ${to}`, { id, description: "Saved to GitHub in Project order." });
-        return;
-      }
-      toast.success(moved, {
-        id,
-        description: c.keep ? `Pinned. It waits for ${issuesText(c.keep.waitsFor)}.` : `Saved to GitHub in Project order. #${n} is pinned.`,
-        action: { label: "Undo", onClick: () => save(undoOf(c), true) },
-      });
+      toast.success(text.title, { id, description: text.description, ...(text.undo ? { action: { label: "Undo", onClick: text.undo } } : {}) });
     });
+  };
+
+  /** A drop or a dialog's choice, and its Undo. */
+  const save = (c: OrderChange, undo = false) => {
+    const n = c.issue;
+    const from = c.shown.indexOf(n) + 1;
+    const to = c.queue.indexOf(n) + 1;
+    const moved = `#${n} ${c.keep || from === to ? "stays at" : "moves to"} Next ${to}`;
+    commit(
+      { ...c, reason: c.keep ? "keep_here" : undefined },
+      undo
+        ? { saving: `#${n} goes back to Next ${to}`, back: `#${n} is back at Next ${from}.`, title: `Put #${n} back at Next ${to}`, description: "Saved to GitHub in Project order." }
+        : {
+            saving: moved,
+            back: `#${n} is back at Next ${from}.`,
+            title: moved,
+            description: c.keep ? `Pinned. It waits for ${issuesText(c.keep.waitsFor)}.` : `Saved to GitHub in Project order. #${n} is pinned.`,
+            undo: () => save(undoOf(c), true),
+          },
+    );
+  };
+
+  /** Optimize's Apply: the new order with no pin changes, and its Undo, which writes the old order back. */
+  const applyOptimized = (shownQueue: number[], queue: number[], text: { scope: string; moved: number; kept: number }) => {
+    const pins = shown.pins;
+    const back = "The order is back as it was.";
+    const undo = () =>
+      commit({ shown: queue, queue: shownQueue, before: pins, pins }, { saving: "The order goes back", back: "The optimized order stays.", title: "Put the order back", description: "Saved to GitHub in Project order." });
+    commit(
+      { shown: shownQueue, queue, before: pins, pins },
+      { saving: `Moving ${tasksText(text.moved)}`, back, title: `Optimized ${text.scope}`, description: appliedSentence(text.moved, text.kept), undo },
+    );
   };
 
   const unpin = (n: number) => {
@@ -692,7 +765,7 @@ function useOrderWrites(projectId: string, input: FlowInput) {
       then();
     });
 
-  return { shown, save, unpin, switchToProject };
+  return { shown, save, applyOptimized, unpin, switchToProject };
 }
 
 /** A drop that asks first: to switch to Project order, or where a task placed before its blocker goes. */
@@ -780,7 +853,30 @@ function useFlowDrops(projectId: string, input: FlowInput, width: number) {
     choose,
     cancel: () => setPending(undefined),
     unpin: writes.unpin,
+    applyOptimized: writes.applyOptimized,
+    switchToProject: writes.switchToProject,
   };
+}
+
+/**
+ * Optimize's preview (docs/plans/flow.md, Decision 11): while the person asks for it, the queue arranged over
+ * the ticked items, or the whole queue, with the flow it gives and each moved task's old Next place. Pins and
+ * tasks outside the selection keep their places. Under Priority order there is no preview: the order of the
+ * tasks does not decide what starts.
+ */
+function useOptimizePreview(input: FlowInput, flow: Flow, selection: FlowSelectionControl | undefined, tree: SelectionTree) {
+  const previewing = selection?.previewing ?? false;
+  const picks = selection?.picks;
+  return useMemo(() => {
+    if (!previewing || !picks || input.order !== "project") return undefined;
+    const result = optimize({ queue: flow.queue, tasks: input.tasks, minutes: input.minutes, priorityOptions: input.priorityOptions, pins: input.pins, scope: scopeOf(picks, tree) });
+    return {
+      ...result,
+      before: flow.queue,
+      flow: layoutFlow(reorderFlow(input, result.queue)),
+      was: new Map(result.moved.map((m) => [m.issue, m.from])),
+    };
+  }, [previewing, picks, input, flow, tree]);
 }
 
 /** Each task's open blockers turned around: the tasks each one blocks. */
@@ -804,9 +900,20 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
   const q = useSearchQuery();
   const drops = useFlowDrops(projectId, given, width);
   const { input, place } = drops;
-  // While a card moves, the flow shows the order it would give, on an axis that fits both.
-  const flow = place?.flow ?? drops.flow;
-  const axis = axisOf(place ? { cards: [...drops.flow.cards, ...flow.cards], end: Math.max(drops.flow.end, flow.end) } : flow, width);
+  const selection = useFlowSelection();
+  const tree = useMemo(() => selectionTree(epics, unparented), [epics, unparented]);
+  const tickOf = (row: TimelineRow): Tick | undefined => {
+    if (!selection || !row.item) return undefined;
+    const n = row.item.number;
+    return {
+      checked: isTicked(selection.picks, tree, n) || (isMixed(selection.picks, tree, n) && "indeterminate"),
+      onClick: () => selection.setPicks(togglePick(selection.picks, tree, n)),
+    };
+  };
+  const optimized = useOptimizePreview(input, drops.flow, selection, tree);
+  // While a card moves or Optimize shows its preview, the flow shows the order it would give, on an axis that fits both.
+  const flow = place?.flow ?? optimized?.flow ?? drops.flow;
+  const axis = axisOf(flow !== drops.flow ? { cards: [...drops.flow.cards, ...flow.cards], end: Math.max(drops.flow.end, flow.end) } : flow, width);
   const cards = new Map(flow.cards.map((c) => [c.issue, c]));
   const tags = new Map(flow.rows.map((r) => [r.issue, r.tags]));
   const breaks = new Map(flow.breaks.map((b) => [b.issue, b.waitsFor]));
@@ -816,14 +923,32 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
   const was = place && drops.flow.cards.find((c) => c.issue === place.issue);
   const landed = place && cards.get(place.issue);
   const drag: CardDrag = {
-    propsOf: (card) => (card.kind === "next" && !drops.asking ? drops.drag.cardProps(card.issue) : undefined),
+    // Cards do not drag while Optimize shows its preview.
+    propsOf: (card) => (card.kind === "next" && !drops.asking && !optimized ? drops.drag.cardProps(card.issue) : undefined),
     moving: place && was ? { issue: place.issue, ghost: boxOf(axis, was), tip: drops.tip } : undefined,
     quiet: place !== undefined,
     onUnpin: drops.unpin,
+    preview: optimized && {
+      was: optimized.was,
+      ghosts: new Map(drops.flow.cards.filter((c) => optimized.was.has(c.issue)).map((c) => [c.issue, boxOf(axis, c)])),
+    },
   };
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
+      {optimized && selection && (
+        <OptimizePreview
+          moved={optimized.moved.length}
+          kept={optimized.kept.length}
+          scope={scopeName(selection.picks, tree)}
+          selected={selection.picks.size > 0}
+          onApply={() => {
+            selection.setPreviewing(false);
+            drops.applyOptimized(optimized.before, optimized.queue, { scope: scopeName(selection.picks, tree), moved: optimized.moved.length, kept: optimized.kept.length });
+          }}
+          onCancel={() => selection.setPreviewing(false)}
+        />
+      )}
       <div ref={scroller} className="overflow-x-auto overscroll-x-contain">
         <div role="grid" aria-label="Flow" aria-rowcount={rows.length + 1} className="relative text-[13px]" style={{ width: LABEL + axis.width, minWidth: "100%" }}>
           <div role="rowgroup">
@@ -850,6 +975,8 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
                 <FlowRowLabel
                   row={row}
                   tags={(row.task && tags.get(row.task.number)) ?? []}
+                  tick={tickOf(row)}
+                  was={row.task && optimized?.was.get(row.task.number)}
                   projectId={projectId}
                   start={{ graphs, graphName }}
                   onToggle={() => rowsOpen.toggle(row.key)}
@@ -868,6 +995,18 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
         </div>
       </div>
       <PriorityOrderDialog open={drops.priority} onSwitch={drops.switchOrder} onCancel={drops.cancel} />
+      {selection && (
+        <PriorityOrderDialog
+          open={selection.previewing && input.order === "priority"}
+          asking="optimize"
+          onSwitch={() => {
+            // The preview opens once the scheduler orders by Project order.
+            selection.setPreviewing(false);
+            drops.switchToProject(() => selection.setPreviewing(true));
+          }}
+          onCancel={() => selection.setPreviewing(false)}
+        />
+      )}
       <RuleBreakDialog drop={drops.ruleDrop} titleOf={(n) => items.get(n)?.title} onMove={drops.choose} onCancel={drops.cancel} />
     </div>
   );
