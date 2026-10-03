@@ -1,0 +1,141 @@
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
+import { SETTING_CONFIGURATION, type LaunchConfiguration } from "@handoff/core";
+import { projects } from "@handoff/db";
+import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { createOriginRepo } from "../testing/git.ts";
+import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
+import { launchTestOf, startLaunchTest, stopLaunchTest } from "./launch-test.ts";
+
+const db = createTestDb();
+const pids: number[] = [];
+beforeEach(() => truncateAll(db));
+afterEach(() => {
+  for (const pid of pids.splice(0)) {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {}
+  }
+});
+afterAll(() => db.$client.end());
+
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const server = `require("node:http").createServer((_, res) => res.end("hello from " + process.env.PORT)).listen(Number(process.env.PORT));`;
+
+/** The App launch form's configuration, as the project settings page passes it. */
+const form = (overrides: Partial<LaunchConfiguration> = {}): LaunchConfiguration => ({
+  name: SETTING_CONFIGURATION,
+  runtimeExecutable: "node",
+  runtimeArgs: ["app.js"],
+  args: [],
+  port: 3000,
+  env: {},
+  ...overrides,
+});
+
+/** A project whose repository holds `files` on main, and the dependencies a Test start needs. */
+async function project(files: Record<string, string>, values: Partial<typeof projects.$inferInsert> = {}) {
+  const origin = createOriginRepo(files);
+  const [row] = await db
+    .insert(projects)
+    .values({ name: `p-${crypto.randomUUID()}`, repoOwner: "o", repoName: "r", defaultBranch: "main", localClonePath: origin, ...values })
+    .returning();
+  const deps = { db, workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) };
+  return { project: row!, deps, origin };
+}
+
+const headOf = (origin: string) => execFileSync("git", ["rev-parse", "--short", "main"], { cwd: origin }).toString().trim();
+
+test("Test start runs the form's app from a fresh worktree of the default branch, step by step, until it is stopped", async () => {
+  const { project: p, deps, origin } = await project({ "app.js": server }, { setupCommand: "touch installed", demoSeedCommand: "test -f installed" });
+  const { test: started, finished } = await startLaunchTest(deps, { projectId: p.id, launch: form(), readyTimeoutMs: 10_000 });
+  expect(started).toMatchObject({ status: "starting", command: "node app.js" });
+
+  const ready = await finished;
+  pids.push(ready.pid!);
+  expect(ready).toMatchObject({ status: "ready", url: `http://localhost:${ready.port}`, readyAt: expect.any(Date) });
+  expect(ready.stopsAt.getTime() - ready.createdAt.getTime()).toBe(10 * 60_000);
+  expect(ready.steps).toEqual([
+    { name: "worktree", status: "done", detail: `A fresh worktree of main at ${headOf(origin)}`, ms: expect.any(Number) },
+    { name: "setup", status: "done", detail: "`touch installed` exited 0", ms: expect.any(Number) },
+    { name: "services", status: "done", detail: "None in the repository", ms: expect.any(Number) },
+    { name: "seed", status: "done", detail: "`test -f installed` exited 0", ms: expect.any(Number) },
+    { name: "app", status: "done", detail: `Listening on port ${ready.port}`, ms: expect.any(Number) },
+  ]);
+  expect(await (await fetch(`http://127.0.0.1:${ready.port}`)).text()).toBe(`hello from ${ready.port}`);
+  expect(existsSync(ready.worktreePath!)).toBe(true);
+
+  await stopLaunchTest(deps, ready.id);
+  await expect.poll(() => alive(ready.pid!)).toBe(false);
+  expect(existsSync(ready.worktreePath!)).toBe(false);
+  expect(await launchTestOf(deps, p.id)).toMatchObject({ test: { status: "stopped", stoppedAt: expect.any(Date) } });
+});
+
+test("an app that does not start fails with why and the end of its output, and leaves no worktree behind", async () => {
+  const { project: p, deps } = await project({ "app.js": `console.error("Cannot find module vite"); process.exit(1);` });
+  const { finished } = await startLaunchTest(deps, { projectId: p.id, launch: form(), readyTimeoutMs: 10_000 });
+  const failed = await finished;
+  expect(failed).toMatchObject({ status: "failed", error: "The app exited with code 1 before it was up:", log: expect.stringContaining("Cannot find module vite") });
+  expect(failed.steps.at(-1)).toMatchObject({ name: "app", status: "failed", detail: "Exited with code 1" });
+  expect(existsSync(failed.worktreePath!)).toBe(false);
+});
+
+test("a setup command that fails stops the Test start there, with its output", async () => {
+  const { project: p, deps } = await project({ "app.js": server }, { setupCommand: "echo no lockfile; exit 3" });
+  const failed = await (await startLaunchTest(deps, { projectId: p.id, launch: form() })).finished;
+  expect(failed).toMatchObject({ status: "failed", error: expect.stringMatching(/setup command `echo no lockfile; exit 3` exited 3/), log: expect.stringContaining("no lockfile") });
+  expect(failed.steps.map((s) => [s.name, s.status])).toEqual([
+    ["worktree", "done"],
+    ["setup", "failed"],
+  ]);
+});
+
+test("the repository's launch file wins over the form", async () => {
+  const file = JSON.stringify({ configurations: [{ name: "web", runtimeExecutable: "node", runtimeArgs: ["app.js", "--from-file"] }] });
+  const { project: p, deps } = await project({ ".claude/launch.json": file, "app.js": server });
+  const ready = await (await startLaunchTest(deps, { projectId: p.id, launch: form({ runtimeArgs: ["missing.js"] }), readyTimeoutMs: 10_000 })).finished;
+  pids.push(ready.pid!);
+  expect(ready).toMatchObject({ status: "ready", command: "node app.js --from-file" });
+  await stopLaunchTest(deps, ready.id);
+});
+
+test("a Test start stops by itself when its time is up, and a new one stops the one before", async () => {
+  const { project: p, deps } = await project({ "app.js": server });
+  const first = await (await startLaunchTest(deps, { projectId: p.id, launch: form(), readyTimeoutMs: 10_000 })).finished;
+  pids.push(first.pid!);
+  const second = await (await startLaunchTest(deps, { projectId: p.id, launch: form(), readyTimeoutMs: 10_000, lifetimeMs: 1_000 })).finished;
+  pids.push(second.pid!);
+  await expect.poll(() => alive(first.pid!)).toBe(false);
+  expect(second.status).toBe("ready");
+
+  await expect.poll(() => alive(second.pid!), { timeout: 10_000 }).toBe(false);
+  await expect.poll(async () => (await launchTestOf(deps, p.id))?.test.status, { timeout: 10_000 }).toBe("stopped");
+});
+
+test("reading a Test start past its time stops it, as after the dashboard restarted", async () => {
+  const { project: p, deps } = await project({ "app.js": server });
+  const ready = await (await startLaunchTest(deps, { projectId: p.id, launch: form(), readyTimeoutMs: 10_000, lifetimeMs: 60_000, timer: false })).finished;
+  pids.push(ready.pid!);
+  const now = new Date(ready.stopsAt.getTime() + 1);
+  expect(await launchTestOf(deps, p.id, now)).toMatchObject({ test: { status: "stopped" } });
+  await expect.poll(() => alive(ready.pid!)).toBe(false);
+});
+
+test("a ready Test start shows the end of the app's log", async () => {
+  const { project: p, deps } = await project({ "app.js": `console.log("compiled in 2.1s"); ${server}` });
+  const ready = await (await startLaunchTest(deps, { projectId: p.id, launch: form(), readyTimeoutMs: 10_000 })).finished;
+  pids.push(ready.pid!);
+  await expect.poll(async () => (await launchTestOf(deps, p.id))?.log).toContain("compiled in 2.1s");
+  await stopLaunchTest(deps, ready.id);
+});

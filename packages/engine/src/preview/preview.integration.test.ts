@@ -4,6 +4,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
+import { SETTING_CONFIGURATION, type LaunchConfiguration } from "@handoff/core";
 import { eq, previews } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
 import { cancelRun } from "../operations.ts";
@@ -44,11 +45,26 @@ function worktree(files: Record<string, string>) {
 const launch = (config: Record<string, unknown>) => JSON.stringify({ version: "0.0.1", configurations: [{ name: "web", runtimeExecutable: "node", ...config }] });
 const server = `require("node:http").createServer((_, res) => res.end("hello from " + process.env.PORT)).listen(Number(process.env.PORT));`;
 
-async function start(files: Record<string, string>, opts: { readyTimeoutMs?: number } = {}) {
+async function start(files: Record<string, string>, opts: { readyTimeoutMs?: number; launch?: LaunchConfiguration | null } = {}) {
   const { run, project } = await seedRun(db);
   const workdir = worktree(files);
-  return { run, workdir, preview: () => startPreview({ db, workerId: "w1" }, { runId: run.id, projectId: project.id, workdir, readyTimeoutMs: opts.readyTimeoutMs ?? 10_000 }) };
+  return {
+    run,
+    workdir,
+    preview: () => startPreview({ db, workerId: "w1" }, { runId: run.id, projectId: project.id, workdir, readyTimeoutMs: opts.readyTimeoutMs ?? 10_000, launch: opts.launch ?? null }),
+  };
 }
+
+/** The project's App launch setting, as the form saves it. */
+const setting = (overrides: Partial<LaunchConfiguration> = {}): LaunchConfiguration => ({
+  name: SETTING_CONFIGURATION,
+  runtimeExecutable: "node",
+  runtimeArgs: ["app.js"],
+  args: [],
+  port: 3000,
+  env: {},
+  ...overrides,
+});
 
 test("a run's app starts from its worktree on a free port it is told in PORT, and stops with its whole process group", async () => {
   const { preview } = await start({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"], port: 3000 }), "app.js": server });
@@ -90,9 +106,32 @@ test("an app that must have its port fails when the port is taken", async () => 
   }
 });
 
-test("a repository without a launch file says how to add one", async () => {
+test("a repository without a launch file or an App launch setting says how to add either", async () => {
   const { preview } = await start({ "README.md": "hi" });
-  await expect(preview()).rejects.toThrow(/\.claude\/launch\.json/);
+  await expect(preview()).rejects.toThrow(/no \.claude\/launch\.json.*App launch/s);
+});
+
+test("a repository without a launch file starts the app as the project's App launch setting says", async () => {
+  const { preview } = await start({ "web/app.js": server }, { launch: setting({ cwd: "web", url: "http://localhost:3000/shop", env: { GREETING: "hi" } }) });
+  const row = await preview();
+  started.push(row.pid!);
+  expect(row).toMatchObject({ status: "running", configuration: SETTING_CONFIGURATION, url: `http://localhost:${row.port}/shop` });
+  expect(await (await fetch(`http://127.0.0.1:${row.port}`)).text()).toBe(`hello from ${row.port}`);
+});
+
+test("the repository's launch file wins over the App launch setting", async () => {
+  const { preview } = await start({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": server }, { launch: setting({ runtimeArgs: ["missing.js"] }) });
+  const row = await preview();
+  started.push(row.pid!);
+  expect(row).toMatchObject({ status: "running", configuration: "web" });
+});
+
+test("an App launch setting whose app never listens says to turn off Any free port, not to edit a file", async () => {
+  const { preview } = await start({ "app.js": "setInterval(() => {}, 1000);" }, { launch: setting(), readyTimeoutMs: 1_000 });
+  const error = await preview().catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(PreviewError);
+  expect((error as Error).message).toMatch(/turn off Any free port/);
+  expect((error as Error).message).not.toMatch(/launch\.json/);
 });
 
 test("a worker stops the previews it left running when it starts again", async () => {

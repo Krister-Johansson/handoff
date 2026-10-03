@@ -210,7 +210,8 @@ async function reap(deps: EngineDeps) {
   }
 }
 
-function defaultRemote(project: typeof projects.$inferSelect): string {
+/** Where a project's code is fetched from: its local clone when it has one, else its GitHub repository. */
+export function defaultRemote(project: typeof projects.$inferSelect): string {
   return project.localClonePath ?? `https://github.com/${project.repoOwner}/${project.repoName}.git`;
 }
 

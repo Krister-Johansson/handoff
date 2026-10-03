@@ -184,8 +184,23 @@ test("a demo set to UI changes in a repository without a launch file leaves thro
   const { run } = await demoRun(cli, { document: uiGraph, files: { "README.md": "no launch file" }, writes: { "src/components/task-list.tsx": "export {};\n" } });
   const { run: row, executions } = await inspect(db, run.id);
   expect(row.status).toBe("succeeded");
-  expect(executions.find((e) => e.nodeKey === "demo")!.output).toMatchObject({ skipped: true, reason: expect.stringContaining(".claude/launch.json") });
+  expect(executions.find((e) => e.nodeKey === "demo")!.output).toMatchObject({ skipped: true, reason: expect.stringMatching(/\.claude\/launch\.json.*App launch/s) });
   expect(cli.requests).toHaveLength(0);
+});
+
+test("a repository without a launch file demos its UI changes from the project's App launch setting", async () => {
+  const seen: { page?: string } = {};
+  const setting = { name: "app", runtimeExecutable: "node", runtimeArgs: ["app.js"], args: [], port: 3000, env: {} };
+  const { run } = await demoRun(readsTheApp(seen), {
+    document: uiGraph,
+    files: { "app.js": app },
+    writes: { "src/components/task-list.tsx": "export {};\n" },
+    project: { launch: setting },
+  });
+  const { executions } = await inspect(db, run.id);
+  expect(executions.find((e) => e.nodeKey === "demo")).toMatchObject({ status: "passed" });
+  expect(seen.page).toBeDefined();
+  expect((await db.select().from(previews).where(eq(previews.runId, run.id)))[0]).toMatchObject({ configuration: "app" });
 });
 
 test("the seed command runs after services start and before the app", async () => {

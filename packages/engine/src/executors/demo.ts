@@ -65,8 +65,10 @@ async function skipReason(ctx: ExecutorContext, workdir: string): Promise<string
   const paths = uiPathsOf(ctx.project.uiPaths);
   const files = await changedFiles(workdir, ctx.run.baseBranch);
   if (files.some((file) => isOwned(file, paths))) {
-    // A template demos UI changes; a repository that has not said how to start its app has no demo to give.
-    if (!existsSync(join(workdir, LAUNCH_FILE))) return `This repository has no ${LAUNCH_FILE}, so handoff cannot start the app to show the change. Add one to demo UI changes.`;
+    // A template demos UI changes; a project that has not said how to start its app has no demo to give.
+    if (!existsSync(join(workdir, LAUNCH_FILE)) && !ctx.project.launch) {
+      return `This repository has no ${LAUNCH_FILE} and the project has no App launch setting, so handoff cannot start the app to show the change. Set one in Project settings, App launch, to demo UI changes.`;
+    }
     return undefined;
   }
   if (!files.length) return "The change has no files, so there is nothing new to show in the app.";
@@ -103,6 +105,7 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
             signal: ctx.signal,
             note: (message) => ctx.emit("preview.note", { message }),
             seedCommand: ctx.project.demoSeedCommand,
+            launch: ctx.project.launch,
             passEnv: passEnvOf(ctx.node.config),
             ...(options.docker ? { docker: options.docker } : {}),
           },

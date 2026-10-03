@@ -19,3 +19,4 @@ export * from "./permission-requests.ts";
 export * from "./assistant.ts";
 export * from "./schedulers.ts";
 export * from "./plan-pins.ts";
+export * from "./launch-tests.ts";
