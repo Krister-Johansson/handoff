@@ -8,6 +8,7 @@ export * from "./graph/compile.ts";
 export * from "./graph/routing.ts";
 export * from "./graph/ports.ts";
 export * from "./graph/notify.ts";
+export * from "./graph/progress.ts";
 export * from "./preview/launch.ts";
 export * from "./preview/ui-paths.ts";
 export * from "./preview/warnings.ts";
