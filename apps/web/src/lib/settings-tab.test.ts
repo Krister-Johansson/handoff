@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { libraryRedirectPath, parseProjectSettingsTab, parseSettingsTab, projectSettingsPath, settingsPath } from "./settings-tab";
+import { libraryRedirectPath, parseProjectSettingsTab, parseSettingsTab, projectSettingsPath, projectSettingsTabLabel, settingsPath } from "./settings-tab";
 
 test("the settings tab comes from ?tab=, Projects, the first section, unless another known tab is asked for", () => {
   expect(parseSettingsTab({})).toBe("projects");
@@ -36,4 +36,11 @@ test("the project settings tab comes from ?tab=, Graphs, the first section, unle
   expect(parseProjectSettingsTab({ tab: ["library"] })).toBe("graphs");
   expect(projectSettingsPath("p1")).toBe("/projects/p1/settings");
   expect(projectSettingsPath("p1", "graphs")).toBe("/projects/p1/settings?tab=graphs");
+});
+
+test("the estimates section is Estimates in a Timeline project and Plan budget in a Flow project; the other names keep to every mode", () => {
+  expect(projectSettingsTabLabel("estimates", "timeline")).toBe("Estimates");
+  expect(projectSettingsTabLabel("estimates", "flow")).toBe("Plan budget");
+  expect(projectSettingsTabLabel("scheduler", "flow")).toBe("Scheduler");
+  expect(projectSettingsTabLabel("library", "timeline")).toBe("Default library");
 });

@@ -194,4 +194,15 @@ test("capacity, forecasts and the plan budget are in project settings, not here"
   fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
   expect(screen.queryByText("Plan budget", { selector: "dt" })).not.toBeInTheDocument();
   expect(within(detail("Estimates")).getByRole("link", { name: "Project settings, Estimates" })).toHaveAttribute("href", "/projects/p1/settings?tab=estimates");
+  expect(detail("Estimates")).toHaveTextContent("Capacity, forecasts and the plan budget are in Project settings, Estimates.");
+});
+
+test("a Flow project points to its plan budget only, since it has no capacity or forecasts", () => {
+  render(<ProjectsSettings projects={[{ ...handoff, planMode: "flow" }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(screen.queryByText("Estimates", { selector: "dt" })).not.toBeInTheDocument();
+  const row = detail("Plan budget");
+  expect(row).toHaveTextContent("The plan budget is in Project settings, Plan budget.");
+  expect(row).not.toHaveTextContent(/capacity|forecast/i);
+  expect(within(row).getByRole("link", { name: "Project settings, Plan budget" })).toHaveAttribute("href", "/projects/p1/settings?tab=estimates");
 });

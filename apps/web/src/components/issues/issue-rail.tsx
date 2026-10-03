@@ -274,27 +274,38 @@ function StoryTimeline({ place, timeline, projectId, epic }: { place: PlannedSto
   );
 }
 
+/** The rail's sections for an issue of the plan, by kind. A Flow project's epic has no Dates, since it plans an order without dates. */
+function plannedSections(page: FoundIssue, place: PlannedTask | PlannedStory | PlannedEpic, projectId: string, today: string) {
+  if (place.kind === "task") {
+    return [
+      <InThePlan key="plan" place={place} />,
+      <PartOf key="part" parents={place.parents} />,
+      <BlockedBy key="blocked" page={page} />,
+      <Blocks key="blocks" page={page} />,
+      <Pulls key="pulls" pulls={page.pulls} title="Pull request" empty="None yet. The run's pull request shows here when it opens." />,
+    ];
+  }
+  if (place.kind === "story") {
+    return [
+      <Progress key="progress" progress={place.item.progress} />,
+      <PartOf key="part" parents={place.parents} />,
+      ...(place.timeline ? [<StoryTimeline key="timeline" place={place} timeline={place.timeline} projectId={projectId} epic={place.parents[0]?.number} />] : []),
+      <Pulls key="pulls" pulls={page.pulls} title="Pull requests" empty="None of its tasks has a pull request yet." />,
+    ];
+  }
+  return [
+    <Progress key="progress" progress={place.item.progress} every />,
+    ...(page.planMode === "timeline" ? [<Dates key="dates" place={place} today={today} />] : []),
+    <Waiting key="waiting" place={place} />,
+  ];
+}
+
 /** The right rail: where the issue sits, by kind. Below 768 px it sits between the first section and the description. */
 export function IssueRail({ page, projectId, today }: { page: FoundIssue; projectId: string; today: string }) {
   const { place } = page;
-  const sections = !place.planned
-    ? [<NotInThePlan key="plan" place={place} number={page.issue.number} />, <BlockedBy key="blocked" page={page} />, ...(page.blocking.length ? [<Blocks key="blocks" page={page} />] : []), <Pulls key="pulls" pulls={page.pulls} title="Pull request" empty="None yet." />]
-    : place.kind === "task"
-      ? [
-          <InThePlan key="plan" place={place} />,
-          <PartOf key="part" parents={place.parents} />,
-          <BlockedBy key="blocked" page={page} />,
-          <Blocks key="blocks" page={page} />,
-          <Pulls key="pulls" pulls={page.pulls} title="Pull request" empty="None yet. The run's pull request shows here when it opens." />,
-        ]
-      : place.kind === "story"
-        ? [
-            <Progress key="progress" progress={place.item.progress} />,
-            <PartOf key="part" parents={place.parents} />,
-            ...(place.timeline ? [<StoryTimeline key="timeline" place={place} timeline={place.timeline} projectId={projectId} epic={place.parents[0]?.number} />] : []),
-            <Pulls key="pulls" pulls={page.pulls} title="Pull requests" empty="None of its tasks has a pull request yet." />,
-          ]
-        : [<Progress key="progress" progress={place.item.progress} every />, <Dates key="dates" place={place} today={today} />, <Waiting key="waiting" place={place} />];
+  const sections = place.planned
+    ? plannedSections(page, place, projectId, today)
+    : [<NotInThePlan key="plan" place={place} number={page.issue.number} />, <BlockedBy key="blocked" page={page} />, ...(page.blocking.length ? [<Blocks key="blocks" page={page} />] : []), <Pulls key="pulls" pulls={page.pulls} title="Pull request" empty="None yet." />];
   return (
     <aside aria-label={`Where #${page.issue.number} sits`} className="min-w-0 [grid-area:rail] lg:self-start">
       <Card className="gap-0 py-0">

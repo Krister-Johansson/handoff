@@ -34,7 +34,7 @@ test("the library is a group of Settings after Projects, one section per kind", 
 });
 
 test("project settings has Runs with Graphs and Default library, and Plan with Plan mode, the Scheduler and Estimates", () => {
-  render(<ProjectSettingsNav projectId="p1" active="library" />);
+  render(<ProjectSettingsNav projectId="p1" mode="timeline" active="library" />);
   const nav = screen.getByRole("navigation", { name: "Project settings sections" });
   expect(links(within(nav).getByRole("group", { name: "Runs" }))).toEqual([
     ["Graphs", "/projects/p1/settings?tab=graphs"],
@@ -47,4 +47,15 @@ test("project settings has Runs with Graphs and Default library, and Plan with P
   ]);
   expect(within(nav).getByRole("link", { name: "Default library" })).toHaveAttribute("aria-current", "page");
   expect(within(nav).getByRole("link", { name: "Graphs" })).not.toHaveAttribute("aria-current");
+});
+
+test("a Flow project's Plan group names the estimates section Plan budget, since it has no capacity or forecasts", () => {
+  render(<ProjectSettingsNav projectId="p1" mode="flow" active="estimates" />);
+  const plan = within(screen.getByRole("navigation", { name: "Project settings sections" })).getByRole("group", { name: "Plan" });
+  expect(links(plan)).toEqual([
+    ["Plan mode", "/projects/p1/settings?tab=mode"],
+    ["Scheduler", "/projects/p1/settings?tab=scheduler"],
+    ["Plan budget", "/projects/p1/settings?tab=estimates"],
+  ]);
+  expect(within(plan).getByRole("link", { name: "Plan budget" })).toHaveAttribute("aria-current", "page");
 });

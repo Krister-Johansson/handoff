@@ -126,6 +126,7 @@ test("a task in an unknown status column is listed under other", async () => {
 
 test("loadPlan joins each task's runs into actual strips and marks late tasks from live blockers", async () => {
   const { github, plan, project, number, issue } = await planned();
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
   const epic = await issue("Project management", ["epic"]);
   const story = await issue("Dates", ["story"], epic);
   const migration = await issue("Add the column", ["task"], story);
@@ -224,7 +225,7 @@ test("a task with a Size ignores a planner's proposal", async () => {
 test("loadPlan lays out the bars of tasks with a duration at the project's capacity", async () => {
   const { github, plan, project, number, issue } = await planned();
   await plan.ensureEstimateFields("octo", number);
-  await db.update(projects).set({ planHoursPerDay: 8 }).where(eq(projects.id, project.id));
+  await db.update(projects).set({ planHoursPerDay: 8, planMode: "timeline" }).where(eq(projects.id, project.id));
   const story = await issue("Bars", ["story"], await issue("Estimates", ["epic"]));
   const sized = await issue("Sized", ["task"], story);
   const estimated = await issue("Estimated", ["task"], story);
@@ -259,20 +260,23 @@ test("without a plan number loadPlan says there is no plan, and without the proj
   expect(await loadPlan(db, github, plan, project.id)).toEqual({ reason: "unreachable", error: expect.stringContaining("#9") });
 });
 
-test("loadPlan gives a Flow project the flow's input and a Timeline project none", async () => {
+test("loadPlan gives a Flow project the flow's input and no timeline, and a Timeline project its timeline and no flow", async () => {
   const { github, plan, project, issue, status } = await planned();
   const first = await issue("Add the column", ["task"]);
   const second = await issue("The Ready gate", ["task"]);
   status(first, "Ready");
   status(second, "Ready");
+  plan.itemsOf(repo).get(first)!.start = "2026-10-05";
 
   const flow = await loadPlan(db, github, plan, project.id);
   if ("error" in flow) throw new Error(flow.error);
   expect(flow.flow?.tasks.map((t) => t.number)).toEqual([first, second]);
   expect(flow.flow).toMatchObject({ lanes: 1, order: "project", runs: [], held: [], minutes: { S: 30, M: 60, L: 120 } });
+  expect(flow.timeline).toBeUndefined();
 
   await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
   const timeline = await loadPlan(db, github, plan, project.id);
   if ("error" in timeline) throw new Error(timeline.error);
   expect(timeline.flow).toBeUndefined();
+  expect(timeline.timeline?.items.find((i) => i.number === first)?.planned).toMatchObject({ start: "2026-10-05" });
 });

@@ -25,7 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import type { PlanModeName } from "@/lib/project-tab";
-import { projectSettingsPath } from "@/lib/settings-tab";
+import { projectSettingsPath, projectSettingsTabLabel } from "@/lib/settings-tab";
 import type { PlanFieldsPresent, PlanLink } from "@/server/project-admin";
 import type { SchedulerBrief } from "@/server/scheduler-card";
 
@@ -199,8 +199,12 @@ function PlanOnGitHub({ project }: { project: ProjectRow }) {
   );
 }
 
-/** What Settings, Projects manages for one project: name, repository, default branch, setup and teardown commands, agent notes, demo settings and plan. */
+/**
+ * What Settings, Projects manages for one project: name, repository, default branch, setup and teardown commands, agent notes, demo settings and plan,
+ * and where its estimates are: capacity, forecasts and the plan budget, or in a Flow project the plan budget only.
+ */
 function ProjectDetails({ project }: { project: ProjectRow }) {
+  const section = projectSettingsTabLabel("estimates", project.planMode);
   return (
     <dl className="grid grid-cols-[140px_minmax(0,1fr)] gap-x-4 gap-y-2 text-[13px]">
       <Detail term="Name">
@@ -228,11 +232,11 @@ function ProjectDetails({ project }: { project: ProjectRow }) {
       <Detail term="Plan on GitHub">
         <PlanOnGitHub project={project} />
       </Detail>
-      <Detail term="Estimates">
+      <Detail term={section}>
         <span className="text-[13px] text-muted-foreground">
-          Capacity, forecasts and the plan budget are in{" "}
+          {project.planMode === "flow" ? "The plan budget is in" : "Capacity, forecasts and the plan budget are in"}{" "}
           <Link href={projectSettingsPath(project.id, "estimates")} className="font-medium text-foreground underline underline-offset-3">
-            Project settings, Estimates
+            Project settings, {section}
           </Link>
           .
         </span>
