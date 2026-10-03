@@ -11,14 +11,17 @@ export const SIZES: readonly PlanSize[] = ["S", "M", "L"];
 /** A change to a task's Size or manual estimate in hours: a value sets it, null clears it, a missing key leaves it. */
 export type SizeChange = { size?: PlanSize | null; estimate?: number | null };
 
-/** How a chip reads: a forecast from runs, a size's default, the planner's proposal, a manual estimate, or nothing. */
-export type ChipKind = "forecast" | "default" | "proposal" | "estimate" | "none";
+/**
+ * How a chip reads: a forecast from runs, a size's default, the planner's proposal, a manual estimate, or
+ * nothing; in a Flow project a size alone.
+ */
+export type ChipKind = "forecast" | "default" | "proposal" | "estimate" | "size" | "none";
 
 export type Chip = {
   kind: ChipKind;
   /** The letter in the chip: the Size, else the proposal; undefined for an estimate without either. */
   size: PlanSize | undefined;
-  /** The duration as the chip writes it: "~50m" for a forecast, "1.5d" for an estimate, "Size" with neither. */
+  /** The duration as the chip writes it: "~50m" for a forecast, "1.5d" for an estimate, "Size" with neither, "" for a Flow size. */
   text: string;
   /** The button's accessible name. */
   label: string;
@@ -119,4 +122,16 @@ export function chipOf(task: SizedTask, forecasts: Forecasts, capacity: number):
   }
   const kind = duration.source === "forecast" ? "forecast" : "default";
   return { kind, size, text: `~${text}`, label: `Size ${size}, ${kind === "default" ? "default forecast" : "forecast"} ${text}. ${change}`, title };
+}
+
+/**
+ * A task's size chip in a Flow project, which has no hours: its Size, else the planner's proposal (dashed),
+ * else "Size". A manual estimate does not count.
+ */
+export function flowChipOf(task: SizedTask): Chip {
+  const change = `Change the size of #${task.number}`;
+  if (task.size) return { kind: "size", size: task.size, text: "", label: `Size ${task.size}. ${change}`, title: `Size ${task.size}` };
+  const proposed = task.proposal?.size;
+  if (proposed) return { kind: "proposal", size: proposed, text: "", label: `Size ${proposed}, proposed by the planner. ${change}`, title: "Proposed by the planner" };
+  return { kind: "none", size: undefined, text: "Size", label: `Set a size for #${task.number}`, title: undefined };
 }

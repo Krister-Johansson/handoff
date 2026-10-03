@@ -46,6 +46,37 @@ test("the chip shows a forecast, a dotted default, a dashed proposal, a pinned e
   expect(within(none).queryByText(/~/)).not.toBeInTheDocument();
 });
 
+test("in a Flow project the chip shows the size letter only, with no time, and ignores an estimate", () => {
+  render(
+    <Sizing value={sizingOf({ mode: "flow" })}>
+      <SizeChip task={task(141, "R1 Redesign tokens", "Done", { size: "S" })} />
+      <SizeChip task={task(148, "R8 Restyle the task page", "Shaping", { size: "L" })} />
+      <SizeChip task={task(147, "R7 Restyle the dashboard", "Shaping", { proposal: proposal("M") })} />
+      <SizeChip task={task(143, "R3 Restyle the sidebar", "Ready", { size: "L", estimate: 9 })} />
+      <SizeChip task={task(150, "R10 Restyle settings", "Shaping", { estimate: 7 })} />
+      <SizeChip task={task(152, "Document the workflow", "Shaping")} />
+    </Sizing>,
+  );
+
+  const sized = screen.getByRole("button", { name: "Size S. Change the size of #141" });
+  expect(sized).toHaveTextContent(/^S$/);
+  expect(sized).toHaveAttribute("title", "Size S");
+  expect(screen.getByRole("button", { name: "Size L. Change the size of #148" })).toHaveTextContent(/^L$/);
+
+  const proposed = screen.getByRole("button", { name: "Size M, proposed by the planner. Change the size of #147" });
+  expect(proposed).toHaveTextContent(/^M$/);
+  expect(proposed).toHaveAttribute("title", "Proposed by the planner");
+
+  expect(screen.getByRole("button", { name: "Size L. Change the size of #143" })).toHaveTextContent(/^L$/);
+  expect(screen.getByRole("button", { name: "Set a size for #150" })).toHaveTextContent("Size");
+  expect(screen.getByRole("button", { name: "Set a size for #152" })).toHaveTextContent("Size");
+
+  for (const chip of screen.getAllByRole("button")) {
+    expect(chip.textContent).not.toMatch(/~|\d/);
+    expect(chip.getAttribute("title") ?? "").not.toMatch(/forecast|estimate|\d/i);
+  }
+});
+
 test("without the Plan page's forecasts the chip is not shown", () => {
   render(<SizeChip task={task(141, "R1 Redesign tokens", "Done", { size: "S" })} />);
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
