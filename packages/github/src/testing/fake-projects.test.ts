@@ -139,6 +139,17 @@ test("FakeProjects ensureEstimateFields adds S, M and L to a Size field that lac
   expect((await projects.getProject("octo", project.number))?.estimateFields).toEqual(ids);
 });
 
+test("FakeProjects creates a Project without date fields and only the Size field when asked, as a Flow project's setup does", async () => {
+  const projects = new FakeProjects(new FakeGitHub());
+  const project = await projects.createProject("octo", repo, "sample plan", { dateFields: false });
+  expect(project.dateFields).toEqual({ start: undefined, target: undefined });
+  expect(await projects.ensureEstimateFields("octo", project.number, { estimate: false })).toEqual({
+    size: { id: expect.any(String), options: { S: expect.any(String), M: expect.any(String), L: expect.any(String) } },
+    estimate: undefined,
+  });
+  expect((await projects.getProject("octo", project.number))?.estimateFields?.estimate).toBeUndefined();
+});
+
 test("moveItems reorders listItems", async () => {
   const projects = new FakeProjects(new FakeGitHub());
   const project = await projects.createProject("octo", repo, "sample plan");
