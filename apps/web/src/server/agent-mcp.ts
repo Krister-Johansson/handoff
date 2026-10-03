@@ -19,7 +19,7 @@ import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
 import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSizes, setupPlan, type ScheduleItem, type SizesInput } from "./shaping";
-import { annotationsOf, CATALOG, type ToolSpec } from "../lib/assistant/catalog";
+import { annotationsOf, CATALOG, forChatProject, withChatProject, type ChatProject, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import { arrangeTimeline } from "../lib/plan/arrange";
 import type { Forecast } from "../lib/plan/forecast";
@@ -877,15 +877,17 @@ function resultOf(spec: ToolSpec, value: unknown, wrapUntrusted: boolean) {
  * Registers the catalog's data tools on an MCP server, each calling the same server functions the
  * dashboard uses. `wrapUntrusted` marks results that carry text from runs or GitHub as data, for the
  * dashboard's assistant. `apps` links the tools that have an MCP Apps view to it; their results stay the same.
+ * `project` is the assistant chat's project: a tool that needs a project uses it when the call leaves it out.
  */
-export function registerDataTools(server: McpServer, deps: HandoffMcpDeps, options: { wrapUntrusted?: boolean; apps?: boolean } = {}) {
+export function registerDataTools(server: McpServer, deps: HandoffMcpDeps, options: { wrapUntrusted?: boolean; apps?: boolean; project?: ChatProject | undefined } = {}) {
   const handlers = handlersFor(deps);
   for (const spec of CATALOG.filter((t) => t.kind === "data")) {
     const handler = handlers[spec.name] as ((args: unknown) => Promise<unknown>) | undefined;
     if (!handler) throw new Error(`The catalog's tool ${spec.name} has no handler.`);
     const _meta = options.apps ? appMetaOf(spec.name) : undefined;
-    server.registerTool(spec.name, { title: spec.title, description: spec.description, inputSchema: spec.input.shape, annotations: annotationsOf(spec), ...(_meta ? { _meta } : {}) }, (args: unknown) =>
-      tool(async () => resultOf(spec, await handler(args), options.wrapUntrusted ?? false)),
+    const { description, inputSchema } = forChatProject(spec, options.project);
+    server.registerTool(spec.name, { title: spec.title, description, inputSchema, annotations: annotationsOf(spec), ...(_meta ? { _meta } : {}) }, (args: unknown) =>
+      tool(async () => resultOf(spec, await handler(withChatProject(spec, args, options.project)), options.wrapUntrusted ?? false)),
     );
   }
 }

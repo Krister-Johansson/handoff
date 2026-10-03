@@ -66,6 +66,16 @@ export async function claimProject(db: Db, id: string, path: string | undefined)
     .where(and(eq(assistantConversations.id, id), isNull(assistantConversations.projectId)));
 }
 
+/** The project a conversation is on, by id and name; undefined for a chat started outside a project. */
+export async function conversationProject(db: Db, id: string): Promise<{ id: string; name: string } | undefined> {
+  const [row] = await db
+    .select({ id: projects.id, name: projects.name })
+    .from(assistantConversations)
+    .innerJoin(projects, eq(projects.id, assistantConversations.projectId))
+    .where(eq(assistantConversations.id, id));
+  return row;
+}
+
 /** A chat as the sidebar, the Chats page and the panel's header show it. */
 export type ChatSummary = {
   id: string;

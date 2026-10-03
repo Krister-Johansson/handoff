@@ -248,9 +248,31 @@ test("a page opens its route and a chat opens in the assistant panel", async () 
   expect(env.showChat).toHaveBeenCalledWith("c1");
 });
 
-test("another project's runs, chats and name show under Other projects, with Search all projects", async () => {
+test("on a project's page, search keeps to that project: other projects' runs, chats and names wait for Search all projects", async () => {
+  env.tasks.mockResolvedValue({ ...planTasks, tasks: [...planTasks.tasks, task(70, "Checkout tests")] });
   renderSearch();
   await openSearch();
+  type("checkout");
+  expect(screen.queryByRole("group", { name: /^Other projects/ })).not.toBeInTheDocument();
+  expect(optionsOf(/^Tasks/)).toEqual([expect.stringContaining("#70Checkout tests")]);
+  expect(screen.queryByText(/Checkout keeps the cart after sign in/)).not.toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: /All/, selected: true })).toHaveTextContent("All1");
+  expect(screen.getByRole("option", { name: /Search all projects for "checkout"/ })).toHaveTextContent("2 more in other projects");
+
+  type("sign in");
+  expect(screen.getByText('No results for "sign in"')).toBeInTheDocument();
+  expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Search all projectsexample-shop too", "Search issues on GitHubocto/handoff, in a new tab"]);
+  fireEvent.click(screen.getByRole("option", { name: /Search all projects/ }));
+  await waitFor(() => expect(env.tasks).toHaveBeenLastCalledWith({ projectId: "p1", all: true }));
+  expect(screen.getByRole("button", { name: "Searching all projects. Change" })).toBeInTheDocument();
+  expect(optionsOf(/^Runs/)).toEqual([expect.stringContaining("Checkout keeps the cart after sign in")]);
+});
+
+test("outside a project's pages, another project's runs, chats and name show under Other projects, with Search all projects", async () => {
+  env.pathname = "/inbox";
+  renderSearch();
+  await openSearch();
+  expect(env.records).toHaveBeenCalledWith({});
   type("checkout");
   expect(screen.getByText('Nothing in handoff matches "checkout".')).toBeInTheDocument();
   expect(optionsOf(/^Other projects/)).toEqual([expect.stringContaining("Checkout keeps the cart after sign in"), expect.stringContaining("Why checkout drops the cart")]);

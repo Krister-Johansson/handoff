@@ -93,3 +93,55 @@ test("approve puts a confirm page tool on a card with the spec's summary and all
     closeTurn(turn);
   }
 });
+
+const todooverkill = { id: "8f0c1a8e-0000-4000-8000-000000000151", name: "todooverkill" };
+type SchemaTool = ListedTool & { description?: string; inputSchema: { required?: string[] } };
+
+test("in a chat on a project, tools that take a project let the call leave it out and say they use the chat's project", async () => {
+  const turn = openTurn("c1", undefined, todooverkill);
+  try {
+    const { tools } = (await rpc(turn.token, "tools/list", {})) as { tools: SchemaTool[] };
+    const tool = (name: string) => tools.find((t) => t.name === name)!;
+    for (const name of ["list_plan", "get_project", "list_backlog", "start_run", "move_to_ready"]) {
+      expect(tool(name).inputSchema.required ?? []).not.toContain("project");
+      expect(tool(name).description).toMatch(/Without project, it uses todooverkill, this chat's project\.$/);
+    }
+    // The UI tools that open a project's pages take this chat's project too.
+    for (const name of ["set_project_tab", "go_to_plan"]) expect(tool(name).inputSchema.required ?? []).not.toContain("project_id");
+    // An optional project stays a filter: without it, list_runs covers every project.
+    expect(tool("list_runs").description).not.toMatch(/Without project/);
+  } finally {
+    closeTurn(turn);
+  }
+  const plain = openTurn("c2");
+  try {
+    const { tools } = (await rpc(plain.token, "tools/list", {})) as { tools: SchemaTool[] };
+    expect(tools.find((t) => t.name === "list_plan")!.inputSchema.required).toContain("project");
+    expect(tools.find((t) => t.name === "set_project_tab")!.inputSchema.required).toContain("project_id");
+  } finally {
+    closeTurn(plain);
+  }
+});
+
+test("in a chat on a project, an approval card and a UI call name the chat's project when the call left it out", async () => {
+  const turn = openTurn("c1", undefined, todooverkill);
+  const events: TurnEvent[] = [];
+  turn.subscribe((e) => {
+    events.push(e);
+    if (e.type === "confirm") setTimeout(() => turn.answer(e.requestId, { approved: true }), 10);
+    if (e.type === "ui_call") setTimeout(() => turn.answerUi(e.requestId, { text: "Opened the plan.", isError: false }), 10);
+  });
+  try {
+    const { content } = (await rpc(turn.token, "tools/call", {
+      name: "approve",
+      arguments: { tool_name: "mcp__handoff__move_to_ready", input: { issues: [151] }, tool_use_id: "toolu_1" },
+    })) as { content: { text: string }[] };
+    expect(JSON.parse(content[0]!.text)).toEqual({ behavior: "allow", updatedInput: { issues: [151], project: "todooverkill" } });
+    expect(events.find((e) => e.type === "confirm")).toMatchObject({ summary: "Move task #151 to Ready in todooverkill", args: { issues: [151], project: "todooverkill" } });
+
+    await rpc(turn.token, "tools/call", { name: "set_project_tab", arguments: { tab: "plan" } });
+    expect(events.find((e) => e.type === "ui_call")).toMatchObject({ name: "set_project_tab", args: { tab: "plan", project_id: todooverkill.id } });
+  } finally {
+    closeTurn(turn);
+  }
+});
