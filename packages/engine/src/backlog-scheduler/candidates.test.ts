@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { PlanItem } from "@handoff/github";
-import { candidates, type IssueRun } from "./candidates.ts";
+import { candidates, orderTasks, skipReason, type IssueRun } from "./candidates.ts";
 
 /** A plan item as listItems returns it: an open task in Ready with no blockers, unless `over` says otherwise. */
 function item(number: number, over: Partial<PlanItem> = {}): PlanItem {
@@ -116,4 +116,35 @@ test("a task whose cancelled run a person let the scheduler take is a candidate 
 
   expect(numbers(result.candidates)).toEqual([1]);
   expect(result.skipped).toEqual([{ number: 2, title: "Task 2", reason: "cancelled run; start it by hand" }]);
+});
+
+test("candidates is orderTasks then skipReason, in Project and in Priority order", () => {
+  const cancelled = "cccccccc-0000-0000-0000-000000000000";
+  const items = [
+    item(1, { position: 1, priority: "P1" }),
+    item(2, { position: 2, kind: "story" }),
+    item(3, { position: 3, priority: "P0", labels: ["task", "human"] }),
+    item(4, { position: 4, blockedBy: [1] }),
+    item(5, { position: 5, priority: "P0" }),
+    item(6, { position: 6, priority: "P1" }),
+  ];
+  const runs = new Map<number, IssueRun>([[6, { id: cancelled, status: "cancelled" }]]);
+  const opts = { skipLabel: "human", priorityOptions: ["P0", "P1"] };
+
+  // orderTasks sorts every item and leaves out none; it is the order the scheduler reads.
+  expect(orderTasks(items, { ...opts, order: "project" }).map((i) => i.number)).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(orderTasks(items, { ...opts, order: "priority" }).map((i) => i.number)).toEqual([3, 5, 1, 6, 2, 4]);
+
+  // skipReason says why a Ready task is passed over, or nothing for one the scheduler may start.
+  expect(skipReason(items[0]!, undefined, { ...opts, order: "project" })).toBeUndefined();
+  expect(skipReason(items[2]!, undefined, { ...opts, order: "project" })).toBe("labelled human");
+  expect(skipReason(items[3]!, undefined, { ...opts, order: "project" })).toBe("blocked by #1");
+  expect(skipReason(items[5]!, runs.get(6), { ...opts, order: "project" })).toBe("cancelled run; start it by hand");
+
+  const byProject = candidates(items, runs, { ...opts, order: "project" });
+  const byPriority = candidates(items, runs, { ...opts, order: "priority" });
+  expect(numbers(byProject.candidates)).toEqual([1, 5]);
+  expect(numbers(byProject.skipped)).toEqual([3, 4, 6]);
+  expect(numbers(byPriority.candidates)).toEqual([5, 1]);
+  expect(numbers(byPriority.skipped)).toEqual([3, 6, 4]);
 });
