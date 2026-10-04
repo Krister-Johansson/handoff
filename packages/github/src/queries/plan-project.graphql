@@ -117,6 +117,21 @@ query PlanProjectSetup($login: String!, $number: Int!) {
 query PlanProject($login: String!, $number: Int!) {
   repositoryOwner(login: $login) {
     __typename
+    # An organization's Priority issue field orders the plan when the Project has no Priority field of its own.
+    ... on Organization {
+      issueFields(first: 25) {
+        nodes {
+          __typename
+          ... on IssueFieldSingleSelect {
+            name
+            options {
+              name
+              priority
+            }
+          }
+        }
+      }
+    }
     ... on ProjectV2Owner {
       projectV2(number: $number) {
         id
@@ -139,6 +154,8 @@ query PlanProject($login: String!, $number: Int!) {
         priority: field(name: "Priority") {
           __typename
           ... on ProjectV2SingleSelectField {
+            # True for a column that shows the organization's issue field rather than a field of the Project's own.
+            isIssueField
             options {
               name
             }

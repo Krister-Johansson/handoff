@@ -273,7 +273,12 @@ export type PlanItemsQueryVariables = Exact<{
 
 
 export type PlanItemsQuery = { repositoryOwner:
-    | { __typename: 'Organization', projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
+    | { __typename: 'Organization', projectV2: { priority:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', isIssueField: boolean }
+         | null, items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
               | { __typename: 'ProjectV2ItemFieldDateValue' }
               | { __typename: 'ProjectV2ItemFieldIterationValue' }
               | { __typename: 'ProjectV2ItemFieldLabelValue' }
@@ -376,10 +381,27 @@ export type PlanItemsQuery = { repositoryOwner:
               | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
                     | { login: string }
                     | { login: string }
-                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
+                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, issueFieldValues: { nodes: Array<
+                    | { __typename: 'IssueFieldDateValue' }
+                    | { __typename: 'IssueFieldMultiSelectValue' }
+                    | { __typename: 'IssueFieldNumberValue' }
+                    | { __typename: 'IssueFieldSingleSelectValue', name: string, field:
+                        | { __typename: 'IssueFieldDate' }
+                        | { __typename: 'IssueFieldMultiSelect' }
+                        | { __typename: 'IssueFieldNumber' }
+                        | { __typename: 'IssueFieldSingleSelect', name: string }
+                        | { __typename: 'IssueFieldText' }
+                       | null }
+                    | { __typename: 'IssueFieldTextValue' }
+                   | null> | null } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
               | { __typename: 'PullRequest' }
              | null } | null> | null } } | null }
-    | { __typename: 'User', projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
+    | { __typename: 'User', projectV2: { priority:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', isIssueField: boolean }
+         | null, items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
               | { __typename: 'ProjectV2ItemFieldDateValue' }
               | { __typename: 'ProjectV2ItemFieldIterationValue' }
               | { __typename: 'ProjectV2ItemFieldLabelValue' }
@@ -482,7 +504,19 @@ export type PlanItemsQuery = { repositoryOwner:
               | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
                     | { login: string }
                     | { login: string }
-                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
+                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, issueFieldValues: { nodes: Array<
+                    | { __typename: 'IssueFieldDateValue' }
+                    | { __typename: 'IssueFieldMultiSelectValue' }
+                    | { __typename: 'IssueFieldNumberValue' }
+                    | { __typename: 'IssueFieldSingleSelectValue', name: string, field:
+                        | { __typename: 'IssueFieldDate' }
+                        | { __typename: 'IssueFieldMultiSelect' }
+                        | { __typename: 'IssueFieldNumber' }
+                        | { __typename: 'IssueFieldSingleSelect', name: string }
+                        | { __typename: 'IssueFieldText' }
+                       | null }
+                    | { __typename: 'IssueFieldTextValue' }
+                   | null> | null } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
               | { __typename: 'PullRequest' }
              | null } | null> | null } } | null }
    | null };
@@ -851,7 +885,13 @@ export type PlanProjectQueryVariables = Exact<{
 
 
 export type PlanProjectQuery = { repositoryOwner:
-    | { __typename: 'Organization', projectV2: { id: string, number: number, url: string, title: string, field:
+    | { __typename: 'Organization', issueFields: { nodes: Array<
+          | { __typename: 'IssueFieldDate' }
+          | { __typename: 'IssueFieldMultiSelect' }
+          | { __typename: 'IssueFieldNumber' }
+          | { __typename: 'IssueFieldSingleSelect', name: string, options: Array<{ name: string, priority: number | null }> }
+          | { __typename: 'IssueFieldText' }
+         | null> | null } | null, projectV2: { id: string, number: number, url: string, title: string, field:
           | { __typename: 'ProjectV2Field' }
           | { __typename: 'ProjectV2IterationField' }
           | { __typename: 'ProjectV2MultiSelectField' }
@@ -860,7 +900,7 @@ export type PlanProjectQuery = { repositoryOwner:
           | { __typename: 'ProjectV2Field' }
           | { __typename: 'ProjectV2IterationField' }
           | { __typename: 'ProjectV2MultiSelectField' }
-          | { __typename: 'ProjectV2SingleSelectField', options: Array<{ name: string }> }
+          | { __typename: 'ProjectV2SingleSelectField', isIssueField: boolean, options: Array<{ name: string }> }
          | null, start:
           | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
           | { __typename: 'ProjectV2IterationField' }
@@ -891,7 +931,7 @@ export type PlanProjectQuery = { repositoryOwner:
           | { __typename: 'ProjectV2Field' }
           | { __typename: 'ProjectV2IterationField' }
           | { __typename: 'ProjectV2MultiSelectField' }
-          | { __typename: 'ProjectV2SingleSelectField', options: Array<{ name: string }> }
+          | { __typename: 'ProjectV2SingleSelectField', isIssueField: boolean, options: Array<{ name: string }> }
          | null, start:
           | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
           | { __typename: 'ProjectV2IterationField' }
@@ -1311,6 +1351,12 @@ export const PlanItemsDocument = new TypedDocumentString(`
     __typename
     ... on ProjectV2Owner {
       projectV2(number: $number) {
+        priority: field(name: "Priority") {
+          __typename
+          ... on ProjectV2SingleSelectField {
+            isIssueField
+          }
+        }
         items(first: 100, after: $cursor) {
           pageInfo {
             hasNextPage
@@ -1389,6 +1435,20 @@ export const PlanItemsDocument = new TypedDocumentString(`
                 }
                 issueType {
                   name
+                }
+                issueFieldValues(first: 10) {
+                  nodes {
+                    __typename
+                    ... on IssueFieldSingleSelectValue {
+                      name
+                      field {
+                        __typename
+                        ... on IssueFieldSingleSelect {
+                          name
+                        }
+                      }
+                    }
+                  }
                 }
                 parent {
                   number
@@ -1824,6 +1884,20 @@ export const PlanProjectDocument = new TypedDocumentString(`
     query PlanProject($login: String!, $number: Int!) {
   repositoryOwner(login: $login) {
     __typename
+    ... on Organization {
+      issueFields(first: 25) {
+        nodes {
+          __typename
+          ... on IssueFieldSingleSelect {
+            name
+            options {
+              name
+              priority
+            }
+          }
+        }
+      }
+    }
     ... on ProjectV2Owner {
       projectV2(number: $number) {
         id
@@ -1845,6 +1919,7 @@ export const PlanProjectDocument = new TypedDocumentString(`
         priority: field(name: "Priority") {
           __typename
           ... on ProjectV2SingleSelectField {
+            isIssueField
             options {
               name
             }

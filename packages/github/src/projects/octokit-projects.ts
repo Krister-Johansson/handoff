@@ -84,6 +84,41 @@ type GqlItem = NonNullable<NonNullable<NonNullable<PlanItemsQuery["repositoryOwn
 type ProjectNode = NonNullable<NonNullable<PlanProjectQuery["repositoryOwner"]>["projectV2"]>;
 /** Whether a user or an organization owns a Project, as GitHub names the owner's type. */
 type OwnerType = NonNullable<PlanProject["owner"]>;
+/** One of an organization's issue fields as PlanProject reads them. */
+type OwnerIssueField = NonNullable<NonNullable<Extract<NonNullable<PlanProjectQuery["repositoryOwner"]>, { __typename: "Organization" }>["issueFields"]>["nodes"]>[number] & {};
+/** The name GitHub gives the Priority field, on a Project and among an organization's issue fields. */
+const PRIORITY = "Priority";
+
+/** Whether `field(name: "Priority")` found a single select field of the Project's own, not a column showing the organization's issue field. */
+function isOwnPriorityField(field: { __typename: string; isIssueField?: boolean } | null | undefined): boolean {
+  return field?.__typename === "ProjectV2SingleSelectField" && field.isIssueField !== true;
+}
+
+/**
+ * Where Priority comes from (docs/plans/organizations.md, Decision 5): the Project's own single select field
+ * named Priority, else the organization's single select issue field named Priority with its options in the
+ * order of their `priority` number, else none.
+ */
+function priorityOf(field: ProjectNode["priority"], issueFields: OwnerIssueField[] = []): Pick<PlanProject, "priorityOptions" | "prioritySource"> {
+  if (field?.__typename === "ProjectV2SingleSelectField" && isOwnPriorityField(field)) return { priorityOptions: field.options.map((o) => o.name), prioritySource: "project" };
+  const issueField = issueFields.find((f) => f.__typename === "IssueFieldSingleSelect" && f.name === PRIORITY);
+  if (issueField?.__typename !== "IssueFieldSingleSelect") return { priorityOptions: undefined, prioritySource: undefined };
+  // An option without a priority number goes after those with one, in the order GitHub lists them.
+  const rank = (priority: number | null) => priority ?? Number.MAX_SAFE_INTEGER;
+  const options = [...issueField.options].sort((a, b) => rank(a.priority) - rank(b.priority));
+  return { priorityOptions: options.map((o) => o.name), prioritySource: "issue-field" };
+}
+
+/** The option name of the item's value in the Project's single select field named Priority; undefined for none or another value type. */
+function projectPriorityOf(item: NonNullable<GqlItem>): string | undefined {
+  return item.priority?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? (item.priority.name ?? undefined) : undefined;
+}
+
+/** The option name of the issue's single select issue field named Priority; undefined without a value or such a field. */
+function issuePriorityOf(issue: Extract<NonNullable<GqlItem>["content"], { __typename: "Issue" }>): string | undefined {
+  const value = present(issue.issueFieldValues?.nodes).find((v) => v.__typename === "IssueFieldSingleSelectValue" && v.field?.__typename === "IssueFieldSingleSelect" && v.field.name === PRIORITY);
+  return value?.__typename === "IssueFieldSingleSelectValue" ? value.name : undefined;
+}
 
 /** ProjectsPort over Octokit with a classic personal token: GitHub Apps cannot reach user-owned Projects. */
 export class OctokitProjects implements ProjectsPort {
@@ -112,7 +147,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async getProject(login: string, number: number): Promise<PlanProject | undefined> {
-    const { owner, project } = await this.projectNode(login, number);
+    const { owner, project, issueFields } = await this.projectNode(login, number);
     if (!project) return undefined;
     return {
       number: project.number,
@@ -121,7 +156,7 @@ export class OctokitProjects implements ProjectsPort {
       owner,
       statusOptions: optionIds(statusField(project.field)),
       dateFields: dateFieldIds(project),
-      priorityOptions: project.priority?.__typename === "ProjectV2SingleSelectField" ? project.priority.options.map((o) => o.name) : undefined,
+      ...priorityOf(project.priority, issueFields),
       estimateFields: estimateFieldIds(project),
     };
   }
@@ -142,9 +177,21 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]> {
-    const data = await this.octokit.graphql.paginate<PlanItemsQuery>(PlanItemsDocument.toString(), { login, number });
-    // GitHub returns items by POSITION, so an item's index across the merged pages is its place in the Project.
-    return present<NonNullable<GqlItem>>(data.repositoryOwner?.projectV2?.items.nodes).flatMap((item, index) => toPlanItem(item, repo, index + 1));
+    const items: NonNullable<GqlItem>[] = [];
+    let ownPriority = false;
+    let cursor: string | null | undefined;
+    // Paged by hand: a Project without a Priority field answers each page with a NOT_FOUND next to its data,
+    // which Octokit's paginate would throw.
+    do {
+      const data = await this.withOptionalFields<PlanItemsQuery>(PlanItemsDocument.toString(), cursor ? { login, number, cursor } : { login, number });
+      const project = data.repositoryOwner?.projectV2;
+      if (!project) break;
+      ownPriority = isOwnPriorityField(project.priority);
+      items.push(...present<NonNullable<GqlItem>>(project.items.nodes));
+      cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : undefined;
+    } while (cursor);
+    // GitHub returns items by POSITION, so an item's index across the pages is its place in the Project.
+    return items.flatMap((item, index) => toPlanItem(item, repo, index + 1, ownPriority));
   }
 
   async setStatus(repo: RepoRef, project: number, issue: number, status: PlanStatus, opts: { add?: boolean } = {}): Promise<SetStatusResult> {
@@ -468,12 +515,14 @@ export class OctokitProjects implements ProjectsPort {
   /**
    * The Project `number` of the repository owner `login`, a user or an organization, with its Status, date and
    * Priority fields; `project` is undefined when there is none the token can see. `owner` is the owner's type
-   * whenever GitHub knows the login, also next to a Project number it cannot resolve.
+   * whenever GitHub knows the login, also next to a Project number it cannot resolve. `issueFields` are an
+   * organization's issue fields, none for a user.
    */
-  private async projectNode(login: string, number: number): Promise<{ owner: OwnerType | undefined; project: ProjectNode | undefined }> {
+  private async projectNode(login: string, number: number): Promise<{ owner: OwnerType | undefined; project: ProjectNode | undefined; issueFields?: OwnerIssueField[] }> {
     try {
       const data = await this.withOptionalFields<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
-      return { owner: data.repositoryOwner?.__typename, project: data.repositoryOwner?.projectV2 ?? undefined };
+      const owner = data.repositoryOwner;
+      return { owner: owner?.__typename, project: owner?.projectV2 ?? undefined, issueFields: owner?.__typename === "Organization" ? present(owner.issueFields?.nodes) : [] };
     } catch (error) {
       if (isNotFound(error)) return { owner: (error as { data?: PlanProjectQuery | null }).data?.repositoryOwner?.__typename, project: undefined };
       throw error;
@@ -601,7 +650,11 @@ function statusField(field: StatusFieldConfig): { id: string; options: { id: str
   return field?.__typename === "ProjectV2SingleSelectField" && field.id && field.options ? { id: field.id, options: field.options } : undefined;
 }
 
-function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number): PlanItem[] {
+/**
+ * The repository's issue of a PlanItems item as a plan item. `ownPriority` says the Project has a Priority field of
+ * its own, whose value wins; without one the issue's Priority issue field gives it.
+ */
+function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number, ownPriority: boolean): PlanItem[] {
   const issue = item.content;
   if (issue?.__typename !== "Issue") return [];
   if (issue.repository.owner.login.toLowerCase() !== repo.owner.toLowerCase() || issue.repository.name.toLowerCase() !== repo.name.toLowerCase()) return [];
@@ -626,7 +679,8 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number)
       itemId: item.id,
       prNumbers: present(issue.closedByPullRequestsReferences?.nodes).map((pr) => pr.number),
       updatedAt: issue.updatedAt,
-      priority: item.priority?.__typename === "ProjectV2ItemFieldSingleSelectValue" ? (item.priority.name ?? undefined) : undefined,
+      // A single select value of the Project's field wins; with a field of its own and no value, the issue field does not stand in.
+      priority: projectPriorityOf(item) ?? (ownPriority ? undefined : issuePriorityOf(issue)),
       start: dateOf(item.start),
       target: dateOf(item.target),
       iteration:

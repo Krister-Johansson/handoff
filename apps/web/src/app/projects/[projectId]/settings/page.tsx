@@ -27,13 +27,13 @@ const LINK = "font-medium text-foreground underline underline-offset-3";
 
 const TEMPLATE_CHOICES = Object.entries(TEMPLATES).map(([value, t]) => ({ value, label: t.label }));
 
-/** Whether the project's GitHub Project has a Priority field to order by; no when GitHub cannot say. */
-async function hasPriority(owner: string, number: number | null) {
-  if (number === null) return false;
+/** Where the project's Priority comes from, the Project's own field or the organization's issue field; undefined with neither or when GitHub cannot say. */
+async function prioritySource(owner: string, number: number | null) {
+  if (number === null) return undefined;
   const plan = await getProjects()
     ?.getProject(owner, number)
     .catch(() => undefined);
-  return plan?.priorityOptions !== undefined;
+  return plan?.prioritySource;
 }
 
 /** The open section with what it reads on the server; only the open section reads anything. */
@@ -68,7 +68,7 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
           </SectionCard>
         );
       }
-      const [scheduler, priority] = await Promise.all([loadSchedulerCard(getDb(), project.id), hasPriority(project.repoOwner, project.planProjectNumber)]);
+      const [scheduler, priority] = await Promise.all([loadSchedulerCard(getDb(), project.id), prioritySource(project.repoOwner, project.planProjectNumber)]);
       return (
         <SchedulerSettings
           // A save or a change elsewhere gives the section its stored settings again.

@@ -4,6 +4,14 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
     __typename
     ... on ProjectV2Owner {
       projectV2(number: $number) {
+        # Whether the Project has a Priority field of its own, which wins over the organization's Priority
+        # issue field. A Project without one answers with a NOT_FOUND error for this lookup, next to complete data.
+        priority: field(name: "Priority") {
+          __typename
+          ... on ProjectV2SingleSelectField {
+            isIssueField
+          }
+        }
         items(first: 100, after: $cursor) {
           pageInfo {
             hasNextPage
@@ -89,6 +97,22 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
                 }
                 issueType {
                   name
+                }
+                # The organization's issue fields set on the issue; a user's repository answers an empty list.
+                # handoff reads the single select named Priority when the Project has no Priority field of its own.
+                issueFieldValues(first: 10) {
+                  nodes {
+                    __typename
+                    ... on IssueFieldSingleSelectValue {
+                      name
+                      field {
+                        __typename
+                        ... on IssueFieldSingleSelect {
+                          name
+                        }
+                      }
+                    }
+                  }
                 }
                 parent {
                   number

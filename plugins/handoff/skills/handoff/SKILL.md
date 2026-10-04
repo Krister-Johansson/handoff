@@ -29,7 +29,7 @@ Without the `project` scope on the dashboard's `GITHUB_TOKEN` the plan tools ref
 
 ## Let the scheduler start runs
 
-A project with a plan can have a scheduler. Once the user turns it on, handoff starts runs on its own on Ready tasks without open blockers, in Project order or by the Priority field, until a limit of active runs is reached. The user decides what is Ready: the scheduler never moves a task to Ready, never requests a merge and never starts a task whose last run was cancelled.
+A project with a plan can have a scheduler. Once the user turns it on, handoff starts runs on its own on Ready tasks without open blockers, in Project order or by Priority, until a limit of active runs is reached. Priority comes from the Project's own Priority field, or, in an organization's repository whose Project has none, from the organization's Priority issue field; `get_scheduler` says which. The user decides what is Ready: the scheduler never moves a task to Ready, never requests a merge and never starts a task whose last run was cancelled.
 
 - `get_scheduler` shows whether it is off, paused, held, idle or running, what holds it (a failed run, including a stuck loop, or a permission request), each with its link, the active runs against the limit with the worker's Claude slots, and the next tasks it will start with the reasons it skips others.
 - `start_scheduler` turns it on, resumes it after a pause, or changes `max_runs` (1 to 10), `order` (`project` or `priority`), `graph` and `skip_label` (tasks with that label are left to a person; `null` skips none). It asks the user first. It refuses a project without a plan, so run `setup_plan` before it.

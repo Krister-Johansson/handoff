@@ -61,7 +61,7 @@ export default async function ProjectPage({
         <SchedulerLine
           project={{ id: project.id, name: project.name }}
           card={scheduler}
-          form={{ graphs: start.graphs, defaultGraph: start.graphName, planNumber: project.planProjectNumber, priority: plan?.priorityOptions !== undefined }}
+          form={{ graphs: start.graphs, defaultGraph: start.graphName, planNumber: project.planProjectNumber, priority: plan?.prioritySource }}
         />
       )}
       <ProjectOverview project={{ id: project.id, name: project.name, repo }} overview={overview} start={start} />

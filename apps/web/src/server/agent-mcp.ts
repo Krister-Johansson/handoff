@@ -28,7 +28,7 @@ import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
 import { inboxGroups } from "./inbox-groups";
 import { checkText } from "../lib/scheduler-text";
-import { getScheduler, pauseScheduler, startScheduler, stopScheduler } from "./scheduler";
+import { getScheduler, pauseScheduler, priorityOrderText, startScheduler, stopScheduler } from "./scheduler";
 import { listNotifications } from "./notifications";
 import { appMetaOf, registerAppResources } from "./mcp-apps";
 
@@ -832,11 +832,14 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     },
 
     get_scheduler: async ({ project }: { project: string }) => {
-      const { id } = await findProject(db, project);
+      const found = await findProject(db, project);
+      const { id } = found;
       const s = await getScheduler(db, id);
+      const priority = s.settings?.order === "priority" ? await priorityOrderText(plan, found) : undefined;
       return {
         state: s.state,
         settings: s.settings ? { max_runs: s.settings.maxRuns, order: s.settings.order, graph: s.settings.graphName, skip_label: s.settings.skipLabel } : null,
+        ...(priority ? { priority } : {}),
         ...(s.paused ? { paused: { by: s.paused.by, reason: s.paused.reason, at: s.paused.at.toISOString() } } : {}),
         summary: s.summary,
         active: s.active,

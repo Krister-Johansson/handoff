@@ -54,7 +54,7 @@ const forecastsForSettings = vi.hoisted(() =>
 );
 vi.mock("@/server/forecasts", () => ({ forecastsForSettings }));
 vi.mock("@/app/projects/scheduler-actions", () => ({}));
-const getProject = vi.hoisted(() => vi.fn(async () => ({ number: 5, priorityOptions: ["High", "Low"] })));
+const getProject = vi.hoisted(() => vi.fn(async () => ({ number: 5, priorityOptions: ["High", "Low"], prioritySource: "project" as const })));
 vi.mock("@/lib/github", () => ({ getProjects: () => ({ getProject }), getGitHub: () => undefined }));
 const loadAppLaunch = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -121,6 +121,7 @@ test("the Scheduler section lists the project's graphs and knows whether its Git
   expect(loadSchedulerCard).toHaveBeenCalledWith(expect.anything(), "p1");
   expect(within(section).getAllByRole("option").map((o) => o.textContent)).toEqual(["plan-review"]);
   expect(within(section).getByRole("radio", { name: "Priority" })).toBeEnabled();
+  expect(within(section).getByText("Priority comes from the Project's Priority field.")).toBeInTheDocument();
 
   // GitHub out of reach: Priority stays off, the rest of the section works.
   getProject.mockRejectedValueOnce(new Error("GitHub did not answer"));

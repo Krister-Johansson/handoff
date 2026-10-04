@@ -18,9 +18,10 @@ import {
   type ProjectSchedulerRow,
 } from "@handoff/db";
 import { issueRuns, nudgeScheduler, overlapKey, projectHolds, type Candidate, type CheckResult, type Hold, type Skipped } from "@handoff/engine/backlog-scheduler";
-import type { ProjectsPort } from "@handoff/github";
+import type { PlanProject, ProjectsPort } from "@handoff/github";
 import { getProjectDetail } from "./graphs";
 import { projectsAccessProblem } from "./plan";
+import { priorityField } from "../lib/scheduler-form";
 import { holdText } from "../lib/scheduler-text";
 
 export type SchedulerDeps = { db: Db; projects: ProjectsPort | undefined };
@@ -74,9 +75,7 @@ export async function startScheduler(deps: SchedulerDeps, projectId: string, set
   if (settings.order === "priority") {
     // The check reads the Project the way tick.ts does: the repository owner's Project by number.
     const plan = await deps.projects?.getProject(project.repoOwner, project.planProjectNumber);
-    if (plan?.priorityOptions === undefined) {
-      throw new Error(`GitHub Project #${project.planProjectNumber} has no Priority field, so the scheduler cannot order tasks by priority. Add a single select field named Priority to the Project, or use Project order.`);
-    }
+    if (plan?.priorityOptions === undefined) throw new Error(noPriority(project.planProjectNumber, project.repoOwner, plan?.owner));
   }
   const skipLabel = settings.skipLabel === undefined ? (stored ? stored.skipLabel : "human") : settings.skipLabel?.trim() || null;
   const next: Stored = { maxRuns: settings.maxRuns ?? stored?.maxRuns ?? 1, order: settings.order ?? stored?.order ?? "project", graphName, skipLabel };
@@ -97,6 +96,26 @@ export async function startScheduler(deps: SchedulerDeps, projectId: string, set
     await nudgeScheduler(tx, projectId);
   });
   return { state: "on" as const, max_runs: next.maxRuns, order: next.order, graph: next.graphName };
+}
+
+/**
+ * "Priority order from the organization's Priority issue field": the field a scheduler in Priority order reads, for
+ * get_scheduler. Undefined without a plan, without Priority, or when GitHub cannot say.
+ */
+export async function priorityOrderText(projects: ProjectsPort | undefined, project: { repoOwner: string; planProjectNumber: number | null }) {
+  if (!projects || project.planProjectNumber === null) return undefined;
+  const plan = await projects.getProject(project.repoOwner, project.planProjectNumber).catch(() => undefined);
+  return plan?.prioritySource ? `Priority order from ${priorityField(plan.prioritySource)}` : undefined;
+}
+
+/**
+ * Why Priority order is refused: the Project has no Priority field and, in an organization, the organization has
+ * no Priority issue field either.
+ */
+function noPriority(number: number, owner: string, ownerType: PlanProject["owner"]) {
+  return ownerType === "Organization"
+    ? `GitHub Project #${number} has no Priority field and ${owner} has no Priority issue field, so the scheduler cannot order tasks by priority. Add a single select field named Priority, or use Project order.`
+    : `GitHub Project #${number} has no Priority field, so the scheduler cannot order tasks by priority. Add a single select field named Priority to the Project, or use Project order.`;
 }
 
 /**
