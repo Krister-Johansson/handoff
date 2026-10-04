@@ -85,7 +85,7 @@ export default async function PlanPage({
         <SchedulerCard
           project={{ id: project.id, name: project.name }}
           card={scheduler}
-          form={{ graphs: graphs.map((g) => g.name), defaultGraph, planNumber: plan.project.number, priority: plan.project.priorityOptions !== undefined }}
+          form={{ graphs: graphs.map((g) => g.name), defaultGraph, planNumber: plan.project.number, priority: plan.project.prioritySource }}
           start={{ graphs: graphs.map((g) => g.name), graphName: defaultGraph }}
           now={new Date(readAt)}
         />

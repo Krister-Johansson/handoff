@@ -62,7 +62,7 @@ export function TurnOnButton({ project, form, settings, size = "sm" }: { project
           <PopoverDescription className="text-xs">It starts nothing while a failed run or a permission prompt waits on someone.</PopoverDescription>
         </PopoverHeader>
         <SchedulerFields values={values} onChange={setValues} form={form} />
-        <p className="rounded-md border bg-muted px-3 py-2 text-[13px] leading-snug">{approvalSentence(project.name, values)}</p>
+        <p className="rounded-md border bg-muted px-3 py-2 text-[13px] leading-snug">{approvalSentence(project.name, values, form.priority)}</p>
         {action.error && <FieldError>{action.error}</FieldError>}
         <div className="flex justify-end gap-2">
           <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
@@ -160,7 +160,7 @@ function Header({ project, card, form, now, fold, extra }: { project: SchedulerP
             <TooltipTrigger asChild>
               <Link href={projectPath(project.id, "settings")} className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline hover:underline-offset-3">
                 <SlidersHorizontalIcon aria-hidden className="size-3.5" />
-                {settingsLine(status.settings)}
+                {settingsLine(status.settings, form.priority)}
               </Link>
             </TooltipTrigger>
             <TooltipContent>Change in Project settings</TooltipContent>

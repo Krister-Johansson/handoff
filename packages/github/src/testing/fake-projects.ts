@@ -31,7 +31,11 @@ export type FakePlanItem = {
   start?: string | undefined;
   target?: string | undefined;
   iteration?: PlanIteration | undefined;
-  /** The option name of the Priority field; listItems reads it only while the Project has `priorityOptions`. */
+  /**
+   * The option name of the Project's own Priority field; listItems reads it only while the Project has
+   * `priorityOptions`. Without them it reads the issue's value in `issuePriorities` for an organization with a
+   * Priority issue field.
+   */
   priority?: string | undefined;
   /** The option name of the Size field, so a test can pick an option that is not S, M or L; read only while the Project has the field. */
   size?: string | undefined;
@@ -76,6 +80,13 @@ export class FakeProjects implements ProjectsPort {
   readonly canCreateProjects = new Map<string, boolean>();
   /** GitHub's issue type of an issue by number, such as an organization's Task, Bug or Feature; an issue not in it has none. */
   readonly issueTypes = new Map<number, string>();
+  /**
+   * The options of an organization's Priority issue field by login, the highest first; an owner not in it has
+   * none. It gives Priority to a Project of the organization without a Priority field of its own.
+   */
+  readonly priorityIssueFields = new Map<string, string[]>();
+  /** An issue's value of its organization's Priority issue field, by issue number. */
+  readonly issuePriorities = new Map<number, string>();
   scopesAnswer = { project: true, classic: true };
   private nextProject = 1;
 
@@ -95,12 +106,25 @@ export class FakeProjects implements ProjectsPort {
 
   async getProject(login: string, number: number): Promise<PlanProject | undefined> {
     const plan = [...this.plans.values()].find((p) => p.login === login && p.project.number === number);
-    return plan ? structuredClone(plan.project) : undefined;
+    return plan ? { ...structuredClone(plan.project), ...this.priorityOf(plan) } : undefined;
+  }
+
+  /** The organization's Priority issue field options for a plan whose owner is an organization; undefined otherwise. */
+  private issueFieldOf(plan: FakePlan): string[] | undefined {
+    return this.owners.get(plan.login) === "Organization" ? this.priorityIssueFields.get(plan.login) : undefined;
+  }
+
+  /** The Project's own Priority field (`priorityOptions` set on the Project) wins over the organization's issue field, as on GitHub. */
+  private priorityOf(plan: FakePlan): Pick<PlanProject, "priorityOptions" | "prioritySource"> {
+    if (plan.project.priorityOptions) return { priorityOptions: plan.project.priorityOptions, prioritySource: "project" };
+    const issueField = this.issueFieldOf(plan);
+    return issueField ? { priorityOptions: [...issueField], prioritySource: "issue-field" } : { priorityOptions: undefined, prioritySource: undefined };
   }
 
   async listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]> {
     const plan = this.planOf(repo, number);
     if (!plan || plan.login !== login) return [];
+    const priorityOf = (issue: number, item: FakePlanItem) => (plan.project.priorityOptions ? item.priority : this.issueFieldOf(plan) ? this.issuePriorities.get(issue) : undefined);
     return [...plan.items].flatMap(([issueNumber, item], index) => {
       const issue = this.github.issues.get(issueNumber);
       if (!issue) return [];
@@ -122,7 +146,7 @@ export class FakeProjects implements ProjectsPort {
           blockers: [...(issue.blockedBy ?? [])],
           position: index + 1,
           itemId: itemIdOf(issueNumber),
-          priority: plan.project.priorityOptions ? item.priority : undefined,
+          priority: priorityOf(issueNumber, item),
           prNumbers: item.prNumbers ?? [],
           updatedAt: issue.updatedAt ?? "",
           start: item.start,

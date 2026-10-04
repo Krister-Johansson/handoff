@@ -700,7 +700,7 @@ export const CATALOG: ToolSpec[] = [
     name: "get_scheduler",
     title: "Show the scheduler",
     description:
-      "A project's scheduler: off, paused, held, idle or running; what holds it (failed runs, including a stuck loop, and permission requests), each with its link; active runs of max_runs and the worker's Claude slots; runs waiting before their coder because their plan shares paths with another run; the next tasks it will start and the Ready tasks it skips with the reason; and its recent events.",
+      "A project's scheduler: off, paused, held, idle or running; in priority order, which Priority field it reads; what holds it (failed runs, including a stuck loop, and permission requests), each with its link; active runs of max_runs and the worker's Claude slots; runs waiting before their coder because their plan shares paths with another run; the next tasks it will start and the Ready tasks it skips with the reason; and its recent events.",
     input: z.object({ project }),
     kind: "data",
     confirm: false,
@@ -712,11 +712,11 @@ export const CATALOG: ToolSpec[] = [
     name: "start_scheduler",
     title: "Start the scheduler",
     description:
-      "Turns on a project's scheduler, or resumes it after a pause, and changes the settings given. The scheduler starts runs on its own on the plan's Ready tasks without open blockers, in Project order or by the Priority field, until max_runs runs of the project are active, and starts nothing while a run failed or a permission request waits for a person. A run waiting on a question, a plan or code review, Try it or a pull request review does not stop it: that run stays active and counts toward max_runs. A person decides what is Ready. Refuses a project without a plan, priority order without a Priority field, and missing access to GitHub Projects.",
+      "Turns on a project's scheduler, or resumes it after a pause, and changes the settings given. The scheduler starts runs on its own on the plan's Ready tasks without open blockers, in Project order or by Priority, until max_runs runs of the project are active, and starts nothing while a run failed or a permission request waits for a person. Priority comes from the Project's own Priority field; in an organization's repository whose Project has none, from the organization's Priority issue field. A run waiting on a question, a plan or code review, Try it or a pull request review does not stop it: that run stays active and counts toward max_runs. A person decides what is Ready. Refuses a project without a plan, priority order with neither Priority field, and missing access to GitHub Projects.",
     input: z.object({
       project,
       max_runs: z.number().int().min(1).max(10).optional().describe("The most runs of the project active at once, 1 to 10; 1 when first turned on"),
-      order: z.enum(["project", "priority"]).optional().describe("project for Project order, priority for the Priority field first; project when first turned on"),
+      order: z.enum(["project", "priority"]).optional().describe("project for Project order, priority for Priority first; project when first turned on"),
       graph: z.string().optional().describe("The graph its runs use; the project's default graph when first turned on"),
       skip_label: z.string().nullable().optional().describe("Tasks with this label are left to a person; null skips none; human when first turned on"),
     }),
