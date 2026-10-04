@@ -1,6 +1,6 @@
 import { commandLine, criteriaInIssue, demoConfiguration, LAUNCH_FILE, LaunchConfigurationSchema, parseLaunchFile } from "@handoff/core";
 import { and, desc, eq, graphs, gt, liveWorkers, projects, sql, webhookDeliveries, type Db } from "@handoff/db";
-import type { GitHubPort, ProjectsPort } from "@handoff/github";
+import { ProjectsAccessError, type GitHubPort, type ProjectsPort } from "@handoff/github";
 import { engineWarning, type DockerMode } from "@/lib/app-launch";
 import { dockerMode } from "./app-launch";
 import { projectsAccessProblem, SCOPE_FIX } from "./plan";
@@ -98,8 +98,8 @@ async function acceptanceCheck(github: GitHubPort, repo: { owner: string; name: 
   return withCriteria > 0 ? check({ ...base, status: "ok", detail }) : check({ ...base, status: "todo", detail, fix });
 }
 
-/** Whether the project has a plan on GitHub Projects that handoff can reach. Never required. */
-async function planCheck(plan: ProjectsPort | undefined, project: { repoOwner: string; planProjectNumber: number | null }): Promise<ReadinessCheck> {
+/** Whether the project has a plan on GitHub Projects that handoff can reach, or why not. Never required. */
+export async function planCheck(plan: ProjectsPort | undefined, project: { repoOwner: string; planProjectNumber: number | null }): Promise<ReadinessCheck> {
   const base = { id: "plan", title: "A plan on GitHub Projects", required: false };
   const number = project.planProjectNumber;
   if (number === null) {
@@ -112,7 +112,9 @@ async function planCheck(plan: ProjectsPort | undefined, project: { repoOwner: s
   }
   const problem = await projectsAccessProblem(plan).catch((error: unknown) => `GitHub refused the token: ${(error as Error).message}`);
   if (problem || !plan) return check({ ...base, status: "todo", detail: problem ?? "GITHUB_TOKEN is not set.", fix: SCOPE_FIX });
-  const found = await plan.getProject(project.repoOwner, number).catch(() => undefined);
+  const found = await plan.getProject(project.repoOwner, number).catch((error: unknown) => (error instanceof ProjectsAccessError ? error : undefined));
+  // GitHub refused the token for the owner's Project; the sentence names the organization and what to do.
+  if (found instanceof ProjectsAccessError) return check({ ...base, status: "todo", detail: found.message });
   if (!found) {
     return check({
       ...base,

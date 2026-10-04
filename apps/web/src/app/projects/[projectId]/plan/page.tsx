@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
-import { PlanEmpty } from "@/components/plan/plan-empty";
+import { PlanEmpty, type PlanEmptyReason } from "@/components/plan/plan-empty";
 import { PlanHeader } from "@/components/plan/plan-header";
 import { PlanTab } from "@/components/plan/plan-tab";
 import { getDb } from "@/lib/db";
@@ -11,7 +11,7 @@ import { readyInBacklog } from "@/lib/plan/task";
 import { parsePlanView, parseZoom } from "@/lib/project-tab";
 import { projectCrumb } from "@/server/crumbs";
 import { getProjectDetail } from "@/server/graphs";
-import { loadPlan } from "@/server/plan";
+import { loadPlan, type PlanUnavailable } from "@/server/plan";
 import { lastGitHubActivity } from "@/server/plan-activity";
 import { planSignals } from "@/server/plan-signals";
 import { tokenUser } from "@/server/assignees";
@@ -40,6 +40,16 @@ async function loadPlanPage(projectId: string) {
   return { detail, plan, activity, signals, scheduler, crumbs, me, readAt: Date.now() };
 }
 
+/**
+ * The empty state for a plan that cannot be shown. An organization's SSO or its block on classic tokens is no
+ * missing scope: its sentence says what to do instead of the scope commands.
+ */
+function emptyReason({ reason, access }: PlanUnavailable): PlanEmptyReason {
+  if (reason === "no-plan") return "no-plan";
+  if (reason !== "no-scope") return "unreachable";
+  return access === "sso" || access === "classic-blocked" ? "refused" : "no-scope";
+}
+
 /** A project's plan from its GitHub Project: epics, stories and tasks as a tree, a board or a timeline. */
 export default async function PlanPage({
   params,
@@ -58,7 +68,7 @@ export default async function PlanPage({
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
         <PageHeader crumbs={crumbs} title="Plan" description={`Epics, stories and tasks for ${project.name}, from a GitHub Project.`} />
         <PlanEmpty
-          reason={plan.reason === "no-plan" ? "no-plan" : plan.reason === "no-scope" ? "no-scope" : "unreachable"}
+          reason={emptyReason(plan)}
           error={plan.error}
           project={{ id: project.id, name: project.name, repo: `${project.repoOwner}/${project.repoName}` }}
         />

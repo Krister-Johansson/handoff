@@ -7,6 +7,7 @@ export * from "./octokit-client.ts";
 export * from "./from-env.ts";
 export * from "./projects/types.ts";
 export * from "./projects/kinds.ts";
+export * from "./projects/access.ts";
 export * from "./projects/octokit-projects.ts";
 export * from "./projects/from-env.ts";
 export { orderMoves } from "./projects/order-moves.ts";

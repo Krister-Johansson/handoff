@@ -4,7 +4,7 @@ import { eq, events, projects, projectSchedulers, runs, sql } from "@handoff/db"
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cancelRun } from "@handoff/engine/operations";
 import { OctokitProjects } from "@handoff/github";
-import { fakeGraphql, FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { fakeFetch, fakeGraphql, FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 import { addDateFields, addEstimateFields, moveItem, moveToReady, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
 
@@ -81,6 +81,20 @@ test("schedule writes 60 items' dates to GitHub in a dozen requests at most", as
   const written = operations.filter((o) => o.operation === "SetManyPlanFields").flatMap((o) => Object.keys(o.variables).filter((k) => k.endsWith("Value")));
   expect(written).toHaveLength(120);
   expect(calls.length).toBeLessThanOrEqual(12);
+});
+
+test("setup_plan in an organization whose SSO the token is not authorized for answers with the sentence and stores nothing", async () => {
+  const url = "https://github.com/orgs/octo/sso?authorization_request=A1";
+  const { fetch } = fakeFetch({
+    "GET /user": () => ({ json: { login: "ann" }, headers: { "x-oauth-scopes": "repo, project" } }),
+    "POST /graphql": () => ({ status: 403, headers: { "x-github-sso": `required; url=${url}` }, json: { message: "Resource protected by organization SAML enforcement." } }),
+  });
+
+  await expect(setupPlan({ db, github, projects: OctokitProjects.withToken("t", { fetch, throttle: false }) }, projectId, { use: 4 })).rejects.toThrow(
+    `octo uses SAML single sign-on, and GITHUB_TOKEN is not authorized for it. Authorize the token at ${url} within the hour, or on GitHub under Settings, Developer settings, Personal access tokens, Configure SSO.`,
+  );
+  const [stored] = await db.select({ number: projects.planProjectNumber }).from(projects).where(eq(projects.id, projectId));
+  expect(stored).toEqual({ number: null });
 });
 
 test("plan_issue puts an issue whose run is active in Running and records it on the run; one without a run stays in Shaping", async () => {

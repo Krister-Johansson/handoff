@@ -18,7 +18,7 @@ import {
   type ProjectSchedulerRow,
 } from "@handoff/db";
 import { issueRuns, nudgeScheduler, overlapKey, projectHolds, type Candidate, type CheckResult, type Hold, type Skipped } from "@handoff/engine/backlog-scheduler";
-import type { ProjectsPort } from "@handoff/github";
+import { ProjectsAccessError, type ProjectsPort } from "@handoff/github";
 import { getProjectDetail } from "./graphs";
 import { projectsAccessProblem } from "./plan";
 import { holdText } from "../lib/scheduler-text";
@@ -66,14 +66,20 @@ export async function startScheduler(deps: SchedulerDeps, projectId: string, set
   }
   const access = await projectsAccessProblem(deps.projects);
   if (access) throw new Error(`The scheduler reads Ready tasks from GitHub Projects. ${access}`);
-  const [stored] = await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId));
+  // The check reads the Project the way tick.ts does: the repository owner's Project by number. An organization
+  // that refuses the token (SSO, classic tokens blocked) is named now, not at every check.
+  const [plan, [stored]] = await Promise.all([
+    deps.projects?.getProject(project.repoOwner, project.planProjectNumber).catch((error: unknown) => {
+      if (error instanceof ProjectsAccessError) throw new Error(`The scheduler reads Ready tasks from GitHub Projects. ${error.message}`, { cause: error });
+      throw error;
+    }),
+    db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, projectId)),
+  ]);
   const graphName = settings.graph ?? stored?.graphName ?? (await getProjectDetail(db, projectId))?.defaultGraph;
   if (!graphName) throw new Error(`${project.name} has no graph yet. Create one on its Graphs page.`);
   const [graph] = await db.select({ id: graphs.id }).from(graphs).where(and(eq(graphs.projectId, projectId), eq(graphs.name, graphName)));
   if (!graph) throw new Error(`${project.name} has no graph ${graphName}.`);
   if (settings.order === "priority") {
-    // The check reads the Project the way tick.ts does: the repository owner's Project by number.
-    const plan = await deps.projects?.getProject(project.repoOwner, project.planProjectNumber);
     if (plan?.priorityOptions === undefined) {
       throw new Error(`GitHub Project #${project.planProjectNumber} has no Priority field, so the scheduler cannot order tasks by priority. Add a single select field named Priority to the Project, or use Project order.`);
     }

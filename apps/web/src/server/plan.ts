@@ -1,5 +1,5 @@
 import { eq, projects, runs, type Db } from "@handoff/db";
-import { STATUS_OPTIONS, type GitHubPort, type PlanItem, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
+import { ProjectsAccessError, STATUS_OPTIONS, type AccessReason, type GitHubPort, type PlanItem, type PlanKind, type PlanProject, type PlanStatus, type ProjectsPort } from "@handoff/github";
 import { latestRuns, type BacklogIssue, type BacklogRun } from "./backlog.ts";
 import { deriveSpans, type Timeline, type TimelineRun } from "../lib/plan/schedule.ts";
 import { durationOf, type Duration, type Forecasts } from "../lib/plan/forecast.ts";
@@ -49,17 +49,25 @@ export type PlanView = {
   flow?: FlowInput | undefined;
 };
 
-/** Why a project's plan cannot be shown, with a sentence that says what to do. */
-export type PlanUnavailable = { reason: "not-found" | "no-scope" | "no-plan" | "unreachable"; error: string };
+/**
+ * Why a project's plan cannot be shown, with a sentence that says what to do. `access` says which refusal
+ * when GitHub refused the token for the owner's Project (a missing scope, SSO, classic tokens blocked).
+ */
+export type PlanUnavailable = { reason: "not-found" | "no-scope" | "no-plan" | "unreachable"; access?: AccessReason; error: string };
 
 export const SCOPE_FIX ="Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).";
-const NEEDS_TOKEN = `The plan needs GITHUB_TOKEN, a classic token with the project scope; a GitHub App cannot reach a user-owned Project. ${SCOPE_FIX}`;
+const NEEDS_TOKEN = `The plan needs GITHUB_TOKEN, a classic token with the project scope, which reaches user and organization Projects; handoff does not reach Projects through the GitHub App. ${SCOPE_FIX}`;
 
-/** What keeps handoff from GitHub Projects, as a sentence; undefined when the token can read and write them. */
+/**
+ * What keeps handoff from GitHub Projects, as a sentence; undefined when the token can read and write them.
+ * An organization's own refusal (SSO, classic tokens blocked) shows only when handoff reads its Project.
+ */
 export async function projectsAccessProblem(plan: ProjectsPort | undefined): Promise<string | undefined> {
   if (!plan) return NEEDS_TOKEN;
   const scopes = await plan.scopes();
-  if (!scopes.classic) return `GITHUB_TOKEN is not a classic token, and only a classic token with the project scope can reach a user-owned Project. ${SCOPE_FIX}`;
+  if (!scopes.classic) {
+    return `GITHUB_TOKEN is a fine-grained token. A fine-grained token cannot reach a Project owned by a user, and handoff reads every Project, a user's or an organization's, with one classic token with the project scope. ${SCOPE_FIX}`;
+  }
   if (!scopes.project) return `GITHUB_TOKEN lacks the project scope. ${SCOPE_FIX}`;
   return undefined;
 }
@@ -99,7 +107,7 @@ export async function loadPlan(
   if (number === null) return { reason: "no-plan", error: "This project has no plan on GitHub yet." };
   const repo = { owner: project.repoOwner, name: project.repoName };
   const flowMode = project.planMode === "flow";
-  const [planProject, items, open, latest, projectRuns, proposals] = await Promise.all([
+  const read = await Promise.all([
     plan.getProject(repo.owner, number),
     plan.listItems(repo.owner, number, repo),
     github.listIssues(repo),
@@ -107,7 +115,13 @@ export async function loadPlan(
     // A Flow project has no timeline, so its runs' strips are not read.
     flowMode ? [] : timelineRuns(db, projectId),
     latestProposals(db, projectId),
-  ]);
+  ]).catch((error: unknown) => {
+    // GitHub refused the token for this owner's Project: the sentence names the organization and what to do.
+    if (error instanceof ProjectsAccessError) return error;
+    throw error;
+  });
+  if (read instanceof ProjectsAccessError) return { reason: "no-scope", access: read.reason, error: read.message };
+  const [planProject, items, open, latest, projectRuns, proposals] = read;
   if (!planProject) return { reason: "unreachable", error: `GitHub Project #${number} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.` };
   const byNumber = new Map(items.map((i) => [i.number, i]));
   const { forecasts, capacity } = await loadForecasts(db, projectId, (issue) => byNumber.get(issue)?.size);

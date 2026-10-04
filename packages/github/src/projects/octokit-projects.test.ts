@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { buildSchema, Kind, parse, validate } from "graphql";
 import { expect, test } from "vitest";
 import { PlanItemsDocument, PlanOwnerIdsDocument, PlanProjectDocument, PlanProjectsDocument, PlanProjectSetupDocument } from "../gql/graphql.ts";
-import { fakeGraphql, GraphqlErrors } from "../testing/fake-fetch.ts";
+import { fakeFetch, fakeGraphql, GraphqlErrors } from "../testing/fake-fetch.ts";
+import { ProjectsAccessError } from "./access.ts";
 import { OctokitProjects } from "./octokit-projects.ts";
 
 const repo = { owner: "octo", name: "sample" };
@@ -1223,6 +1224,40 @@ test("setStatus still fails for an issue GitHub cannot resolve", async () => {
   const projects = port(fetch);
 
   await expect(projects.setStatus(repo, 5, 999, "Ready")).rejects.toThrow(/Could not resolve to an Issue/);
+});
+
+test("listItems on an organization that requires SSO throws a ProjectsAccessError with reason sso", async () => {
+  // https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api: a 403 whose X-GitHub-SSO header holds the URL that authorizes the token.
+  const url = "https://github.com/orgs/acme/sso?authorization_request=A1B2C3";
+  const { fetch } = fakeFetch({
+    "POST /graphql": () => ({
+      status: 403,
+      headers: { "x-github-sso": `required; url=${url}` },
+      json: { message: "Resource protected by organization SAML enforcement. You must grant your Personal Access token access to this organization." },
+    }),
+  });
+
+  const thrown = await port(fetch)
+    .listItems("acme", 4, { owner: "acme", name: "web" })
+    .catch((error: unknown) => error);
+
+  expect(thrown).toBeInstanceOf(ProjectsAccessError);
+  expect(thrown).toMatchObject({ reason: "sso", message: expect.stringContaining(`acme uses SAML single sign-on, and GITHUB_TOKEN is not authorized for it. Authorize the token at ${url}`) });
+});
+
+test("getProject without the read:project scope throws a ProjectsAccessError that names it", async () => {
+  const { fetch } = fakeGraphql({
+    PlanProject: () =>
+      new GraphqlErrors({ repositoryOwner: null }, [
+        {
+          type: "INSUFFICIENT_SCOPES",
+          message:
+            "Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['read:project'], but your token has only been granted the: ['repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens.",
+        },
+      ]),
+  });
+
+  await expect(port(fetch).getProject("acme", 4)).rejects.toMatchObject({ name: "ProjectsAccessError", reason: "scope", message: expect.stringContaining("lacks the read:project scope") });
 });
 
 /** A repository of the organization `acme`, whose plan is a Project the organization owns. */
