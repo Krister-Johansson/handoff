@@ -75,7 +75,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       merge: mergeNodeExecutor({ github, db, projects }),
     },
     github,
-    workdirs: env.HANDOFF_WORKSPACE === "docker" ? new DockerWorkdirProvider({ git, image: env.HANDOFF_DOCKER_IMAGE, mounts: [home, ...(env.HANDOFF_DOCKER_MOUNTS?.split(",").map((m) => m.trim()).filter(Boolean) ?? [])], ...(env.HANDOFF_DOCKER_NETWORK ? { network: env.HANDOFF_DOCKER_NETWORK } : {}) }) : git,
+    workdirs: env.HANDOFF_WORKSPACE === "docker" ? new DockerWorkdirProvider({ git, ...env.docker }) : git,
     log,
   };
 }
@@ -83,14 +83,14 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
 export async function runWorker(env: WorkerEnv) {
   const log = (message: string, detail?: unknown) => console.log(`[worker] ${message}`, detail ?? "");
   const docker = env.HANDOFF_WORKSPACE === "docker";
-  const mounts = env.HANDOFF_DOCKER_MOUNTS?.split(",").map((m) => m.trim()).filter(Boolean) ?? [];
   const cli = await checkClaudeVersion(
     docker ? env.HANDOFF_CONTAINER_CLAUDE_BIN : env.HANDOFF_CLAUDE_BIN,
     env.HANDOFF_CLAUDE_VERSION,
     env.allowCliDrift,
-    docker ? { image: env.HANDOFF_DOCKER_IMAGE, mounts } : undefined,
+    // The version check needs the extra mounts only; HANDOFF_HOME comes first and may not exist yet.
+    docker ? { image: env.docker.image, mounts: env.docker.mounts.slice(1) } : undefined,
   );
-  if (docker) log(`running nodes in containers from ${env.HANDOFF_DOCKER_IMAGE}`);
+  if (docker) log(`running nodes in containers from ${env.docker.image}`);
   if (cli.drift) log(`claude ${cli.version} differs from the pinned ${env.HANDOFF_CLAUDE_VERSION}; continuing because HANDOFF_ALLOW_CLI_DRIFT is set`);
   // A GitHub App cannot reach a user-owned Project: status writes need GITHUB_TOKEN even when the App runs the rest.
   const projects = await planAccess(projectsFromEnv({ GITHUB_TOKEN: env.GITHUB_TOKEN }), log);

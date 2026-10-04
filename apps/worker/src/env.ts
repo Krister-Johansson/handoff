@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dockerOptionsFromEnv } from "@handoff/engine";
 
 const intFrom = (fallback: number) => z.coerce.number().int().positive().default(fallback);
 const optional = z.string().trim().min(1).optional().catch(undefined);
@@ -22,10 +23,6 @@ const Schema = z.object({
   HANDOFF_EFFORT: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().catch(undefined),
   HANDOFF_PR_RECONCILE_MS: intFrom(10 * 60_000),
   HANDOFF_WORKSPACE: z.enum(["worktree", "docker"]).catch("worktree").default("worktree"),
-  HANDOFF_DOCKER_IMAGE: z.string().default("handoff-runner:2.1.285"),
-  HANDOFF_DOCKER_NETWORK: optional,
-  /** Extra host paths mounted into run containers, comma separated. */
-  HANDOFF_DOCKER_MOUNTS: optional,
   /** CLI to run inside the container; the runner image has `claude` on PATH. */
   HANDOFF_CONTAINER_CLAUDE_BIN: z.string().default("claude"),
   /** Comma-separated env var names passed through to the claude child (tests and sandbox runs only). */
@@ -56,6 +53,8 @@ export function parseEnv(source: Record<string, string | undefined>) {
   }
   return {
     ...env,
+    /** The run containers' image, mounts, network and user; dockerOptionsFromEnv reads them for the dashboard too. */
+    docker: dockerOptionsFromEnv(cleaned),
     allowCliDrift: env.HANDOFF_ALLOW_CLI_DRIFT === "1" || env.HANDOFF_ALLOW_CLI_DRIFT === "true",
     caps: { cli: env.HANDOFF_CAP_CLI, shell: env.HANDOFF_CAP_SHELL, github: env.HANDOFF_CAP_GITHUB, human: 1000, function: env.HANDOFF_CAP_FUNCTION },
     github,
