@@ -511,9 +511,10 @@ export const LIVE_WORKER_WINDOW_MS = 60_000;
  * would stop them otherwise. That is its own id's previews, from the process before it, and those of
  * any worker that is no longer live (stopped, or silent past the window), whatever its id: the default
  * id holds the pid and changes with every restart. A live worker's previews are left alone, and so are
- * those of workers on other hosts, whose pids mean nothing here.
+ * those of workers on other hosts, whose pids mean nothing here. Stopping one removes its container in
+ * a Docker workspace; then removeEndedPreviewContainers removes the containers whose preview has ended.
  */
-export async function stopLeftPreviews(db: Db, opts: { workerId: string; windowMs?: number; host?: string }): Promise<void> {
+export async function stopLeftPreviews(db: Db, opts: { workerId: string; windowMs?: number; host?: string; docker?: DockerExec }): Promise<void> {
   const live = new Set((await liveWorkers(db, opts.windowMs ?? LIVE_WORKER_WINDOW_MS)).map((w) => w.id));
   const rows = await db
     .select({ id: previews.id, workerId: previews.workerId })
@@ -522,4 +523,29 @@ export async function stopLeftPreviews(db: Db, opts: { workerId: string; windowM
     .where(and(eq(workers.hostname, opts.host ?? hostname()), inArray(previews.status, ["starting", "running"])));
   const left = rows.filter((r) => r.workerId === opts.workerId || !live.has(r.workerId));
   await Promise.all(left.map((r) => stopPreview(db, r.id)));
+  await removeEndedPreviewContainers(db, opts.docker);
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Removes the app containers whose preview has ended: those labelled handoff.preview whose row is
+ * neither starting nor running and names that container, as when Docker was not running while the app
+ * was stopped. A container whose preview this database does not hold is left alone, since it may be
+ * another database's, such as a test run's or another checkout's. Without Docker there is nothing to do.
+ */
+export async function removeEndedPreviewContainers(db: Db, exec: DockerExec = docker): Promise<void> {
+  const listed = await exec(["ps", "-a", "--filter", "label=handoff.preview", "--format", '{{.Names}}\t{{.Label "handoff.preview"}}'], process.cwd());
+  if (listed.exitCode !== 0) return;
+  const containers = listed.output
+    .split("\n")
+    .map((line) => line.trim().split("\t"))
+    .filter((c): c is [string, string] => Boolean(c[0]) && UUID.test(c[1] ?? ""));
+  if (containers.length === 0) return;
+  const rows = await db
+    .select({ id: previews.id, status: previews.status, container: previews.container })
+    .from(previews)
+    .where(inArray(previews.id, [...new Set(containers.map(([, id]) => id))]));
+  const ended = new Map(rows.filter((r) => r.status !== "starting" && r.status !== "running").map((r) => [r.id, r.container]));
+  await Promise.all(containers.filter(([name, id]) => ended.get(id) === name).map(([name]) => removePreviewContainer(name, exec)));
 }

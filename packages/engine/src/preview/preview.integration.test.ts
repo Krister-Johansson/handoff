@@ -1,4 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
@@ -199,6 +200,31 @@ test("it leaves the previews of a dead worker on another host alone: their pids 
   expect(await statusOf(row.id)).toBe("running");
 });
 
+test("a starting worker removes only the preview containers whose row has ended and names them", async () => {
+  const { run } = await seedRun(db);
+  const row = (id: string, status: "running" | "stopped" | "failed", container: string) => ({ id, runId: run.id, configuration: "web", workerId: "w1", status, port: 1, url: "http://localhost:1", logPath: "/tmp/log", container });
+  const [stopped, failed, live, renamed, unknown] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+  await db.insert(previews).values([
+    row(stopped, "stopped", "handoff-preview-a"),
+    row(failed, "failed", "handoff-preview-b"),
+    row(live, "running", "handoff-preview-c"),
+    row(renamed, "stopped", "handoff-preview-d"),
+  ]);
+  const listing = [`handoff-preview-a\t${stopped}`, `handoff-preview-b\t${failed}`, `handoff-preview-c\t${live}`, `someone-elses\t${renamed}`, `handoff-preview-e\t${unknown}`, "handoff-preview-f\tnot-an-id"].join("\n");
+  const removed: string[] = [];
+  const fake: DockerExec = async (args) => {
+    if (args[0] === "ps") return { exitCode: 0, output: `${listing}\n` };
+    if (args[0] === "rm") removed.push(args.at(-1)!);
+    return { exitCode: 0, output: "" };
+  };
+
+  await stopLeftPreviews(db, { workerId: "starting", docker: fake });
+
+  expect(removed.sort()).toEqual(["handoff-preview-a", "handoff-preview-b"]);
+  // Without Docker there is nothing to remove, and the worker starts as before.
+  await expect(stopLeftPreviews(db, { workerId: "starting", docker: async () => ({ exitCode: 1, output: "Cannot connect to the Docker daemon" }) })).resolves.toBeUndefined();
+});
+
 test("a repository with a compose file gets its services started once per project, kept if already up", async () => {
   const workdir = worktree({ "docker-compose.yml": "services: {}\n" });
   const calls: string[][] = [];
@@ -271,7 +297,7 @@ const dockerServer = `require("node:http").createServer((_, res) => res.end("hel
  * DockerWorkdirProvider with HANDOFF_HOME as the only mount, as the worker makes it. The run's
  * container and every app container of the run are removed when the test ends.
  */
-async function dockerStart(files: Record<string, string>, opts: { readyTimeoutMs?: number; seedCommand?: string; docker?: DockerExec } = {}) {
+async function dockerStart(files: Record<string, string>, opts: { readyTimeoutMs?: number; seedCommand?: string; docker?: DockerExec; workerId?: string } = {}) {
   const { run, project } = await seedRun(db);
   const home = mkdtempSync(join(tmpdir(), "handoff-docker-home-"));
   const provider = new DockerWorkdirProvider({ git: new GitWorktreeProvider({ root: home }), image, mounts: [home] });
@@ -286,7 +312,7 @@ async function dockerStart(files: Record<string, string>, opts: { readyTimeoutMs
     workdir,
     preview: () =>
       startPreview(
-        { db, workerId: "w1" },
+        { db, workerId: opts.workerId ?? "w1" },
         { runId: run.id, projectId: project.id, workdir, readyTimeoutMs: opts.readyTimeoutMs ?? 15_000, seedCommand: opts.seedCommand ?? null, ...(opts.docker ? { docker: opts.docker } : {}) },
       ),
   };
@@ -367,6 +393,56 @@ describe.skipIf(!dockerEnabled)("in a Docker workspace", () => {
     expect(appContainersOf(run.id)).toEqual([]);
     expect(await statusOf(row.id)).toBe("stopped");
     await expect(fetch(row.url, { signal: AbortSignal.timeout(2_000) })).rejects.toThrow();
+  });
+
+  const appFiles = { ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": dockerServer };
+  const running = (name: string) => docker("inspect", "-f", "{{.State.Running}}", name) === "true";
+
+  test("a preview container whose row is not running is removed when a worker starts", async () => {
+    await registerWorker(db, { id: "live", hostname: hostname(), caps: {} });
+    const { run, preview } = await dockerStart(appFiles, { workerId: "live" });
+    const row = await preview();
+    // The row ended but the container stayed, as when Docker was not running while the app was stopped.
+    await db.update(previews).set({ status: "stopped", stoppedAt: new Date() }).where(eq(previews.id, row.id));
+    await registerWorker(db, { id: "starting", hostname: hostname(), caps: {} });
+
+    await stopLeftPreviews(db, { workerId: "starting" });
+
+    expect(appContainersOf(run.id)).toEqual([]);
+  });
+
+  test("a starting worker removes the containers of the previews a worker that is no longer live left", async () => {
+    await registerWorker(db, { id: `${hostname()}:111`, hostname: hostname(), caps: {} });
+    await stopWorker(db, `${hostname()}:111`);
+    const { run, preview } = await dockerStart(appFiles, { workerId: `${hostname()}:111` });
+    const row = await preview();
+    await registerWorker(db, { id: `${hostname()}:222`, hostname: hostname(), caps: {} });
+
+    await stopLeftPreviews(db, { workerId: `${hostname()}:222` });
+
+    expect(appContainersOf(run.id)).toEqual([]);
+    expect(await statusOf(row.id)).toBe("stopped");
+  });
+
+  test("it leaves a live worker's preview container alone, and every container whose preview this database does not hold", async () => {
+    await registerWorker(db, { id: "live", hostname: hostname(), caps: {} });
+    const { preview } = await dockerStart(appFiles, { workerId: "live" });
+    const row = await preview();
+    // Preview containers of another database, such as the person's own worker's while these tests run, and one with a label that is not an id.
+    const others = [randomUUID(), "not-an-id"].map((id) => {
+      const name = `handoff-test-other-${randomUUID().slice(0, 8)}`;
+      docker("run", "-d", "--name", name, "--label", `handoff.preview=${id}`, "--label", `handoff.run=${randomUUID()}`, image, "sleep", "infinity");
+      onTestFinished(() => void execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" }));
+      return name;
+    });
+    await registerWorker(db, { id: "starting", hostname: hostname(), caps: {} });
+
+    await stopLeftPreviews(db, { workerId: "starting" });
+
+    expect(await statusOf(row.id)).toBe("running");
+    expect(running(row.container!)).toBe(true);
+    expect(await (await fetch(row.url)).text()).toMatch(`hello from ${row.port}`);
+    for (const name of others) expect(running(name)).toBe(true);
   });
 
   test("cancelling a run removes its app's container", async () => {
