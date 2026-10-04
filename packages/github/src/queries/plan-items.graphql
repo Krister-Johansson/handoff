@@ -1,114 +1,118 @@
+# $login is the repository owner's, a user or an organization; one request reads either's Project.
 query PlanItems($login: String!, $number: Int!, $cursor: String) {
-  user(login: $login) {
-    projectV2(number: $number) {
-      items(first: 100, after: $cursor) {
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-        nodes {
-          # The item's node id, which an order write names; a scalar on a node already fetched.
-          id
-          status: fieldValueByName(name: "Status") {
-            __typename
-            ... on ProjectV2ItemFieldSingleSelectValue {
-              name
-            }
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        items(first: 100, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
           }
-          # Values by field name cost no points, unlike fieldValues(first:), which counts once per item.
-          start: fieldValueByName(name: "Start") {
-            __typename
-            ... on ProjectV2ItemFieldDateValue {
-              date
-            }
-          }
-          target: fieldValueByName(name: "Target") {
-            __typename
-            ... on ProjectV2ItemFieldDateValue {
-              date
-            }
-          }
-          # A Project without a Priority field answers null here, without an error.
-          priority: fieldValueByName(name: "Priority") {
-            __typename
-            ... on ProjectV2ItemFieldSingleSelectValue {
-              name
-            }
-          }
-          # handoff's sizes are the options S, M and L; another option reads as no size. Measured live: these two lookups add no points.
-          size: fieldValueByName(name: "Size") {
-            __typename
-            ... on ProjectV2ItemFieldSingleSelectValue {
-              name
-            }
-          }
-          # Hours; 0 or less reads as no estimate.
-          estimate: fieldValueByName(name: "Estimate") {
-            __typename
-            ... on ProjectV2ItemFieldNumberValue {
-              number
-            }
-          }
-          # GitHub names a new iteration field "Iteration"; a renamed one is not read.
-          iteration: fieldValueByName(name: "Iteration") {
-            __typename
-            ... on ProjectV2ItemFieldIterationValue {
-              title
-              startDate
-              duration
-            }
-          }
-          content {
-            __typename
-            ... on Issue {
-              number
-              title
-              url
-              state
-              updatedAt
-              repository {
+          nodes {
+            # The item's node id, which an order write names; a scalar on a node already fetched.
+            id
+            status: fieldValueByName(name: "Status") {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
                 name
-                owner {
-                  login
-                }
               }
-              labels(first: 20) {
-                nodes {
+            }
+            # Values by field name cost no points, unlike fieldValues(first:), which counts once per item.
+            start: fieldValueByName(name: "Start") {
+              __typename
+              ... on ProjectV2ItemFieldDateValue {
+                date
+              }
+            }
+            target: fieldValueByName(name: "Target") {
+              __typename
+              ... on ProjectV2ItemFieldDateValue {
+                date
+              }
+            }
+            # A Project without a Priority field answers null here, without an error.
+            priority: fieldValueByName(name: "Priority") {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+              }
+            }
+            # handoff's sizes are the options S, M and L; another option reads as no size. Measured live: these two lookups add no points.
+            size: fieldValueByName(name: "Size") {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+              }
+            }
+            # Hours; 0 or less reads as no estimate.
+            estimate: fieldValueByName(name: "Estimate") {
+              __typename
+              ... on ProjectV2ItemFieldNumberValue {
+                number
+              }
+            }
+            # GitHub names a new iteration field "Iteration"; a renamed one is not read.
+            iteration: fieldValueByName(name: "Iteration") {
+              __typename
+              ... on ProjectV2ItemFieldIterationValue {
+                title
+                startDate
+                duration
+              }
+            }
+            content {
+              __typename
+              ... on Issue {
+                number
+                title
+                url
+                state
+                updatedAt
+                repository {
+                  name
+                  owner {
+                    login
+                  }
+                }
+                labels(first: 20) {
+                  nodes {
+                    name
+                  }
+                }
+                # avatarUrl is a scalar on a node already fetched, so it adds no points.
+                assignees(first: 10) {
+                  nodes {
+                    login
+                    avatarUrl
+                  }
+                }
+                issueType {
                   name
                 }
-              }
-              # avatarUrl is a scalar on a node already fetched, so it adds no points.
-              assignees(first: 10) {
-                nodes {
-                  login
-                  avatarUrl
-                }
-              }
-              issueType {
-                name
-              }
-              parent {
-                number
                 parent {
                   number
                   parent {
                     number
+                    parent {
+                      number
+                    }
                   }
                 }
-              }
-              subIssuesSummary {
-                total
-                completed
-              }
-              blockedBy(first: 20) {
-                nodes {
-                  number
-                  state
+                subIssuesSummary {
+                  total
+                  completed
                 }
-              }
-              closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
-                nodes {
-                  number
+                blockedBy(first: 20) {
+                  nodes {
+                    number
+                    state
+                  }
+                }
+                closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
+                  nodes {
+                    number
+                  }
                 }
               }
             }

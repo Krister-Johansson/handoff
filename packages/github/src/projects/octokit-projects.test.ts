@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { buildSchema, Kind, parse, validate } from "graphql";
 import { expect, test } from "vitest";
+import { PlanItemsDocument, PlanOwnerIdsDocument, PlanProjectDocument, PlanProjectsDocument, PlanProjectSetupDocument } from "../gql/graphql.ts";
 import { fakeGraphql, GraphqlErrors } from "../testing/fake-fetch.ts";
 import { OctokitProjects } from "./octokit-projects.ts";
 
@@ -33,8 +34,9 @@ function issueItem(number: number, over: Record<string, unknown> = {}, status: s
   };
 }
 
-const page = (nodes: unknown[], endCursor: string | null, hasNextPage: boolean) => ({
-  user: { projectV2: { items: { pageInfo: { hasNextPage, endCursor }, nodes } } },
+/** A page of PlanItems as GitHub answers it through repositoryOwner, for a user's Project unless `owner` says otherwise. */
+const page = (nodes: unknown[], endCursor: string | null, hasNextPage: boolean, owner: "User" | "Organization" = "User") => ({
+  repositoryOwner: { __typename: owner, projectV2: { items: { pageInfo: { hasNextPage, endCursor }, nodes } } },
 });
 
 test("listItems reads every page of a Project and returns the repository's issues with status, kind, parent, sub-issue counts, open blockers and linked pull requests", async () => {
@@ -288,7 +290,7 @@ test("setStatus finds the issue's item and sets the Status option by id, and rep
 test("setStatus with add adds the issue to the Project first", async () => {
   const { fetch, operations } = fakeGraphql({
     IssuePlan: () => issuePlan(12, []),
-    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "https://github.com/users/octo/projects/3", title: "sample plan" } } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "https://github.com/users/octo/projects/3", title: "sample plan" } } }),
     AddPlanItem: () => ({ addProjectV2ItemById: { item: { id: "PVTI_new" } } }),
     SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_new" } } }),
   });
@@ -325,7 +327,7 @@ test("createProject creates a user Project, renames the Status options keeping D
     ],
   };
   const { fetch, operations } = fakeGraphql({
-    PlanOwnerIds: () => ({ user: { id: "U_octo" }, repository: { id: "R_sample" } }),
+    PlanOwnerIds: () => ({ repository: { id: "R_sample", owner: { __typename: "User", id: "U_octo", viewerCanCreateProjects: true } } }),
     CreatePlanProject: () => ({ createProjectV2: { projectV2: { id: "PVT_9", number: 9, url: "https://github.com/users/octo/projects/9", title: "sample plan", field: defaults } } }),
     SetStatusOptions: () => ({ updateProjectV2Field: { projectV2Field: renamed } }),
     CreatePlanDateField: (v) => ({ createProjectV2Field: { projectV2Field: { __typename: "ProjectV2Field", id: `F_${String(v.name).toLowerCase()}`, dataType: "DATE" } } }),
@@ -337,6 +339,7 @@ test("createProject creates a user Project, renames the Status options keeping D
     number: 9,
     url: "https://github.com/users/octo/projects/9",
     title: "sample plan",
+    owner: "User",
     statusOptions: { Shaping: "o_s", Ready: "o_r", Running: "o_run", "In review": "o_rev", Done: "o_done" },
     dateFields: { start: "F_start", target: "F_target" },
   });
@@ -345,7 +348,7 @@ test("createProject creates a user Project, renames the Status options keeping D
     { projectId: "PVT_9", name: "Start" },
     { projectId: "PVT_9", name: "Target" },
   ]);
-  expect(operations[0]!.variables).toEqual({ login: "octo", owner: "octo", name: "sample" });
+  expect(operations[0]!.variables).toEqual({ owner: "octo", name: "sample" });
   expect(operations[1]!.variables).toEqual({ ownerId: "U_octo", title: "sample plan" });
   const options = (operations[2]!.variables.options as { id?: string; name: string; color: string; description: string }[]).map(({ id, name, color, description }) => ({ id, name, color, description }));
   expect(operations[2]!.variables.fieldId).toBe("F_status");
@@ -359,7 +362,7 @@ test("createProject creates a user Project, renames the Status options keeping D
 test("createProject without date fields creates no Start or Target field, for a project that plans in Flow mode", async () => {
   const field = { __typename: "ProjectV2SingleSelectField", id: "F_status", options: [{ id: "o_done", name: "Done", color: "PURPLE", description: "Done" }] };
   const { fetch, operations } = fakeGraphql({
-    PlanOwnerIds: () => ({ user: { id: "U_octo" }, repository: { id: "R_sample" } }),
+    PlanOwnerIds: () => ({ repository: { id: "R_sample", owner: { __typename: "User", id: "U_octo", viewerCanCreateProjects: true } } }),
     CreatePlanProject: () => ({ createProjectV2: { projectV2: { id: "PVT_9", number: 9, url: "u", title: "sample plan", field } } }),
     SetStatusOptions: () => ({ updateProjectV2Field: { projectV2Field: field } }),
     LinkPlanRepository: () => ({ linkProjectV2ToRepository: { repository: { id: "R_sample" } } }),
@@ -383,7 +386,7 @@ test("createIssue sends the parent, the labels and the blockers, and leaves the 
     AddPlanBlocker: (v) => ({ addBlockedBy: { issue: { id: v.issueId } } }),
     // GitHub may already have added the sub-issue to its parent's Project; here it has not.
     IssuePlan: () => issuePlan(20, []),
-    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } }),
     AddPlanItem: () => ({ addProjectV2ItemById: { item: { id: "PVTI_20" } } }),
     SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
   });
@@ -412,7 +415,7 @@ test("createIssue sets Start and Target after adding the item", async () => {
     IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] } } }),
     CreatePlanIssue: () => ({ createIssue: { issue: { id: "I_20", number: 20, url: "https://github.com/octo/sample/issues/20" } } }),
     IssuePlan: () => issuePlan(20, added ? [{ id: "PVTI_20", project: planProject(3), status: "Shaping" }] : []),
-    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } }),
     AddPlanItem: () => {
       added = true;
       return { addProjectV2ItemById: { item: { id: "PVTI_20" } } };
@@ -460,7 +463,8 @@ const userProject = (number: number, title: string, field: unknown, repositories
 test("listProjects lists the user's open Projects, those linked to the repository first, with the Status options each lacks", async () => {
   const { fetch, operations } = fakeGraphql({
     PlanProjects: () => ({
-      user: {
+      repositoryOwner: {
+        __typename: "User",
         projectsV2: {
           nodes: [
             userProject(3, "gqlPrune Roadmap", statusOptions("Todo", "In Progress", "Done"), [{ name: "gqlPrune", owner: "octo" }]),
@@ -485,8 +489,8 @@ test("listProjects lists the user's open Projects, those linked to the repositor
 test("adoptProject links the repository and renames or adds handoff's Status options, keeping the other options and their ids", async () => {
   const current = statusOptions("🆕 New", "📋 Backlog", "✅ ready", "🏗 In progress", "👀 In review", "Done");
   const { fetch, operations } = fakeGraphql({
-    PlanProjectSetup: () => ({ user: { projectV2: userProject(1, "Untitled", current) } }),
-    PlanOwnerIds: () => ({ user: { id: "U_octo" }, repository: { id: "R_sample" } }),
+    PlanProjectSetup: () => ({ repositoryOwner: { __typename: "User", projectV2: userProject(1, "Untitled", current) } }),
+    PlanOwnerIds: () => ({ repository: { id: "R_sample", owner: { __typename: "User", id: "U_octo", viewerCanCreateProjects: true } } }),
     SetStatusOptions: (v) => ({
       updateProjectV2Field: {
         projectV2Field: { __typename: "ProjectV2SingleSelectField", id: "F_status", options: (v.options as { id?: string; name: string }[]).map((o, i) => ({ id: o.id ?? `new_${i}`, name: o.name })) },
@@ -520,6 +524,7 @@ test("adoptProject links the repository and renames or adds handoff's Status opt
       number: 1,
       url: "https://github.com/users/octo/projects/1",
       title: "Untitled",
+      owner: "User",
       statusOptions: { Shaping: "new_0", Ready: "o_2", Running: "new_2", "In review": "o_4", Done: "o_5" },
       // The Project has no date fields yet; setup_plan adds them with ensureDateFields.
       dateFields: { start: undefined, target: undefined },
@@ -535,7 +540,8 @@ test("adoptProject links the repository and renames or adds handoff's Status opt
 test("adoptProject leaves a Project that already has handoff's options and is linked alone", async () => {
   const { fetch, operations } = fakeGraphql({
     PlanProjectSetup: () => ({
-      user: {
+      repositoryOwner: {
+        __typename: "User",
         projectV2: {
           ...userProject(2, "sample plan", statusOptions("Shaping", "Ready", "Running", "In review", "Done", "Parked"), [{ name: "sample", owner: "octo" }]),
           start: projectField("F_start"),
@@ -561,7 +567,7 @@ test("addIssue labels an existing issue, makes it a sub-issue of the parent and 
     AddPlanLabels: () => ({ addLabelsToLabelable: { clientMutationId: null } }),
     AddPlanSubIssue: () => ({ addSubIssue: { issue: { id: "I_11" } } }),
     IssuePlan: () => issuePlan(30, []),
-    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } }),
     AddPlanItem: () => ({ addProjectV2ItemById: { item: { id: "PVTI_30" } } }),
     SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_30" } } }),
   });
@@ -606,9 +612,9 @@ test("getProject reads a user's Project with its Status option ids and date fiel
   const { fetch } = fakeGraphql({
     PlanProject: (v) =>
       v.number === 3
-        ? { user: { projectV2: { ...planProject(3), url: "https://github.com/users/octo/projects/3", title: "sample plan" } } }
+        ? { repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "https://github.com/users/octo/projects/3", title: "sample plan" } } }
         : // GitHub answers a Project number it cannot resolve with a NOT_FOUND error next to the null.
-          new GraphqlErrors({ user: { projectV2: null } }, [{ type: "NOT_FOUND", path: ["user", "projectV2"], message: `Could not resolve to a ProjectV2 with the number ${v.number}.` }]),
+          new GraphqlErrors({ repositoryOwner: { __typename: "User", projectV2: null } }, [{ type: "NOT_FOUND", path: ["repositoryOwner", "projectV2"], message: `Could not resolve to a ProjectV2 with the number ${v.number}.` }]),
   });
   const projects = port(fetch);
 
@@ -616,6 +622,7 @@ test("getProject reads a user's Project with its Status option ids and date fiel
     number: 3,
     url: "https://github.com/users/octo/projects/3",
     title: "sample plan",
+    owner: "User",
     statusOptions: { Shaping: "o_shaping", Ready: "o_ready", Running: "o_running", "In review": "o_review", Done: "o_done" },
     dateFields: { start: "F_start", target: "F_target" },
     estimateFields: { size: undefined, estimate: undefined },
@@ -634,7 +641,8 @@ test("listItems reads the Priority option and getProject returns the Priority op
     PlanItems: () => page([medium, high, none, text], null, false),
     // The options as Project #3 lists them live: the first is the highest.
     PlanProject: () => ({
-      user: {
+      repositoryOwner: {
+        __typename: "User",
         projectV2: {
           ...planProject(3),
           url: "https://github.com/users/octo/projects/3",
@@ -674,8 +682,8 @@ const missingDateFields = (path: string[]) =>
 test("a Project without Start and Target fields is still read, with no date field ids", async () => {
   const project = { ...planProject(5, "U_octo", false), url: "https://github.com/users/octo/projects/5", title: "older plan", closed: false, repositories: { nodes: [] } };
   const { fetch } = fakeGraphql({
-    PlanProject: () => new GraphqlErrors({ user: { projectV2: project } }, missingDateFields(["user", "projectV2"])),
-    PlanProjects: () => new GraphqlErrors({ user: { projectsV2: { nodes: [project] } } }, missingDateFields(["user", "projectsV2", "nodes", "0"])),
+    PlanProject: () => new GraphqlErrors({ repositoryOwner: { __typename: "User", projectV2: project } }, missingDateFields(["repositoryOwner", "projectV2"])),
+    PlanProjects: () => new GraphqlErrors({ repositoryOwner: { __typename: "User", projectsV2: { nodes: [project] } } }, missingDateFields(["repositoryOwner", "projectsV2", "nodes", "0"])),
   });
   const projects = port(fetch);
 
@@ -701,8 +709,8 @@ test("a Project without Size and Estimate fields is read with no estimate field 
   const bare = { ...planProject(5), url: "https://github.com/users/octo/projects/5", title: "todooverkill plan", closed: false, repositories: { nodes: [] } };
   const sized = { ...planProject(1), url: "https://github.com/users/octo/projects/1", title: "sized", size: sizeField("🐋 X-Large", "S", "M", "L"), estimate: projectField("F_estimate", "NUMBER") };
   const { fetch } = fakeGraphql({
-    PlanProject: (v) => (v.number === 5 ? new GraphqlErrors({ user: { projectV2: bare } }, missingEstimateFields(["user", "projectV2"])) : { user: { projectV2: sized } }),
-    PlanProjects: () => new GraphqlErrors({ user: { projectsV2: { nodes: [bare] } } }, missingEstimateFields(["user", "projectsV2", "nodes", "0"])),
+    PlanProject: (v) => (v.number === 5 ? new GraphqlErrors({ repositoryOwner: { __typename: "User", projectV2: bare } }, missingEstimateFields(["repositoryOwner", "projectV2"])) : { repositoryOwner: { __typename: "User", projectV2: sized } }),
+    PlanProjects: () => new GraphqlErrors({ repositoryOwner: { __typename: "User", projectsV2: { nodes: [bare] } } }, missingEstimateFields(["repositoryOwner", "projectsV2", "nodes", "0"])),
   });
   const projects = port(fetch);
 
@@ -716,11 +724,11 @@ test("a Project without a Priority field gives every item no priority", async ()
   const project = { ...planProject(5, "U_octo", false), url: "https://github.com/users/octo/projects/5", title: "older plan", priority: null };
   const missingPriority = {
     type: "NOT_FOUND",
-    path: ["user", "projectV2", "priority"],
+    path: ["repositoryOwner", "projectV2", "priority"],
     message: "Could not resolve to a Unions::ProjectV2FieldConfiguration with the name Priority",
   };
   const { fetch } = fakeGraphql({
-    PlanProject: () => new GraphqlErrors({ user: { projectV2: project } }, [...missingDateFields(["user", "projectV2"]), missingPriority]),
+    PlanProject: () => new GraphqlErrors({ repositoryOwner: { __typename: "User", projectV2: project } }, [...missingDateFields(["repositoryOwner", "projectV2"]), missingPriority]),
     PlanItems: () => page([{ ...issueItem(40), priority: null }, { ...issueItem(41), priority: null }], null, false),
   });
   const projects = port(fetch);
@@ -767,7 +775,7 @@ test("setStatus reports no-option when the Project's Status has no such option",
 test("ensureDateFields creates Start and Target once and returns the ids", async () => {
   let project: Record<string, unknown> = { ...planProject(3), url: "u", title: "t", start: null, target: projectField("F_target") };
   const { fetch, operations } = fakeGraphql({
-    PlanProject: () => ({ user: { projectV2: project } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: project } }),
     CreatePlanDateField: (v) => {
       project = { ...project, start: projectField("F_start") };
       return { createProjectV2Field: { projectV2Field: { __typename: "ProjectV2Field", id: "F_start", dataType: "DATE", name: v.name } } };
@@ -981,7 +989,7 @@ function planItemIds(variables: Record<string, unknown>, itemsOf: (issue: number
 test("setManyPlanFields writes 60 items' Start and Target in a few requests, each valid against GitHub's schema", async () => {
   const issues = Array.from({ length: 60 }, (_, i) => 100 + i);
   const { fetch, operations, calls } = fakeGraphql({
-    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } }),
     PlanItemIds: (v) => planItemIds(v, (issue) => [{ id: "PVTI_other", project: "PVT_2" }, { id: `PVTI_${issue}`, project: "PVT_3" }]),
     SetManyPlanFields: () => ({}),
   });
@@ -1012,7 +1020,7 @@ test("setManyPlanFields writes 60 items' Start and Target in a few requests, eac
 
 test("setManyPlanFields writes nothing when an issue is outside the Project or the Project lacks a field, and names only those issues", async () => {
   const { fetch, operations } = fakeGraphql({
-    PlanProject: () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } }),
     // #13 is only in another Project; GitHub has no #14.
     PlanItemIds: (v) => planItemIds(v, (issue) => (issue === 12 ? [{ id: "PVTI_12", project: "PVT_3" }] : issue === 13 ? [{ id: "PVTI_13", project: "PVT_2" }] : null)),
   });
@@ -1045,7 +1053,7 @@ test("listItems returns each item's id", async () => {
 });
 
 /** The PlanProject answer for Project #3, the plan the moves go to. */
-const movesProject = () => ({ user: { projectV2: { ...planProject(3), url: "u", title: "t" } } });
+const movesProject = () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } });
 const moves = (count: number) => Array.from({ length: count }, (_, i) => ({ itemId: `PVTI_${i + 1}`, afterId: i === 0 ? null : `PVTI_${i}` }));
 
 test("moveItems sends the moves in order, 20 per request", async () => {
@@ -1105,7 +1113,7 @@ test("a refusal part way throws naming how many moved", async () => {
 });
 
 test("moveItems throws when the Project does not exist", async () => {
-  const { fetch, operations } = fakeGraphql({ PlanProject: () => new GraphqlErrors({ user: { projectV2: null } }, [{ type: "NOT_FOUND", message: "Could not resolve to a ProjectV2" }]) });
+  const { fetch, operations } = fakeGraphql({ PlanProject: () => new GraphqlErrors({ repositoryOwner: { __typename: "User", projectV2: null } }, [{ type: "NOT_FOUND", message: "Could not resolve to a ProjectV2" }]) });
 
   await expect(port(fetch).moveItems("octo", 9, moves(2))).rejects.toThrow(/Project #9 of octo does not exist/);
   expect(operations.map((o) => o.operation)).toEqual(["PlanProject"]);
@@ -1122,7 +1130,7 @@ test("ensureEstimateFields creates Size with S, M and L and Estimate as a Number
   let project: Record<string, unknown> = { ...planProject(5), url: "u", title: "t" };
   const { fetch, operations } = fakeGraphql({
     PlanProject: () =>
-      project.size ? { user: { projectV2: project } } : new GraphqlErrors({ user: { projectV2: { ...project, size: null, estimate: null } } }, missingEstimateFields(["user", "projectV2"])),
+      project.size ? { repositoryOwner: { __typename: "User", projectV2: project } } : new GraphqlErrors({ repositoryOwner: { __typename: "User", projectV2: { ...project, size: null, estimate: null } } }, missingEstimateFields(["repositoryOwner", "projectV2"])),
     CreatePlanSizeField: (v) => {
       const field = sizeFieldFrom(v.options as { name: string }[]);
       project = { ...project, size: field };
@@ -1153,7 +1161,7 @@ test("ensureEstimateFields adds S, M and L to an existing Size field and keeps i
   const current = sizeField("🐋 X-Large", "🦑 Large", "M", "🐂 Medium", "🐇 Small", "🦔 Tiny");
   let project: Record<string, unknown> = { ...planProject(1), url: "u", title: "t", size: current, estimate: projectField("F_estimate", "NUMBER") };
   const { fetch, operations } = fakeGraphql({
-    PlanProject: () => ({ user: { projectV2: project } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: project } }),
     SetPlanSizeOptions: (v) => {
       const field = sizeFieldFrom(v.options as { id?: string; name: string }[]);
       project = { ...project, size: field };
@@ -1182,7 +1190,7 @@ test("ensureEstimateFields adds S, M and L to an existing Size field and keeps i
 test("ensureEstimateFields without the estimate creates only Size, for a project that plans in Flow mode", async () => {
   const project: Record<string, unknown> = { ...planProject(5), url: "u", title: "t", size: null, estimate: null };
   const { fetch, operations } = fakeGraphql({
-    PlanProject: () => ({ user: { projectV2: project } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: project } }),
     CreatePlanSizeField: (v) => ({ createProjectV2Field: { projectV2Field: sizeFieldFrom(v.options as { name: string }[]) } }),
   });
 
@@ -1192,7 +1200,7 @@ test("ensureEstimateFields without the estimate creates only Size, for a project
 
 test("ensureEstimateFields refuses a Size that is not a single select", async () => {
   let project: Record<string, unknown> = { ...planProject(3), url: "u", title: "t", size: projectField("F_size_text", "TEXT"), estimate: null };
-  const { fetch, operations } = fakeGraphql({ PlanProject: () => ({ user: { projectV2: project } }) });
+  const { fetch, operations } = fakeGraphql({ PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: project } }) });
   const projects = port(fetch);
 
   await expect(projects.ensureEstimateFields("octo", 3)).rejects.toThrow(/has a Size field that is not a single select/);
@@ -1215,4 +1223,166 @@ test("setStatus still fails for an issue GitHub cannot resolve", async () => {
   const projects = port(fetch);
 
   await expect(projects.setStatus(repo, 5, 999, "Ready")).rejects.toThrow(/Could not resolve to an Issue/);
+});
+
+/** A repository of the organization `acme`, whose plan is a Project the organization owns. */
+const orgRepo = { owner: "acme", name: "web" };
+
+/** A PlanItems item whose content is an issue of `acme/web`. */
+const orgIssueItem = (number: number, over: Record<string, unknown> = {}, status: string | null = null) =>
+  issueItem(number, { url: `https://github.com/acme/web/issues/${number}`, repository: { name: "web", owner: { login: "acme" } }, ...over }, status);
+
+/** How GitHub answers PlanOwnerIds for `acme/web`: the repository with its owner, the organization. */
+const orgOwnerIds = (viewerCanCreateProjects = true) => ({ repository: { id: "R_web", owner: { __typename: "Organization", id: "O_acme", viewerCanCreateProjects } } });
+
+/** The text of the GraphQL request a call sent. */
+const queryOf = (call: { body: unknown }) => (call.body as { query: string }).query;
+
+test("listItems reads an organization's Project through repositoryOwner and returns the repository's issues", async () => {
+  const task = orgIssueItem(1, { labels: { nodes: [{ name: "task" }] } }, "Ready");
+  // The organization's issue type Task names the kind when the issue has no kind label.
+  const typed = orgIssueItem(2, { issueType: { name: "Task" } }, "Shaping");
+  // An organization Project holds issues of other repositories too; they are not this repository's plan.
+  const elsewhere = issueItem(3);
+  const { fetch, operations, calls } = fakeGraphql({ PlanItems: () => page([task, typed, elsewhere], null, false, "Organization") });
+
+  const items = await port(fetch).listItems("acme", 4, orgRepo);
+
+  expect(items.map((i) => [i.number, i.kind, i.status, i.url, i.position])).toEqual([
+    [1, "task", "Ready", "https://github.com/acme/web/issues/1", 1],
+    [2, "task", "Shaping", "https://github.com/acme/web/issues/2", 2],
+  ]);
+  expect(operations).toEqual([{ operation: "PlanItems", variables: { login: "acme", number: 4 } }]);
+  expect(queryOf(calls[0]!)).toMatch(/repositoryOwner\(login: \$login\)/);
+  expect(queryOf(calls[0]!)).not.toMatch(/\buser\(/);
+});
+
+test("a user's Project is still read in one request per page", async () => {
+  const { fetch, operations, calls } = fakeGraphql({
+    PlanItems: (v) => (v.cursor ? page([issueItem(3)], null, false) : page([issueItem(1), issueItem(2)], "c1", true)),
+  });
+
+  expect((await port(fetch).listItems("octo", 3, repo)).map((i) => [i.number, i.position])).toEqual([
+    [1, 1],
+    [2, 2],
+    [3, 3],
+  ]);
+  // No query runs first to learn the owner type: each page is one PlanItems request.
+  expect(operations).toEqual([
+    { operation: "PlanItems", variables: { login: "octo", number: 3 } },
+    { operation: "PlanItems", variables: { login: "octo", number: 3, cursor: "c1" } },
+  ]);
+  expect(calls).toHaveLength(2);
+  expect(queryOf(calls[0]!)).toMatch(/repositoryOwner\(login: \$login\)/);
+});
+
+test("getProject reads an organization's Project and says an organization owns it", async () => {
+  const { fetch, operations } = fakeGraphql({
+    PlanProject: (v) =>
+      v.number === 4
+        ? { repositoryOwner: { __typename: "Organization", projectV2: { ...planProject(4, "O_acme"), url: "https://github.com/orgs/acme/projects/4", title: "web plan" } } }
+        : // The organization exists and the Project does not: GitHub still answers the owner's type next to the NOT_FOUND.
+          new GraphqlErrors({ repositoryOwner: { __typename: "Organization", projectV2: null } }, [
+            { type: "NOT_FOUND", path: ["repositoryOwner", "projectV2"], message: `Could not resolve to a ProjectV2 with the number ${v.number}.` },
+          ]),
+  });
+  const projects = port(fetch);
+
+  expect(await projects.getProject("acme", 4)).toEqual({
+    number: 4,
+    url: "https://github.com/orgs/acme/projects/4",
+    title: "web plan",
+    owner: "Organization",
+    statusOptions: { Shaping: "o_shaping", Ready: "o_ready", Running: "o_running", "In review": "o_review", Done: "o_done" },
+    dateFields: { start: "F_start", target: "F_target" },
+    estimateFields: { size: undefined, estimate: undefined },
+  });
+  expect(operations).toEqual([{ operation: "PlanProject", variables: { login: "acme", number: 4 } }]);
+  expect(await projects.getProject("acme", 9)).toBeUndefined();
+  // A message about a Project the token cannot find names the organization as one.
+  await expect(projects.ensureDateFields("acme", 9)).rejects.toThrow("GitHub Project #9 of the organization acme does not exist or GITHUB_TOKEN cannot see it.");
+});
+
+test("listProjects lists the Projects the token can write for an organization repository, linked first", async () => {
+  const orgProject = (number: number, title: string, repositories: { name: string; owner: string }[] = []) => ({
+    ...userProject(number, title, statusOptions("Shaping", "Ready", "Running", "In review", "Done"), repositories),
+    url: `https://github.com/orgs/acme/projects/${number}`,
+  });
+  const { fetch, operations, calls } = fakeGraphql({
+    PlanProjects: () => ({
+      repositoryOwner: {
+        __typename: "Organization",
+        projectsV2: { nodes: [orgProject(2, "Roadmap", [{ name: "api", owner: "acme" }]), orgProject(1, "web plan", [{ name: "web", owner: "acme" }])] },
+      },
+    }),
+  });
+
+  expect(await port(fetch).listProjects("acme", orgRepo)).toEqual([
+    { number: 1, title: "web plan", url: "https://github.com/orgs/acme/projects/1", linked: true, missingStatusOptions: [] },
+    { number: 2, title: "Roadmap", url: "https://github.com/orgs/acme/projects/2", linked: false, missingStatusOptions: [] },
+  ]);
+  expect(operations).toEqual([{ operation: "PlanProjects", variables: { login: "acme" } }]);
+  // Only Projects the token can write are worth offering to setup.
+  expect(queryOf(calls[0]!)).toMatch(/projectsV2\([^)]*minPermissionLevel: WRITE/);
+});
+
+test("adoptProject links an organization Project to the organization's repository", async () => {
+  const { fetch, operations } = fakeGraphql({
+    PlanProjectSetup: () => ({
+      repositoryOwner: {
+        __typename: "Organization",
+        projectV2: { ...userProject(6, "Team board", statusOptions("Shaping", "Ready", "Running", "In review", "Done")), url: "https://github.com/orgs/acme/projects/6" },
+      },
+    }),
+    PlanOwnerIds: () => orgOwnerIds(),
+    LinkPlanRepository: () => ({ linkProjectV2ToRepository: { repository: { id: "R_web" } } }),
+  });
+
+  const adopted = await port(fetch).adoptProject("acme", 6, orgRepo);
+
+  expect(adopted.project).toMatchObject({ number: 6, url: "https://github.com/orgs/acme/projects/6", owner: "Organization", statusOptions: { Shaping: "o_0", Done: "o_4" } });
+  expect(operations).toEqual([
+    { operation: "PlanProjectSetup", variables: { login: "acme", number: 6 } },
+    { operation: "PlanOwnerIds", variables: { owner: "acme", name: "web" } },
+    { operation: "LinkPlanRepository", variables: { projectId: "PVT_6", repositoryId: "R_web" } },
+  ]);
+});
+
+test("createProject creates the Project under the repository's owner when it is an organization, and links it", async () => {
+  const field = { __typename: "ProjectV2SingleSelectField", id: "F_status", options: [{ id: "o_done", name: "Done", color: "PURPLE", description: "Done" }] };
+  const { fetch, operations } = fakeGraphql({
+    PlanOwnerIds: () => orgOwnerIds(),
+    CreatePlanProject: () => ({ createProjectV2: { projectV2: { id: "PVT_7", number: 7, url: "https://github.com/orgs/acme/projects/7", title: "web plan", field } } }),
+    SetStatusOptions: () => ({ updateProjectV2Field: { projectV2Field: field } }),
+    LinkPlanRepository: () => ({ linkProjectV2ToRepository: { repository: { id: "R_web" } } }),
+  });
+
+  expect(await port(fetch).createProject("acme", orgRepo, "web plan", { dateFields: false })).toMatchObject({
+    number: 7,
+    url: "https://github.com/orgs/acme/projects/7",
+    owner: "Organization",
+  });
+  const sent = (name: string) => operations.filter((o) => o.operation === name).map((o) => o.variables);
+  expect(sent("PlanOwnerIds")).toEqual([{ owner: "acme", name: "web" }]);
+  expect(sent("CreatePlanProject")).toEqual([{ ownerId: "O_acme", title: "web plan" }]);
+  expect(sent("LinkPlanRepository")).toEqual([{ projectId: "PVT_7", repositoryId: "R_web" }]);
+});
+
+test("createProject refuses before creating anything when the account cannot create Projects there", async () => {
+  const { fetch, operations } = fakeGraphql({ PlanOwnerIds: () => orgOwnerIds(false) });
+
+  await expect(port(fetch).createProject("acme", orgRepo, "web plan")).rejects.toThrow(
+    "Your GitHub account cannot create Projects in acme. An organization owner can let members create Projects, or create one and run setup_plan with use.",
+  );
+  expect(operations.map((o) => o.operation)).toEqual(["PlanOwnerIds"]);
+});
+
+test("every plan document is valid against GitHub's schema", () => {
+  const documents = { PlanItemsDocument, PlanOwnerIdsDocument, PlanProjectDocument, PlanProjectsDocument, PlanProjectSetupDocument };
+  for (const [name, document] of Object.entries(documents)) {
+    const text = document.toString();
+    expect(validate(githubSchema, parse(text)), name).toEqual([]);
+    // A Project read through user(login:) finds nothing when an organization owns the repository.
+    expect(text, name).not.toMatch(/\buser\(/);
+  }
 });

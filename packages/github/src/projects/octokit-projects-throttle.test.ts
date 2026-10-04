@@ -14,12 +14,12 @@ test("a plan read made while a 60-item schedule writes answers within seconds, b
   vi.useFakeTimers();
   const issues = Array.from({ length: 60 }, (_, i) => 100 + i);
   const { fetch, operations } = fakeGraphql({
-    PlanProject: () => ({ user: { projectV2: { id: "PVT_3", number: 3, url: "u", title: "t", field: null, start: dateField("F_start"), target: dateField("F_target") } } }),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { id: "PVT_3", number: 3, url: "u", title: "t", field: null, start: dateField("F_start"), target: dateField("F_target") } } }),
     PlanItemIds: () => ({
       repository: Object.fromEntries(issues.map((n) => [`i${n}`, { projectItems: { nodes: [{ id: `PVTI_${n}`, project: { id: "PVT_3" } }] } }])),
     }),
     SetManyPlanFields: () => ({}),
-    PlanItems: () => ({ user: { projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } }),
+    PlanItems: () => ({ repositoryOwner: { __typename: "User", projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } }),
   });
   // The dashboard's port, with the throttle on.
   const projects = OctokitProjects.withToken("t", { fetch });

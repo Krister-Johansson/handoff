@@ -65,8 +65,8 @@ test("schedule writes 60 items' dates to GitHub in a dozen requests at most", as
   const dateField = (id: string) => ({ __typename: "ProjectV2Field", id, dataType: "DATE" });
   const { fetch, calls, operations } = fakeGraphql(
     {
-      PlanProject: () => ({ user: { projectV2: { id: "PVT_3", number: 3, url: "u", title: "t", field: null, start: dateField("F_start"), target: dateField("F_target") } } }),
-      PlanItems: () => ({ user: { projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: issues.map(taskNode) } } } }),
+      PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { id: "PVT_3", number: 3, url: "u", title: "t", field: null, start: dateField("F_start"), target: dateField("F_target") } } }),
+      PlanItems: () => ({ repositoryOwner: { __typename: "User", projectV2: { items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: issues.map(taskNode) } } } }),
       PlanItemIds: () => ({ repository: Object.fromEntries(issues.map((n) => [`i${n}`, { projectItems: { nodes: [{ id: `PVTI_${n}`, project: { id: "PVT_3" } }] } }])) }),
       SetManyPlanFields: () => ({}),
     },

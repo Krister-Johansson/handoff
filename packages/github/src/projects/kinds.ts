@@ -23,6 +23,8 @@ const asKind = (name: string | null | undefined): PlanKind | undefined => {
 /**
  * An issue's kind: its kind label first, then an issue type named like a kind, then its depth in the
  * sub-issue tree (no parent is an epic, one a story, two a task). Undefined when nothing fits.
+ * An organization's default issue types are Task, Bug and Feature: a kind label still wins over Task,
+ * Task alone makes a task at any depth, and Bug or Feature leave the kind to the depth.
  */
 export function kindOf(labels: readonly string[], issueType: string | null | undefined, depth: number): PlanKind | undefined {
   for (const label of labels) {

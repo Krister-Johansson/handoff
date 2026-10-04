@@ -40,6 +40,7 @@ export type FakePlanItem = {
 };
 
 type FakePlan = { login: string; project: PlanProject; items: Map<number, FakePlanItem> };
+type OwnerType = NonNullable<PlanProject["owner"]>;
 
 /** A fake item's node id, from its issue number, and back. */
 const itemIdOf = (issue: number) => `PVTI_${issue}`;
@@ -58,7 +59,8 @@ function fieldsProblem(plan: FakePlan | undefined, issue: number, fields: PlanFi
 }
 
 /**
- * In-memory GitHub Projects for tests: one Project per repository. Issue titles, bodies, labels, state and
+ * In-memory GitHub Projects for tests: one Project per repository, owned by the login it was created for,
+ * a user unless `owners` names it an organization. Issue titles, bodies, labels, state and
  * blockers live in the FakeGitHub it is given, so closing an issue there shows as closed in the plan.
  * Tests change `itemsOf(repo)` directly to simulate a person moving a card on GitHub's board. Project order
  * is the order of `itemsOf(repo)`: the order items joined, until moveItems reorders them. An item's id is
@@ -68,6 +70,12 @@ export class FakeProjects implements ProjectsPort {
   readonly plans = new Map<string, FakePlan>();
   /** Labels created on each repository, by repository key. */
   readonly labels = new Map<string, Set<string>>();
+  /** The type of each repository owner by login; a login not in it is a user. */
+  readonly owners = new Map<string, OwnerType>();
+  /** Whether the token's user can create Projects for an owner, by login; a login not in it can. */
+  readonly canCreateProjects = new Map<string, boolean>();
+  /** GitHub's issue type of an issue by number, such as an organization's Task, Bug or Feature; an issue not in it has none. */
+  readonly issueTypes = new Map<number, string>();
   scopesAnswer = { project: true, classic: true };
   private nextProject = 1;
 
@@ -104,7 +112,7 @@ export class FakeProjects implements ProjectsPort {
           title: issue.title,
           url: issue.url,
           state: issue.state,
-          kind: kindOf(labels, undefined, this.depthOf(issueNumber)),
+          kind: kindOf(labels, this.issueTypes.get(issueNumber), this.depthOf(issueNumber)),
           status: statusOf(item.status),
           parent: this.parents.get(issueNumber),
           labels,
@@ -168,12 +176,22 @@ export class FakeProjects implements ProjectsPort {
     return { project: structuredClone(plan.project), renamed: [], added };
   }
 
+  /** Creates the Project under `login`, a user or an organization as `owners` says; refuses before creating anything when `canCreateProjects` says no. */
   async createProject(login: string, repo: RepoRef, title: string, opts: { dateFields?: boolean } = {}): Promise<PlanProject> {
+    const owner = this.owners.get(login) ?? "User";
+    if (this.canCreateProjects.get(login) === false) {
+      throw new Error(
+        owner === "Organization"
+          ? `Your GitHub account cannot create Projects in ${login}. An organization owner can let members create Projects, or create one and run setup_plan with use.`
+          : `Your GitHub account cannot create Projects for ${login}. Create one as ${login}, then run setup_plan with use.`,
+      );
+    }
     const number = this.nextProject++;
     const project: PlanProject = {
       number,
-      url: `https://github.com/users/${login}/projects/${number}`,
+      url: `https://github.com/${owner === "Organization" ? "orgs" : "users"}/${login}/projects/${number}`,
       title,
+      owner,
       statusOptions: { Shaping: "opt-shaping", Ready: "opt-ready", Running: "opt-running", "In review": "opt-in-review", Done: "opt-done" },
       dateFields: opts.dateFields === false ? { start: undefined, target: undefined } : { start: "field-start", target: "field-target" },
     };
