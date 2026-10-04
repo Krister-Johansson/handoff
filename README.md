@@ -95,7 +95,7 @@ The library holds skills, MCP servers and subagents that nodes enable by name. I
 A project can keep a plan of epics, stories and tasks on GitHub. GitHub holds the whole plan, including the order of the work. handoff stores the number of the GitHub Project that belongs to the handoff project, and three things GitHub has no field for: the plan mode (see Plan mode), the capacity the timeline uses (see Sizes and estimates) and the Flow's pins (see Pins).
 
 - **Hierarchy.** Epics, stories and tasks are issues in the project's repository. A story is a sub-issue of its epic and a task is a sub-issue of its story. The labels `epic`, `story` and `task` mark the kind.
-- **Status.** Each task has a Status on a GitHub Project (v2) that you own, with the options Shaping, Ready, Running, In review and Done. A closed issue counts as Done whatever its Status says.
+- **Status.** Each task has a Status on a GitHub Project (v2) of the repository's owner, a user or an organization, with the options Shaping, Ready, Running, In review and Done. A closed issue counts as Done whatever its Status says.
 - **The Ready gate.** Of the issues in the Project, only open tasks in Ready that no run works on reach the backlog and `list_backlog`. Tasks blocked by an open issue are listed last, and a run will not start on them until the blocker closes. Epics and stories never run. Issues that are not in the Project stay in the backlog as unplanned and can still be started.
 - **Status from runs.** handoff sets Running when a run starts on a task, In review when the pull request opens and Done when it merges. A task that joins the plan while a run works on it gets the run's Status. Each write is a `plan.status` event on the run, and a write that moves a task onto the run's Status records the Status the task had in `from`. Cancelling a run, or stopping it after a loop ran out, puts each task it moved back to that Status: a task the run started on goes back to Ready, and a task that was in Shaping when it joined the plan goes back to Shaping. A task the run never moved keeps its Status, and so does a task a newer run links. A write that cannot happen is a `plan.skipped` event and the run carries on.
 
@@ -239,7 +239,7 @@ Optimize shows a preview first and writes nothing until Apply. The banner says w
 
 ### Staying up to date
 
-GitHub sends no webhook when a card moves on a Project owned by a user account. The Plan page reads the Project each time it renders and refreshes itself every 30 seconds while the browser tab is visible. A change made on GitHub's board shows on the dashboard within 30 seconds.
+GitHub sends no webhook when a card moves on a Project owned by a user account. For an organization's Project GitHub sends `projects_v2_item` webhooks, but only to an organization webhook or a GitHub App; handoff's repository webhooks and `pnpm dev:webhooks` do not receive them, and handoff does not use them. So for both owners the Plan page reads the Project each time it renders and refreshes itself every 30 seconds while the browser tab is visible. A change made on GitHub's board shows on the dashboard within 30 seconds.
 
 `pnpm dev:webhooks` also relays the repository's `issues`, `sub_issues` and `issue_dependencies` events. handoff stores them with every other delivery. They wake nothing; the Plan page uses the latest one for its "last GitHub activity" line.
 
@@ -267,11 +267,11 @@ A project with a plan has a scheduler. It is off until you turn it on. Once on, 
 
 ### What it starts, and in what order
 
-The worker checks each project whose scheduler is on every 60 seconds. These bring the check forward: a run ends, a run the scheduler started gets its plan, a merge closes issues, someone answers a question or decides a permission request, a run is repaired or cancelled, a stuck loop is resolved, `move_to_ready` moves tasks, someone lets the scheduler take a cancelled task, and someone turns the scheduler on, resumes it or changes its settings. A check never comes sooner than 10 seconds after the last one. GitHub sends no webhook when you move a card on the board, so the scheduler sees a task you move to Ready there on the next 60 second check.
+The worker checks each project whose scheduler is on every 60 seconds. These bring the check forward: a run ends, a run the scheduler started gets its plan, a merge closes issues, someone answers a question or decides a permission request, a run is repaired or cancelled, a stuck loop is resolved, `move_to_ready` moves tasks, someone lets the scheduler take a cancelled task, and someone turns the scheduler on, resumes it or changes its settings. A check never comes sooner than 10 seconds after the last one. handoff gets no webhook when you move a card on the board, so the scheduler sees a task you move to Ready there on the next 60 second check.
 
 A task is a candidate when it is an open task in Ready, has no open blocker, has no active run, does not carry the skip label, and is not a task whose run you cancelled (see A cancelled task). Epics, stories, tasks in other columns and issues outside the Project never start by themselves.
 
-Candidates start in Project order: the order of the items in the GitHub Project. With the order set to priority, the single select field named Priority comes first. Its first option ranks highest, items without a value come after every item with one, and Project order breaks ties. The scheduler refuses priority order for a Project without a Priority field.
+Candidates start in Project order: the order of the items in the GitHub Project. With the order set to priority, Priority comes first. It is the Project's own single select field named Priority, whose first option ranks highest. When the Project has no such field and the repository's owner is an organization with a single select Priority issue field, each issue's value in that issue field counts, and its options rank by their priority number. Items without a value come after every item with one, and Project order breaks ties. The scheduler card, Project settings and `get_scheduler` say which field orders the tasks. The scheduler refuses priority order without either: in an organization the sentence names both, for example "GitHub Project #3 has no Priority field and Task-Insight has no Priority issue field, so the scheduler cannot order tasks by priority. Add a single select field named Priority, or use Project order."
 
 Each check starts at most one run, on the first candidate, with the scheduler's graph (the project's default graph unless you pick another) and the task linked as the run's issue. The start goes through the same checks as `start_run`, so a task that is blocked or taken by then is skipped for that check and the next candidate is tried. The next start waits until the run it started has a plan from its planner, so the runs it starts are planned one at a time. With a graph that has no Planner node, the next start waits until that run ends.
 
@@ -329,7 +329,7 @@ Over MCP, for the assistant, Claude Code with the handoff plugin and WebMCP:
 - `pause_scheduler` and `stop_scheduler` pause it and turn it off.
 - `list_runs` and `get_run` report who started each run in `started_by`.
 
-`start_scheduler` refuses a demo project, a project without a plan (run `setup_plan` first), a graph the project does not have, priority order without a Priority field, and a dashboard without access to GitHub Projects. The worker needs that access too: the Plan's token (see The token). A worker without it logs that the scheduler is off and checks nothing.
+`start_scheduler` refuses a demo project, a project without a plan (run `setup_plan` first), a graph the project does not have, priority order without a Priority field (or, in an organization, a Priority issue field), and a dashboard without access to GitHub Projects. The worker needs that access too: the Plan's token (see The token). A worker without it logs that the scheduler is off and checks nothing.
 
 ### Setting up a project for the scheduler
 
