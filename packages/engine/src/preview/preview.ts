@@ -20,7 +20,7 @@ import { and, eq, inArray, liveWorkers, previews, workers, type Db } from "@hand
 import { commandEnv, shell } from "../contract/checks.ts";
 import type { Workdir } from "../types.ts";
 import { runIdentity } from "../workdir/setup.ts";
-import { mountedPath, previewContainerName, probeInside, reachServices, removePreviewContainer, siblingOf, startPreviewContainer, type PreviewContainer } from "./container.ts";
+import { mountedPath, previewContainerName, probeInside, reachServices, removePreviewContainer, siblingOf, startPreviewContainer, type PreviewContainer, type PreviewLabel } from "./container.ts";
 import { servicePorts } from "./forward.ts";
 import { answers } from "./ready.ts";
 
@@ -152,8 +152,9 @@ export type LaunchedApp = { pid: number | undefined; port: number; url: string; 
 export type LaunchContainer = {
   /** The run's container, whose image, user, environment, mounts and network the app's container copies. */
   of: string;
-  /** Names the app's container (handoff-preview-<id8>) and labels it handoff.preview. */
+  /** Names the app's container (handoff-preview-<id8>) and labels it handoff.preview, or `label`. */
   previewId: string;
+  label?: PreviewLabel;
   runId: string;
   workerId?: string;
 };
@@ -319,7 +320,7 @@ async function appContainer(o: LaunchAppOptions, exec: DockerExec, compose: stri
   await o.onContainer?.({ pid: undefined, port: first.port, url: first.cmd.url, logPath, container: previewContainerName(c.previewId) });
   const next = o.config.autoPort === false ? {} : { next: () => portFor(o.config.port, false, o.source) };
   const box = await startPreviewContainer(
-    { previewId: c.previewId, runId: c.runId, ...(c.workerId ? { workerId: c.workerId } : {}), of, forward: { ports, dir } },
+    { previewId: c.previewId, ...(c.label ? { label: c.label } : {}), runId: c.runId, ...(c.workerId ? { workerId: c.workerId } : {}), of, forward: { ports, dir } },
     { first: first.port, ...next },
     exec,
   );

@@ -106,8 +106,16 @@ export async function siblingOf(runContainer: string, exec: DockerExec = dockerE
   };
 }
 
+/**
+ * The label that carries the app's id: handoff.preview for a run's app, which a starting worker removes
+ * unless its preview row runs, and handoff.launch-test for a Test start's, which has no preview row.
+ */
+export type PreviewLabel = "handoff.preview" | "handoff.launch-test";
+
 export type PreviewContainerSpec = {
   previewId: string;
+  /** handoff.preview when not given. */
+  label?: PreviewLabel;
   runId: string;
   workerId?: string;
   /** The run container's settings, from siblingOf. */
@@ -162,7 +170,7 @@ export async function startPreviewContainer(spec: PreviewContainerSpec, ports: P
         "--name",
         name,
         "--label",
-        `handoff.preview=${spec.previewId}`,
+        `${spec.label ?? "handoff.preview"}=${spec.previewId}`,
         "--label",
         `handoff.run=${spec.runId}`,
         ...(spec.workerId ? ["--label", `handoff.worker=${spec.workerId}`] : []),
