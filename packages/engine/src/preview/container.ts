@@ -1,6 +1,9 @@
 import { execFile } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
+import { FORWARDER_FILE, FORWARDER_READY, forwarderScript } from "./forward.ts";
 import type { DockerExec } from "./preview.ts";
 import { PreviewError } from "./preview.ts";
 
@@ -12,14 +15,23 @@ const STOP_GRACE_MS = 5_000;
 /** How many new ports a preview tries after the first one turns out to be taken. */
 const NEW_PORT_TRIES = 3;
 
-/** The container's own processes once the app's are gone: docker-init and the main process. */
+/** The container's own processes once the app's are gone: docker-init and the forwarder. */
 const OWN_PROCESSES = 2;
 
-/**
- * The main process: it ignores SIGTERM, so stopping the app's processes with `kill -TERM -1` leaves the
- * container up for the grace period instead of ending everything at once.
- */
-const KEEP_ALIVE = ["sh", "-c", 'trap "" TERM; exec sleep infinity'];
+/** How long a new container's forwarder gets to listen on the service ports. */
+const FORWARDER_READY_MS = 10_000;
+
+/** How long the services check waits for each connection from inside the container. */
+const REACH_TIMEOUT_MS = 3_000;
+
+/** Connects from inside the container to host.docker.internal on each port in its arguments and prints "<port> <why>" for each that fails. */
+const REACH_SCRIPT = `const { connect } = require("node:net");
+for (const port of process.argv.slice(1).map(Number)) {
+  const socket = connect({ host: "host.docker.internal", port, timeout: ${REACH_TIMEOUT_MS} });
+  socket.once("connect", () => socket.destroy());
+  socket.once("timeout", () => (console.log(port + " timed out"), socket.destroy()));
+  socket.once("error", (error) => console.log(port + " " + error.message));
+}`;
 
 const dockerExec: DockerExec = async (args, cwd) => {
   try {
@@ -72,6 +84,12 @@ export type PreviewContainerSpec = {
   workerId?: string;
   /** The run container's settings, from siblingOf. */
   of: SiblingConfig;
+  /**
+   * The services' host ports to forward from localhost inside the container (servicePorts), and the
+   * folder the forwarder script is written to. The folder must be mounted at the same path in the
+   * container, as the worktree's git directory under HANDOFF_HOME is.
+   */
+  forward: { ports: number[]; dir: string };
 };
 
 /** The host port to try first, and where a new free port comes from when it is taken; without `next` the app must have `first`. */
@@ -95,10 +113,16 @@ const ipv6Refused = (output: string) => /\[::1\]|tcp6/i.test(output);
  * out. A port taken before `docker run` gets a new one from `ports.next`, up to three times; when
  * Docker refuses [::1], the port is published on 127.0.0.1 alone. A container Docker created but could
  * not start is removed before the next try or the failure.
+ *
+ * The container's main process is the forwarder (forward.ts), which makes the services' ports answer at
+ * localhost inside it through host.docker.internal; `--add-host host.docker.internal:host-gateway`
+ * makes that name resolve on Linux too. It returns once the forwarder listens.
  */
 export async function startPreviewContainer(spec: PreviewContainerSpec, ports: PreviewPorts, exec: DockerExec = dockerExec): Promise<PreviewContainer> {
   const name = previewContainerName(spec.previewId);
-  const { of } = spec;
+  const { of, forward } = spec;
+  const script = join(forward.dir, FORWARDER_FILE);
+  writeFileSync(script, forwarderScript);
   let port = ports.first;
   let addresses = ["127.0.0.1", "::1"];
   for (let newPorts = 0; ; ) {
@@ -119,14 +143,21 @@ export async function startPreviewContainer(spec: PreviewContainerSpec, ports: P
         ...of.env.flatMap((e) => ["-e", e]),
         ...of.binds.flatMap((b) => ["-v", b]),
         ...addresses.flatMap((a) => ["-p", `${a.includes(":") ? `[${a}]` : a}:${port}:${port}`]),
+        "--add-host",
+        "host.docker.internal:host-gateway",
         "-w",
         of.workdir,
         of.image,
-        ...KEEP_ALIVE,
+        "node",
+        script,
+        ...forward.ports.filter((p) => p !== port).map(String),
       ],
       process.cwd(),
     );
-    if (run.exitCode === 0) return { name, port, addresses };
+    if (run.exitCode === 0) {
+      await forwarderListens(name, exec);
+      return { name, port, addresses };
+    }
     await exec(["rm", "-f", name], process.cwd());
     if (portTaken(run.output)) {
       if (!ports.next) throw new PreviewError(`Port ${port} is in use, so Docker could not publish the app's port:`, tail(run.output));
@@ -138,6 +169,42 @@ export async function startPreviewContainer(spec: PreviewContainerSpec, ports: P
       throw new PreviewError(`The app's container ${name} did not start:`, tail(run.output));
     }
   }
+}
+
+/** Waits until the container's forwarder says it listens; a forwarder that fails or stays silent removes the container. */
+async function forwarderListens(name: string, exec: DockerExec): Promise<void> {
+  const deadline = Date.now() + FORWARDER_READY_MS;
+  let logs = "";
+  for (;;) {
+    logs = (await exec(["logs", name], process.cwd())).output;
+    if (logs.includes(FORWARDER_READY)) return;
+    if (logs.includes("handoff-forward:") || Date.now() > deadline) break;
+    await sleep(100);
+  }
+  await exec(["rm", "-f", name], process.cwd());
+  throw new PreviewError(`The app's container ${name} did not start forwarding the services' ports:`, tail(logs) || undefined);
+}
+
+const listed = (ports: number[]) => (ports.length === 1 ? `port ${ports[0]}` : `ports ${ports.slice(0, -1).join(", ")} and ${ports.at(-1)}`);
+
+/**
+ * The services check: opens one connection from inside the app's container to host.docker.internal on
+ * each forwarded port. A port it cannot reach fails with a message that names it. On Docker Desktop
+ * that means nothing listens there; on Linux, also a service published on 127.0.0.1 only, which a
+ * container cannot reach through host-gateway.
+ */
+export async function reachServices(container: string, ports: number[], exec: DockerExec = dockerExec): Promise<void> {
+  if (ports.length === 0) return;
+  const check = await exec(["exec", container, "node", "-e", REACH_SCRIPT, ...ports.map(String)], process.cwd());
+  if (check.exitCode !== 0) throw new PreviewError(`The services check could not run in the app's container ${container}:`, tail(check.output));
+  const failures = check.output.split("\n").filter((line) => /^\d+ /.test(line));
+  if (failures.length === 0) return;
+  const unreachable = failures.map((line) => Number(line.split(" ")[0]));
+  const first = unreachable[0];
+  throw new PreviewError(
+    `The app's container could not reach ${listed(unreachable)} on this machine through host.docker.internal, so the app cannot reach ${unreachable.length === 1 ? "that service" : "those services"} at localhost. Check that the service runs. On Linux a container reaches only ports published on all addresses: publish it as "${first}:${first}", not "127.0.0.1:${first}:${first}", or use worktree mode (HANDOFF_WORKSPACE=worktree).`,
+    failures.join("\n"),
+  );
 }
 
 /**

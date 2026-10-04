@@ -1,12 +1,20 @@
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { DockerExec } from "./preview.ts";
-import { siblingOf, startPreviewContainer, type SiblingConfig } from "./container.ts";
+import { reachServices, siblingOf, startPreviewContainer, type SiblingConfig } from "./container.ts";
+import { FORWARDER_READY, forwarderScript } from "./forward.ts";
 
 const of: SiblingConfig = { image: "runner:1", user: "501:20", env: ["HOME=/tmp"], binds: ["/h:/h"], workdir: "/h/worktrees/r1" };
-const spec = { previewId: "5e6f7a8b-0000-0000-0000-000000000000", runId: "r1", of };
+const dir = mkdtempSync(join(tmpdir(), "handoff-forward-"));
+const spec = { previewId: "5e6f7a8b-0000-0000-0000-000000000000", runId: "r1", of, forward: { ports: [], dir } };
 
-/** A fake docker that answers `docker run` with the given outputs in turn, failing while one is given, and records every call. */
-function fakeDocker(runFailures: string[]) {
+/**
+ * A fake docker that answers `docker run` with the given outputs in turn, failing while one is given,
+ * answers `docker logs` with `logs` (the forwarder's ready line unless given), and records every call.
+ */
+function fakeDocker(runFailures: string[], logs = FORWARDER_READY) {
   const calls: string[][] = [];
   const exec: DockerExec = async (args) => {
     calls.push(args);
@@ -14,6 +22,7 @@ function fakeDocker(runFailures: string[]) {
       const failure = runFailures.shift();
       if (failure) return { exitCode: 125, output: failure };
     }
+    if (args[0] === "logs") return { exitCode: 0, output: `${logs}\n` };
     return { exitCode: 0, output: "" };
   };
   const published = () => calls.filter((c) => c[0] === "run").map((c) => c.flatMap((a, i) => (c[i - 1] === "-p" ? [a] : [])));
@@ -69,4 +78,32 @@ test("a run container on Docker's default network gives a sibling without --netw
 
 test("a missing run container fails with Docker's message", async () => {
   await expect(siblingOf("handoff-gone", async () => ({ exitCode: 1, output: "Error: No such object: handoff-gone" }))).rejects.toThrow(/handoff-gone[\s\S]*No such object/);
+});
+
+test("the forwarder is the container's main process and forwards every service port but the app's", async () => {
+  const docker = fakeDocker(["Bind for 127.0.0.1:41234 failed: port is already allocated"]);
+  const started = await startPreviewContainer({ ...spec, forward: { ports: [5432, 6379, 50000], dir } }, { first: 41234, next: async () => 50000 }, docker.exec);
+  expect(started.port).toBe(50000);
+  const script = join(dir, "handoff-forward.mjs");
+  expect(readFileSync(script, "utf8")).toBe(forwarderScript);
+  const runs = docker.calls.filter((c) => c[0] === "run");
+  expect(runs[0]!.join(" ")).toContain("--add-host host.docker.internal:host-gateway");
+  expect(runs[0]!.slice(-6)).toEqual(["runner:1", "node", script, "5432", "6379", "50000"]);
+  expect(runs[1]!.slice(-5)).toEqual(["runner:1", "node", script, "5432", "6379"]);
+});
+
+test("a forwarder that cannot listen removes the container and quotes it", async () => {
+  const docker = fakeDocker([], "handoff-forward: cannot listen on 127.0.0.1:5432: listen EACCES");
+  await expect(startPreviewContainer({ ...spec, forward: { ports: [5432], dir } }, { first: 41234 }, docker.exec)).rejects.toThrow(
+    /did not start forwarding[\s\S]*127\.0\.0\.1:5432: listen EACCES/,
+  );
+  expect(docker.calls.at(-1)).toEqual(["rm", "-f", "handoff-preview-5e6f7a8b"]);
+});
+
+test("the services check names every port the container cannot reach", async () => {
+  const exec: DockerExec = async () => ({ exitCode: 0, output: "5432 connect ECONNREFUSED 172.17.0.1:5432\n6379 timed out\n" });
+  await expect(reachServices("handoff-preview-5e6f7a8b", [5432, 6379, 8025], exec)).rejects.toThrow(
+    /could not reach ports 5432 and 6379 on this machine[\s\S]*"5432:5432"[\s\S]*ECONNREFUSED/,
+  );
+  await expect(reachServices("handoff-preview-5e6f7a8b", [5432], async () => ({ exitCode: 0, output: "" }))).resolves.toBeUndefined();
 });
