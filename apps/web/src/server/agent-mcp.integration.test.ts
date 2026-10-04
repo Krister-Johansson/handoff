@@ -1351,6 +1351,56 @@ test("set_order writes the order, pins what pin names, and refuses to move a pin
   expect(await db.select({ issue: planPins.issue, pinnedBy: planPins.pinnedBy, reason: planPins.reason }).from(planPins)).toEqual([{ issue: B, pinnedBy: "claude-code", reason: "set_order" }]);
 });
 
+/** The sandbox repository's owner octo is an organization, so its Projects are the organization's. */
+const organization = () => plan.owners.set("octo", "Organization");
+
+test("list_github_projects lists the organization's Projects for an organization repository", async () => {
+  organization();
+  const other = await roadmap();
+  const { number } = await withPlan();
+  // A Project of another owner is not the repository owner's, so it is not listed.
+  await plan.createProject("ann", { owner: "ann", name: "notes" }, "Notes");
+
+  expect(await call("list_github_projects", { project: "sandbox" })).toEqual([
+    { number, title: "sandbox plan", url: `https://github.com/orgs/octo/projects/${number}`, linked: true, missing_status_options: [] },
+    { number: other, title: "Roadmap", url: `https://github.com/orgs/octo/projects/${other}`, linked: false, missing_status_options: ["Shaping", "Ready", "Running", "In review"] },
+  ]);
+});
+
+test("arrange_plan in a Flow project reads an organization's plan", async () => {
+  organization();
+  const { tasks } = await flowPlan({ Small: { size: "S" }, Long: { size: "L" }, After: { size: "M", after: ["Long"] } });
+  const writes = [vi.spyOn(plan, "moveItems"), vi.spyOn(plan, "setManyPlanFields"), vi.spyOn(plan, "setPlanFields")];
+
+  expect(await call("arrange_plan", { project: "sandbox" })).toMatchObject({
+    mode: "flow",
+    was: [tasks.Small, tasks.Long, tasks.After],
+    moves: [
+      { issue: tasks.Long, title: "Long", from: 2, to: 1 },
+      { issue: tasks.After, title: "After", from: 3, to: 2 },
+      { issue: tasks.Small, title: "Small", from: 1, to: 3 },
+    ],
+  });
+  expect(plan.plans.get("octo/sample")?.project.owner).toBe("Organization");
+  for (const write of writes) expect(write).not.toHaveBeenCalled();
+});
+
+test("set_order moves a task in an organization's Project order", async () => {
+  organization();
+  const { tasks } = await flowPlan({ Alpha: {}, Bravo: {} });
+  const { Alpha: A, Bravo: B } = tasks as Record<"Alpha" | "Bravo", number>;
+
+  expect(await call("set_order", { project: "sandbox", order: [B, A], was: [A, B], pin: [B] })).toMatchObject({
+    moved: [
+      { issue: B, from: 2, to: 1 },
+      { issue: A, from: 1, to: 2 },
+    ],
+    pinned: [B],
+  });
+  expect(projectOrder().filter((n) => [A, B].includes(n))).toEqual([B, A]);
+  expect(plan.plans.get("octo/sample")?.project.owner).toBe("Organization");
+});
+
 test("every shaping tool refuses with the scope sentence when the Projects port is missing", async () => {
   await withPlan();
   const server = createHandoffMcpServer({ db, github, projects: undefined, baseUrl: BASE });

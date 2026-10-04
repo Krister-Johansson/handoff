@@ -6,7 +6,22 @@ import { cancelRun } from "@handoff/engine/operations";
 import { OctokitProjects } from "@handoff/github";
 import { fakeFetch, fakeGraphql, FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
-import { addDateFields, addEstimateFields, moveItem, moveToReady, planIssue, saveArrange, schedule, setSize, setupPlan, type ShapingDeps } from "./shaping.ts";
+import {
+  addDateFields,
+  addEstimateFields,
+  createEpic,
+  createStory,
+  createTask,
+  moveItem,
+  moveToReady,
+  moveToShaping,
+  planIssue,
+  saveArrange,
+  schedule,
+  setSize,
+  setupPlan,
+  type ShapingDeps,
+} from "./shaping.ts";
 
 const db = createTestDb();
 const repo = { owner: "octo", name: "sample" };
@@ -373,4 +388,96 @@ test("saveArrange writes the tasks' Start and Target in one batch and reports a 
   await expect(saveArrange(deps, projectId, [{ issue: 23, start: "2026-10-08", target: "2026-10-07" }])).rejects.toThrow("#23: Target 2026-10-07 is before its Start 2026-10-08.");
   await expect(saveArrange(deps, projectId, [])).rejects.toThrow("Give at least one task to arrange.");
   expect(writes).not.toHaveBeenCalled();
+});
+
+/** The repository's owner octo is an organization, so its plan lives on a Project the organization owns. */
+const organization = () => plan.owners.set("octo", "Organization");
+const organizationOwner = { login: "octo", type: "Organization" };
+const storedNumber = async () => (await db.select({ number: projects.planProjectNumber }).from(projects).where(eq(projects.id, projectId)))[0]?.number;
+
+/** An organization's plan set up through setup_plan, with an epic and a story created through the shaping tools. */
+async function organizationPlan() {
+  organization();
+  const { project } = await setupPlan(deps, projectId);
+  const epic = await createEpic(deps, projectId, { title: "Organizations", goal: "Plans for repositories an organization owns." });
+  const story = await createStory(deps, projectId, { epic: epic.number, title: "Shaping tools", acceptance: ["Every tool works on the organization's Project"] });
+  return { number: project.number, epic: epic.number, story: story.number };
+}
+
+test("setup_plan in an organization repository creates the Project under the organization and links it", async () => {
+  organization();
+
+  const result = await setupPlan(deps, projectId);
+
+  expect(result).toMatchObject({
+    created: true,
+    project: { title: "sandbox plan", url: expect.stringContaining("https://github.com/orgs/octo/projects/"), owner: organizationOwner },
+    missing_status_options: [],
+  });
+  expect(plan.plans.get("octo/sample")).toMatchObject({ login: "octo", project: { number: result.project.number, owner: "Organization" } });
+  expect(await plan.listProjects("octo", repo)).toEqual([expect.objectContaining({ number: result.project.number, linked: true })]);
+  expect(await storedNumber()).toBe(result.project.number);
+  expect([...(plan.labels.get("octo/sample") ?? [])].sort()).toEqual(["epic", "story", "task"]);
+});
+
+test("setup_plan with use adopts an organization Project", async () => {
+  organization();
+  const roadmap = await plan.createProject("octo", { owner: "octo", name: "roadmap" }, "Roadmap");
+  plan.plans.get("octo/roadmap")!.project.statusOptions = { Shaping: undefined, Ready: undefined, Running: undefined, "In review": undefined, Done: "opt-done" };
+
+  const result = await setupPlan(deps, projectId, { use: roadmap.number });
+
+  expect(result).toMatchObject({
+    created: false,
+    project: { number: roadmap.number, title: "Roadmap", url: `https://github.com/orgs/octo/projects/${roadmap.number}`, owner: organizationOwner },
+    added_status_options: ["Shaping", "Ready", "Running", "In review"],
+    missing_status_options: [],
+  });
+  expect(plan.plans.get("octo/sample")?.project.number).toBe(roadmap.number);
+  expect(await storedNumber()).toBe(roadmap.number);
+});
+
+test("create_epic, create_story and create_task put the issues in Shaping on the organization's Project", async () => {
+  const { number, epic, story } = await organizationPlan();
+  const task = await createTask(deps, projectId, { story, title: "Test the tools", brief: "Run each shaping tool on an organization Project." });
+  // The organization types the epic Task; its label keeps it an epic.
+  plan.issueTypes.set(epic, "Task");
+
+  const items = await plan.listItems("octo", number, repo);
+
+  expect(items.map((i) => [i.number, i.kind, i.status, i.parent])).toEqual([
+    [epic, "epic", "Shaping", undefined],
+    [story, "story", "Shaping", epic],
+    [task.number, "task", "Shaping", story],
+  ]);
+  expect([epic, story, task.number].map((n) => github.issues.get(n)?.labels)).toEqual([["epic"], ["story"], ["task"]]);
+});
+
+test("plan_issue, move_to_ready and move_to_shaping write Status on the organization's Project", async () => {
+  const { story } = await organizationPlan();
+
+  expect(await planIssue(deps, projectId, { issue: 11, story })).toMatchObject({ number: 11, kind: "task", status: "Shaping", parent: story });
+  expect(await planIssue(deps, projectId, { issue: 12, story })).toMatchObject({ number: 12, status: "Shaping" });
+  expect(await moveToReady(deps, projectId, [11, 12])).toEqual({ moved: [11, 12], status: "Ready" });
+  expect([statusOf(11), statusOf(12)]).toEqual(["Ready", "Ready"]);
+  expect(await moveToShaping(deps, projectId, [12])).toEqual({ moved: [12], status: "Shaping" });
+  expect([statusOf(11), statusOf(12)]).toEqual(["Ready", "Shaping"]);
+});
+
+test("set_size writes Size on an organization Project in Flow mode and Size and Estimate in Timeline mode", async () => {
+  const { story } = await organizationPlan();
+  const task = (await createTask(deps, projectId, { story, title: "Size me", brief: "A task to size." })).number;
+  const sized = () => {
+    const { size, estimate } = plan.itemsOf(repo).get(task)!;
+    return { size, estimate };
+  };
+
+  expect(await setSize(deps, projectId, { issue: task, size: "M" })).toEqual({ issue: task, size: { from: null, to: "M" } });
+  expect(sized()).toEqual({ size: "M", estimate: undefined });
+
+  // In Timeline mode setup_plan adds the Estimate field the Flow project did without.
+  await timeline();
+  expect(await setupPlan(deps, projectId)).toMatchObject({ added_estimate_fields: ["Estimate"] });
+  expect(await setSize(deps, projectId, { issue: task, size: "L", estimate: 6 })).toEqual({ issue: task, size: { from: "M", to: "L" }, estimate: { from: null, to: 6 } });
+  expect(sized()).toEqual({ size: "L", estimate: 6 });
 });

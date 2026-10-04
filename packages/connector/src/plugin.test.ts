@@ -102,10 +102,23 @@ test("the handoff skill says a Flow project has no dates and names arrange_plan 
   expect(readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8")).toMatch(/Flow project[^\n]*Size/);
 });
 
-test("the plugin is 0.19.0, whose skill says Priority order reads the organization's Priority issue field when the Project has no Priority field", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.19.0");
+test("the handoff skill says Priority order reads the organization's Priority issue field when the Project has no Priority field", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   expect(skill).toMatch(/Project's own Priority field[^\n]*organization's Priority issue field/);
+});
+
+test("the plugin is 0.20.0, whose setup skill puts the plan on a Project of the repository's owner, a user or an organization, and says what an organization asks of the token", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.20.0");
+  const setup = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
+  const start = setup.indexOf("### A plan on GitHub Projects");
+  const section = setup.slice(start, setup.indexOf("\n## ", start + 1));
+  expect(section).toMatch(/GitHub Project owned by the repository's owner, a user or an organization/);
+  expect(section).not.toMatch(/owned by the user|Project of the user's/);
+  expect(section).toMatch(/`list_github_projects`[^\n]*Projects of the repository's owner that the token can write/);
+  expect(section).toMatch(/classic token with the `project` scope, which reaches the Projects of users and organizations/);
+  expect(section).toMatch(/SAML single sign-on[^\n]*Configure SSO/);
+  expect(section).toMatch(/refuse classic personal access tokens[^\n]*organization owner/);
+  expect(section).toMatch(/issue type[^\n]*label/);
 });
 
 test("both skills send the user to Project settings, Graphs for a graph, and arrange_plan takes a story and issues in Timeline mode too", () => {

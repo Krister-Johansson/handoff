@@ -13,10 +13,14 @@ afterAll(() => db.$client.end());
 
 const repo = { owner: "octo", name: "sample" };
 
-/** A project whose plan is a fake GitHub Project, with its scheduler on. */
-async function planned(settings: Partial<typeof projectSchedulers.$inferInsert> = {}) {
+/**
+ * A project whose plan is a fake GitHub Project, with its scheduler on. With `organization`, the repository's
+ * owner octo is an organization that owns the Project.
+ */
+async function planned(settings: Partial<typeof projectSchedulers.$inferInsert> = {}, opts: { organization?: boolean } = {}) {
   const github = new FakeGitHub();
   const plan = new FakeProjects(github);
+  if (opts.organization) plan.owners.set("octo", "Organization");
   const { number } = await plan.createProject("octo", repo, "sample plan");
   const { project } = await seedGraph(db, linear);
   await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
@@ -117,6 +121,20 @@ test("priority order from the issue field starts an Urgent task before a High on
 
   expect((await p.started()).map((r) => r.issue)).toEqual([urgent]);
   expect((await p.row()).lastResult).toMatchObject({ candidates: [{ number: high }, { number: none }] });
+});
+
+test("the scheduler starts a Ready task of an organization's plan in Project order", async () => {
+  // The repository's owner octo is an organization, and the plan is a Project the organization owns.
+  const p = await planned({ maxRuns: 1 }, { organization: true });
+  const shaping = await p.task("Still in Shaping", { status: "Shaping" });
+  const first = await p.task("First Ready in Project order");
+  const second = await p.task("Second Ready");
+
+  await p.check();
+
+  expect((await p.started()).map((r) => [r.issue, r.startedBy])).toEqual([[first, "scheduler"]]);
+  expect(p.plan.plans.get("octo/sample")?.project.owner).toBe("Organization");
+  expect([shaping, first, second].map((n) => p.plan.itemsOf(repo).get(n)?.status)).toEqual(["Shaping", "Running", "Ready"]);
 });
 
 test("runs a person started count toward max_runs", async () => {

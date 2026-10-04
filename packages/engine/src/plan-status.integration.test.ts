@@ -1,13 +1,20 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, nodeExecutions, projects, runs } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, projects, runs, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { ProjectsAccessError, type PlanStatus } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { mergeNodeExecutor, prNodeExecutor } from "./executors/github.ts";
 import { cancelRun, resolveExhaustedLoop } from "./operations.ts";
 import { createRun } from "./runs.ts";
 import { startRun } from "./start-run.ts";
-import { inspect, seedGraph } from "./testing/harness.ts";
+import { createOriginRepo, git } from "./testing/git.ts";
+import { drain, engineDeps, inspect, seedGraph } from "./testing/harness.ts";
+import type { ExecutorRegistry } from "./types.ts";
+import { GitWorktreeProvider } from "./workdir/git-worktree.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -70,6 +77,52 @@ test("a status write refused for SSO records plan.skipped with the sentence", as
 
   expect(await planEvents(run.id)).toEqual([["plan.skipped", { issue: migration.number, status: "Running", reason: sentence }]]);
   expect(await statusOf(migration.number)).toBe("Ready");
+});
+
+test("a run writes Running, In review and Done on an organization's Project", async () => {
+  const origin = createOriginRepo();
+  const github = new FakeGitHub();
+  const plan = new FakeProjects(github);
+  // The repository's owner octo is an organization, and the plan is a Project the organization owns.
+  plan.owners.set("octo", "Organization");
+  const { number } = await plan.createProject("octo", repo, "sample plan");
+  const { project } = await seedGraph(db, linear, { localClonePath: origin });
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
+  const created = await plan.createIssue(repo, { project: number, title: "Add the changelog", body: "", labels: ["task"] });
+  plan.itemsOf(repo).get(created.number)!.status = "Ready";
+  const statusOf = () => plan.getStatus(repo, number, created.number);
+  const executors: ExecutorRegistry = {
+    planner: { needsWorkdir: false, execute: async () => ({ kind: "completed", output: { plan: "p", steps: [], ownedPaths: ["CHANGELOG.md"] } }) },
+    coder: {
+      needsWorkdir: true,
+      execute: async (ctx) => {
+        writeFileSync(join(ctx.workdir!.path, "CHANGELOG.md"), "# Changelog\n");
+        git(ctx.workdir!.path, "add", "-A");
+        git(ctx.workdir!.path, "commit", "-qm", "Add changelog");
+        return { kind: "completed", output: { status: "done", summary: "Added CHANGELOG.md" } };
+      },
+    },
+    pr: prNodeExecutor({ github, projects: plan }),
+    merge: mergeNodeExecutor({ github, projects: plan }),
+  };
+  const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+
+  const run = await startRun(db, { projectId: project.id, graphName: "g", task: "Add a CHANGELOG.md", issues: [{ ...created, title: "Add the changelog", body: "" }] }, { projects: plan });
+  expect(await statusOf()).toBe("Running");
+  await drain(deps);
+  expect(await statusOf()).toBe("In review");
+  github.setChecks(1, "SUCCESS");
+  await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+  await drain(deps);
+
+  expect(github.merged).toEqual([1]);
+  expect(await statusOf()).toBe("Done");
+  expect(plan.plans.get("octo/sample")?.project.owner).toBe("Organization");
+  expect((await planEvents(run.id)).map(([type, payload]) => [type, (payload as { status: string }).status])).toEqual([
+    ["plan.status", "Running"],
+    ["plan.status", "In review"],
+    ["plan.status", "Done"],
+  ]);
 });
 
 test("cancelling a run that never moved its task leaves the task's Status alone", async () => {

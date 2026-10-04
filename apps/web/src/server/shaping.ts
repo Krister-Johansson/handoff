@@ -52,18 +52,19 @@ async function plannedProject(deps: ShapingDeps, projectId: string) {
 type Planned = Awaited<ReturnType<typeof plannedProject>>;
 
 const missingOptions = (project: PlanProject) => STATUS_OPTIONS.filter((s) => !project.statusOptions[s]);
-const projectSummary = ({ number, title, url }: PlanProject) => ({ number, title, url });
+/** A plan's GitHub Project as setup_plan answers it, with its owner: the repository's owner, a user or an organization. */
+const projectSummary = ({ number, title, url, owner }: PlanProject, login: string) => ({ number, title, url, owner: { login, ...(owner ? { type: owner } : {}) } });
 
-/** The user's GitHub Projects setup can use, those linked to the project's repository first. */
+/** The GitHub Projects of the repository's owner, a user or an organization, that setup can use, those linked to the project's repository first. */
 export async function listGitHubProjects(deps: ShapingDeps, projectId: string) {
   const { plan, repo } = await shapingAccess(deps, projectId);
   return (await plan.listProjects(repo.owner, repo)).map((p) => ({ number: p.number, title: p.title, url: p.url, linked: p.linked, missing_status_options: p.missingStatusOptions }));
 }
 
 /**
- * Sets up a project's plan: the kind labels on the repository and a user-owned GitHub Project with
- * handoff's Status options, linked to the repository, whose number the project stores. `use` adopts an
- * existing Project of the user instead of creating one. With a number already stored it creates
+ * Sets up a project's plan: the kind labels on the repository and a GitHub Project owned by the repository's
+ * owner, a user or an organization, with handoff's Status options, linked to the repository, whose number the
+ * project stores. `use` adopts an existing Project of that owner instead of creating one. With a number already stored it creates
  * nothing: it re-creates missing labels and reports Status options the Project lacks. An adopted or
  * stored Project's items that active runs work on get the Status each run owns (statuses_from_runs).
  * A project in Flow mode plans without dates or hours, so its Project gets the Size field and no Start,
@@ -93,7 +94,7 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
     const found = await plan.getProject(repo.owner, stored);
     if (!found) throw new Error(`GitHub Project #${stored} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.`);
     const fromRuns = await statusesFromRuns(deps.db, { plan, project, repo, number: stored });
-    return { created: false, project: projectSummary(found), missing_status_options: missingOptions(found), statuses_from_runs: fromRuns, ...(await dateFields(found)) };
+    return { created: false, project: projectSummary(found, repo.owner), missing_status_options: missingOptions(found), statuses_from_runs: fromRuns, ...(await dateFields(found)) };
   }
   if (opts.use !== undefined) {
     const adopted = await plan.adoptProject(repo.owner, opts.use, repo);
@@ -101,7 +102,7 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
     const fromRuns = await statusesFromRuns(deps.db, { plan, project, repo, number: adopted.project.number });
     return {
       created: false,
-      project: projectSummary(adopted.project),
+      project: projectSummary(adopted.project, repo.owner),
       renamed_status_options: adopted.renamed,
       added_status_options: adopted.added,
       missing_status_options: missingOptions(adopted.project),
@@ -112,7 +113,7 @@ export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { us
   const created = await plan.createProject(repo.owner, repo, `${project.name} plan`, { dateFields: !flow });
   await store(created.number);
   // A new Project has no items yet, so no run's Status to write.
-  return { created: true, project: projectSummary(created), missing_status_options: missingOptions(created), statuses_from_runs: [], ...(await dateFields(created)) };
+  return { created: true, project: projectSummary(created, repo.owner), missing_status_options: missingOptions(created), statuses_from_runs: [], ...(await dateFields(created)) };
 }
 
 const DATE_FIELDS = [

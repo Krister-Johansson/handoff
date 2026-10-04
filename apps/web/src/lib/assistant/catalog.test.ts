@@ -145,6 +145,16 @@ test("set_order is confirm and its summary lists each move and pin", () => {
   expect(toolSpec("set_order").input.safeParse({ project: "todooverkill", order: [] }).success).toBe(false);
 });
 
+test("list_github_projects and setup_plan describe the repository owner's Projects, a user's or an organization's", () => {
+  const list = toolSpec("list_github_projects").description;
+  expect(list).toMatch(/^The GitHub Projects of the repository's owner, a user or an organization, that the token can write, those linked to the project's repository first/);
+  expect(list).not.toMatch(/user's own/);
+  const setup = toolSpec("setup_plan").description;
+  expect(setup).toMatch(/a GitHub Project of the repository's owner, a user or an organization, with the Status columns/);
+  expect(setup).toMatch(/project names the Project's owner/);
+  expect(setup).not.toMatch(/Project of the user/);
+});
+
 test("start_scheduler names both sources of Priority, the Project's own field first, and get_scheduler says which one it reads", () => {
   const start = toolSpec("start_scheduler").description;
   expect(start).toMatch(/the Project's own Priority field/);

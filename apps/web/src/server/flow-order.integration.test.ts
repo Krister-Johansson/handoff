@@ -12,10 +12,14 @@ afterAll(() => db.$client.end());
 
 const repo = { owner: "octo", name: "sample" };
 
-/** A Flow project with a plan on a fake GitHub; `item` adds an issue to the end of Project order. */
-async function flowProject() {
+/**
+ * A Flow project with a plan on a fake GitHub; `item` adds an issue to the end of Project order. With
+ * `organization`, the repository's owner octo is an organization that owns the Project.
+ */
+async function flowProject(opts: { organization?: boolean } = {}) {
   const github = new FakeGitHub();
   const plan = new FakeProjects(github);
+  if (opts.organization) plan.owners.set("octo", "Organization");
   const { number } = await plan.createProject("octo", repo, "sandbox plan");
   const project = await createProject(db, { name: "todooverkill", repo: "octo/sample", defaultBranch: "main" });
   await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
@@ -44,6 +48,19 @@ test("writeOrder moves the dragged task in Project order with one move and pins 
   expect(moves).toHaveBeenCalledTimes(1);
   expect(moves.mock.calls[0]![2]).toEqual([{ itemId: `PVTI_${d}`, afterId: null }]);
   expect(await pins()).toEqual([{ issue: d, pinnedBy: "person", reason: "drop" }]);
+});
+
+test("writeOrder moves a task in an organization's Project order and pins it", async () => {
+  const { plan, project, ready, order, pins, moves, deps } = await flowProject({ organization: true });
+  const [a, b, c] = [await ready("Tree"), await ready("Board"), await ready("Flow")];
+
+  await writeOrder(deps, project.id, { shown: [a, b, c], queue: [c, a, b], pin: [c], actor: "person" });
+
+  expect(plan.plans.get("octo/sample")?.project.owner).toBe("Organization");
+  expect(await order()).toEqual([c, a, b]);
+  expect(moves).toHaveBeenCalledTimes(1);
+  expect(moves.mock.calls[0]!.slice(0, 2)).toEqual(["octo", 1]);
+  expect(await pins()).toEqual([{ issue: c, pinnedBy: "person", reason: "drop" }]);
 });
 
 test("epics, stories and closed items keep their places", async () => {
