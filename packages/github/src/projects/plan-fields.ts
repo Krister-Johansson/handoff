@@ -4,8 +4,12 @@ import type { PlanDateFieldIds, PlanEstimateFieldIds, PlanFields, SetFieldsResul
 const PLAN_FIELD_KEYS = ["start", "target", "size", "estimate"] as const;
 type PlanFieldKey = (typeof PLAN_FIELD_KEYS)[number];
 
+/** A field a write names: the plan's fields, and Status, which copyItems writes with them. */
+type WriteKey = PlanFieldKey | "status";
+
 /** Each field's key in `ProjectV2FieldValue` and the GraphQL type of its value. */
-const VALUE_OF: Record<PlanFieldKey, { key: string; type: string }> = {
+const VALUE_OF: Record<WriteKey, { key: string; type: string }> = {
+  status: { key: "singleSelectOptionId", type: "String" },
   start: { key: "date", type: "Date" },
   target: { key: "date", type: "Date" },
   size: { key: "singleSelectOptionId", type: "String" },
@@ -13,7 +17,7 @@ const VALUE_OF: Record<PlanFieldKey, { key: string; type: string }> = {
 };
 
 /** One field to write on an item: its field id and the value, or null to clear it. */
-export type FieldWrite = { key: PlanFieldKey; fieldId: string; value: string | number | null };
+export type FieldWrite = { key: WriteKey; fieldId: string; value: string | number | null };
 
 /**
  * The writes for `fields` on a Project with these field ids, checking every field and Size option
@@ -74,6 +78,22 @@ export function planItemIdsDocument(issues: number[]): { document: string; varia
     document: `query PlanItemIds(${declarations.join(", ")}) {\n  repository(owner: $owner, name: $name) {\n${selections.join("\n")}\n  }\n}`,
     variables: Object.fromEntries(issues.map((n) => [`i${n}`, n])),
   };
+}
+
+/**
+ * One mutation request that adds several issues to a Project: an `addProjectV2ItemById` per issue node id, aliased
+ * `a<n>` from 1 with the variable `a<n>Content`, in the order given. Each answers its item's id. The caller adds
+ * `projectId`.
+ */
+export function addItemsDocument(contentIds: string[]): { document: string; variables: Record<string, unknown> } {
+  const out = newDocument(["$projectId: ID!"]);
+  contentIds.forEach((contentId, index) => {
+    const name = `a${index + 1}`;
+    out.declarations.push(`$${name}Content: ID!`);
+    out.variables[`${name}Content`] = contentId;
+    out.selections.push(`  ${name}: addProjectV2ItemById(input: { projectId: $projectId, contentId: $${name}Content }) { item { id } }`);
+  });
+  return { document: `mutation AddPlanItems(${out.declarations.join(", ")}) {\n${out.selections.join("\n")}\n}`, variables: out.variables };
 }
 
 type DocumentParts = { declarations: string[]; selections: string[]; variables: Record<string, unknown> };

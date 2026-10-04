@@ -15,7 +15,7 @@ In a folder whose git origin is a GitHub repository, handoff's tools use that re
 
 A project can keep its plan on a GitHub Project: epics, stories under them and tasks under the stories, as sub-issues labelled `epic`, `story` and `task`, each with a Status of Shaping, Ready, Running, In review or Done. With a plan, only tasks in Ready reach the backlog. Every tool below that writes to GitHub asks the user first.
 
-1. Once per project, `setup_plan`. Call `list_github_projects` before it and ask the user whether to use one of their Projects (`setup_plan` with `use` and its number) or to create a new one. `setup_project` shows whether a plan exists.
+1. Once per project, `setup_plan`. Call `list_github_projects` before it and ask the user whether to use one of the Projects of the repository's owner, a user or an organization (`setup_plan` with `use` and its number), or to create a new one. `setup_project` shows whether a plan exists.
 2. Shape with the user: `create_epic` with the goal, `create_story` under the epic with its acceptance criteria, then `create_task` under each story with a brief (the goal, where in the code, how to tell it is done). Give `blocked_by` when a task must wait for another. Everything starts in Shaping.
 3. `list_plan` shows the tree with each item's status, run and pull request, and the open issues outside the plan. `plan_issue` brings one of those into the plan as a task.
 4. When a story is shaped and the user agrees, `move_to_ready` with its tasks. `move_to_shaping` takes a task back out of the backlog.

@@ -1,6 +1,7 @@
 import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "../projects/kinds.ts";
 import type {
   AdoptedProject,
+  CopyField,
   ItemMove,
   NewPlanIssue,
   PlanAncestor,
@@ -14,6 +15,7 @@ import type {
   PlanProject,
   PlanProjectChoice,
   PlanStatus,
+  ProjectRef,
   ProjectsPort,
   SetDatesResult,
   SetFieldsResult,
@@ -51,6 +53,9 @@ const itemIdOf = (issue: number) => `PVTI_${issue}`;
 const issueOf = (itemId: string) => Number(itemId.slice("PVTI_".length));
 
 const keyOf = (repo: RepoRef) => `${repo.owner}/${repo.name}`.toLowerCase();
+
+/** The name on GitHub of each field copyItems copies. */
+const COPY_FIELD_NAMES: Record<CopyField, string> = { start: "Start", target: "Target", size: "Size", estimate: "Estimate" };
 
 /** Why `fields` cannot be written on the issue's item of the plan, as setPlanFields answers; undefined when they can. */
 function fieldsProblem(plan: FakePlan | undefined, issue: number, fields: PlanFields): Exclude<SetFieldsResult, "set"> | undefined {
@@ -337,12 +342,51 @@ export class FakeProjects implements ProjectsPort {
     place();
   }
 
+  /**
+   * Copies the items of `from` into `to` with their Status and the given fields, in `from`'s order within the places
+   * the copied items take in `to`. Every issue of the FakeGitHub belongs to `repo`. Throws when `to` lacks a field.
+   */
+  async copyItems(_repo: RepoRef, from: ProjectRef, to: ProjectRef, fields: CopyField[]): Promise<{ copied: number[]; priorities: number[] }> {
+    const source = this.projectOf(from);
+    const target = this.projectOf(to);
+    if (!source) throw new Error(`GitHub Project #${from.number} of ${from.login} not found`);
+    if (!target) throw new Error(`GitHub Project #${to.number} of ${to.login} not found`);
+    const has: Record<CopyField, unknown> = {
+      start: target.project.dateFields?.start,
+      target: target.project.dateFields?.target,
+      size: target.project.estimateFields?.size,
+      estimate: target.project.estimateFields?.estimate,
+    };
+    const lacking = fields.find((key) => !has[key]);
+    if (lacking) throw new Error(`GitHub Project #${to.number} of ${to.login} has no ${COPY_FIELD_NAMES[lacking]} field. Run setup_plan to add it, then copy again.`);
+    const copied = [...source.items].filter(([issue]) => this.github.issues.has(issue));
+    for (const [issue, item] of copied) {
+      const next = target.items.get(issue) ?? { status: undefined };
+      if (statusOf(item.status) && target.project.statusOptions[statusOf(item.status)!]) next.status = item.status;
+      for (const key of fields) if (item[key] !== undefined) next[key] = item[key] as never;
+      target.items.set(issue, next);
+    }
+    // The copied items take the places they hold, in the source's order; the Map is refilled so tests keep their handle.
+    const order = copied.map(([issue]) => issue);
+    const queue = [...order];
+    const entries = [...target.items.keys()].map((issue) => (order.includes(issue) ? queue.shift()! : issue)).map((issue) => [issue, target.items.get(issue)!] as const);
+    target.items.clear();
+    for (const [issue, item] of entries) target.items.set(issue, item);
+    const priorityOf = (issue: number, item: FakePlanItem) => (source.project.priorityOptions ? item.priority : this.issueFieldOf(source) ? this.issuePriorities.get(issue) : undefined);
+    return { copied: order, priorities: copied.filter(([issue, item]) => priorityOf(issue, item)).map(([issue]) => issue) };
+  }
+
   async lineage(_repo: RepoRef, issue: number): Promise<PlanAncestor[]> {
     return this.github.ancestorsOf(issue);
   }
 
   async scopes() {
     return { ...this.scopesAnswer };
+  }
+
+  /** The Project of `login` numbered `number`, whichever repository it belongs to. */
+  private projectOf({ login, number }: ProjectRef): FakePlan | undefined {
+    return [...this.plans.values()].find((p) => p.login === login && p.project.number === number);
   }
 
   private planOf(repo: RepoRef, number: number): FakePlan | undefined {

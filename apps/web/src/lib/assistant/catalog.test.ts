@@ -155,6 +155,21 @@ test("list_github_projects and setup_plan describe the repository owner's Projec
   expect(setup).not.toMatch(/Project of the user/);
 });
 
+test("setup_plan takes copy_from, the old Project of a moved repository, and says Priority is not copied", () => {
+  const setup = toolSpec("setup_plan");
+  expect(setup.description).toMatch(/repository moved to another owner[^.]*copy_from/);
+  expect(setup.description).toMatch(/Priority is not copied/);
+  expect(setup.input.safeParse({ project: "web", copy_from: { owner: "Krister-Johansson", number: 5 } }).success).toBe(true);
+  expect(setup.input.safeParse({ project: "web", copy_from: { owner: "", number: 5 } }).success).toBe(false);
+  expect(setup.input.safeParse({ project: "web", copy_from: { owner: "Krister-Johansson", number: 0 } }).success).toBe(false);
+  expect(setup.summarize({ project: "web", copy_from: { owner: "Krister-Johansson", number: 5 } })).toMatch(
+    /^Set up the plan of web on GitHub: .*, and copy the items of Krister-Johansson's Project #5 with their Status and fields$/,
+  );
+  expect(setup.summarize({ project: "web", use: 3, copy_from: { owner: "Krister-Johansson", number: 5 } })).toMatch(
+    /^Use GitHub Project #3 as the plan of web: .*, and copy the items of Krister-Johansson's Project #5 with their Status and fields$/,
+  );
+});
+
 test("start_scheduler names both sources of Priority, the Project's own field first, and get_scheduler says which one it reads", () => {
   const start = toolSpec("start_scheduler").description;
   expect(start).toMatch(/the Project's own Priority field/);

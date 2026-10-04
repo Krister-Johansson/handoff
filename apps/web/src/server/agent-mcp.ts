@@ -18,7 +18,7 @@ import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
-import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSizes, setupPlan, type ScheduleItem, type SizesInput } from "./shaping";
+import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSizes, setupPlan, type CopyFrom, type ScheduleItem, type SizesInput } from "./shaping";
 import { annotationsOf, CATALOG, forChatProject, withChatProject, type ChatProject, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import { arrangeTimeline } from "../lib/plan/arrange";
@@ -699,7 +699,8 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     list_github_projects: async ({ project }: { project: string }) => listGitHubProjects(shaping, (await findProject(db, project)).id),
 
-    setup_plan: async ({ project, use }: { project: string; use?: number }) => setupPlan(shaping, (await findProject(db, project)).id, use !== undefined ? { use } : {}),
+    setup_plan: async ({ project, use, copy_from }: { project: string; use?: number; copy_from?: CopyFrom }) =>
+      setupPlan(shaping, (await findProject(db, project)).id, { ...(use !== undefined ? { use } : {}), ...(copy_from ? { copyFrom: copy_from } : {}) }),
 
     create_epic: async ({ project, title, goal }: { project: string; title: string; goal: string }) => createEpic(shaping, (await findProject(db, project)).id, { title, goal }),
 

@@ -12,6 +12,7 @@
     "./backlog-scheduler": "./src/backlog-scheduler/index.ts",
     "./candidates": "./src/backlog-scheduler/candidates.ts",
     "./plan-status": "./src/plan-status.ts",
+    "./move-project": "./src/move-project.ts",
     "./library-import": "./src/library/import-repo.ts",
     "./mcp-check": "./src/library/mcp-check.ts",
     "./mcp-oauth": "./src/library/mcp-oauth.ts",

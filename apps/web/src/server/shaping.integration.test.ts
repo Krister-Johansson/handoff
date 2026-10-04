@@ -481,3 +481,63 @@ test("set_size writes Size on an organization Project in Flow mode and Size and 
   expect(await setSize(deps, projectId, { issue: task, size: "L", estimate: 6 })).toEqual({ issue: task, size: { from: "M", to: "L" }, estimate: { from: null, to: 6 } });
   expect(sized()).toEqual({ size: "L", estimate: 6 });
 });
+
+/**
+ * The sandbox project's plan on the user octo's Project, then GitHub moved octo/sample to the organization acme and
+ * handoff moved the project: it uses acme/sample and has no plan. The old Project has #12, #13 and #11 in that
+ * order, and its own Priority field.
+ */
+async function movedToOrganization() {
+  github.issues.set(13, { number: 13, title: "Issue 13", url: "https://github.com/octo/sample/issues/13", body: "Body 13", state: "open" });
+  const old = await plan.createProject("octo", repo, "sandbox plan");
+  await plan.ensureEstimateFields("octo", old.number);
+  plan.plans.get("octo/sample")!.project.priorityOptions = ["High", "Low"];
+  for (const [issue, status] of [[12, "Ready"], [13, "Shaping"], [11, "Done"]] as const) await plan.setStatus(repo, old.number, issue, status, { add: true });
+  await plan.setPlanFields(repo, old.number, 12, { size: "M", estimate: 5, start: "2026-10-06", target: "2026-10-07" });
+  await plan.setPlanFields(repo, old.number, 11, { size: "S" });
+  plan.itemsOf(repo).get(11)!.priority = "High";
+  plan.owners.set("acme", "Organization");
+  await db.update(projects).set({ repoOwner: "acme", planProjectNumber: null }).where(eq(projects.id, projectId));
+  return old.number;
+}
+const acme = { owner: "acme", name: "sample" };
+
+test("setup_plan with copy_from copies each item's Status and the mode's fields into the new Project in the old Project order, and lists the items with a Priority", async () => {
+  const old = await movedToOrganization();
+  await timeline();
+  const copy = vi.spyOn(plan, "copyItems");
+
+  const result = await setupPlan(deps, projectId, { copyFrom: { owner: "octo", number: old } });
+
+  expect(result).toMatchObject({
+    created: true,
+    project: { title: "sandbox plan", owner: { login: "acme", type: "Organization" } },
+    copied: { from: { owner: "octo", number: old }, items: [12, 13, 11], items_with_priority: [11], note: expect.stringContaining("Priority is not copied") },
+  });
+  expect(copy).toHaveBeenCalledWith(acme, { login: "octo", number: old }, { login: "acme", number: result.project.number }, ["size", "estimate", "start", "target"]);
+  const items = await plan.listItems("acme", result.project.number, acme);
+  expect(items.map((i) => [i.number, i.status, i.size, i.estimate, i.start, i.target])).toEqual([
+    [12, "Ready", "M", 5, "2026-10-06", "2026-10-07"],
+    [13, "Shaping", undefined, undefined, undefined, undefined],
+    [11, "Done", "S", undefined, undefined, undefined],
+  ]);
+  // Priority stays on the old Project, which is left as it was.
+  expect(items.map((i) => i.priority)).toEqual([undefined, undefined, undefined]);
+  expect([...plan.itemsOf(repo).keys()]).toEqual([12, 13, 11]);
+});
+
+test("setup_plan with copy_from in a Flow project copies Status and Size only", async () => {
+  const old = await movedToOrganization();
+  const copy = vi.spyOn(plan, "copyItems");
+
+  const result = await setupPlan(deps, projectId, { copyFrom: { owner: "octo", number: old } });
+
+  expect(copy).toHaveBeenCalledWith(acme, { login: "octo", number: old }, { login: "acme", number: result.project.number }, ["size"]);
+  expect((await plan.listItems("acme", result.project.number, acme)).map((i) => [i.number, i.status, i.size, i.estimate])).toEqual([
+    [12, "Ready", "M", undefined],
+    [13, "Shaping", undefined, undefined],
+    [11, "Done", "S", undefined],
+  ]);
+  // The new plan cannot copy from itself.
+  await expect(setupPlan(deps, projectId, { copyFrom: { owner: "acme", number: result.project.number } })).rejects.toThrow(/the plan.s own Project/);
+});

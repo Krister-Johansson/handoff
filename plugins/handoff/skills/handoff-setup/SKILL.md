@@ -110,6 +110,12 @@ An organization can stop that token in two ways. handoff names the one GitHub re
 - An organization with SAML single sign-on needs the token authorized for it: on GitHub under Settings, Developer settings, Personal access tokens, Configure SSO.
 - An organization can refuse classic personal access tokens. An organization owner allows them in the organization's settings under Personal access tokens, Settings, Tokens (classic).
 
+### A repository that moved to an organization
+
+When GitHub moves a project's repository to another owner, for example from the user to an organization, handoff still uses the old name, and its plan looks empty. `add_project` with the new name refuses and names the project. Move the project with `handoff project move <project> --repo <owner>/<name>`, or in the dashboard under Settings, Projects, Repository moved. The project keeps its runs, graphs and pins. The move refuses while a run is active, and when GitHub says the new name is another repository. When the owner changed, the plan's Project of the old owner is unlinked and the scheduler pauses.
+
+Then set up the plan again. `setup_plan` with `copy_from` set to the old Project's owner and number copies the repository's items into the new Project with their Status and the fields the plan mode uses, in the old order. Priority is not copied: the result lists the items that had one. The old Project stays on GitHub for the user to close. With the GitHub App, install it on the organization too, and run `pnpm dev:webhooks <owner>/<name>` with the new name.
+
 ## 3. After the setup
 
 Run `setup_project` again and tell the user what is in place and what is left. Then the normal flow applies (see the `handoff` skill): plan the work as issues, `start_run`, and follow it with `get_run`.

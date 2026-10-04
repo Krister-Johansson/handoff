@@ -38,7 +38,22 @@ export async function listProjects(db: Db) {
 }
 
 /**
- * Adds a project; with a GitHub client it also checks the repository exists and stores its id.
+ * Refuses a repository whose GitHub id a project stores already. Under another name it is a repository GitHub moved,
+ * for example to an organization, and the sentence names the project and how to move it.
+ */
+async function refuseKnownRepository(db: Db, repo: string, repoId: number) {
+  const [known] = await db.select({ name: projects.name, repoOwner: projects.repoOwner, repoName: projects.repoName }).from(projects).where(eq(projects.repoId, repoId));
+  if (!known) return;
+  const knownAs = `${known.repoOwner}/${known.repoName}`;
+  if (knownAs.toLowerCase() === repo.toLowerCase()) throw new Error(`${repo} is already a project: ${known.name}.`);
+  throw new Error(
+    `${repo} is the project ${known.name}, which knows it as ${knownAs}. It moved: run handoff project move ${known.name} --repo ${repo}, or use Settings, Projects, Repository moved.`,
+  );
+}
+
+/**
+ * Adds a project; with a GitHub client it also checks the repository exists and stores its id, and refuses a
+ * repository a project has already, also under the name it had before GitHub moved it.
  * Without a name the project is named after the repository (lowercase, dashes, made unique).
  */
 export async function createProject(db: Db, input: { name?: string; repo: string; defaultBranch: string }, github?: GitHubPort) {
@@ -53,6 +68,7 @@ export async function createProject(db: Db, input: { name?: string; repo: string
     } catch {
       throw new Error(`GitHub cannot find ${owner}/${name} with the configured credentials.`);
     }
+    await refuseKnownRepository(db, `${owner}/${name}`, repoId);
   }
   const [project] = await db
     .insert(projects)

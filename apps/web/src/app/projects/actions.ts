@@ -14,7 +14,7 @@ import { addDateFields, addEstimateFields, listGitHubProjects, moveItem, moveToR
 import { requestMerge, requestMergeAll } from "@handoff/engine/operations";
 import { PLAN_MODES, setPlanMode } from "@/server/plan-mode";
 import { unpin, writeOrder } from "@/server/flow-order";
-import { deleteProject, setCapacity, setPlanBudget, unlinkPlan, updateProject } from "@/server/project-admin";
+import { deleteProject, moveProjectRepo, setCapacity, setPlanBudget, unlinkPlan, updateProject } from "@/server/project-admin";
 import { archiveRun, unarchiveRun } from "@/server/pulls";
 import { linkDependencies } from "@/server/link-dependencies";
 import { listAvailableRepos, type AvailableRepo } from "@/server/repos";
@@ -77,6 +77,20 @@ export async function deleteProjectAction(_: ActionState, form: FormData): Promi
     return { ok: false, error: (error as Error).message };
   }
   // The sidebar in the root layout lists the projects; Settings, Projects shows them too.
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** Points a project at the place GitHub moved its repository to, from Settings, Projects, Repository moved. */
+export async function moveProjectAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const projectId = field(form, "projectId");
+  const repo = field(form, "repo");
+  try {
+    await moveProjectRepo({ db: getDb(), github: getGitHub() }, projectId, repo);
+  } catch (error) {
+    return { ok: false, error: (error as Error).message, values: { repo } };
+  }
+  // The sidebar in the root layout names each project's repository; Settings, Projects and the Plan page change too.
   revalidatePath("/", "layout");
   return { ok: true };
 }

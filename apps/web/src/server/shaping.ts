@@ -2,6 +2,7 @@ import { eq, projects, type Db } from "@handoff/db";
 import {
   PLAN_SIZES,
   STATUS_OPTIONS,
+  type CopyField,
   type GitHubPort,
   type PlanFields,
   type PlanItem,
@@ -10,6 +11,7 @@ import {
   type PlanSize,
   type PlanStatus,
   type ProjectsPort,
+  type RepoRef,
   type SetFieldsResult,
 } from "@handoff/github";
 import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
@@ -69,13 +71,50 @@ export async function listGitHubProjects(deps: ShapingDeps, projectId: string) {
  * stored Project's items that active runs work on get the Status each run owns (statuses_from_runs).
  * A project in Flow mode plans without dates or hours, so its Project gets the Size field and no Start,
  * Target or Estimate field.
+ *
+ * `copyFrom` names another Project, such as the old owner's after GitHub moved the repository to an organization:
+ * once the plan's Project has its fields, the items of the repository in that Project are copied into it with their
+ * Status and the fields the plan mode uses (Size in Flow; Size, Estimate, Start and Target in Timeline), in its
+ * order. Priority is not copied; the result lists the items that had one. The other Project stays as it is.
  */
-export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { use?: number } = {}) {
+export async function setupPlan(deps: ShapingDeps, projectId: string, opts: { use?: number; copyFrom?: CopyFrom } = {}) {
   const { project, plan, repo } = await shapingAccess(deps, projectId);
   const stored = project.planProjectNumber;
   if (stored !== null && opts.use !== undefined && opts.use !== stored) {
     throw new Error(`${project.name} already has a plan: GitHub Project #${stored}. handoff keeps one Project per project.`);
   }
+  const { copyFrom } = opts;
+  const planNumber = stored ?? opts.use;
+  if (copyFrom && planNumber !== undefined && copyFrom.number === planNumber && copyFrom.owner.toLowerCase() === repo.owner.toLowerCase()) {
+    throw new Error(`copy_from names the plan's own Project, GitHub Project #${planNumber}. Name the Project the items are in now.`);
+  }
+  const result = await setupPlanProject({ project, plan, repo, stored }, deps, opts.use);
+  if (!copyFrom) return result;
+  const fields: CopyField[] = project.planMode === "flow" ? ["size"] : ["size", "estimate", "start", "target"];
+  const copy = await plan.copyItems(repo, { login: copyFrom.owner, number: copyFrom.number }, { login: repo.owner, number: result.project.number }, fields);
+  return {
+    ...result,
+    copied: {
+      from: { owner: copyFrom.owner, number: copyFrom.number },
+      items: copy.copied,
+      items_with_priority: copy.priorities,
+      note: copy.priorities.length
+        ? "Priority is not copied. Set it on these items in the new Project if they need it; the old Project keeps its values."
+        : "Priority is not copied; none of the items had one. The old Project stays as it is, for you to close.",
+    },
+  };
+}
+
+/** Another Project to copy a plan's items from: its owner's login and its number. */
+export type CopyFrom = { owner: string; number: number };
+
+/** setupPlan without the copy: the plan's Project created, adopted or checked, with its labels and fields. */
+async function setupPlanProject(
+  { project, plan, repo, stored }: { project: Awaited<ReturnType<typeof shapingAccess>>["project"]; plan: ProjectsPort; repo: RepoRef; stored: number | null },
+  deps: ShapingDeps,
+  use: number | undefined,
+) {
+  const opts = { use };
   await plan.ensureLabels(repo);
   const store = (number: number) => deps.db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
 

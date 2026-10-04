@@ -84,6 +84,7 @@ mutation CreatePlanLabel($repositoryId: ID!, $name: String!, $color: String!, $d
   }
 }
 
+# Adds an issue to a Project; adding one that is an item already answers its item. copyItems sends several of these, aliased, in one request.
 mutation AddPlanItem($projectId: ID!, $contentId: ID!) {
   addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
     item {

@@ -1,11 +1,11 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
-import { appendEvents, createNotification, eq, events, graphs, nodeExecutions, notifications, projects, questions, runs, sql } from "@handoff/db";
+import { appendEvents, createNotification, eq, events, graphs, nodeExecutions, notifications, planPins, projects, projectSchedulers, questions, runs, schedulerEvents, sql } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 import { planModeOf } from "./plan-mode.ts";
-import { deleteProject, projectAttention, projectsForSettings, unlinkPlan, updateProject } from "./project-admin.ts";
+import { deleteProject, moveProjectRepo, projectAttention, projectsForSettings, unlinkPlan, updateProject } from "./project-admin.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -119,6 +119,74 @@ describe("Settings, Projects", () => {
     const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
     expect(row?.planProjectNumber).toBeNull();
     expect(await plan.getProject("octo", number)).toBeDefined();
+  });
+});
+
+describe("moveProjectRepo", () => {
+  /**
+   * A project of octo/sample (GitHub's id 42) with a finished run on issue #11, a pin, its scheduler on and
+   * its plan on octo's GitHub Project #3, as it stands after GitHub moved the repository to acme.
+   */
+  async function movedProject() {
+    const { project, run } = await projectWithRun();
+    await db.update(projects).set({ repoId: 42, planProjectNumber: 3 }).where(eq(projects.id, project.id));
+    await db
+      .update(runs)
+      .set({ status: "succeeded", issues: [{ number: 11, title: "Add a CHANGELOG.md", url: "https://github.com/octo/sample/issues/11" }] })
+      .where(eq(runs.id, run.id));
+    await db.insert(planPins).values({ projectId: project.id, issue: 11, pinnedBy: "person", reason: "drop" });
+    await db.insert(projectSchedulers).values({ projectId: project.id, enabled: true, graphName: "g" });
+    const github = new FakeGitHub();
+    github.repoId = 42;
+    return { project, run, github };
+  }
+
+  test("moving a project to its repository's new owner keeps runs, graphs, pins and the scheduler row, rewrites the runs' issue URLs and forgets the plan's Project number", async () => {
+    const { project, run, github } = await movedProject();
+    const { project: other } = await projectWithRun("other", "octo/other");
+
+    const moved = await moveProjectRepo({ db, github }, project.id, "acme/sample");
+
+    expect(moved).toMatchObject({ repo: "acme/sample", from: "octo/sample", plan: { owner: "octo", number: 3 }, planUnlinked: true });
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(row).toMatchObject({ name: "sandbox", repoOwner: "acme", repoName: "sample", repoId: 42, planProjectNumber: null });
+    const [kept] = await db.select().from(runs).where(eq(runs.id, run.id));
+    expect(kept?.issues).toEqual([{ number: 11, title: "Add a CHANGELOG.md", url: "https://github.com/acme/sample/issues/11" }]);
+    expect((await db.select().from(graphs).where(eq(graphs.projectId, project.id))).map((g) => g.name)).toEqual(["g"]);
+    expect(await db.select({ issue: planPins.issue }).from(planPins).where(eq(planPins.projectId, project.id))).toEqual([{ issue: 11 }]);
+    expect(await db.select({ enabled: projectSchedulers.enabled }).from(projectSchedulers).where(eq(projectSchedulers.projectId, project.id))).toEqual([{ enabled: true }]);
+    // Another project of the old owner is not touched.
+    expect((await db.select().from(projects).where(eq(projects.id, other.id)))[0]).toMatchObject({ repoOwner: "octo", repoName: "other" });
+  });
+
+  test("moving pauses the scheduler with the reason", async () => {
+    const { project, github } = await movedProject();
+
+    expect(await moveProjectRepo({ db, github }, project.id, "acme/sample")).toMatchObject({ schedulerPaused: true });
+
+    const reason = "The repository moved to acme. Set up the plan again, then resume.";
+    const [scheduler] = await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, project.id));
+    expect(scheduler).toMatchObject({ enabled: true, pausedBy: "person", pauseReason: reason });
+    expect(scheduler?.pausedAt).toBeInstanceOf(Date);
+    const recorded = await db.select({ type: schedulerEvents.type, payload: schedulerEvents.payload }).from(schedulerEvents).where(eq(schedulerEvents.projectId, project.id));
+    expect(recorded).toEqual([{ type: "scheduler.paused", payload: { by: "person", reason } }]);
+  });
+
+  test("moving refuses while a run is active", async () => {
+    const { project, run, github } = await movedProject();
+    await db.update(runs).set({ status: "running" }).where(eq(runs.id, run.id));
+
+    await expect(moveProjectRepo({ db, github }, project.id, "acme/sample")).rejects.toThrow("The project has 1 active run. Let it finish or cancel it, then move the repository.");
+    expect((await db.select().from(projects).where(eq(projects.id, project.id)))[0]).toMatchObject({ repoOwner: "octo", planProjectNumber: 3 });
+  });
+
+  test("moving refuses a repository with another id", async () => {
+    const { project, github } = await movedProject();
+    github.repoId = 43;
+
+    await expect(moveProjectRepo({ db, github }, project.id, "acme/sample")).rejects.toThrow("acme/sample is another repository than the one this project was added with.");
+    expect((await db.select().from(projects).where(eq(projects.id, project.id)))[0]).toMatchObject({ repoOwner: "octo", repoName: "sample", planProjectNumber: 3 });
+    expect((await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, project.id)))[0]?.pausedAt).toBeNull();
   });
 });
 

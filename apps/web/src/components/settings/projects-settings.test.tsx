@@ -8,6 +8,7 @@ const actions = vi.hoisted(() => ({
   updateProjectAction: vi.fn(async () => ({ ok: true })),
   deleteProjectAction: vi.fn(async () => ({ ok: true })),
   unlinkPlanAction: vi.fn(async () => ({ ok: true })),
+  moveProjectAction: vi.fn(async () => ({ ok: true })),
   listGitHubProjectsAction: vi.fn(async () => ({ projects: [] })),
   setupPlanAction: vi.fn(async () => ({ ok: true })),
   addEstimateFieldsAction: vi.fn(async (): Promise<{ ok: boolean; error?: string }> => ({ ok: true })),
@@ -143,6 +144,25 @@ test("Edit opens the edit form with the project's name, branch and setup command
   expect(within(dialog).getByLabelText("Name")).toHaveValue("handoff");
   expect(within(dialog).getByLabelText("Default branch")).toHaveValue("main");
   expect(within(dialog).getByLabelText("Setup command")).toHaveValue("pnpm install");
+});
+
+test("Repository moved opens the move dialog for the open project, which names its plan and its running scheduler", async () => {
+  render(<ProjectsSettings projects={[{ ...handoff, scheduler: { state: "running", active: 1, maxRuns: 2 } }, shop]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  fireEvent.click(screen.getByRole("button", { name: "Repository moved" }));
+  const dialog = await screen.findByRole("dialog", { name: "Repository moved" });
+  expect(dialog).toHaveTextContent("octo/handoff");
+  fireEvent.change(within(dialog).getByLabelText("New repository"), { target: { value: "acme/handoff" } });
+  expect(dialog).toHaveTextContent("The plan's GitHub Project belongs to octo, so it is unlinked; set up the plan again. The scheduler pauses.");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(actions.moveProjectAction).toHaveBeenCalledTimes(1));
+  expect(Object.fromEntries((actions.moveProjectAction.mock.calls[0] as unknown[])[1] as FormData)).toEqual({ projectId: "p1", repo: "acme/handoff" });
+});
+
+test("the demo project has no Repository moved", () => {
+  render(<ProjectsSettings projects={[{ ...handoff, isDemo: true }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(screen.queryByRole("button", { name: "Repository moved" })).not.toBeInTheDocument();
 });
 
 test("Plan on GitHub lists the fields and offers Add the fields when Size or Estimate is missing", async () => {

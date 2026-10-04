@@ -3,6 +3,7 @@ import { basename, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { compileGraph, parseSkillMarkdown, suggestProjectName, type LinkedIssue } from "@handoff/core";
 import { importSkillRepository } from "@handoff/engine/library-import";
+import { moveProject } from "@handoff/engine/move-project";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, GitWorktreeProvider, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
@@ -13,6 +14,7 @@ export type CliIo = { db: Db; out: (line: string) => void; webUrl?: string; gith
 
 const USAGE = `usage:
   handoff project add --repo <owner/name> [--name <name>] [--branch <default>] [--clone <path>]
+  handoff project move <project> --repo <owner/name>
   handoff graph import --project <name> --name <graph> <file.json>
   handoff run --project <name> --graph <graph> [--task "<task>"] [--issue <number> ...] [--follow]
   handoff runs
@@ -71,6 +73,24 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
       })
       .returning();
     out(`project ${project!.name}: ${owner}/${repoName} (default branch ${project!.defaultBranch})`);
+    return;
+  }
+
+  if (command === "project" && sub === "move") {
+    // After GitHub moved the repository, for example to an organization: the project keeps its runs and graphs.
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { repo: { type: "string" } } });
+    const name = positionals[0];
+    if (!name) throw new Error(`name the project to move\n${USAGE}`);
+    const project = await projectByName(db, name);
+    const github = io.github === undefined ? gitHubFromEnv() : io.github ?? undefined;
+    const moved = await moveProject({ db, github }, project.id, need(values, "repo"), "cli");
+    out(`project ${project.name}: ${moved.repo} (was ${moved.from})`);
+    if (moved.planUnlinked && moved.plan) {
+      out(
+        `The plan's GitHub Project #${moved.plan.number} belongs to ${moved.plan.owner}, so it is unlinked. Set up the plan again with setup_plan; copy_from { owner: "${moved.plan.owner}", number: ${moved.plan.number} } copies its items.`,
+      );
+    }
+    if (moved.schedulerPaused) out("The scheduler is paused until you resume it.");
     return;
   }
 
