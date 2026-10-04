@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Fake `claude` binary for tests. Replays a scripted stream-json scenario.
-// FAKE_CLAUDE_SCENARIO: path to JSON { lines, lineDelayMs, stderrLines, exitCode, edits, gitCommit, hangAfterLine, ignoreSigint, chunkSplit }
+// FAKE_CLAUDE_SCENARIO: path to JSON { lines, lineDelayMs, stderrLines, exitCode, edits, gitCommit, hangAfterLine, ignoreSigint, chunkSplit, background, visit }
 // FAKE_CLAUDE_RECORD: path; one JSON line { argv, cwd, stdin, env } is appended per invocation.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
+import { hostname } from "node:os";
 
 const argv = process.argv.slice(2);
 if (argv[0] === "--version") {
@@ -56,6 +57,21 @@ for (const bg of scenario.background ?? []) {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "fake-dev-server"], { detached: bg.detached ?? false, stdio: "ignore" });
   child.unref();
   appendFileSync(bg.pidFile, `${child.pid}\n`);
+}
+
+// Visits the first http://localhost URL in the appended system prompt, as a demo's browser visits the app, and writes
+// where it ran and what came back to the scenario's `visit` file.
+if (scenario.visit) {
+  const prompt = readFileSync(argv[argv.indexOf("--append-system-prompt-file") + 1], "utf8");
+  const url = /http:\/\/(localhost|127\.0\.0\.1):\d+\S*?(?=[.,]?(\s|$))/.exec(prompt)?.[0];
+  const seen = { url, host: hostname() };
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    Object.assign(seen, { status: response.status, body: await response.text() });
+  } catch (error) {
+    Object.assign(seen, { error: String(error?.cause ?? error) });
+  }
+  writeFileSync(scenario.visit, JSON.stringify(seen));
 }
 
 for (const line of scenario.stderrLines ?? []) process.stderr.write(line + "\n");

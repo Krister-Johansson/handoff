@@ -1,8 +1,10 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
-import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
+import { dirname, join, resolve } from "node:path";
+import { afterAll, afterEach, beforeEach, describe, expect, onTestFinished, test } from "vitest";
+import { ClaudeCliExecutor } from "@handoff/cli-adapter";
+import { fakeClaude, fakeClaudeBin, FakeCliExecutor, lines } from "@handoff/cli-adapter/testing";
 import { eq, previews, projects, screenshots } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { stopWorkerPreviews, type DockerExec } from "../preview/preview.ts";
@@ -11,6 +13,7 @@ import { createOriginRepo } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import { done } from "../testing/scripted.ts";
 import type { NodeExecutor } from "../types.ts";
+import { DockerWorkdirProvider } from "../workdir/docker.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { demoExecutor } from "./demo.ts";
 import { finishExecutor, startExecutor } from "./flow.ts";
@@ -311,4 +314,65 @@ test("a passEnv variable reaches the app", async () => {
   } finally {
     delete process.env.HANDOFF_DEMO_TEST_KEY;
   }
+});
+
+const dockerEnabled = process.env.HANDOFF_TEST_DOCKER === "1";
+const image = process.env.HANDOFF_TEST_DOCKER_IMAGE ?? "node:22-alpine";
+const repoRoot = resolve(import.meta.dirname, "../../../..");
+const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+
+describe.skipIf(!dockerEnabled)("in a Docker workspace", () => {
+  test("the demo's Claude runs in the app's container, where the app's URL answers", async () => {
+    const home = mkdtempSync(join(tmpdir(), "handoff-home-"));
+    // The app answers with the name of the machine it runs on: its container's hostname.
+    const named = `require("node:http").createServer((_, res) => res.end(require("node:os").hostname())).listen(Number(process.env.PORT));`;
+    const origin = createOriginRepo({ ".claude/launch.json": launch, "app.js": named });
+    const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Tasks", issues: [issue] });
+    // The run's container and its app's container both carry the run's label.
+    onTestFinished(() => {
+      for (const name of docker("ps", "-a", "--filter", `label=handoff.run=${run.id}`, "--format", "{{.Names}}").split("\n").filter(Boolean)) docker("rm", "-f", name);
+    });
+    const visit = join(home, "visit.json");
+    const fake = fakeClaude(
+      {
+        visit,
+        lines: [lines.init({ mcp_servers: [{ name: "playwright", status: "connected" }] }), lines.result({ structured_output: { summary: "Opened the app.", shots: [] } })],
+      },
+      mkdtempSync(join(home, "fake-")),
+    );
+    const cli = new ClaudeCliExecutor({
+      command: { file: "node", prefixArgs: [fakeClaudeBin] },
+      oauthToken: "sk-ant-oat01-test",
+      configDir: join(home, "claude-config"),
+      baseEnv: { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/tmp", ...fake.env },
+      passthroughEnv: ["FAKE_CLAUDE_SCENARIO", "FAKE_CLAUDE_RECORD"],
+      killGraceMs: 200,
+    });
+    const deps = engineDeps(
+      db,
+      {
+        start: startExecutor(),
+        finish: finishExecutor(),
+        coder: coderWriting({}),
+        demo: demoExecutor({ cli, maxTurns: 30, timeoutMs: 60_000, db, workerId: "test-worker", artifactsRoot: join(home, "artifacts") }),
+      },
+      {
+        workerId: "test-worker",
+        stagingRoot: join(home, "staging"),
+        // The fake claude is read from this checkout, at the same path inside the containers.
+        workdirs: new DockerWorkdirProvider({ git: new GitWorktreeProvider({ root: home }), image, mounts: [home, repoRoot] }),
+      },
+    );
+    await drain(deps);
+
+    const { executions } = await inspect(db, run.id);
+    expect(executions.find((e) => e.nodeKey === "demo")).toMatchObject({ status: "passed" });
+    const [preview] = await db.select().from(previews).where(eq(previews.runId, run.id));
+    expect(preview).toMatchObject({ status: "stopped", container: expect.stringMatching(/^handoff-preview-/) });
+    // Claude opened the app's URL at its own localhost, and the app that answered runs on the same machine as Claude.
+    const seen = JSON.parse(readFileSync(visit, "utf8")) as { url: string; host: string; status?: number; body?: string; error?: string };
+    expect(seen).toEqual({ url: preview!.url, host: seen.host, status: 200, body: seen.host });
+    expect(fake.invocations()).toHaveLength(1);
+  });
 });
