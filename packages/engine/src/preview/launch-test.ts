@@ -1,13 +1,17 @@
+import { existsSync } from "node:fs";
 import { commandLine, redactSecrets, type LaunchConfiguration } from "@handoff/core";
 import { and, desc, eq, inArray, launchTests, projects, type Db, type LaunchTestStep, type LaunchTestStepName } from "@handoff/db";
 import { shell } from "../contract/checks.ts";
 import { defaultRemote } from "../runs.ts";
 import type { WorkdirProvider, WorkdirSpec } from "../types.ts";
 import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
+import { removePreviewContainer } from "./container.ts";
 import { launchApp, launchConfigurationFor, logTail, PreviewError, stopGroup, type DockerExec } from "./preview.ts";
 
-// The dashboard makes a Test start's worktree with the same provider the worker uses.
+// The dashboard makes a Test start's worktree with the same providers and Docker options the worker uses.
 export { GitWorktreeProvider } from "../workdir/git-worktree.ts";
+export { DockerWorkdirProvider } from "../workdir/docker.ts";
+export { dockerOptionsFromEnv } from "../workdir/docker-options.ts";
 
 /** How long a Test start keeps the app running before it stops it. */
 export const LAUNCH_TEST_LIFETIME_MS = 10 * 60_000;
@@ -17,7 +21,10 @@ export type LaunchTestRow = typeof launchTests.$inferSelect;
 
 export type LaunchTestDeps = {
   db: Db;
-  /** Makes the fresh worktree of the default branch; git worktrees, never containers. */
+  /**
+   * Makes the fresh worktree of the default branch. In a Docker workspace it also makes the setup
+   * container, as for a run, and the app runs in a container next to it.
+   */
   workdirs: WorkdirProvider;
   docker?: DockerExec;
 };
@@ -57,7 +64,9 @@ export type StartLaunchTestOptions = {
  * Test start: starts the project's app as Try it and demo steps would, from a fresh worktree of the
  * default branch outside any run, with the form's values when the repository has no launch file. It
  * stops any Test start of the project still running first. Returns the new row at once; `finished`
- * settles with the row once the app is ready or has failed. The app stops after `lifetimeMs`.
+ * settles with the row once the app is ready or has failed. The app stops after `lifetimeMs`. In a
+ * Docker workspace the setup command runs in the worktree's container and the app in its own next to it,
+ * as in a run.
  */
 export async function startLaunchTest(deps: LaunchTestDeps, opts: StartLaunchTestOptions): Promise<{ test: LaunchTestRow; finished: Promise<LaunchTestRow> }> {
   const { db } = deps;
@@ -107,16 +116,17 @@ export async function startLaunchTest(deps: LaunchTestDeps, opts: StartLaunchTes
       step("worktree", "done", `A fresh worktree of ${project.defaultBranch} at ${workdir.baseSha.slice(0, 7)}`);
       save({ worktreePath: workdir.path });
       const identity = runIdentity(id, workdir.path);
+      const where = workdir.container ? ` in container ${workdir.container}` : "";
 
       if (project.setupCommand) {
-        step("setup", "running", `\`${project.setupCommand}\``);
+        step("setup", "running", `\`${project.setupCommand}\`${where}`);
         try {
           await setUpWorkdir(workdir, project.setupCommand, () => {}, controller.signal, identity);
         } catch (error) {
-          step("setup", "failed", `\`${project.setupCommand}\` failed`);
+          step("setup", "failed", `\`${project.setupCommand}\` failed${where}`);
           throw error;
         }
-        step("setup", "done", `\`${project.setupCommand}\` exited 0`);
+        step("setup", "done", `\`${project.setupCommand}\` exited 0${where}`);
       }
 
       const { config, source } = launchConfigurationFor(workdir.path, { launch: opts.launch });
@@ -131,10 +141,14 @@ export async function startLaunchTest(deps: LaunchTestDeps, opts: StartLaunchTes
         signal: controller.signal,
         ...(opts.readyTimeoutMs !== undefined ? { readyTimeoutMs: opts.readyTimeoutMs } : {}),
         ...(deps.docker ? { docker: deps.docker } : {}),
+        // In a Docker workspace the app runs next to the setup container, labelled so a worker's preview cleanup leaves it alone.
+        ...(workdir.container ? { container: { of: workdir.container, previewId: id, label: "handoff.launch-test" as const, runId: id } } : {}),
         onStep: (e) => step(e.step, e.status, e.detail),
+        // Written before the container starts, so stopping the Test start removes it whatever happens next.
+        onContainer: async (app) => void (await save({ container: app.container ?? null })),
         onSpawn: async (app) => {
           logPath = app.logPath;
-          save({ pid: app.pid ?? null, port: app.port, url: app.url, logPath: app.logPath });
+          save({ pid: app.pid ?? null, port: app.port, url: app.url, logPath: app.logPath, container: app.container ?? null });
         },
       });
       save({ status: "ready", readyAt: new Date() });
@@ -154,13 +168,17 @@ export async function startLaunchTest(deps: LaunchTestDeps, opts: StartLaunchTes
   return { test: test!, finished };
 }
 
-/** Runs the project's teardown command in a Test start's worktree, then removes the worktree. Never throws. */
+/**
+ * Runs the project's teardown command in a Test start's worktree, where the setup command ran (the setup
+ * container in a Docker workspace), then removes the worktree and that container. Never throws.
+ */
 async function release(deps: LaunchTestDeps, project: typeof projects.$inferSelect, id: string) {
   const [row] = await deps.db.select({ worktreePath: launchTests.worktreePath }).from(launchTests).where(eq(launchTests.id, id));
   const spec = specOf(project, id);
   try {
-    if (project.teardownCommand && row?.worktreePath) {
-      await shell(project.teardownCommand, row.worktreePath, TEARDOWN_TIMEOUT_MS, undefined, [], undefined, runIdentity(id, row.worktreePath)).catch(() => undefined);
+    if (project.teardownCommand && row?.worktreePath && existsSync(row.worktreePath)) {
+      const workdir = await deps.workdirs.acquire(spec);
+      await shell(project.teardownCommand, workdir.path, TEARDOWN_TIMEOUT_MS, workdir.container, [], undefined, runIdentity(id, workdir.path)).catch(() => undefined);
     }
     await deps.workdirs.release(spec);
   } catch {
@@ -169,8 +187,8 @@ async function release(deps: LaunchTestDeps, project: typeof projects.$inferSele
 }
 
 /**
- * Stops a Test start: its app's process group, then its worktree. Stopping one that already ended does
- * nothing.
+ * Stops a Test start: its app's container in a Docker workspace, its app's process group, then its
+ * worktree and setup container. Stopping one that already ended does nothing.
  */
 export async function stopLaunchTest(deps: LaunchTestDeps, id: string): Promise<void> {
   const [row] = await deps.db
@@ -180,6 +198,7 @@ export async function stopLaunchTest(deps: LaunchTestDeps, id: string): Promise<
     .returning();
   if (!row) return;
   starting.get(id)?.abort();
+  if (row.container) await removePreviewContainer(row.container, deps.docker);
   if (row.pid) await stopGroup(row.pid);
   const [project] = await deps.db.select().from(projects).where(eq(projects.id, row.projectId));
   if (project) await release(deps, project, id);

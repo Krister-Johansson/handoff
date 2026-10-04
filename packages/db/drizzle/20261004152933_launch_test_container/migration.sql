@@ -1,0 +1,1 @@
+ALTER TABLE "launch_tests" ADD COLUMN "container" text;

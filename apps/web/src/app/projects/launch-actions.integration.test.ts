@@ -83,9 +83,33 @@ test("Test start starts the app from the form's values, unsaved, until Stop", as
   expect(stopped).toMatchObject({ status: "stopped" });
 });
 
-test("Test start checks the form first, and is refused in Docker workspaces", async () => {
+test("Test start checks the form first", async () => {
   expect(await startLaunchTestAction({ projectId, form: form({ command: `sh -c "x` }) })).toEqual({ ok: false, errors: { command: expect.stringMatching(/quote/) } });
-  vi.stubEnv("HANDOFF_WORKSPACE", "docker");
-  expect(await startLaunchTestAction({ projectId, form: form() })).toEqual({ ok: false, error: expect.stringMatching(/Docker workspaces/) });
   expect(await launchTestAction({ projectId })).toBeNull();
+});
+
+test.skipIf(process.env.HANDOFF_TEST_DOCKER !== "1")("in Docker workspace mode Test start runs the app in a container until Stop", async () => {
+  vi.stubEnv("HANDOFF_WORKSPACE", "docker");
+  vi.stubEnv("HANDOFF_DOCKER_IMAGE", process.env.HANDOFF_TEST_DOCKER_IMAGE ?? "node:22-alpine");
+  vi.stubEnv("HANDOFF_DOCKER_MOUNTS", "");
+  vi.stubEnv("HANDOFF_DOCKER_NETWORK", "");
+  const server = `require("node:http").createServer((_, res) => res.end("ok")).listen(Number(process.env.PORT), process.env.HOST);`;
+  await db.update(projects).set({ localClonePath: origin({ "app.js": server }) }).where(eq(projects.id, projectId));
+  const containersOf = (id: string) =>
+    execFileSync("docker", ["ps", "-a", "--filter", `label=handoff.run=${id}`, "--format", "{{.Names}}"], { encoding: "utf8" }).split("\n").filter(Boolean);
+
+  const started = await startLaunchTestAction({ projectId, form: form() });
+  expect(started).toMatchObject({ ok: true, test: { status: "starting" } });
+  const id = (started as { test: { id: string } }).test.id;
+  try {
+    await expect.poll(async () => (await launchTestAction({ projectId }))?.status, { timeout: 30_000 }).toBe("ready");
+    const ready = (await launchTestAction({ projectId }))!;
+    expect(ready.steps.at(-1)).toMatchObject({ name: "app", detail: `Listening on port ${ready.port} in container handoff-preview-${id.slice(0, 8)}` });
+    expect(await (await fetch(ready.url!.replace("localhost", "127.0.0.1"))).text()).toBe("ok");
+
+    expect(await stopLaunchTestAction({ projectId, id })).toMatchObject({ status: "stopped" });
+    expect(containersOf(id)).toEqual([]);
+  } finally {
+    for (const name of containersOf(id)) execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+  }
 });

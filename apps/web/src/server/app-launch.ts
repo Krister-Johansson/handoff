@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { configurationFromForm, demoConfiguration, LAUNCH_FILE, LaunchConfigurationSchema, parseLaunchFile, type LaunchConfiguration, type LaunchForm, type LaunchFormResult } from "@handoff/core";
 import { eq, projects, type Db, type LaunchTestStatus, type LaunchTestStep } from "@handoff/db";
-import { GitWorktreeProvider, launchTestOf, type LaunchTestDeps, type LaunchTestRow } from "@handoff/engine/launch-test";
+import { DockerWorkdirProvider, dockerOptionsFromEnv, GitWorktreeProvider, launchTestOf, type LaunchTestDeps, type LaunchTestRow } from "@handoff/engine/launch-test";
 import type { GitHubPort } from "@handoff/github";
 
 type Env = Record<string, string | undefined>;
@@ -36,7 +36,7 @@ export type AppLaunchView = {
   projectId: string;
   projectName: string;
   branch: string;
-  /** The worker runs steps in Docker containers, where previews do not run yet. */
+  /** The worker runs steps in Docker containers, and Test start runs in containers too. */
   docker: boolean;
   detected: DetectedLaunch;
   saved: LaunchConfiguration | null;
@@ -86,10 +86,14 @@ function serviceNames(text: string): string[] {
 /**
  * Where a Test start makes its worktree: HANDOFF_HOME's clones, as the worker's, resolved from the
  * dashboard's folder as the assistant's home is. Git authenticates as the dashboard's GitHub credential.
+ * In Docker workspace mode the setup command and the app run in containers made with the worker's
+ * Docker options, which mount that same HANDOFF_HOME.
  */
 export function launchTestDeps(db: Db, github: GitHubPort | undefined, repo: { owner: string; name: string }, env: Env = process.env): LaunchTestDeps {
   const root = env.HANDOFF_HOME ? resolve(env.HANDOFF_HOME) : join(homedir(), ".handoff");
-  return { db, workdirs: new GitWorktreeProvider({ root, gitEnv: async () => (github ? github.gitAuthEnv(repo).catch(() => ({})) : {}) }) };
+  const git = new GitWorktreeProvider({ root, gitEnv: async () => (github ? github.gitAuthEnv(repo).catch(() => ({})) : {}) });
+  if (!dockerWorkspace(env)) return { db, workdirs: git };
+  return { db, workdirs: new DockerWorkdirProvider({ git, ...dockerOptionsFromEnv({ ...env, HANDOFF_HOME: root }) }) };
 }
 
 /**

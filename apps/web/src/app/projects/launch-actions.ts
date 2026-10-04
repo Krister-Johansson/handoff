@@ -8,8 +8,7 @@ import { launchTestOf, startLaunchTest, stopLaunchTest } from "@handoff/engine/l
 import { getDb } from "@/lib/db";
 import { getGitHub } from "@/lib/github";
 import { projectSettingsPath } from "@/lib/settings-tab";
-import { DOCKER_NOT_SUPPORTED } from "@/lib/app-launch";
-import { dockerWorkspace, launchTestDeps, saveAppLaunch, testView, type LaunchTestView } from "@/server/app-launch";
+import { launchTestDeps, saveAppLaunch, testView, type LaunchTestView } from "@/server/app-launch";
 
 /** A refusal: a sentence to show, or what to fix in each field of the form. */
 export type AppLaunchRefusal = { ok: false; error?: string; errors?: Partial<Record<LaunchFormField, string>> };
@@ -51,7 +50,8 @@ async function depsFor(projectId: string) {
 /**
  * Test start: the app from a fresh worktree of the default branch, with the form's values, saved or not.
  * Without a form (the repository has a launch file) it uses the saved setting, which the file overrides
- * anyway. Answers at once with the starting Test start; launchTestAction follows it.
+ * anyway. In Docker workspace mode the setup command and the app run in containers, as in a run. Answers
+ * at once with the starting Test start; launchTestAction follows it.
  */
 export async function startLaunchTestAction(input: z.input<typeof Project> & { form?: z.input<typeof Form> }): Promise<{ ok: true; test: LaunchTestView } | AppLaunchRefusal> {
   const parsed = Project.extend({ form: Form.optional() }).safeParse(input);
@@ -62,7 +62,6 @@ export async function startLaunchTestAction(input: z.input<typeof Project> & { f
     if (!result.ok) return { ok: false, errors: result.errors };
     launch = result.configuration;
   }
-  if (dockerWorkspace()) return { ok: false, error: DOCKER_NOT_SUPPORTED };
   const found = await depsFor(parsed.data.projectId);
   if (!found) return { ok: false, error: NOT_HERE };
   if (!launch) {
@@ -89,7 +88,7 @@ export async function launchTestAction(input: z.input<typeof Project>): Promise<
   return latest ? testView(latest.test, latest.log) : null;
 }
 
-/** Stops a Test start: the app, then its worktree. */
+/** Stops a Test start: the app and its container, then its worktree and setup container. */
 export async function stopLaunchTestAction(input: z.input<typeof Project> & { id: string }): Promise<LaunchTestView | null> {
   const parsed = Project.extend({ id: z.uuid() }).safeParse(input);
   if (!parsed.success) return null;

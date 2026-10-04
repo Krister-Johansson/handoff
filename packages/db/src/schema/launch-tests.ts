@@ -15,7 +15,7 @@ export type LaunchTestStep = { name: LaunchTestStepName; status: "running" | "do
 /**
  * A Test start from Project settings, App launch: the project's app started from a fresh worktree of its
  * default branch, outside any run, to see that it starts. The dashboard owns the process; `pid` leads its
- * process group. It stops when a person stops it, when another Test start of the project begins, or at
+ * process group, the host's `docker exec` client in a Docker workspace. It stops when a person stops it, when another Test start of the project begins, or at
  * `stopsAt`.
  */
 export const launchTests = pgTable(
@@ -35,6 +35,11 @@ export const launchTests = pgTable(
     url: text("url"),
     /** Where the app's output goes: a file in the worktree's git directory, outside the tree. */
     logPath: text("log_path"),
+    /**
+     * In a Docker workspace, the app's container (handoff-preview-<id8>), written before it starts; the
+     * setup command runs in the setup container handoff-<id>. Null in worktree mode.
+     */
+    container: text("container"),
     /** Why it did not start, in a sentence a person can act on. */
     error: text("error"),
     /** The end of the output that explains the failure: the app's log, or the setup or seed command's output. */
