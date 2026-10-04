@@ -91,17 +91,24 @@ CI results and reviews wake a waiting run at once when webhooks reach handoff. W
 
 ### A plan on GitHub Projects
 
-A plan is optional. It holds epics, stories and tasks on a GitHub Project of the user's, and only tasks in Ready reach the backlog. `setup_plan` creates:
+A plan is optional. It holds epics, stories and tasks on a GitHub Project of the repository's owner, and only tasks in Ready reach the backlog. `setup_plan` creates:
 
 - the labels `epic`, `story` and `task` on the repository;
-- a GitHub Project owned by the user, named after the project, with the Status columns Shaping, Ready, Running, In review and Done, linked to the repository;
+- a GitHub Project owned by the repository's owner, a user or an organization, named after the project, with the Status columns Shaping, Ready, Running, In review and Done, linked to the repository;
 - the fields the project's plan mode uses. A Flow project gets the Size field only, since a Flow plan has an order and no dates or hours. A Timeline project gets Size, Estimate and the date fields Start and Target.
 
-Call `list_github_projects` first and ask the user whether to use one of their existing Projects instead (`setup_plan` with `use`). Using one renames Status options that already match apart from case or emoji, adds the missing ones, and keeps every other option. Running `setup_plan` again creates no Project: it adds labels someone removed and the fields the plan mode uses when the Project lacks them, and reports Status options the Project lacks.
+Call `list_github_projects` first: it lists the Projects of the repository's owner that the token can write. Ask the user whether to use one of them instead (`setup_plan` with `use`). Using one renames Status options that already match apart from case or emoji, adds the missing ones, and keeps every other option. Running `setup_plan` again creates no Project: it adds labels someone removed and the fields the plan mode uses when the Project lacks them, and reports Status options the Project lacks.
+
+In an organization's repository, the user's GitHub account must be allowed to create Projects in the organization. When it is not, `setup_plan` says so before creating anything; an organization owner can allow it, or create a Project for the user to pick with `use`. handoff sets no issue type: an organization's issue type such as Task does not change the kind of an issue that has a kind label.
 
 In a Timeline project, GitHub's roadmap layout reads Start and Target only after the user picks them once: in a Roadmap view of the Project, open "Date fields" and choose Start for the start date and Target for the target date. The API cannot set this.
 
-The plan needs the dashboard's `GITHUB_TOKEN` to be a classic token with the `project` scope. Run `gh auth refresh -s project`, then set `GITHUB_TOKEN=$(gh auth token)` in handoff's `.env` and restart the dashboard and the worker. A GitHub App cannot reach a Project owned by a user, and a fine-grained token cannot either.
+The plan needs the dashboard's `GITHUB_TOKEN` to be a classic token with the `project` scope, which reaches the Projects of users and organizations. Run `gh auth refresh -s project`, then set `GITHUB_TOKEN=$(gh auth token)` in handoff's `.env` and restart the dashboard and the worker. A GitHub App cannot reach a Project owned by a user, and a fine-grained token cannot either, so handoff reads every Project with the one classic token.
+
+An organization can stop that token in two ways. handoff names the one GitHub reports on the Plan page and in the tools' answers:
+
+- An organization with SAML single sign-on needs the token authorized for it: on GitHub under Settings, Developer settings, Personal access tokens, Configure SSO.
+- An organization can refuse classic personal access tokens. An organization owner allows them in the organization's settings under Personal access tokens, Settings, Tokens (classic).
 
 ## 3. After the setup
 

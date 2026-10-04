@@ -15517,7 +15517,7 @@ var StdioServerTransport = class {
 // plugins/handoff/.claude-plugin/plugin.json
 var plugin_default = {
   name: "handoff",
-  version: "0.19.0",
+  version: "0.20.0",
   description: "Drive handoff from Claude Code: shape a plan of epics, stories and tasks, see the backlog, start runs for issues, follow them and hear when a run needs you.",
   author: { name: "Krister Johansson" },
   userConfig: {

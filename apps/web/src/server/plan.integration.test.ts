@@ -13,10 +13,14 @@ afterAll(() => db.$client.end());
 
 const repo = { owner: "octo", name: "sample" };
 
-/** A handoff project whose repository has a GitHub Project, stored as its plan. */
-async function planned() {
+/**
+ * A handoff project whose repository has a GitHub Project, stored as its plan. With `organization`, the
+ * repository's owner octo is an organization that owns the Project.
+ */
+async function planned(opts: { organization?: boolean } = {}) {
   const github = new FakeGitHub();
   const plan = new FakeProjects(github);
+  if (opts.organization) plan.owners.set("octo", "Organization");
   const { number } = await plan.createProject("octo", repo, "sandbox plan");
   const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
   await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
@@ -308,6 +312,34 @@ test("loadPlan gives a Flow project the flow's input and no timeline, and a Time
   await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
   const timeline = await loadPlan(db, github, plan, project.id);
   if ("error" in timeline) throw new Error(timeline.error);
+  expect(timeline.flow).toBeUndefined();
+  expect(timeline.timeline?.items.find((i) => i.number === first)?.planned).toMatchObject({ start: "2026-10-05" });
+});
+
+test("loadPlan reads an organization's plan in Flow and in Timeline mode", async () => {
+  const { github, plan, project, number, issue, status } = await planned({ organization: true });
+  const epic = await issue("Organizations", ["epic"]);
+  const story = await issue("Plan page", ["story"], epic);
+  const first = await issue("Read the Project", ["task"], story);
+  const second = await issue("Show the board", ["task"], story);
+  status(first, "Ready");
+  plan.itemsOf(repo).get(first)!.start = "2026-10-05";
+
+  const flow = await loadPlan(db, github, plan, project.id);
+  if ("error" in flow) throw new Error(flow.error);
+  expect(flow.project).toMatchObject({ number, owner: "Organization", url: `https://github.com/orgs/octo/projects/${number}` });
+  expect(flow.epics[0]!.stories[0]!.tasks.map((t) => [t.number, t.status])).toEqual([
+    [first, "Ready"],
+    [second, "Shaping"],
+  ]);
+  // The flow reads every item of the organization's Project in Project order.
+  expect(flow.flow?.tasks.map((t) => t.number)).toEqual([epic, story, first, second]);
+  expect(flow.timeline).toBeUndefined();
+
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
+  const timeline = await loadPlan(db, github, plan, project.id);
+  if ("error" in timeline) throw new Error(timeline.error);
+  expect(timeline.project.owner).toBe("Organization");
   expect(timeline.flow).toBeUndefined();
   expect(timeline.timeline?.items.find((i) => i.number === first)?.planned).toMatchObject({ start: "2026-10-05" });
 });

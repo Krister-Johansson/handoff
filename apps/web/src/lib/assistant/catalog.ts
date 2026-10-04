@@ -480,7 +480,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_github_projects",
     title: "List GitHub Projects",
     description:
-      "The user's own GitHub Projects, those linked to the project's repository first, each with the Status options it lacks of Shaping, Ready, Running, In review and Done. Call it before setup_plan and ask the user whether to use one of them or create a new Project.",
+      "The GitHub Projects of the repository's owner, a user or an organization, that the token can write, those linked to the project's repository first, each with the Status options it lacks of Shaping, Ready, Running, In review and Done. Call it before setup_plan and ask the user whether to use one of them or create a new Project.",
     input: z.object({ project }),
     kind: "data",
     confirm: false,
@@ -492,7 +492,7 @@ export const CATALOG: ToolSpec[] = [
     name: "setup_plan",
     title: "Set up the plan",
     description:
-      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the user with the Status columns Shaping, Ready, Running, In review and Done and a single select Size with S, M and L, linked to the repository; in Timeline mode also the date fields Start and Target and a Number field Estimate, which a Flow project does not use. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and fields (adding S, M and L to a Size field that lacks them) and reports Status options the Project lacks.",
+      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the repository's owner, a user or an organization, with the Status columns Shaping, Ready, Running, In review and Done and a single select Size with S, M and L, linked to the repository; in Timeline mode also the date fields Start and Target and a Number field Estimate, which a Flow project does not use. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and fields (adding S, M and L to a Size field that lacks them) and reports Status options the Project lacks. The result's project names the Project's owner: its login and whether it is a User or an Organization.",
     input: z.object({ project, use: z.number().int().positive().optional().describe("An existing Project's number to use instead of creating one") }),
     kind: "data",
     confirm: true,
