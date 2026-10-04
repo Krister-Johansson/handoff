@@ -23,7 +23,7 @@ const view = (overrides: Partial<AppLaunchView> = {}): AppLaunchView => ({
   projectId: "p1",
   projectName: "example-shop",
   branch: "main",
-  docker: false,
+  docker: null,
   detected: { kind: "none" },
   saved: null,
   services: { file: "compose.yaml", names: ["postgres", "redis"] },
@@ -242,10 +242,49 @@ test("a failed Test start shows why with the end of the server log, and Try agai
   await waitFor(() => expect(actions.startLaunchTestAction).toHaveBeenCalledWith({ projectId: "p1", form: expect.objectContaining({ command: "pnpm dev" }) }));
 });
 
-test("in Docker workspace mode the section says starting the app is not supported there yet, and offers no Test start", () => {
-  render(<AppLaunchSettings view={{ ...filled(), docker: true }} />);
+test("in Docker workspace mode the section offers Test start and says the app runs in its own container on 127.0.0.1", async () => {
+  render(<AppLaunchSettings view={{ ...filled(), docker: { image: "handoff-runner:2.1.285", engine: "28.5.1" } }} />);
   const s = section();
-  expect(s).toHaveTextContent("Starting the app is not supported in Docker workspaces yet.");
-  expect(within(s).queryByRole("button", { name: "Test start" })).not.toBeInTheDocument();
-  expect(within(s).getByRole("button", { name: "Save" })).toBeInTheDocument();
+  expect(s).toHaveTextContent(
+    "Steps run in Docker containers from handoff-runner:2.1.285. The app runs in its own container from that image, published on 127.0.0.1 only, and must listen on 0.0.0.0. It reaches the services in compose.yaml at the same localhost ports as on this machine.",
+  );
+  expect(s).not.toHaveTextContent("not supported");
+  expect(s).not.toHaveTextContent("Docker Engine 28.5.1");
+  const steps = within(within(s).getByRole("list", { name: "Before the app starts" })).getAllByRole("listitem");
+  expect(steps[2]).toHaveTextContent("Runs in its own container and stops when its step ends.");
+  expect(steps[3]).toHaveTextContent("Ready when the app answers on its port, within 2 minutes");
+
+  actions.startLaunchTestAction.mockResolvedValueOnce({
+    ok: true,
+    test: test_({
+      status: "ready",
+      port: 41234,
+      url: "http://localhost:41234",
+      readyAt: "2026-10-03T10:00:09.000Z",
+      steps: [
+        { name: "setup", status: "done", detail: "`pnpm install --frozen-lockfile` exited 0 in container handoff-1a2b3c4d", ms: 21_000 },
+        { name: "app", status: "done", detail: "Listening on port 41234 in container handoff-preview-5e6f7a8b", ms: 4200 },
+      ],
+    }),
+  });
+  fireEvent.click(within(s).getByRole("button", { name: "Test start" }));
+  const result = await within(s).findByRole("status", { name: "Test start" });
+  expect(result).toHaveTextContent("pnpm install --frozen-lockfile exited 0 in container handoff-1a2b3c4d");
+  expect(result).toHaveTextContent("Listening on port 41234 in container handoff-preview-5e6f7a8b");
+});
+
+test("in Docker workspace mode without a compose file the section leaves out the services sentence", () => {
+  render(<AppLaunchSettings view={{ ...filled(), services: null, docker: { image: "runner:1", engine: null } }} />);
+  const s = section();
+  expect(s).toHaveTextContent("Steps run in Docker containers from runner:1.");
+  expect(s).not.toHaveTextContent("It reaches the services");
+});
+
+test("an Engine below 28 shows the warning", () => {
+  render(<AppLaunchSettings view={{ ...filled(), docker: { image: "handoff-runner:2.1.285", engine: "27.5.1" } }} />);
+  const s = section();
+  expect(within(s).getByRole("alert")).toHaveTextContent(
+    "Docker Engine 27.5.1 is older than 28, so other machines on your network may reach ports published on 127.0.0.1. Update Docker to 28 or later.",
+  );
+  expect(within(s).getByRole("button", { name: "Test start" })).toBeInTheDocument();
 });

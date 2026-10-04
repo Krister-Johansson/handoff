@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -5,6 +6,7 @@ import { configurationFromForm, demoConfiguration, LAUNCH_FILE, LaunchConfigurat
 import { eq, projects, type Db, type LaunchTestStatus, type LaunchTestStep } from "@handoff/db";
 import { DockerWorkdirProvider, dockerOptionsFromEnv, GitWorktreeProvider, launchTestOf, type LaunchTestDeps, type LaunchTestRow } from "@handoff/engine/launch-test";
 import type { GitHubPort } from "@handoff/github";
+import type { DockerMode } from "@/lib/app-launch";
 
 type Env = Record<string, string | undefined>;
 
@@ -36,8 +38,8 @@ export type AppLaunchView = {
   projectId: string;
   projectName: string;
   branch: string;
-  /** The worker runs steps in Docker containers, and Test start runs in containers too. */
-  docker: boolean;
+  /** The worker runs steps in Docker containers, and Test start runs in containers too; null in worktree mode. */
+  docker: DockerMode | null;
   detected: DetectedLaunch;
   saved: LaunchConfiguration | null;
   /** The compose file and its services on the default branch; null without one, undefined when GitHub cannot say. */
@@ -51,6 +53,19 @@ const COMPOSE_FILES = ["compose.yaml", "compose.yml", "docker-compose.yaml", "do
 
 /** Whether the worker runs steps in Docker containers: the dashboard reads the same .env. */
 export const dockerWorkspace = (env: Env = process.env) => env.HANDOFF_WORKSPACE === "docker";
+
+/** The Docker Engine's version, as the server reports it; null when Docker does not answer within 5 seconds. */
+export function dockerEngineVersion(): Promise<string | null> {
+  return new Promise((done) => {
+    execFile("docker", ["version", "--format", "{{.Server.Version}}"], { timeout: 5000 }, (error, stdout) => done(error ? null : stdout.trim() || null));
+  });
+}
+
+/** Docker workspace mode as the pages describe it, or null in worktree mode. Asks Docker for its version only in Docker mode. */
+export async function dockerMode(env: Env = process.env, engineVersion: () => Promise<string | null> = dockerEngineVersion): Promise<DockerMode | null> {
+  if (!dockerWorkspace(env)) return null;
+  return { image: dockerOptionsFromEnv(env).image, engine: await engineVersion() };
+}
 
 const savedOf = (launch: unknown): LaunchConfiguration | null => {
   const parsed = LaunchConfigurationSchema.safeParse(launch);
@@ -100,7 +115,13 @@ export function launchTestDeps(db: Db, github: GitHubPort | undefined, repo: { o
  * What Project settings, App launch shows: the launch file on the default branch when there is one (it
  * wins), else the saved setting, with what runs before the app and the latest Test start.
  */
-export async function loadAppLaunch(db: Db, github: GitHubPort | undefined, projectId: string, env: Env = process.env): Promise<AppLaunchView> {
+export async function loadAppLaunch(
+  db: Db,
+  github: GitHubPort | undefined,
+  projectId: string,
+  env: Env = process.env,
+  engineVersion: () => Promise<string | null> = dockerEngineVersion,
+): Promise<AppLaunchView> {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) throw new Error(`no project ${projectId}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
@@ -108,10 +129,11 @@ export async function loadAppLaunch(db: Db, github: GitHubPort | undefined, proj
   const url = `https://github.com/${repo.owner}/${repo.name}/blob/${branch}/${LAUNCH_FILE}`;
 
   const read = (path: string) => (github ? github.getFile(repo, path, branch).then((text) => ({ text }), () => undefined) : Promise.resolve(undefined));
-  const [file, composeFiles, latest] = await Promise.all([
+  const [file, composeFiles, latest, docker] = await Promise.all([
     read(LAUNCH_FILE),
     Promise.all(COMPOSE_FILES.map(read)),
     launchTestOf(launchTestDeps(db, github, repo, env), projectId),
+    dockerMode(env, engineVersion),
   ]);
 
   let detected: DetectedLaunch;
@@ -136,7 +158,7 @@ export async function loadAppLaunch(db: Db, github: GitHubPort | undefined, proj
     projectId: project.id,
     projectName: project.name,
     branch,
-    docker: dockerWorkspace(env),
+    docker,
     detected,
     saved: savedOf(project.launch),
     services,

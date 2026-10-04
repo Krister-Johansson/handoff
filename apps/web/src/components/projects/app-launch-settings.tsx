@@ -16,6 +16,7 @@ import {
   PlusIcon,
   RotateCwIcon,
   SquareIcon,
+  TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
 import { commandLine, configurationFromForm, formFromConfiguration, launchFileText, type LaunchForm, type LaunchFormField } from "@handoff/core";
@@ -32,7 +33,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
-import { DOCKER_NOT_SUPPORTED, LAUNCH_DOCS_URL } from "@/lib/app-launch";
+import { dockerLaunchNote, engineWarning, LAUNCH_DOCS_URL } from "@/lib/app-launch";
 import { PROJECTS_SETTINGS_PATH } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 import type { AppLaunchView, LaunchTestView } from "@/server/app-launch";
@@ -173,8 +174,12 @@ function BeforeStart({ view }: { view: AppLaunchView }) {
         </>
       ),
     },
-    { title: "App", value: "The command above, on its port", note: "Runs in its own process group with a minimal environment. It stops when its step ends." },
-    { title: "Ready check", value: "Ready when the app accepts connections on its port, within 2 minutes" },
+    {
+      title: "App",
+      value: "The command above, on its port",
+      note: view.docker ? "Runs in its own container and stops when its step ends." : "Runs in its own process group with a minimal environment. It stops when its step ends.",
+    },
+    { title: "Ready check", value: view.docker ? "Ready when the app answers on its port, within 2 minutes" : "Ready when the app accepts connections on its port, within 2 minutes" },
   ];
   return (
     <div className={cn(CARD_BODY, "flex flex-col gap-2")}>
@@ -505,6 +510,26 @@ function UnknownNote({ view }: { view: AppLaunchView }) {
   );
 }
 
+/** In Docker workspace mode: where the app runs and how it must listen, and the warning for a Docker Engine before 28. */
+function DockerNote({ view }: { view: AppLaunchView }) {
+  if (!view.docker) return null;
+  const warning = engineWarning(view.docker.engine);
+  return (
+    <div className={cn(CARD_BODY, "flex flex-col gap-3")}>
+      <p className="flex items-start gap-2 text-xs text-muted-foreground">
+        <InfoIcon aria-hidden className="mt-px size-3.5 shrink-0" />
+        {dockerLaunchNote(view.docker, view.services?.file)}
+      </p>
+      {warning && (
+        <Alert className="border-attention-dot/35 bg-attention-bg">
+          <TriangleAlertIcon className="text-attention" />
+          <AlertDescription>{warning}</AlertDescription>
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 /** A launch file handoff cannot read: runs stop there too, so the section says why. */
 function InvalidFile({ detected, branch }: { detected: Extract<AppLaunchView["detected"], { kind: "invalid" }>; branch: string }) {
   return (
@@ -641,7 +666,7 @@ export function AppLaunchSettings({ view }: { view: AppLaunchView }) {
     });
 
   const fromFile = detected.kind === "file";
-  const result = !view.docker && test && <TestResult test={test} now={now} onStop={stop} onRetry={() => testStart(!fromFile)} busy={busy} />;
+  const result = test && <TestResult test={test} now={now} onStop={stop} onRetry={() => testStart(!fromFile)} busy={busy} />;
 
   let body: ReactNode;
   if (detected.kind === "file") {
@@ -649,12 +674,10 @@ export function AppLaunchSettings({ view }: { view: AppLaunchView }) {
       <>
         <Detected detected={detected} branch={view.branch} savedToo={view.saved !== null} />
         <BeforeStart view={view} />
-        {!view.docker && (
-          <Footer error={errors.form} result={result}>
-            <TestStartButton onClick={() => testStart(false)} busy={busy} />
-            <span className="text-xs text-muted-foreground">Starts the app from a fresh worktree of {view.branch}, then stops it.</span>
-          </Footer>
-        )}
+        <Footer error={errors.form} result={result}>
+          <TestStartButton onClick={() => testStart(false)} busy={busy} />
+          <span className="text-xs text-muted-foreground">Starts the app from a fresh worktree of {view.branch}, then stops it.</span>
+        </Footer>
       </>
     );
   } else if (detected.kind === "invalid") {
@@ -671,9 +694,9 @@ export function AppLaunchSettings({ view }: { view: AppLaunchView }) {
           <Button type="submit" size="sm" disabled={busy}>
             Save
           </Button>
-          {!view.docker && <TestStartButton onClick={() => testStart(true)} busy={busy} />}
+          <TestStartButton onClick={() => testStart(true)} busy={busy} />
           <CopyButton current={launch.current} setErrors={setErrors} />
-          {!view.docker && <span className="ml-auto text-xs text-muted-foreground">Test start uses the form as it is, saved or not.</span>}
+          <span className="ml-auto text-xs text-muted-foreground">Test start uses the form as it is, saved or not.</span>
         </Footer>
       </form>
     );
@@ -682,14 +705,7 @@ export function AppLaunchSettings({ view }: { view: AppLaunchView }) {
   return (
     <section aria-label="App launch">
       <SectionCard title="App launch" description="How handoff starts a run's app from its worktree, for Try it and for screenshots." action={<SourceTag view={view} />}>
-        {view.docker && (
-          <div className={CARD_BODY}>
-            <Alert>
-              <InfoIcon />
-              <AlertDescription>{DOCKER_NOT_SUPPORTED}</AlertDescription>
-            </Alert>
-          </div>
-        )}
+        <DockerNote view={view} />
         {body}
       </SectionCard>
     </section>
