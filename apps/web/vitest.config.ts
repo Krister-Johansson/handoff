@@ -13,5 +13,7 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     exclude: ["src/**/*.integration.test.ts", "**/node_modules/**"],
     setupFiles: ["./vitest.setup.ts"],
+    // Through Vite rather than Node, so theme-provider.test.tsx can hand it the React build Next.js runs.
+    server: { deps: { inline: ["next-themes"] } },
   },
 });
