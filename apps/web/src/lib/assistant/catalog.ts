@@ -492,17 +492,29 @@ export const CATALOG: ToolSpec[] = [
     name: "setup_plan",
     title: "Set up the plan",
     description:
-      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the repository's owner, a user or an organization, with the Status columns Shaping, Ready, Running, In review and Done and a single select Size with S, M and L, linked to the repository; in Timeline mode also the date fields Start and Target and a Number field Estimate, which a Flow project does not use. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and fields (adding S, M and L to a Size field that lacks them) and reports Status options the Project lacks. The result's project names the Project's owner: its login and whether it is a User or an Organization.",
-    input: z.object({ project, use: z.number().int().positive().optional().describe("An existing Project's number to use instead of creating one") }),
+      "Sets up a project's plan on GitHub Projects: the labels epic, story and task on the repository, and a GitHub Project of the repository's owner, a user or an organization, with the Status columns Shaping, Ready, Running, In review and Done and a single select Size with S, M and L, linked to the repository; in Timeline mode also the date fields Start and Target and a Number field Estimate, which a Flow project does not use. Without use it creates a new Project; with use (a number from list_github_projects) it adopts that Project, renaming or adding Status options and keeping the others. Once a plan exists it re-creates missing labels and fields (adding S, M and L to a Size field that lacks them) and reports Status options the Project lacks. The result's project names the Project's owner: its login and whether it is a User or an Organization. After the repository moved to another owner (handoff project move, or Settings, Projects, Repository moved), give copy_from with the old Project's owner and number: the items of this repository in it are copied into the plan's Project with their Status and the fields the plan mode uses, in the old Project order, and the result lists them under copied. Priority is not copied; copied.items_with_priority lists the items that had one. The old Project stays as it is.",
+    input: z.object({
+      project,
+      use: z.number().int().positive().optional().describe("An existing Project's number to use instead of creating one"),
+      copy_from: z
+        .object({
+          owner: z.string().min(1).describe("The login of the Project's owner, the repository's owner before it moved"),
+          number: z.number().int().positive().describe("The Project's number"),
+        })
+        .optional()
+        .describe("The Project that held the plan before the repository moved; its items of this repository are copied into the plan"),
+    }),
     kind: "data",
     confirm: true,
     readOnly: false,
     openWorld: true,
     idempotent: true,
-    summarize: (a) =>
-      a.use
-        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks) and the field Size (in Timeline mode also Start, Target and Estimate), and add the labels epic, story and task`
-        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done and the field Size (in Timeline mode also Start, Target and Estimate), and the labels epic, story and task`,
+    summarize: (a) => {
+      const copy = a.copy_from ? `, and copy the items of ${a.copy_from.owner}'s Project #${a.copy_from.number} with their Status and fields` : "";
+      return a.use
+        ? `Use GitHub Project #${a.use} as the plan of ${a.project}: link it, give it the Status options Shaping, Ready, Running, In review and Done (renaming or adding the ones it lacks) and the field Size (in Timeline mode also Start, Target and Estimate), and add the labels epic, story and task${copy}`
+        : `Set up the plan of ${a.project} on GitHub: a new Project with the columns Shaping, Ready, Running, In review and Done and the field Size (in Timeline mode also Start, Target and Estimate), and the labels epic, story and task${copy}`;
+    },
   }),
   spec({
     name: "create_epic",

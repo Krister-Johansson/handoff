@@ -48,9 +48,9 @@ import type { RepoRef } from "../types.ts";
 import { accessErrorOf, ProjectsAccessError } from "./access.ts";
 import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
-import { moveItemsDocument } from "./order-moves.ts";
-import { planFieldWrites, planItemIdsDocument, setManyPlanFieldsDocument, setPlanFieldsDocument } from "./plan-fields.ts";
-import type { AdoptedProject, ItemMove, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanFieldsChange, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
+import { moveItemsDocument, orderMoves } from "./order-moves.ts";
+import { addItemsDocument, planFieldWrites, planItemIdsDocument, setManyPlanFieldsDocument, setPlanFieldsDocument } from "./plan-fields.ts";
+import type { AdoptedProject, CopyField, ItemMove, NewPlanIssue, PlanAncestor, PlanDateFieldIds, PlanDates, PlanEstimateFieldIds, PlanFields, PlanFieldsChange, PlanItem, PlanKind, PlanProject, PlanProjectChoice, PlanSize, PlanStatus, ProjectRef, ProjectsPort, SetDatesResult, SetFieldsResult, SetStatusResult } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -198,6 +198,11 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]> {
+    return (await this.readItems(login, number, repo)).map(({ item }) => item);
+  }
+
+  /** Every item of the Project that is an issue of `repo`, as listItems returns it, with the issue's node id. */
+  private async readItems(login: string, number: number, repo: RepoRef): Promise<{ item: PlanItem; contentId: string }[]> {
     const items: NonNullable<GqlItem>[] = [];
     let ownPriority = false;
     let cursor: string | null | undefined;
@@ -212,7 +217,7 @@ export class OctokitProjects implements ProjectsPort {
       cursor = project.items.pageInfo.hasNextPage ? project.items.pageInfo.endCursor : undefined;
     } while (cursor);
     // GitHub returns items by POSITION, so an item's index across the pages is its place in the Project.
-    return items.flatMap((item, index) => toPlanItem(item, repo, index + 1, ownPriority));
+    return items.flatMap((item, index) => toPlanItem(item, repo, index + 1, ownPriority).map((planItem) => ({ item: planItem, contentId: item.content?.__typename === "Issue" ? item.content.id : "" })));
   }
 
   async setStatus(repo: RepoRef, project: number, issue: number, status: PlanStatus, opts: { add?: boolean } = {}): Promise<SetStatusResult> {
@@ -483,6 +488,61 @@ export class OctokitProjects implements ProjectsPort {
     }
   }
 
+  async copyItems(repo: RepoRef, from: ProjectRef, to: ProjectRef, fields: CopyField[]): Promise<{ copied: number[]; priorities: number[] }> {
+    const source = await this.readItems(from.login, from.number, repo);
+    const { owner, project } = await this.projectNode(to.login, to.number);
+    if (!project) throw missingProject(to.login, to.number, owner);
+    const ids = { dates: dateFieldIds(project), estimates: estimateFieldIds(project) };
+    const fieldIds: Record<CopyField, string | undefined> = { start: ids.dates.start, target: ids.dates.target, size: ids.estimates.size?.id, estimate: ids.estimates.estimate };
+    const lacking = fields.find((key) => !fieldIds[key]);
+    if (lacking) throw new Error(`GitHub Project #${to.number} of ${ownerName(to.login, owner)} has no ${COPY_FIELD_NAMES[lacking]} field. Run setup_plan to add it, then copy again.`);
+    const result = { copied: source.map(({ item }) => item.number), priorities: source.filter(({ item }) => item.priority).map(({ item }) => item.number) };
+    if (source.length === 0) return result;
+
+    // Adds, 20 a request; adding an issue that is an item already answers that item.
+    const itemIds = new Map<number, string>();
+    for (let at = 0; at < source.length; at += MUTATIONS_PER_REQUEST) {
+      const chunk = source.slice(at, at + MUTATIONS_PER_REQUEST);
+      if (chunk.length === 1) {
+        const added = await this.octokit.graphql<AddPlanItemMutation>(AddPlanItemDocument.toString(), { projectId: project.id, contentId: chunk[0]!.contentId });
+        const id = added.addProjectV2ItemById?.item?.id;
+        if (id) itemIds.set(chunk[0]!.item.number, id);
+      } else {
+        const { document, variables } = addItemsDocument(chunk.map((c) => c.contentId));
+        const added = await this.octokit.graphql<Record<string, { item: { id: string } | null } | null>>(document, { projectId: project.id, ...variables });
+        chunk.forEach(({ item }, index) => {
+          const id = added[`a${index + 1}`]?.item?.id;
+          if (id) itemIds.set(item.number, id);
+        });
+      }
+    }
+
+    // Status and the fields, each item's writes in one request, 20 mutations a request.
+    const status = statusField(project.field);
+    const writes = source.flatMap(({ item }) => {
+      const itemId = itemIds.get(item.number);
+      if (!itemId) return [];
+      const optionId = item.status && status?.options.find((o) => o.name === item.status)?.id;
+      const picked = Object.fromEntries(fields.flatMap((key) => (item[key] !== undefined ? [[key, item[key]]] : []))) as PlanFields;
+      const fieldWrites = planFieldWrites(ids, picked);
+      const list = [...(status && optionId ? [{ key: "status" as const, fieldId: status.id, value: optionId }] : []), ...(typeof fieldWrites === "string" ? [] : fieldWrites)];
+      return list.length ? [{ issue: item.number, itemId, writes: list }] : [];
+    });
+    for (const chunk of byMutationCount(writes, MUTATIONS_PER_REQUEST)) {
+      const { document, variables } = setManyPlanFieldsDocument(chunk);
+      await this.octokit.graphql(document, { projectId: project.id, ...variables });
+    }
+
+    // The copied items take the places they hold in the new Project, in the old Project's order.
+    const current = (await this.listItems(to.login, to.number, repo)).flatMap((i) => (i.itemId ? [{ number: i.number, itemId: i.itemId }] : []));
+    const rank = new Map(source.map(({ item }, index) => [item.number, index]));
+    const copiedInOrder = current.filter((i) => rank.has(i.number)).sort((a, b) => rank.get(a.number)! - rank.get(b.number)!);
+    let next = 0;
+    const wanted = current.map((i) => (rank.has(i.number) ? copiedInOrder[next++]!.itemId : i.itemId));
+    await this.moveItems(to.login, to.number, orderMoves(current.map((i) => i.itemId), wanted));
+    return result;
+  }
+
   /** The item id in the Project `projectId` of each issue that is one of its items, a hundred issues a request. */
   private async itemIdsOf(repo: RepoRef, projectId: string, issues: number[]): Promise<Map<number, string>> {
     const ids = new Map<number, string>();
@@ -719,6 +779,8 @@ const DATE_KEYS = ["start", "target"] as const;
 const DATE_FIELD_NAMES = { start: "Start", target: "Target" } as const;
 /** The names of the estimate fields on GitHub. */
 const ESTIMATE_FIELD_NAMES = { size: "Size", estimate: "Estimate" } as const;
+/** The name on GitHub of each field copyItems copies. */
+const COPY_FIELD_NAMES: Record<CopyField, string> = { ...DATE_FIELD_NAMES, ...ESTIMATE_FIELD_NAMES };
 /**
  * The aliases the queries give the field lookups a Project may lack: the date fields (`PlanDateFields`),
  * Size and Estimate (`PlanEstimateFields`), both also inside IssuePlan's items, and Priority (`PlanProject`).

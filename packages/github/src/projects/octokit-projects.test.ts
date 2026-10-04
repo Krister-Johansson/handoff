@@ -1535,3 +1535,118 @@ test("a user's Project reads Priority as before and has no issue field source", 
   expect(bare?.priorityOptions).toBeUndefined();
   expect(bare?.prioritySource).toBeUndefined();
 });
+
+/** acme/sample after GitHub moved it from octo: its issues are still items of octo's Project #5, to copy into acme's Project #7. */
+const moved = { owner: "acme", name: "sample" };
+/** An item of octo's Project #5 whose issue now belongs to acme/sample, with its node id `I_<n>`. */
+const movedItem = (number: number, over: Record<string, unknown> = {}, status: string | null = null) => ({
+  ...issueItem(number, { id: `I_${number}`, url: `https://github.com/acme/sample/issues/${number}`, repository: { name: "sample", owner: { login: "acme" } }, ...over }, status),
+  id: `PVTI_old_${number}`,
+});
+/** octo's Project #5 as PlanItems reads it, with a Priority field of its own. */
+const sourcePage = (nodes: unknown[]) => ({
+  repositoryOwner: {
+    __typename: "User",
+    projectV2: { priority: { __typename: "ProjectV2SingleSelectField", isIssueField: false }, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } },
+  },
+});
+
+/**
+ * GitHub for a copy from octo's Project #5 into acme's Project #7, which has Status and Size. The target's Project
+ * order lives here: GitHub is taken to put each added item at the top, so only the moves give the source order.
+ */
+function copyGitHub(source: unknown[], target: Record<string, unknown> = { size: sizeField("S", "M", "L") }) {
+  const order: string[] = [];
+  const issueOf = new Map<string, number>();
+  const add = (contentId: string) => {
+    const issue = Number(contentId.slice("I_".length));
+    const itemId = `PVTI_new_${issue}`;
+    if (!order.includes(itemId)) order.unshift(itemId);
+    issueOf.set(itemId, issue);
+    return { item: { id: itemId } };
+  };
+  const move = (itemId: string, afterId: string | null) => {
+    order.splice(order.indexOf(itemId), 1);
+    order.splice(afterId === null ? 0 : order.indexOf(afterId) + 1, 0, itemId);
+    return { clientMutationId: null };
+  };
+  const aliases = (v: Record<string, unknown>, suffix: string) =>
+    Object.keys(v)
+      .filter((k) => k.endsWith(suffix))
+      .map((k) => k.slice(0, -suffix.length));
+  const handlers = fakeGraphql({
+    PlanItems: (v) =>
+      v.login === "octo"
+        ? sourcePage(source)
+        : {
+            repositoryOwner: {
+              __typename: "Organization",
+              projectV2: { priority: null, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: order.map((id) => ({ ...movedItem(issueOf.get(id)!), id })) } },
+            },
+          },
+    PlanProject: () => ({
+      repositoryOwner: { __typename: "Organization", issueFields: { nodes: [] }, projectV2: { ...planProject(7, "O_acme"), url: "https://github.com/orgs/acme/projects/7", title: "sample plan", ...target } },
+    }),
+    AddPlanItem: (v) => ({ addProjectV2ItemById: add(v.contentId as string) }),
+    AddPlanItems: (v) => Object.fromEntries(aliases(v, "Content").map((a) => [a, add(v[`${a}Content`] as string)])),
+    SetManyPlanFields: () => ({}),
+    MovePlanItem: (v) => ({ updateProjectV2ItemPosition: move(v.itemId as string, v.afterId as string | null) }),
+    MovePlanItems: (v) => Object.fromEntries(aliases(v, "Item").map((a) => [a, move(v[`${a}Item`] as string, v[`${a}After`] as string | null)])),
+  });
+  const sent = (operation: string) => handlers.calls.map((c) => c.body as { query: string; variables: Record<string, unknown> }).filter((b) => b.query.includes(`mutation ${operation}(`));
+  return { ...handlers, order, sent };
+}
+
+/** The content ids the AddPlanItems requests added, in the order sent. */
+const addedContent = (adds: { variables: Record<string, unknown> }[]) => adds.flatMap((a) => Object.entries(a.variables).filter(([k]) => k.endsWith("Content")).map(([, id]) => id));
+
+test("copyItems adds 20 items per request and orders them as the source", async () => {
+  // Project order of octo's #5: 145 down to 101. Every item is Ready; odd ones are sized M; every fifth has a Priority.
+  const numbers = Array.from({ length: 45 }, (_, i) => 145 - i);
+  const source = numbers.map((n) => ({
+    ...movedItem(n, {}, "Ready"),
+    size: n % 2 ? { __typename: "ProjectV2ItemFieldSingleSelectValue", name: "M" } : null,
+    priority: n % 5 === 0 ? { __typename: "ProjectV2ItemFieldSingleSelectValue", name: "High" } : null,
+  }));
+  const github = copyGitHub(source);
+
+  const result = await port(github.fetch).copyItems(moved, { login: "octo", number: 5 }, { login: "acme", number: 7 }, ["size"]);
+
+  expect(result).toEqual({ copied: numbers, priorities: numbers.filter((n) => n % 5 === 0) });
+  // The adds go 20 a request, in the source order, each valid against GitHub's schema.
+  const adds = github.sent("AddPlanItems");
+  expect(adds.map((a) => mutationsOf(a.query).length)).toEqual([20, 20, 5]);
+  expect(adds.flatMap((a) => mutationsOf(a.query)).every(([, mutation]) => mutation === "addProjectV2ItemById")).toBe(true);
+  expect(adds.every((a) => a.variables.projectId === "PVT_7")).toBe(true);
+  expect(addedContent(adds)).toEqual(numbers.map((n) => `I_${n}`));
+  // Each new item gets its Status and, when it had one, its Size; at most 20 mutations a request.
+  const writes = github.sent("SetManyPlanFields");
+  expect(writes.every((w) => mutationsOf(w.query).length <= 20)).toBe(true);
+  expect(writes.flatMap((w) => mutationsOf(w.query))).toHaveLength(45 + 23);
+  const values = Object.assign({}, ...writes.map((w) => w.variables)) as Record<string, unknown>;
+  expect(values).toMatchObject({ projectId: "PVT_7", i145Item: "PVTI_new_145", i145_statusField: "F_status", i145_statusValue: "o_ready", i145_sizeField: "F_size", i145_sizeValue: "o_M" });
+  expect(values).not.toHaveProperty("i144_sizeField");
+  // GitHub put each new item at the top; the moves give the old Project order.
+  expect(github.order).toEqual(numbers.map((n) => `PVTI_new_${n}`));
+});
+
+test("copyItems skips items of other repositories", async () => {
+  const source = [
+    movedItem(1, {}, "Done"),
+    movedItem(3, { repository: { name: "other", owner: { login: "acme" } } }, "Ready"),
+    { id: "PVTI_draft", status: null, content: { __typename: "DraftIssue" } },
+    movedItem(2, {}, "Shaping"),
+  ];
+  const github = copyGitHub(source);
+
+  expect(await port(github.fetch).copyItems(moved, { login: "octo", number: 5 }, { login: "acme", number: 7 }, ["size"])).toEqual({ copied: [1, 2], priorities: [] });
+  expect(addedContent(github.sent("AddPlanItems"))).toEqual(["I_1", "I_2"]);
+  expect(github.order).toEqual(["PVTI_new_1", "PVTI_new_2"]);
+
+  // A target Project without a field to copy refuses before adding anything.
+  const bare = copyGitHub(source, {});
+  await expect(port(bare.fetch).copyItems(moved, { login: "octo", number: 5 }, { login: "acme", number: 7 }, ["size"])).rejects.toThrow(
+    "GitHub Project #7 of the organization acme has no Size field. Run setup_plan to add it, then copy again.",
+  );
+  expect(bare.operations.map((o) => o.operation)).toEqual(["PlanItems", "PlanProject"]);
+});

@@ -107,8 +107,18 @@ test("the handoff skill says Priority order reads the organization's Priority is
   expect(skill).toMatch(/Project's own Priority field[^\n]*organization's Priority issue field/);
 });
 
-test("the plugin is 0.20.0, whose setup skill puts the plan on a Project of the repository's owner, a user or an organization, and says what an organization asks of the token", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.20.0");
+test("the plugin is 0.21.0, whose skills offer the repository owner's Projects and say how a moved repository's project and plan move", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.21.0");
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const first = skill.split("\n").find((line) => line.startsWith("1. Once per project, `setup_plan`."));
+  expect(first).toMatch(/one of the Projects of the repository's owner, a user or an organization/);
+  expect(first).not.toMatch(/their Projects/);
+  const setup = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
+  expect(setup).toMatch(/handoff project move <project> --repo <owner>\/<name>[^\n]*Settings, Projects, Repository moved/);
+  expect(setup).toMatch(/`setup_plan` with `copy_from`[^\n]*Status[^\n]*Priority is not copied/);
+});
+
+test("the setup skill puts the plan on a Project of the repository's owner, a user or an organization, and says what an organization asks of the token", () => {
   const setup = readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8");
   const start = setup.indexOf("### A plan on GitHub Projects");
   const section = setup.slice(start, setup.indexOf("\n## ", start + 1));

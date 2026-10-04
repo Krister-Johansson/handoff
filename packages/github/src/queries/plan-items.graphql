@@ -72,6 +72,8 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
             content {
               __typename
               ... on Issue {
+                # The issue's node id, which copyItems adds to another Project; a scalar on a node already fetched.
+                id
                 number
                 title
                 url

@@ -378,7 +378,7 @@ export type PlanItemsQuery = { repositoryOwner:
               | { __typename: 'ProjectV2ItemIssueFieldValue' }
              | null, content:
               | { __typename: 'DraftIssue' }
-              | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
+              | { __typename: 'Issue', id: string, number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
                     | { login: string }
                     | { login: string }
                    }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, issueFieldValues: { nodes: Array<
@@ -501,7 +501,7 @@ export type PlanItemsQuery = { repositoryOwner:
               | { __typename: 'ProjectV2ItemIssueFieldValue' }
              | null, content:
               | { __typename: 'DraftIssue' }
-              | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
+              | { __typename: 'Issue', id: string, number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
                     | { login: string }
                     | { login: string }
                    }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, issueFieldValues: { nodes: Array<
@@ -1411,6 +1411,7 @@ export const PlanItemsDocument = new TypedDocumentString(`
             content {
               __typename
               ... on Issue {
+                id
                 number
                 title
                 url

@@ -105,6 +105,8 @@ test("the header says where the repository and its plan are managed", async () =
   for (const managedElsewhere of ["Repository", "Default branch", "Setup command", "pnpm install"]) expect(screen.queryByText(managedElsewhere)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Settings, Projects" })).toHaveAttribute("href", "/settings?tab=projects");
+  // A repository GitHub moved, for example to an organization, is moved there too.
+  expect(screen.getByText(/Repository moved/)).toHaveTextContent(/after GitHub moved the repository, Repository moved there points handoff at its new place/);
 });
 
 test("?tab=library shows the Default library", async () => {

@@ -1,5 +1,6 @@
 import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, notifications, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { planBudgetOf } from "@handoff/core";
+import { moveProject, type MoveProjectDeps } from "@handoff/engine/move-project";
 import { PLAN_SIZES, type PlanProject, type ProjectsPort } from "@handoff/github";
 import { projectsAccessProblem } from "./plan.ts";
 
@@ -158,6 +159,15 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
 export async function unlinkPlan(db: Db, projectId: string) {
   const [row] = await db.update(projects).set({ planProjectNumber: null, updatedAt: new Date() }).where(eq(projects.id, projectId)).returning({ id: projects.id });
   if (!row) throw new Error("The project no longer exists.");
+}
+
+/**
+ * Points a project at the place its repository moved to on GitHub, `owner/name`, as Settings, Projects, Repository
+ * moved does. See moveProject: it refuses while runs are active or when the id differs, keeps runs, graphs and pins,
+ * forgets a plan of the old owner and pauses the scheduler.
+ */
+export async function moveProjectRepo(deps: MoveProjectDeps, projectId: string, repo: string, actor = "person") {
+  return moveProject(deps, projectId, repo, actor);
 }
 
 /**

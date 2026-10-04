@@ -2,11 +2,12 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { CheckIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
+import { ArrowRightLeftIcon, CheckIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { addDateFieldsAction, addEstimateFieldsAction, unlinkPlanAction } from "@/app/projects/actions";
 import { SetUpPlanDialog } from "@/components/plan/set-up-plan-dialog";
 import { AddProjectDialog } from "@/components/projects/add-project-dialog";
 import { DeleteProjectDialog, EditProjectDialog } from "@/components/projects/project-dialogs";
+import { RepositoryMovedDialog } from "@/components/projects/repository-moved";
 import { ProjectTile } from "@/components/project-switcher";
 import { SchedulerRowTag } from "@/components/scheduler/scheduler-badge";
 import { SectionCard } from "@/components/section-card";
@@ -245,16 +246,29 @@ function ProjectDetails({ project }: { project: ProjectRow }) {
   );
 }
 
-/** Edit and Delete for the open project; Delete asks first. */
+/** Edit, Repository moved and Delete for the open project; Delete asks first. The demo project points at no repository to move. */
 function ProjectActions({ project }: { project: ProjectRow }) {
-  const [dialog, setDialog] = useState<"edit" | "delete">();
+  const [dialog, setDialog] = useState<"edit" | "moved" | "delete">();
   const close = (next: boolean) => !next && setDialog(undefined);
   return (
-    <div className="flex gap-2">
+    <div className="flex flex-wrap gap-2">
       <Button size="sm" variant="outline" onClick={() => setDialog("edit")}>
         <PencilIcon data-icon="inline-start" />
         Edit
       </Button>
+      {!project.isDemo && (
+        <>
+          <Button size="sm" variant="outline" onClick={() => setDialog("moved")}>
+            <ArrowRightLeftIcon data-icon="inline-start" />
+            Repository moved
+          </Button>
+          <RepositoryMovedDialog
+            project={{ ...project, schedulerOn: Boolean(project.scheduler && project.scheduler.state !== "paused") }}
+            open={dialog === "moved"}
+            onOpenChange={close}
+          />
+        </>
+      )}
       <Button size="sm" variant="outline" className="text-danger hover:bg-danger-bg hover:text-danger" onClick={() => setDialog("delete")}>
         <Trash2Icon data-icon="inline-start" />
         Delete

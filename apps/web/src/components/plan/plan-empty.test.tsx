@@ -22,6 +22,9 @@ test("no plan offers Set up the plan, a missing scope shows the commands, an emp
   const dialog = await screen.findByRole("dialog", { name: "Set up the plan" });
   expect(await within(dialog).findByRole("radio", { name: /handoff roadmap/ })).toBeChecked();
   expect(within(dialog).getByText("Linked to o/handoff")).toBeInTheDocument();
+  // The other Projects are the repository owner's, a user's or an organization's.
+  expect(within(dialog).getByText("Other Projects of o")).toBeInTheDocument();
+  expect(within(dialog).queryByText(/you own/)).not.toBeInTheDocument();
   expect(within(dialog).getByText(/Renames or adds Shaping, Ready, Running and In review/)).toBeInTheDocument();
   expect(within(dialog).getByText('"handoff plan", linked to o/handoff')).toBeInTheDocument();
   // A refusal keeps the dialog open with its sentence; a plan set up closes it.

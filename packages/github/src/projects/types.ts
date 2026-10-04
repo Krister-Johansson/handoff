@@ -131,6 +131,11 @@ export type SetFieldsResult = "set" | "not-in-project" | "no-field" | "no-option
 /** The fields to write on one issue's item, for setManyPlanFields. */
 export type PlanFieldsChange = { issue: number; fields: PlanFields };
 
+/** A Project by its owner's login, a user or an organization, and its number. */
+export type ProjectRef = { login: string; number: number };
+/** The plan fields copyItems can copy besides Status. */
+export type CopyField = "size" | "estimate" | "start" | "target";
+
 /** One of the repository owner's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
 export type PlanProjectChoice = { number: number; title: string; url: string; linked: boolean; missingStatusOptions: PlanStatus[] };
 
@@ -217,6 +222,13 @@ export interface ProjectsPort {
    * way, and sends nothing after the refused request.
    */
   moveItems(login: string, number: number, moves: ItemMove[]): Promise<void>;
+  /**
+   * Copies the plan of `repo` from one Project to another, for a repository that moved to a new owner: adds the
+   * issues of `repo` that are items of `from` to `to`, writes each one's Status and the given fields as they are
+   * in `from`, and orders them in `to` as in `from`. Adds and writes go 20 mutations a request. Priority is not
+   * copied: `priorities` lists the issues that had one. Throws before adding anything when `to` lacks a field to copy.
+   */
+  copyItems(repo: RepoRef, from: ProjectRef, to: ProjectRef, fields: CopyField[]): Promise<{ copied: number[]; priorities: number[] }>;
   /** Whether the token can write Projects: `project` among a classic token's scopes. */
   scopes(): Promise<{ project: boolean; classic: boolean }>;
 }

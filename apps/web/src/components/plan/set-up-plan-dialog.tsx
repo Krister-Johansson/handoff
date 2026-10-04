@@ -84,7 +84,7 @@ export function SetUpPlanDialog({ project, size = "default" }: { project: PlanPr
             {linked.map((p) => (
               <ProjectChoice key={p.number} value={String(p.number)} title={p.title} detail={detail(p)} />
             ))}
-            {others.length > 0 && <p className="px-2 pt-1 text-[11px] font-medium tracking-[0.04em] text-muted-foreground uppercase">Other Projects you own</p>}
+            {others.length > 0 && <p className="px-2 pt-1 text-[11px] font-medium tracking-[0.04em] text-muted-foreground uppercase">Other Projects of {project.repo.split("/")[0]}</p>}
             {others.map((p) => (
               <ProjectChoice key={p.number} value={String(p.number)} title={p.title} detail={detail(p)} />
             ))}

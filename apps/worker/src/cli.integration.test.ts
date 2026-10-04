@@ -39,6 +39,27 @@ test("project add without --name names the project after the repository", async 
   expect(project).toMatchObject({ name: "gqlprune", repoName: "gqlPrune" });
 });
 
+test("project move changes the repository of a project", async () => {
+  const { out, lines } = capture();
+  const github = new FakeGitHub();
+  github.repoId = 42;
+  await runCli(["project", "add", "--name", "web", "--repo", "octo/web"], { db, out, github });
+  await db.update(projects).set({ planProjectNumber: 5 }).where(eq(projects.name, "web"));
+
+  await runCli(["project", "move", "web", "--repo", "acme/web"], { db, out, github });
+
+  const [project] = await db.select().from(projects);
+  expect(project).toMatchObject({ name: "web", repoOwner: "acme", repoName: "web", repoId: 42, planProjectNumber: null });
+  expect(lines.slice(1)).toEqual([
+    "project web: acme/web (was octo/web)",
+    "The plan's GitHub Project #5 belongs to octo, so it is unlinked. Set up the plan again with setup_plan; copy_from { owner: \"octo\", number: 5 } copies its items.",
+  ]);
+  // Another id is another repository.
+  github.repoId = 43;
+  await expect(runCli(["project", "move", "web", "--repo", "acme/other"], { db, out, github })).rejects.toThrow(/another repository/);
+  await expect(runCli(["project", "move", "nope", "--repo", "acme/web"], { db, out, github })).rejects.toThrow(/no project named nope/);
+});
+
 test("library import-repo imports a repository's skills as a group", async () => {
   const { out, lines } = capture();
   const repo = mkdtempSync(join(tmpdir(), "skills-repo-"));

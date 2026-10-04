@@ -104,7 +104,7 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
  * What a project's runs start from and how its plan is worked, one section at a time beside a side menu
  * as in Settings: Graphs, the Default library and App launch, then Plan mode, the Scheduler and Estimates (Plan budget in a
  * Flow project). The repository, branch, setup
- * command and GitHub Project are managed in Settings, Projects.
+ * command and GitHub Project are managed in Settings, Projects, which also moves a project whose repository GitHub moved.
  */
 export default async function ProjectSettingsPage({ params, searchParams }: { params: Promise<{ projectId: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const [{ projectId }, query] = await Promise.all([params, searchParams]);
@@ -124,7 +124,7 @@ export default async function ProjectSettingsPage({ params, searchParams }: { pa
             <Link href={PROJECTS_SETTINGS_PATH} className={LINK}>
               Settings, Projects
             </Link>
-            .
+            ; after GitHub moved the repository, Repository moved there points handoff at its new place.
           </>
         }
       />

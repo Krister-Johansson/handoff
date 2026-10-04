@@ -229,6 +229,28 @@ test("add_project adds a repository the credential can reach, on its default bra
   expect(await call("add_project", { repo: "octo/widgets" })).toEqual({ error: expect.stringMatching(/already a project/) });
 });
 
+test("add_project for a repository that is already a project under its old name names the project and the move command", async () => {
+  // sandbox was added as octo/sample, GitHub's repository 42, which GitHub has since moved to acme.
+  await db.update(projects).set({ repoId: 42 }).where(eq(projects.id, projectId));
+  github.repoId = 42;
+
+  expect(await call("add_project", { repo: "acme/sample" })).toEqual({
+    error: "acme/sample is the project sandbox, which knows it as octo/sample. It moved: run handoff project move sandbox --repo acme/sample, or use Settings, Projects, Repository moved.",
+  });
+  expect((await call("list_projects")).map((p: { name: string }) => p.name)).toEqual(["sandbox"]);
+});
+
+test("setup_plan with copy_from copies the old Project's items into the new plan", async () => {
+  const old = await plan.createProject("octo", { owner: "octo", name: "sample" }, "sandbox plan");
+  await plan.setStatus({ owner: "octo", name: "sample" }, old.number, 12, "Ready", { add: true });
+  await db.update(projects).set({ repoOwner: "acme" }).where(eq(projects.id, projectId));
+
+  const result = await call("setup_plan", { project: "sandbox", copy_from: { owner: "octo", number: old.number } });
+
+  expect(result).toMatchObject({ created: true, copied: { from: { owner: "octo", number: old.number }, items: [12], items_with_priority: [] } });
+  expect((await plan.listItems("acme", result.project.number, { owner: "acme", name: "sample" })).map((i) => [i.number, i.status])).toEqual([[12, "Ready"]]);
+});
+
 test("list_runs says which step each active run is on, and for how long", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   const started = new Date(Date.now() - 40 * 60_000);
