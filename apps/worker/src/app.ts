@@ -5,7 +5,7 @@ import { buildClaudeArgv, ClaudeCliExecutor } from "@handoff/cli-adapter";
 import { createDb } from "@handoff/db";
 import { runMigrations } from "@handoff/db/migrate";
 import { startBacklogScheduler } from "@handoff/engine/backlog-scheduler";
-import { branchDiff, cliNodeExecutor, demoExecutor, finishExecutor, startExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
+import { branchDiff, cliNodeExecutor, demoExecutor, DOCKER_DEMO_BROWSER, finishExecutor, startExecutor, DockerWorkdirProvider, GitWorktreeProvider, humanGateExecutor, mergeNodeExecutor, prNodeExecutor, startWorker, testerExecutor, type EngineDeps } from "@handoff/engine";
 import { OctokitGitHub, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
 import { checkClaudeVersion } from "./claude-version.ts";
 import type { WorkerEnv } from "./env.ts";
@@ -69,7 +69,7 @@ export function buildEngine(env: WorkerEnv, log: (message: string, detail?: unkn
       start: startExecutor({ github }),
       finish: finishExecutor(),
       tester: testerExecutor(),
-      demo: demoExecutor({ ...cliOptions, db, workerId, artifactsRoot: join(home, "artifacts") }),
+      demo: demoExecutor({ ...cliOptions, db, workerId, artifactsRoot: join(home, "artifacts"), ...(env.HANDOFF_WORKSPACE === "docker" ? { browser: DOCKER_DEMO_BROWSER } : {}) }),
       human_gate: humanGateExecutor({ db, branchDiff, workerId }),
       pr: prNodeExecutor({ github, db, reconcileMs: env.HANDOFF_PR_RECONCILE_MS, projects }),
       merge: mergeNodeExecutor({ github, db, projects }),

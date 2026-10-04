@@ -17,6 +17,8 @@ export type FakeScenario = {
   chunkSplit?: boolean;
   /** Processes the fake starts and leaves running; `detached` puts one in its own session. */
   background?: { pidFile: string; detached?: boolean }[];
+  /** A file the fake writes `{ url, host, status, body }` or `{ url, host, error }` to after fetching the first http://localhost URL in the system prompt. */
+  visit?: string;
 };
 
 export type FakeInvocation = { argv: string[]; cwd: string; env: Record<string, string> };
