@@ -27,6 +27,11 @@ export const previews = pgTable(
     url: text("url").notNull(),
     /** Where the app's output goes: a file in the worktree's git directory, outside the tree. */
     logPath: text("log_path").notNull(),
+    /**
+     * In a Docker workspace, the container the app runs in, next to the run's own. Recorded before the
+     * container starts, so cleanup finds it after a crash. Null in worktree mode.
+     */
+    container: text("container"),
     error: text("error"),
     createdAt: createdAt(),
     stoppedAt: tstz("stopped_at"),

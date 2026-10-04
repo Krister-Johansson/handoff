@@ -1,7 +1,8 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, onTestFinished, test } from "vitest";
 import { eq, notifications, previews, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { answerQuestion, restartTryIt } from "../operations.ts";
@@ -10,6 +11,8 @@ import { stopPreview, stopWorkerPreviews } from "../preview/preview.ts";
 import { createOriginRepo } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import { done, scripted } from "../testing/scripted.ts";
+import type { WorkdirProvider } from "../types.ts";
+import { DockerWorkdirProvider } from "../workdir/docker.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { finishExecutor, startExecutor } from "./flow.ts";
 import { humanGateExecutor } from "./human-gate.ts";
@@ -39,14 +42,14 @@ const launch = JSON.stringify({ version: "0.0.1", configurations: [{ name: "web"
 const app = `require("node:http").createServer((_, res) => res.end("todo app")).listen(Number(process.env.PORT));`;
 const issue = { number: 5, title: "Tasks", url: "https://github.com/octo/sample/issues/5", body: "## Acceptance criteria\n- [ ] A user can create a new task" };
 
-async function tryRun(files: Record<string, string> = { ".claude/launch.json": launch, "app.js": app }) {
+async function tryRun(files: Record<string, string> = { ".claude/launch.json": launch, "app.js": app }, workdirs: WorkdirProvider = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) })) {
   const origin = createOriginRepo(files);
   const { project, graphVersion } = await seedGraph(db, graph, { localClonePath: origin });
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Tasks", issues: [issue] });
   const deps = engineDeps(
     db,
     { start: startExecutor(), finish: finishExecutor(), coder: scripted(done({ status: "done", summary: "Built it" })), human_gate: humanGateExecutor({ db, workerId: "test-worker" }) },
-    { workerId: "test-worker", workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) },
+    { workerId: "test-worker", workdirs },
   );
   await drain(deps);
   const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
@@ -95,6 +98,39 @@ test("restarting a Try it gate starts its app again when it stopped", async () =
   const [updated] = await db.select().from(questions).where(eq(questions.id, question.id));
   expect(updated!.context).toMatchObject({ preview: { id: running[0]!.id, status: "running" } });
   expect(updated!.answer).toBeNull();
+});
+
+const dockerEnabled = process.env.HANDOFF_TEST_DOCKER === "1";
+const image = process.env.HANDOFF_TEST_DOCKER_IMAGE ?? "node:22-alpine";
+const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+
+describe.skipIf(!dockerEnabled)("in a Docker workspace", () => {
+  test("Start the app again starts a new container when the old one is gone", async () => {
+    const home = mkdtempSync(join(tmpdir(), "handoff-home-"));
+    const workdirs = new DockerWorkdirProvider({ git: new GitWorktreeProvider({ root: home }), image, mounts: [home] });
+    const { run, deps, question } = await tryRun(undefined, workdirs);
+    // The run's container and its apps' containers all carry the run's label.
+    onTestFinished(() => {
+      for (const name of docker("ps", "-a", "--filter", `label=handoff.run=${run.id}`, "--format", "{{.Names}}").split("\n").filter(Boolean)) docker("rm", "-f", name);
+    });
+    const first = (await previewOf(run.id))!;
+    expect(first).toMatchObject({ status: "running", container: expect.stringMatching(/^handoff-preview-/) });
+    // Gone behind handoff's back, as after a restart of Docker.
+    docker("rm", "-f", first.container!);
+
+    await restartTryIt(db, question.id);
+    await drain(deps);
+
+    const rows = await db.select().from(previews).where(eq(previews.runId, run.id));
+    const running = rows.filter((p) => p.status === "running");
+    expect(running).toHaveLength(1);
+    expect(running[0]!.container).toMatch(/^handoff-preview-/);
+    expect(running[0]!.container).not.toBe(first.container);
+    expect(rows.find((p) => p.id === first.id)!.status).toBe("stopped");
+    expect(await (await fetch(running[0]!.url)).text()).toBe("todo app");
+    const [updated] = await db.select().from(questions).where(eq(questions.id, question.id));
+    expect(updated!.context).toMatchObject({ preview: { id: running[0]!.id, status: "running", container: running[0]!.container } });
+  });
 });
 
 test("a Try it gate after a Demo shows its screenshots next to the criteria, and its warnings", async () => {

@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { DockerExec } from "./preview.ts";
-import { reachServices, siblingOf, startPreviewContainer, type SiblingConfig } from "./container.ts";
+import { mountedPath, reachServices, siblingOf, startPreviewContainer, type SiblingConfig } from "./container.ts";
 import { FORWARDER_READY, forwarderScript } from "./forward.ts";
 
 const of: SiblingConfig = { image: "runner:1", user: "501:20", env: ["HOME=/tmp"], binds: ["/h:/h"], workdir: "/h/worktrees/r1" };
@@ -106,4 +106,15 @@ test("the services check names every port the container cannot reach", async () 
     /could not reach ports 5432 and 6379 on this machine[\s\S]*"5432:5432"[\s\S]*ECONNREFUSED/,
   );
   await expect(reachServices("handoff-preview-5e6f7a8b", [5432], async () => ({ exitCode: 0, output: "" }))).resolves.toBeUndefined();
+});
+
+test("a host path is found in the container through the mount that holds it, by its own path or its real path", () => {
+  const home = mkdtempSync(join(tmpdir(), "handoff-home-"));
+  const real = realpathSync(home);
+  const binds = ["/elsewhere:/elsewhere", `${home}:${home}`];
+  expect(mountedPath(join(home, "repos/x/.git/worktrees/r1"), binds)).toBe(join(home, "repos/x/.git/worktrees/r1"));
+  // git reports a worktree's git directory with symbolic links resolved, such as macOS's /var as /private/var.
+  expect(mountedPath(join(real, "repos/x/.git/worktrees/r1"), binds)).toBe(join(home, "repos/x/.git/worktrees/r1"));
+  expect(mountedPath("/not/mounted/.git", binds)).toBeUndefined();
+  expect(mountedPath("/elsewhere-too/x", binds)).toBeUndefined();
 });

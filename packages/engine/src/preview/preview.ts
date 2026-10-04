@@ -20,6 +20,9 @@ import { and, eq, inArray, liveWorkers, previews, workers, type Db } from "@hand
 import { commandEnv, shell } from "../contract/checks.ts";
 import type { Workdir } from "../types.ts";
 import { runIdentity } from "../workdir/setup.ts";
+import { mountedPath, previewContainerName, probeInside, reachServices, removePreviewContainer, siblingOf, startPreviewContainer, type PreviewContainer } from "./container.ts";
+import { servicePorts } from "./forward.ts";
+import { answers } from "./ready.ts";
 
 const execFileAsync = promisify(execFile);
 const READY_TIMEOUT_MS = 120_000;
@@ -139,8 +142,21 @@ export function launchConfigurationFor(root: string, opts: { configuration?: str
 /** What one step of starting an app is doing, for a person watching it start. */
 export type LaunchStepEvent = { step: "services" | "seed" | "app"; status: "running" | "done" | "failed"; detail: string };
 
-/** A started app: its process group's leader, its port, where it is reached and where its output goes. */
-export type LaunchedApp = { pid: number | undefined; port: number; url: string; logPath: string };
+/**
+ * A started app: its process group's leader, its port, where it is reached and where its output goes.
+ * In a Docker workspace the leader is the host's `docker exec` client, and `container` the app's container.
+ */
+export type LaunchedApp = { pid: number | undefined; port: number; url: string; logPath: string; container?: string };
+
+/** What the app's container in a Docker workspace is made from and labelled with. */
+export type LaunchContainer = {
+  /** The run's container, whose image, user, environment, mounts and network the app's container copies. */
+  of: string;
+  /** Names the app's container (handoff-preview-<id8>) and labels it handoff.preview. */
+  previewId: string;
+  runId: string;
+  workerId?: string;
+};
 
 export type LaunchAppOptions = {
   /** The worktree to start the app from. */
@@ -156,8 +172,12 @@ export type LaunchAppOptions = {
   signal?: AbortSignal;
   docker?: DockerExec;
   note?: (message: string) => void;
+  /** In a Docker workspace: the app, and the seed command, run in their own container next to the run's. */
+  container?: LaunchContainer;
   /** Told as each step starts and ends. */
   onStep?: (event: LaunchStepEvent) => void;
+  /** In a Docker workspace, told before the app's container starts, with its name and the first port it tries. */
+  onContainer?: (app: LaunchedApp) => Promise<void>;
   /** Told once the app's process is spawned, before it is up. */
   onSpawn?: (app: LaunchedApp) => Promise<void>;
 };
@@ -167,86 +187,170 @@ export type LaunchAppOptions = {
  * command, then the app in its own process group with a minimal environment, on a free port passed in
  * PORT (or its own port when it must have it). An app that does not come up is stopped, and PreviewError
  * says why, with the end of its output.
+ *
+ * With `container` (a Docker workspace), the app runs in its own container next to the run's, made like
+ * it (container.ts): its port is published on the host's loopback addresses as the same number inside,
+ * the services' ports answer at localhost inside it, the seed command runs in it, and the app starts
+ * through `docker exec` with HOST=0.0.0.0. It is up once it answers through the published port.
  */
 export async function launchApp(o: LaunchAppOptions): Promise<LaunchedApp> {
   const step = (s: LaunchStepEvent["step"], status: LaunchStepEvent["status"], detail: string) => o.onStep?.({ step: s, status, detail });
   const passEnv = o.passEnv ?? [];
+  const exec = o.docker ?? docker;
+  const gitDir = await gitDirOf(o.root);
+  const logPath = join(gitDir, `handoff-preview-${randomUUID()}.log`);
+
+  const pickPort = async (): Promise<{ port: number; cmd: PreviewCommand }> => {
+    try {
+      const port = await portFor(o.config.port, o.config.autoPort === false, o.source);
+      return { port, cmd: previewCommand(o.config, { root: o.root, port }) };
+    } catch (error) {
+      const message = error instanceof PreviewError ? error.summary : (error as Error).message;
+      step("app", "failed", message);
+      throw error instanceof PreviewError ? error : new PreviewError(message);
+    }
+  };
+  // In a Docker workspace the app's port is published when its container starts, before the seed command runs in it.
+  let picked = o.container ? await pickPort() : undefined;
 
   const compose = composeFileOf(o.root);
   let shared = false;
+  let box: PreviewContainer | undefined;
   step("services", "running", compose ? `Starting the services in ${compose}` : "None in the repository");
   try {
-    await ensureServices(o.root, o.projectId, o.docker, (message) => ((shared = true), o.note?.(message)));
+    await ensureServices(o.root, o.projectId, exec, (message) => ((shared = true), o.note?.(message)));
+    if (o.container && picked) box = await appContainer(o, exec, compose, picked, logPath, gitDir);
   } catch (error) {
     step("services", "failed", (error as PreviewError).summary ?? (error as Error).message);
     throw error;
   }
+  const where = box ? ` in container ${box.name}` : "";
   step("services", "done", compose ? (shared ? `${compose}: already running in another stack` : `${compose}: up`) : "None in the repository");
 
-  const seedCommand = o.seedCommand?.trim();
-  if (seedCommand) {
-    step("seed", "running", `\`${seedCommand}\``);
-    const seed = await shell(seedCommand, o.root, SEED_TIMEOUT_MS, undefined, passEnv, o.signal, o.identity);
-    if (seed.timedOut || seed.exitCode !== 0) {
-      const why = seed.timedOut ? `timed out after ${SEED_TIMEOUT_MS / 60_000} minutes` : `exited ${seed.exitCode}`;
-      step("seed", "failed", `\`${seedCommand}\` ${why}`);
-      throw new PreviewError(`The project's demo seed command \`${seedCommand}\` ${why}:`, tail(seed.output));
-    }
-    step("seed", "done", `\`${seedCommand}\` exited 0`);
-  } else {
-    step("seed", "done", "None");
-  }
-
-  let port: number;
-  let cmd: PreviewCommand;
   try {
-    port = await portFor(o.config.port, o.config.autoPort === false, o.source);
-    cmd = previewCommand(o.config, { root: o.root, port });
-  } catch (error) {
-    const message = error instanceof PreviewError ? error.summary : (error as Error).message;
-    step("app", "failed", message);
-    throw error instanceof PreviewError ? error : new PreviewError(message);
-  }
-  const logPath = join(await gitDirOf(o.root), `handoff-preview-${randomUUID()}.log`);
-  step("app", "running", `Waiting for port ${port}`);
-
-  const log = openSync(logPath, "a");
-  // The app is code the agent wrote: it gets the same minimal environment as test commands, without CI,
-  // plus the worktree's identity and the variables passEnv names.
-  const { CI: _ci, ...base } = commandEnv();
-  const env = { ...base, ...pickEnv(passEnv, process.env), ...o.identity, ...cmd.env };
-  const child = spawn(cmd.command, cmd.args, { cwd: cmd.cwd, env: env as NodeJS.ProcessEnv, stdio: ["ignore", log, log], detached: true });
-  closeSync(log);
-  child.unref();
-  let exit: number | null | undefined;
-  let spawnError: Error | undefined;
-  child.once("exit", (code, signal) => (exit = code ?? (signal ? -1 : null)));
-  child.once("error", (error) => (spawnError = error));
-  const app = { pid: child.pid, port, url: cmd.url, logPath };
-  await o.onSpawn?.(app);
-
-  const fail = async (detail: string, summary: string, withLog = true): Promise<never> => {
-    if (child.pid) await stopGroup(child.pid);
-    step("app", "failed", detail);
-    throw new PreviewError(summary, withLog ? logTail(logPath) || undefined : undefined);
-  };
-  const deadline = Date.now() + (o.readyTimeoutMs ?? READY_TIMEOUT_MS);
-  for (;;) {
-    if (spawnError) return fail(`Could not start: ${spawnError.message}`, `The app could not start: ${spawnError.message}`, false);
-    if (exit !== undefined) return fail(`Exited with code ${exit}`, `The app exited with code ${exit} before it was up:`);
-    if (o.signal?.aborted) return fail("Stopped", "The step that started the app was stopped.", false);
-    if (await listening(port)) break;
-    if (Date.now() > deadline) {
-      const fix = o.source === "file" ? `set autoPort to false in ${LAUNCH_FILE}` : "turn off Any free port in App launch";
-      return fail(
-        `Started, but nothing listened on port ${port}`,
-        `The app did not listen on port ${port} in time. Handoff passes the port in PORT, as Claude Code desktop does; make the dev command read PORT instead of a fixed port, or ${fix}.`,
-      );
+    const seedCommand = o.seedCommand?.trim();
+    if (seedCommand) {
+      step("seed", "running", `\`${seedCommand}\`${where}`);
+      const seed = await shell(seedCommand, o.root, SEED_TIMEOUT_MS, box?.name, passEnv, o.signal, o.identity);
+      if (seed.timedOut || seed.exitCode !== 0) {
+        const why = seed.timedOut ? `timed out after ${SEED_TIMEOUT_MS / 60_000} minutes` : `exited ${seed.exitCode}`;
+        step("seed", "failed", `\`${seedCommand}\` ${why}${where}`);
+        throw new PreviewError(`The project's demo seed command \`${seedCommand}\` ${why}:`, tail(seed.output));
+      }
+      step("seed", "done", `\`${seedCommand}\` exited 0${where}`);
+    } else {
+      step("seed", "done", "None");
     }
-    await new Promise((r) => setTimeout(r, 200));
+
+    // The container may have published another port than the first one tried.
+    if (box && picked && box.port !== picked.port) picked = { port: box.port, cmd: previewCommand(o.config, { root: o.root, port: box.port }) };
+    const { port, cmd } = picked ?? (await pickPort());
+    step("app", "running", `Waiting for port ${port}${where}`);
+
+    const log = openSync(logPath, "a");
+    const child = box ? spawnInContainer(box.name, cmd, { ...pickEnv(passEnv, process.env), ...o.identity }, log) : spawnOnHost(cmd, passEnv, o.identity, log);
+    closeSync(log);
+    child.unref();
+    let exit: number | null | undefined;
+    let spawnError: Error | undefined;
+    child.once("exit", (code, signal) => (exit = code ?? (signal ? -1 : null)));
+    child.once("error", (error) => (spawnError = error));
+    const app: LaunchedApp = { pid: child.pid, port, url: cmd.url, logPath, ...(box ? { container: box.name } : {}) };
+    await o.onSpawn?.(app);
+
+    const fail = async (detail: string, summary: string, withLog = true): Promise<never> => {
+      if (child.pid) await stopGroup(child.pid);
+      step("app", "failed", detail);
+      throw new PreviewError(summary, withLog ? logTail(logPath) || undefined : undefined);
+    };
+    // In a container, a TCP connect is not enough: Docker accepts connections to a published port whether or not the app listens.
+    const up = box ? () => answers(port) : () => listening(port);
+    const deadline = Date.now() + (o.readyTimeoutMs ?? READY_TIMEOUT_MS);
+    for (;;) {
+      if (spawnError) return await fail(`Could not start: ${spawnError.message}`, `The app could not start: ${spawnError.message}`, false);
+      if (exit !== undefined) return await fail(`Exited with code ${exit}`, `The app exited with code ${exit} before it was up:`);
+      if (o.signal?.aborted) return await fail("Stopped", "The step that started the app was stopped.", false);
+      if (await up()) break;
+      if (Date.now() > deadline) {
+        const inside = box ? await probeInside(box.name, port, exec) : "none";
+        if (inside === "loopback") {
+          return await fail(
+            `Listening on port ${port} only on 127.0.0.1${where}`,
+            `The app listens on port ${port} only on 127.0.0.1 inside its container, so your browser cannot reach it. Make the dev server listen on 0.0.0.0, for example with its host option. Handoff sets HOST=0.0.0.0, which not every dev server reads.`,
+          );
+        }
+        if (inside === "outside") {
+          return await fail(`Listening on port ${port}${where}, but no answer`, `The app listens on port ${port} in its container, but did not answer an HTTP request through the published port in time.`);
+        }
+        const fix = o.source === "file" ? `set autoPort to false in ${LAUNCH_FILE}` : "turn off Any free port in App launch";
+        return await fail(
+          `Started, but nothing listened on port ${port}${where}`,
+          `The app did not listen on port ${port} in time. Handoff passes the port in PORT, as Claude Code desktop does; make the dev command read PORT instead of a fixed port, or ${fix}.`,
+        );
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    step("app", "done", `Listening on port ${port}${where}`);
+    return app;
+  } catch (error) {
+    // Removing the app's container ends everything in it, the app's processes included.
+    if (box) await removePreviewContainer(box.name, exec);
+    throw error;
   }
-  step("app", "done", `Listening on port ${port}`);
-  return app;
+}
+
+/**
+ * The services step's part in a Docker workspace: starts the app's container next to the run's, with the
+ * compose file's published ports forwarded to the host, and checks it reaches each of them. `onContainer`
+ * hears the container's name before it starts. A container whose services check fails is removed.
+ */
+async function appContainer(o: LaunchAppOptions, exec: DockerExec, compose: string | undefined, first: { port: number; cmd: PreviewCommand }, logPath: string, gitDir: string): Promise<PreviewContainer> {
+  const c = o.container!;
+  let ports: number[] = [];
+  if (compose) {
+    const config = await exec(["compose", "-f", compose, "config", "--format", "json"], o.root);
+    if (config.exitCode !== 0) throw new PreviewError(`The services in ${compose} could not be read:`, tail(config.output));
+    ports = servicePorts(config.output, first.port);
+  }
+  const of = await siblingOf(c.of, exec);
+  // The forwarder script goes next to the log, in the worktree's git directory under HANDOFF_HOME, which the run's container mounts.
+  const dir = mountedPath(gitDir, of.binds);
+  if (!dir) throw new PreviewError(`The worktree's git directory ${gitDir} is not mounted in the run's container ${c.of}, so the app's container cannot use it. Keep HANDOFF_HOME among the Docker mounts.`);
+  await o.onContainer?.({ pid: undefined, port: first.port, url: first.cmd.url, logPath, container: previewContainerName(c.previewId) });
+  const next = o.config.autoPort === false ? {} : { next: () => portFor(o.config.port, false, o.source) };
+  const box = await startPreviewContainer(
+    { previewId: c.previewId, runId: c.runId, ...(c.workerId ? { workerId: c.workerId } : {}), of, forward: { ports, dir } },
+    { first: first.port, ...next },
+    exec,
+  );
+  try {
+    await reachServices(box.name, ports.filter((p) => p !== box.port), exec);
+  } catch (error) {
+    await removePreviewContainer(box.name, exec);
+    throw error;
+  }
+  return box;
+}
+
+/**
+ * Spawns the app on the host. It is code the agent wrote: it gets the same minimal environment as test
+ * commands, without CI, plus the worktree's identity and the variables passEnv names.
+ */
+function spawnOnHost(cmd: PreviewCommand, passEnv: readonly string[], identity: Record<string, string>, log: number) {
+  const { CI: _ci, ...base } = commandEnv();
+  const env = { ...base, ...pickEnv(passEnv, process.env), ...identity, ...cmd.env };
+  return spawn(cmd.command, cmd.args, { cwd: cmd.cwd, env: env as NodeJS.ProcessEnv, stdio: ["ignore", log, log], detached: true });
+}
+
+/**
+ * Spawns the app in its container through a host-side `docker exec` client, whose exit is the app's.
+ * Values reach the container by name, from the client's environment, never in argv. HOST=0.0.0.0 asks
+ * the app to listen where the published port reaches it; the configuration's own HOST wins.
+ */
+function spawnInContainer(container: string, cmd: PreviewCommand, values: Record<string, string>, log: number) {
+  const env = { HOST: "0.0.0.0", ...values, ...cmd.env };
+  const args = ["exec", ...Object.keys(env).flatMap((name) => ["-e", name]), "-w", cmd.cwd, container, cmd.command, ...cmd.args];
+  return spawn("docker", args, { env: { ...process.env, ...env }, stdio: ["ignore", log, log], detached: true });
 }
 
 /** Whether something accepts connections on `port`, over IPv4 or IPv6 (a dev server on localhost may bind either). */
@@ -318,18 +422,38 @@ export type StartPreviewOptions = {
  * Starts a run's app from its worktree, as the repository's `.claude/launch.json` says, or else as the
  * project's App launch setting says, and waits until it accepts connections. The app gets a free port in
  * PORT (or its own port when autoPort is false), the project's compose services, and a minimal environment
- * without the worker's tokens. It runs in its own process group, which stopPreview ends. Throws
- * PreviewError saying what to fix when it cannot start.
+ * without the worker's tokens. It runs in its own process group, which stopPreview ends. In a Docker
+ * workspace it runs in its own container next to the run's, which the row records and stopPreview
+ * removes. Throws PreviewError saying what to fix when it cannot start.
  */
 export async function startPreview(deps: { db: Db; workerId: string }, opts: StartPreviewOptions): Promise<PreviewRow> {
   const { db, workerId } = deps;
-  if (opts.workdir.container) throw new PreviewError("Previews do not run in Docker workspaces yet; use the git worktree workspace.");
   const { config, source } = launchConfigurationFor(opts.workdir.path, opts);
   const problem = passEnvProblem(opts.passEnv ?? []);
   if (problem) throw new PreviewError(problem);
 
   const id = randomUUID();
   let inserted = false;
+  // In a Docker workspace the row is written before the app's container starts, so cleanup finds a container a crash left.
+  const record = async (app: LaunchedApp) => {
+    if (inserted) {
+      await db.update(previews).set({ pid: app.pid ?? null, port: app.port, url: app.url }).where(eq(previews.id, id));
+      return;
+    }
+    await db.insert(previews).values({
+      id,
+      runId: opts.runId,
+      nodeExecutionId: opts.nodeExecutionId ?? null,
+      configuration: config.name,
+      workerId,
+      pid: app.pid ?? null,
+      port: app.port,
+      url: app.url,
+      logPath: app.logPath,
+      container: app.container ?? null,
+    });
+    inserted = true;
+  };
   try {
     await launchApp({
       ...opts,
@@ -337,10 +461,9 @@ export async function startPreview(deps: { db: Db; workerId: string }, opts: Sta
       config,
       source,
       identity: runIdentity(opts.runId, opts.workdir.path),
-      onSpawn: async (app) => {
-        await db.insert(previews).values({ id, runId: opts.runId, nodeExecutionId: opts.nodeExecutionId ?? null, configuration: config.name, workerId, pid: app.pid ?? null, port: app.port, url: app.url, logPath: app.logPath });
-        inserted = true;
-      },
+      ...(opts.workdir.container ? { container: { of: opts.workdir.container, previewId: id, runId: opts.runId, workerId } } : {}),
+      onContainer: record,
+      onSpawn: record,
     });
   } catch (error) {
     if (inserted && error instanceof PreviewError) await db.update(previews).set({ status: "failed", error: error.message, stoppedAt: new Date() }).where(eq(previews.id, id));
@@ -350,10 +473,14 @@ export async function startPreview(deps: { db: Db; workerId: string }, opts: Sta
   return row!;
 }
 
-/** Stops a preview's process group and marks it stopped. Stopping one that already ended does nothing. */
+/**
+ * Stops a preview and marks it stopped: its app's container in a Docker workspace, which ends every
+ * process in it, then its process group on the host. Stopping one that already ended does nothing.
+ */
 export async function stopPreview(db: Db, id: string): Promise<void> {
   const [row] = await db.select().from(previews).where(eq(previews.id, id));
   if (!row || (row.status !== "starting" && row.status !== "running")) return;
+  if (row.container) await removePreviewContainer(row.container);
   if (row.pid) await stopGroup(row.pid);
   await db.update(previews).set({ status: "stopped", stoppedAt: new Date() }).where(eq(previews.id, id));
 }

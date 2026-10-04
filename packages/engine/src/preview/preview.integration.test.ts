@@ -1,14 +1,19 @@
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFile, execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
+import { promisify } from "node:util";
+import { afterAll, afterEach, beforeEach, describe, expect, onTestFinished, test } from "vitest";
 import { SETTING_CONFIGURATION, type LaunchConfiguration } from "@handoff/core";
 import { eq, previews, registerWorker, sql, stopWorker, workers } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
 import { cancelRun } from "../operations.ts";
-import { ensureServices, PreviewError, startPreview, stopLeftPreviews, stopPreview } from "./preview.ts";
+import { createOriginRepo } from "../testing/git.ts";
+import { DockerWorkdirProvider } from "../workdir/docker.ts";
+import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
+import { ensureServices, PreviewError, startPreview, stopLeftPreviews, stopPreview, type DockerExec } from "./preview.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -238,4 +243,137 @@ test("services whose ports another stack already holds are taken as running, and
   expect(notes).toEqual([expect.stringMatching(/already in use.*another Docker stack/s)]);
   // Any other failure still stops the preview.
   await expect(ensureServices(workdir.path, "p1", async (args) => (args[0] === "info" ? { exitCode: 0, output: "" } : { exitCode: 1, output: "no such image" }))).rejects.toThrow(/did not start/);
+});
+
+const dockerEnabled = process.env.HANDOFF_TEST_DOCKER === "1";
+const image = process.env.HANDOFF_TEST_DOCKER_IMAGE ?? "node:22-alpine";
+const docker = (...args: string[]) => execFileSync("docker", args, { encoding: "utf8" }).trim();
+const appContainersOf = (runId: string) =>
+  docker("ps", "-a", "--filter", `label=handoff.run=${runId}`, "--filter", "label=handoff.preview", "--format", "{{.Names}}").split("\n").filter(Boolean);
+const execFileAsync = promisify(execFile);
+
+/** The real docker client, as a DockerExec. */
+const realDocker: DockerExec = async (args, cwd) => {
+  try {
+    const { stdout, stderr } = await execFileAsync("docker", args, { cwd });
+    return { exitCode: 0, output: stdout + stderr };
+  } catch (error) {
+    const e = error as { code?: number; stdout?: string; stderr?: string; message: string };
+    return { exitCode: typeof e.code === "number" ? e.code : 1, output: `${e.stdout ?? ""}${e.stderr ?? ""}` || e.message };
+  }
+};
+
+/** An app that answers with its port and the container it runs in, listening where HOST says. */
+const dockerServer = `require("node:http").createServer((_, res) => res.end("hello from " + process.env.PORT + " in " + require("node:os").hostname())).listen(Number(process.env.PORT), process.env.HOST);`;
+
+/**
+ * A run in a Docker workspace: its worktree holds `files`, and its container comes from
+ * DockerWorkdirProvider with HANDOFF_HOME as the only mount, as the worker makes it. The run's
+ * container and every app container of the run are removed when the test ends.
+ */
+async function dockerStart(files: Record<string, string>, opts: { readyTimeoutMs?: number; seedCommand?: string; docker?: DockerExec } = {}) {
+  const { run, project } = await seedRun(db);
+  const home = mkdtempSync(join(tmpdir(), "handoff-docker-home-"));
+  const provider = new DockerWorkdirProvider({ git: new GitWorktreeProvider({ root: home }), image, mounts: [home] });
+  const spec = { runId: run.id, remoteUrl: createOriginRepo(files), baseBranch: "main", branchName: "handoff/preview" };
+  const workdir = await provider.acquire(spec);
+  onTestFinished(async () => {
+    for (const name of appContainersOf(run.id)) execFileSync("docker", ["rm", "-f", name], { stdio: "ignore" });
+    await provider.release(spec);
+  });
+  return {
+    run,
+    workdir,
+    preview: () =>
+      startPreview(
+        { db, workerId: "w1" },
+        { runId: run.id, projectId: project.id, workdir, readyTimeoutMs: opts.readyTimeoutMs ?? 15_000, seedCommand: opts.seedCommand ?? null, ...(opts.docker ? { docker: opts.docker } : {}) },
+      ),
+  };
+}
+
+const containerHostname = (name: string) => docker("inspect", "-f", "{{.Config.Hostname}}", name);
+
+describe.skipIf(!dockerEnabled)("in a Docker workspace", () => {
+  test("a run's app starts in a container next to the run's on a free port and answers at localhost from the host", async () => {
+    const { run, workdir, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"], port: 3000 }), "app.js": dockerServer });
+    const row = await preview();
+    expect(row).toMatchObject({ status: "running", container: `handoff-preview-${row.id.slice(0, 8)}`, url: `http://localhost:${row.port}` });
+    expect(row.port).not.toBe(3000);
+    expect(row.container).not.toBe(workdir.container);
+    expect(await (await fetch(row.url)).text()).toBe(`hello from ${row.port} in ${containerHostname(row.container!)}`);
+    expect(JSON.parse(docker("inspect", "-f", "{{json .Config.Labels}}", row.container!))).toMatchObject({ "handoff.preview": row.id, "handoff.run": run.id, "handoff.worker": "w1" });
+  });
+
+  test("an app that listens only on 127.0.0.1 inside its container fails and says to listen on 0.0.0.0", async () => {
+    const loopback = `require("node:http").createServer((_, res) => res.end("hi")).listen(Number(process.env.PORT), "127.0.0.1");`;
+    const { run, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": loopback }, { readyTimeoutMs: 3_000 });
+    const error = await preview().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PreviewError);
+    expect((error as Error).message).toMatch(/listens on port \d+ only on 127\.0\.0\.1 inside its container.*0\.0\.0\.0/s);
+    expect((await db.select().from(previews))[0]).toMatchObject({ status: "failed", container: expect.stringMatching(/^handoff-preview-/) });
+    expect(appContainersOf(run.id)).toEqual([]);
+  });
+
+  test("an app that never listens fails and says to read PORT", async () => {
+    const { run, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": "setInterval(() => {}, 1000);" }, { readyTimeoutMs: 3_000 });
+    const error = await preview().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(PreviewError);
+    expect((error as Error).message).toMatch(/did not listen on port \d+.*PORT/s);
+    expect(appContainersOf(run.id)).toEqual([]);
+  });
+
+  test("an app that exits before it is up fails with the end of its output", async () => {
+    const { run, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": `console.error("Cannot find module vite"); process.exit(1);` });
+    await expect(preview()).rejects.toThrow(/exited with code 1[\s\S]*Cannot find module vite/);
+    expect(appContainersOf(run.id)).toEqual([]);
+  });
+
+  test("the seed command runs in the app's container", async () => {
+    const { workdir, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": dockerServer }, { seedCommand: "hostname > seeded-in" });
+    const row = await preview();
+    expect(readFileSync(join(workdir.path, "seeded-in"), "utf8").trim()).toBe(containerHostname(row.container!));
+  });
+
+  test("an app that must have its port fails when the port is taken", async () => {
+    const busy = createServer().listen(0);
+    await new Promise((r) => busy.once("listening", r));
+    onTestFinished(() => void busy.close());
+    const port = (busy.address() as { port: number }).port;
+    const { run, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"], port, autoPort: false }), "app.js": dockerServer });
+    await expect(preview()).rejects.toThrow(new RegExp(`port ${port} is in use`));
+    expect(appContainersOf(run.id)).toEqual([]);
+  });
+
+  test("the app reaches the compose file's services at localhost on their ports", async () => {
+    // A service on the host, listening on all addresses as compose publishes "5432:5432".
+    const service = createHttpServer((_, res) => res.end("from the service"));
+    await new Promise<void>((resolve) => service.listen(0, "0.0.0.0", resolve));
+    onTestFinished(() => new Promise<void>((resolve) => service.close(() => resolve())));
+    const servicePort = (service.address() as { port: number }).port;
+    // Compose itself is faked: starting a stack would make a network.
+    const composeConfig = JSON.stringify({ services: { db: { ports: [{ target: 80, published: String(servicePort), protocol: "tcp" }] } } });
+    const fake: DockerExec = (args, cwd) => (args[0] === "compose" ? Promise.resolve({ exitCode: 0, output: args.includes("config") ? composeConfig : "" }) : realDocker(args, cwd));
+    const app = `require("node:http").createServer(async (_, res) => res.end(await (await fetch("http://localhost:${servicePort}/")).text())).listen(Number(process.env.PORT), process.env.HOST);`;
+    const { preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": app, "compose.yaml": "services: {}\n" }, { docker: fake });
+    const row = await preview();
+    expect(await (await fetch(row.url)).text()).toBe("from the service");
+  });
+
+  test("stopPreview removes the app's container", async () => {
+    const { run, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": dockerServer });
+    const row = await preview();
+    await stopPreview(db, row.id);
+    expect(appContainersOf(run.id)).toEqual([]);
+    expect(await statusOf(row.id)).toBe("stopped");
+    await expect(fetch(row.url, { signal: AbortSignal.timeout(2_000) })).rejects.toThrow();
+  });
+
+  test("cancelling a run removes its app's container", async () => {
+    const { run, preview } = await dockerStart({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": dockerServer });
+    const row = await preview();
+    await cancelRun(db, run.id);
+    expect(appContainersOf(run.id)).toEqual([]);
+    expect(await statusOf(row.id)).toBe("stopped");
+  });
 });

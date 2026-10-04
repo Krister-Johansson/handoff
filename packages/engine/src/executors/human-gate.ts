@@ -4,7 +4,8 @@ import { nodeExecutions, previews, questions, type Db } from "@handoff/db";
 import { planOverlaps } from "../planning.ts";
 import { heldApproval, recordApproval } from "../approvals.ts";
 import { notifyFrom, type Told } from "../notify.ts";
-import { PreviewError, startPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
+import { containerRunning } from "../preview/container.ts";
+import { PreviewError, startPreview, stopPreview, stopStepPreviews, type DockerExec } from "../preview/preview.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { passEnvOf } from "./demo.ts";
 
@@ -201,16 +202,23 @@ async function overlapsOf(ctx: ExecutorContext, db: Db, planner: string, paths: 
  */
 type GateDeps = { db: Db; branchDiff?: BranchDiff; workerId?: string; docker?: DockerExec };
 
-/** What a Try it question shows about the run's app: its address while it runs, or why it did not start. */
-type PreviewState = { id: string; url: string; status: "running" } | { status: "failed"; error: string };
+/**
+ * What a Try it question shows about the run's app: its address while it runs, and in a Docker
+ * workspace the container it runs in, or why it did not start.
+ */
+type PreviewState = { id: string; url: string; status: "running"; container?: string } | { status: "failed"; error: string };
+
+const runningState = (row: { id: string; url: string; container: string | null }): PreviewState => ({ id: row.id, url: row.url, status: "running", ...(row.container ? { container: row.container } : {}) });
 
 /**
- * Starts the run's app for a Try it gate, or keeps the one this gate already has running. An app that
+ * Starts the run's app for a Try it gate, or keeps the one this gate already has running. An app whose
+ * container is gone, as after a restart of Docker, is marked stopped and started again. An app that
  * cannot start does not fail the gate: the person sees why and can send the work back.
  */
 async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<PreviewState> {
   const [running] = await deps.db.select().from(previews).where(and(eq(previews.nodeExecutionId, ctx.execution.id), eq(previews.status, "running")));
-  if (running) return { id: running.id, url: running.url, status: "running" };
+  if (running && (!running.container || (await containerRunning(running.container, deps.docker)))) return runningState(running);
+  if (running) await stopPreview(deps.db, running.id);
   if (!ctx.workdir) return { status: "failed", error: "The gate has no worktree to start the app from." };
   try {
     const row = await startPreview(
@@ -227,8 +235,8 @@ async function ensurePreview(ctx: ExecutorContext, deps: GateDeps): Promise<Prev
         ...(deps.docker ? { docker: deps.docker } : {}),
       },
     );
-    ctx.emit("preview.started", { id: row.id, url: row.url, configuration: row.configuration });
-    return { id: row.id, url: row.url, status: "running" };
+    ctx.emit("preview.started", { id: row.id, url: row.url, configuration: row.configuration, ...(row.container ? { container: row.container } : {}) });
+    return runningState(row);
   } catch (error) {
     if (!(error instanceof PreviewError)) throw error;
     ctx.emit("preview.failed", { error: error.message });

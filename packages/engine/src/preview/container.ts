@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -56,6 +56,34 @@ export type SiblingConfig = {
   network?: string;
   workdir: string;
 };
+
+const realOrSelf = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
+
+/**
+ * Where a host path is inside a container with `binds`, or undefined when no mount holds it. A mount
+ * matches by its own path or by its real path, since git reports a worktree's git directory with
+ * symbolic links resolved (on macOS, /var/folders is /private/var/folders).
+ */
+export function mountedPath(hostPath: string, binds: string[]): string | undefined {
+  const real = realOrSelf(hostPath);
+  for (const bind of binds) {
+    const [host, target = host] = bind.split(":");
+    if (!host) continue;
+    for (const [from, path] of [
+      [host, hostPath],
+      [realOrSelf(host), real],
+    ] as const) {
+      if (path === from || path.startsWith(`${from.replace(/\/$/, "")}/`)) return target + path.slice(from.replace(/\/$/, "").length);
+    }
+  }
+  return undefined;
+}
 
 /** The container a preview's app runs in: `handoff-preview-` and the first 8 characters of the preview's id. */
 export const previewContainerName = (previewId: string) => `handoff-preview-${previewId.slice(0, 8)}`;
@@ -205,6 +233,40 @@ export async function reachServices(container: string, ports: number[], exec: Do
     `The app's container could not reach ${listed(unreachable)} on this machine through host.docker.internal, so the app cannot reach ${unreachable.length === 1 ? "that service" : "those services"} at localhost. Check that the service runs. On Linux a container reaches only ports published on all addresses: publish it as "${first}:${first}", not "127.0.0.1:${first}:${first}", or use worktree mode (HANDOFF_WORKSPACE=worktree).`,
     failures.join("\n"),
   );
+}
+
+/**
+ * Connects inside the container to the port in its arguments, on the loopback addresses and on the
+ * container's own addresses, and prints where something listens: "outside", "loopback" or "none".
+ */
+const PROBE_SCRIPT = `const { connect } = require("node:net");
+const { networkInterfaces } = require("node:os");
+const port = Number(process.argv[1]);
+const own = Object.values(networkInterfaces()).flat().filter((i) => !i.internal).map((i) => i.address.split("%")[0]);
+const open = (host) => new Promise((resolve) => {
+  const socket = connect({ host, port, timeout: 2000 });
+  socket.once("connect", () => (socket.destroy(), resolve(true)));
+  socket.once("timeout", () => (socket.destroy(), resolve(false)));
+  socket.once("error", () => resolve(false));
+});
+const any = async (hosts) => (await Promise.all(hosts.map(open))).some(Boolean);
+(async () => console.log((await any(own)) ? "outside" : (await any(["127.0.0.1", "::1"])) ? "loopback" : "none"))();`;
+
+/**
+ * Where the app listens on `port` inside its container, to explain why it did not answer through the
+ * published port: on an address a published port reaches ("outside"), on loopback only ("loopback"),
+ * or not at all ("none", also when the probe cannot run).
+ */
+export async function probeInside(container: string, port: number, exec: DockerExec = dockerExec): Promise<"outside" | "loopback" | "none"> {
+  const probe = await exec(["exec", container, "node", "-e", PROBE_SCRIPT, String(port)], process.cwd());
+  const where = probe.output.trim().split("\n").at(-1);
+  return probe.exitCode === 0 && (where === "outside" || where === "loopback") ? where : "none";
+}
+
+/** Whether an app's container exists and runs. */
+export async function containerRunning(name: string, exec: DockerExec = dockerExec): Promise<boolean> {
+  const state = await exec(["inspect", "-f", "{{.State.Running}}", name], process.cwd());
+  return state.exitCode === 0 && state.output.trim() === "true";
 }
 
 /**
