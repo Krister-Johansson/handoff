@@ -52,10 +52,13 @@ async function previewNextTo(run: { name: string; runId: string }, ports: { firs
   return { previewId, ...started };
 }
 
-/** A service on the host that answers HTTP on 127.0.0.1 only, closed when the test ends. */
+/**
+ * A service on the host that answers HTTP, closed when the test ends. It listens on all addresses, as
+ * compose publishes "5432:5432": on Linux a container cannot reach a host port bound to 127.0.0.1 alone.
+ */
 async function hostService(body: string): Promise<number> {
   const server = createHttpServer((_, res) => res.end(body));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve));
   onTestFinished(() => new Promise<void>((resolve) => server.close(() => resolve())));
   return (server.address() as { port: number }).port;
 }
