@@ -61,7 +61,7 @@ const loadAppLaunch = vi.hoisted(() =>
     projectId: "p1",
     projectName: "handoff",
     branch: "main",
-    docker: false,
+    docker: null,
     detected: { kind: "none" },
     saved: null,
     services: null,

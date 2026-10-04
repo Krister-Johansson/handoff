@@ -23,8 +23,11 @@ import { cn } from "@/lib/utils";
 import { CARD } from "./styles";
 import { isNextNavigation } from "./send-review";
 
-/** The run's app as the gate started it: its address while it runs, or why it did not start. */
-export type TryPreview = { id?: string; url?: string; status: "running" | "failed"; error?: string };
+/**
+ * The run's app as the gate started it: its address while it runs, or why it did not start. In Docker
+ * workspace mode, the container it runs in.
+ */
+export type TryPreview = { id?: string; url?: string; status: "running" | "failed"; error?: string; container?: string };
 
 /** A criterion's result: works, does not work (with what is wrong), or not checked yet. */
 type Check = { works?: boolean; note: string };
@@ -138,6 +141,9 @@ function AppBar({ preview, readOnly, pending, error, onRestart }: { preview: Try
           </Button>
         )}
       </div>
+      {!readOnly && preview.status === "running" && preview.container && (
+        <p className="text-xs text-muted-foreground">Runs in Docker container {preview.container}, reachable from this machine only.</p>
+      )}
       {!readOnly && preview.status === "failed" && <TerminalOutput text={preview.error ?? "The app did not start."} />}
       {error && <p className="text-sm text-danger">{error}</p>}
     </section>
@@ -410,8 +416,10 @@ export function TryReview({ questionId, runId, executionId, eventsAfter, from, a
     eventsAfter,
     (event) => {
       if (event.nodeExecutionId !== executionId) return;
-      const payload = (event.payload ?? {}) as { id?: string; url?: string; error?: string };
-      if (event.type === "preview.started" && payload.url) setStarted({ ...(payload.id ? { id: payload.id } : {}), url: payload.url, status: "running" });
+      const payload = (event.payload ?? {}) as { id?: string; url?: string; error?: string; container?: string };
+      if (event.type === "preview.started" && payload.url) {
+        setStarted({ ...(payload.id ? { id: payload.id } : {}), url: payload.url, status: "running", ...(payload.container ? { container: payload.container } : {}) });
+      }
       if (event.type === "preview.failed") setStarted({ status: "failed", error: payload.error ?? "The app did not start." });
     },
     !readOnly,

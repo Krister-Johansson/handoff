@@ -33,7 +33,7 @@ test("a repository with a launch file shows it read-only: its configurations, th
     configurations: ["web", "handoff-demo"],
     picked: expect.objectContaining({ name: "handoff-demo", runtimeArgs: ["start"], port: 4000, cwd: "apps/web" }),
   });
-  expect(view).toMatchObject({ branch: "main", docker: false, saved: null, services: null, seedCommand: null, test: null });
+  expect(view).toMatchObject({ branch: "main", docker: null, saved: null, services: null, seedCommand: null, test: null });
 });
 
 test("a launch file handoff cannot read says why, since runs stop there too", async () => {
@@ -66,8 +66,9 @@ test("the worker's Docker workspace mode is known, and the latest Test start sho
     steps: [{ name: "app", status: "failed", detail: "Exited with code 1", ms: 1200 }],
     stopsAt,
   });
-  const view = await loadAppLaunch(db, github, projectId, { HANDOFF_WORKSPACE: "docker" });
-  expect(view.docker).toBe(true);
+  const view = await loadAppLaunch(db, github, projectId, { HANDOFF_WORKSPACE: "docker", HANDOFF_DOCKER_IMAGE: "runner:1" }, async () => "27.5.1");
+  // The image the containers come from and the Engine's version, for the section's copy and its warning.
+  expect(view.docker).toEqual({ image: "runner:1", engine: "27.5.1" });
   expect(view.test).toMatchObject({
     status: "failed",
     command: "pnpm dev",
