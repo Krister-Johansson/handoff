@@ -1,5 +1,7 @@
 import { expect, test } from "vitest";
-import { launchCheck } from "./readiness";
+import { ProjectsAccessError } from "@handoff/github";
+import { FakeProjects } from "@handoff/github/testing";
+import { launchCheck, planCheck } from "./readiness";
 
 const file = JSON.stringify({ version: "0.0.1", configurations: [{ name: "web", runtimeExecutable: "pnpm", runtimeArgs: ["dev"], port: 5173 }] });
 const fixedPort = JSON.stringify({ version: "0.0.1", configurations: [{ name: "web", runtimeExecutable: "pnpm", runtimeArgs: ["dev"], port: 5173, autoPort: false }] });
@@ -19,6 +21,19 @@ test("in Docker mode the launch check says the app must listen on 0.0.0.0", () =
 test("on the host the launch check says nothing about containers", () => {
   expect(launchCheck(file, null, null).detail).toBe("Starts configuration web with pnpm. The app gets a free port in PORT.");
   expect(launchCheck(undefined, null, null).fix).not.toMatch(/container/);
+});
+
+test("the plan check shows the access sentence for an organization", async () => {
+  const sentence =
+    "acme does not accept classic personal access tokens, and handoff reads Projects with one. An organization owner can allow them in the organization's settings under Personal access tokens, Settings, Tokens (classic).";
+  const plan = new FakeProjects();
+  plan.owners.set("acme", "Organization");
+  plan.getProject = async () => {
+    throw new ProjectsAccessError("classic-blocked", sentence);
+  };
+
+  // The sentence says what to do, so the check has no fix of its own.
+  expect(await planCheck(plan, { repoOwner: "acme", planProjectNumber: 4 })).toEqual({ id: "plan", title: "A plan on GitHub Projects", required: false, status: "todo", detail: sentence });
 });
 
 test("in Docker mode with an Engine below 28 the launch check carries the warning", () => {

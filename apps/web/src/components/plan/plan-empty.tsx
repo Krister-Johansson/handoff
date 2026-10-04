@@ -1,6 +1,6 @@
 "use client";
 
-import { CopyIcon, KeyRoundIcon, LayersIcon, SearchXIcon, SquareKanbanIcon } from "lucide-react";
+import { CopyIcon, KeyRoundIcon, LayersIcon, SearchXIcon, ShieldAlertIcon, SquareKanbanIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { SetUpPlanDialog, type PlanProjectRef } from "./set-up-plan-dialog";
@@ -16,11 +16,12 @@ function Command({ text }: { text: string }) {
   );
 }
 
-export type PlanEmptyReason = "no-plan" | "no-scope" | "unreachable" | "empty";
+export type PlanEmptyReason = "no-plan" | "no-scope" | "refused" | "unreachable" | "empty";
 
 /**
  * In place of the tree or the board when there is nothing to show: no plan yet, a token that cannot
- * reach GitHub Projects, a Project handoff cannot read, or a plan with nothing shaped in it.
+ * reach GitHub Projects, an organization that refuses the token (SSO not authorized, classic tokens
+ * blocked) with GitHub's reason in `error`, a Project handoff cannot read, or a plan with nothing shaped in it.
  */
 export function PlanEmpty({ reason, project, error }: { reason: PlanEmptyReason; project: PlanProjectRef; error?: string }) {
   return (
@@ -58,6 +59,15 @@ export function PlanEmpty({ reason, project, error }: { reason: PlanEmptyReason;
             <Command text="GITHUB_TOKEN=$(gh auth token)" />
           </EmptyContent>
         </>
+      )}
+      {reason === "refused" && (
+        <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <ShieldAlertIcon />
+          </EmptyMedia>
+          <EmptyTitle>GitHub refused GITHUB_TOKEN for this plan</EmptyTitle>
+          <EmptyDescription>{error}</EmptyDescription>
+        </EmptyHeader>
       )}
       {reason === "unreachable" && (
         <EmptyHeader>

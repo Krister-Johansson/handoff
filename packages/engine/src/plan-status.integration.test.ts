@@ -2,7 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { appendEvents, eq, nodeExecutions, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import type { PlanStatus } from "@handoff/github";
+import { ProjectsAccessError, type PlanStatus } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { cancelRun, resolveExhaustedLoop } from "./operations.ts";
 import { createRun } from "./runs.ts";
@@ -54,6 +54,22 @@ test("cancelling a run that started on a Ready task puts it back to Ready", asyn
     ["plan.status", { issue: migration.number, status: "Running", from: "Ready" }],
     ["plan.status", { issue: migration.number, status: "Ready" }],
   ]);
+});
+
+test("a status write refused for SSO records plan.skipped with the sentence", async () => {
+  const { plan, task, start, statusOf } = await planned();
+  const migration = await task("Add the migration");
+  const sentence =
+    "octo uses SAML single sign-on, and GITHUB_TOKEN is not authorized for it. Authorize the token at https://github.com/orgs/octo/sso?authorization_request=A1 within the hour, or on GitHub under Settings, Developer settings, Personal access tokens, Configure SSO.";
+  plan.owners.set("octo", "Organization");
+  plan.setStatus = async () => {
+    throw new ProjectsAccessError("sso", sentence);
+  };
+
+  const run = await start([migration]);
+
+  expect(await planEvents(run.id)).toEqual([["plan.skipped", { issue: migration.number, status: "Running", reason: sentence }]]);
+  expect(await statusOf(migration.number)).toBe("Ready");
 });
 
 test("cancelling a run that never moved its task leaves the task's Status alone", async () => {

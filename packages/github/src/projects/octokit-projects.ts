@@ -45,6 +45,7 @@ import {
   type SetStatusOptionsMutation,
 } from "../gql/graphql.ts";
 import type { RepoRef } from "../types.ts";
+import { accessErrorOf, ProjectsAccessError } from "./access.ts";
 import { kindOf, PLAN_KINDS, PLAN_SIZES, sizeOf, STATUS_OPTIONS, statusOf } from "./kinds.ts";
 import { ancestorsOf, depthOf, present } from "./lineage.ts";
 import { moveItemsDocument } from "./order-moves.ts";
@@ -122,7 +123,27 @@ function issuePriorityOf(issue: Extract<NonNullable<GqlItem>["content"], { __typ
 
 /** ProjectsPort over Octokit with a classic personal token: GitHub Apps cannot reach user-owned Projects. */
 export class OctokitProjects implements ProjectsPort {
-  private constructor(private readonly octokit: Octokit) {}
+  private constructor(private readonly octokit: Octokit) {
+    // The request wrapper: GitHub's refusal of the token for an organization (a missing scope, SSO, classic tokens
+    // blocked) reaches every caller as a ProjectsAccessError, also when GraphQL answers it with errors next to data.
+    octokit.hook.wrap("request", async (request, options) => {
+      const variables = (options as { variables?: { login?: unknown; owner?: unknown } }).variables;
+      const owner = [variables?.login, variables?.owner].find((v): v is string => typeof v === "string");
+      let response: Awaited<ReturnType<typeof request>>;
+      try {
+        response = await request(options);
+      } catch (error) {
+        throw accessErrorOf(error, owner);
+      }
+      const errors = (response.data as { errors?: { message?: unknown }[] } | null)?.errors;
+      if (Array.isArray(errors) && errors.length) {
+        const answer = Object.assign(new Error(errors.map((e) => String(e.message)).join("; ")), { headers: response.headers, errors, data: (response.data as { data?: unknown }).data });
+        const refused = accessErrorOf(answer, owner);
+        if (refused instanceof ProjectsAccessError) throw refused;
+      }
+      return response;
+    });
+  }
 
   /** `throttle: false` turns off Octokit's spacing of GraphQL calls one second apart, for tests. */
   static withToken(token: string, opts: { fetch?: Fetch; throttle?: boolean } = {}): OctokitProjects {

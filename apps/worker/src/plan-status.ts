@@ -11,7 +11,7 @@ const off = (why: string) => `The plan on GitHub Projects is off: ${why}. Runs r
  */
 export async function planAccess(projects: ProjectsPort | undefined, log: (message: string) => void): Promise<ProjectsPort | undefined> {
   if (!projects) {
-    log(off("GITHUB_TOKEN is not set, and a GitHub App cannot reach a user-owned Project"));
+    log(off("GITHUB_TOKEN is not set, and handoff does not reach Projects through the GitHub App"));
     return undefined;
   }
   // GitHub unreachable at start is no reason to turn the plan off: each write still records plan.skipped when it fails.
@@ -20,7 +20,11 @@ export async function planAccess(projects: ProjectsPort | undefined, log: (messa
     return { project: true, classic: true };
   });
   if (!scopes.classic) {
-    log(off("GITHUB_TOKEN is not a classic token, and only a classic token with the project scope reaches a user-owned Project"));
+    log(
+      off(
+        "GITHUB_TOKEN is a fine-grained token, which cannot reach a Project owned by a user, and handoff reads every Project, a user's or an organization's, with one classic token with the project scope",
+      ),
+    );
     return undefined;
   }
   if (!scopes.project) {

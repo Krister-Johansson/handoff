@@ -48,3 +48,14 @@ test("no plan offers Set up the plan, a missing scope shows the commands, an emp
   expect(screen.getByText(/Shape the first epic with the assistant/)).toBeInTheDocument();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
+
+test("an organization that refuses the token shows GitHub's reason as a sentence, without the scope commands", () => {
+  const sentence =
+    "acme uses SAML single sign-on, and GITHUB_TOKEN is not authorized for it. Authorize the token at https://github.com/orgs/acme/sso?authorization_request=A1 within the hour, or on GitHub under Settings, Developer settings, Personal access tokens, Configure SSO.";
+  render(<PlanEmpty reason="refused" error={sentence} project={{ id: "p1", name: "web", repo: "acme/web" }} />);
+
+  expect(screen.getByText("GitHub refused GITHUB_TOKEN for this plan")).toBeInTheDocument();
+  expect(screen.getByText(sentence)).toBeInTheDocument();
+  expect(screen.queryByText("gh auth refresh -s project")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});

@@ -2,6 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { eq, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { ProjectsAccessError } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 import { loadPlan } from "./plan.ts";
@@ -258,6 +259,36 @@ test("without a plan number loadPlan says there is no plan, and without the proj
   plan.scopesAnswer = { project: true, classic: true };
   await db.update(projects).set({ planProjectNumber: 9 }).where(eq(projects.id, project.id));
   expect(await loadPlan(db, github, plan, project.id)).toEqual({ reason: "unreachable", error: expect.stringContaining("#9") });
+});
+
+test("the token sentences say one classic token reaches user and organization Projects", async () => {
+  const { github, plan, project } = await planned();
+  expect(await loadPlan(db, github, undefined, project.id)).toEqual({
+    reason: "no-scope",
+    error:
+      "The plan needs GITHUB_TOKEN, a classic token with the project scope, which reaches user and organization Projects; handoff does not reach Projects through the GitHub App. Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).",
+  });
+  plan.scopesAnswer = { project: false, classic: false };
+  expect(await loadPlan(db, github, plan, project.id)).toEqual({
+    reason: "no-scope",
+    error:
+      "GITHUB_TOKEN is a fine-grained token. A fine-grained token cannot reach a Project owned by a user, and handoff reads every Project, a user's or an organization's, with one classic token with the project scope. Run gh auth refresh -s project, then set GITHUB_TOKEN=$(gh auth token).",
+  });
+});
+
+test("an organization Project the token is not authorized for shows the SSO sentence on the Plan page", async () => {
+  const { github, plan, project } = await planned();
+  plan.owners.set("octo", "Organization");
+  // GitHub refuses every read of the organization's Project until the token is authorized for its SSO.
+  const sentence =
+    "octo uses SAML single sign-on, and GITHUB_TOKEN is not authorized for it. Authorize the token at https://github.com/orgs/octo/sso?authorization_request=A1 within the hour, or on GitHub under Settings, Developer settings, Personal access tokens, Configure SSO.";
+  const refuse = async (): Promise<never> => {
+    throw new ProjectsAccessError("sso", sentence);
+  };
+  plan.getProject = refuse;
+  plan.listItems = refuse;
+
+  expect(await loadPlan(db, github, plan, project.id)).toEqual({ reason: "no-scope", access: "sso", error: sentence });
 });
 
 test("loadPlan gives a Flow project the flow's input and no timeline, and a Timeline project its timeline and no flow", async () => {

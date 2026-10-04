@@ -2,6 +2,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import { afterAll, beforeEach, expect, test } from "vitest";
 import { asc, eq, graphVersions, projects, projectSchedulers, questions, runs, schedulerEvents } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
+import { ProjectsAccessError } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { reviewPath, runPath } from "../lib/paths";
 import { createProject, saveGraphVersion } from "./graphs";
@@ -101,6 +102,19 @@ test("switching to Project order from a Flow drop changes only the order: an off
     ["priority", "project", "dashboard"],
     ["priority", "project", "dashboard"],
   ]);
+});
+
+test("start_scheduler in an organization that refuses the token says why and stays off", async () => {
+  plan.owners.set("octo", "Organization");
+  const sentence =
+    "octo uses SAML single sign-on, and GITHUB_TOKEN is not authorized for it. Authorize the token at https://github.com/orgs/octo/sso?authorization_request=A1 within the hour, or on GitHub under Settings, Developer settings, Personal access tokens, Configure SSO.";
+  plan.getProject = async () => {
+    throw new ProjectsAccessError("sso", sentence);
+  };
+
+  await expect(startScheduler(deps(), projectId, { order: "project" }, "dashboard")).rejects.toThrow(`The scheduler reads Ready tasks from GitHub Projects. ${sentence}`);
+  expect(await row()).toBeUndefined();
+  expect(await log()).toEqual([]);
 });
 
 /** A task on the plan with one run of the given status, as a person started it. */
