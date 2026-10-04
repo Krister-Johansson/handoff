@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { connect, createServer } from "node:net";
+import { hostname } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -15,7 +16,7 @@ import {
   type LaunchConfiguration,
   type PreviewCommand,
 } from "@handoff/core";
-import { and, eq, inArray, previews, type Db } from "@handoff/db";
+import { and, eq, inArray, liveWorkers, previews, workers, type Db } from "@handoff/db";
 import { commandEnv, shell } from "../contract/checks.ts";
 import type { Workdir } from "../types.ts";
 import { runIdentity } from "../workdir/setup.ts";
@@ -369,8 +370,29 @@ export async function stopRunPreviews(db: Db, runId: string): Promise<void> {
   await Promise.all(rows.map((r) => stopPreview(db, r.id)));
 }
 
-/** Stops the previews a worker left running, when it starts again: nothing would stop them otherwise. */
+/** Stops the previews started under one worker id. */
 export async function stopWorkerPreviews(db: Db, workerId: string): Promise<void> {
   const rows = await db.select({ id: previews.id }).from(previews).where(and(eq(previews.workerId, workerId), inArray(previews.status, ["starting", "running"])));
   await Promise.all(rows.map((r) => stopPreview(db, r.id)));
+}
+
+/** A worker that has not heartbeated for this long is taken as gone, as the dashboard takes it. */
+export const LIVE_WORKER_WINDOW_MS = 60_000;
+
+/**
+ * Stops the previews that worker processes on this host left running, when a worker starts: nothing
+ * would stop them otherwise. That is its own id's previews, from the process before it, and those of
+ * any worker that is no longer live (stopped, or silent past the window), whatever its id: the default
+ * id holds the pid and changes with every restart. A live worker's previews are left alone, and so are
+ * those of workers on other hosts, whose pids mean nothing here.
+ */
+export async function stopLeftPreviews(db: Db, opts: { workerId: string; windowMs?: number; host?: string }): Promise<void> {
+  const live = new Set((await liveWorkers(db, opts.windowMs ?? LIVE_WORKER_WINDOW_MS)).map((w) => w.id));
+  const rows = await db
+    .select({ id: previews.id, workerId: previews.workerId })
+    .from(previews)
+    .innerJoin(workers, eq(workers.id, previews.workerId))
+    .where(and(eq(workers.hostname, opts.host ?? hostname()), inArray(previews.status, ["starting", "running"])));
+  const left = rows.filter((r) => r.workerId === opts.workerId || !live.has(r.workerId));
+  await Promise.all(left.map((r) => stopPreview(db, r.id)));
 }

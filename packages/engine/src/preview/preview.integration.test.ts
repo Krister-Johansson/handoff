@@ -1,14 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, expect, test } from "vitest";
 import { SETTING_CONFIGURATION, type LaunchConfiguration } from "@handoff/core";
-import { eq, previews } from "@handoff/db";
+import { eq, previews, registerWorker, sql, stopWorker, workers } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
 import { cancelRun } from "../operations.ts";
-import { ensureServices, PreviewError, startPreview, stopPreview, stopWorkerPreviews } from "./preview.ts";
+import { ensureServices, PreviewError, startPreview, stopLeftPreviews, stopPreview } from "./preview.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -45,13 +45,13 @@ function worktree(files: Record<string, string>) {
 const launch = (config: Record<string, unknown>) => JSON.stringify({ version: "0.0.1", configurations: [{ name: "web", runtimeExecutable: "node", ...config }] });
 const server = `require("node:http").createServer((_, res) => res.end("hello from " + process.env.PORT)).listen(Number(process.env.PORT));`;
 
-async function start(files: Record<string, string>, opts: { readyTimeoutMs?: number; launch?: LaunchConfiguration | null } = {}) {
+async function start(files: Record<string, string>, opts: { readyTimeoutMs?: number; launch?: LaunchConfiguration | null; workerId?: string } = {}) {
   const { run, project } = await seedRun(db);
   const workdir = worktree(files);
   return {
     run,
     workdir,
-    preview: () => startPreview({ db, workerId: "w1" }, { runId: run.id, projectId: project.id, workdir, readyTimeoutMs: opts.readyTimeoutMs ?? 10_000, launch: opts.launch ?? null }),
+    preview: () => startPreview({ db, workerId: opts.workerId ?? "w1" }, { runId: run.id, projectId: project.id, workdir, readyTimeoutMs: opts.readyTimeoutMs ?? 10_000, launch: opts.launch ?? null }),
   };
 }
 
@@ -134,13 +134,64 @@ test("an App launch setting whose app never listens says to turn off Any free po
   expect((error as Error).message).not.toMatch(/launch\.json/);
 });
 
-test("a worker stops the previews it left running when it starts again", async () => {
-  const { preview } = await start({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": server });
+/** A running app that worker `workerId` started. */
+async function previewOf(workerId: string) {
+  const { preview } = await start({ ".claude/launch.json": launch({ runtimeArgs: ["app.js"] }), "app.js": server }, { workerId });
   const row = await preview();
   started.push(row.pid!);
-  await stopWorkerPreviews(db, "w1");
+  return row;
+}
+
+const statusOf = async (id: string) => (await db.select({ status: previews.status }).from(previews).where(eq(previews.id, id)))[0]!.status;
+
+test("a worker stops the previews it left running when it starts again", async () => {
+  await registerWorker(db, { id: "w1", hostname: hostname(), caps: {} });
+  const row = await previewOf("w1");
+  await stopLeftPreviews(db, { workerId: "w1" });
   await expect.poll(() => alive(row.pid!)).toBe(false);
-  expect((await db.select().from(previews))[0]!.status).toBe("stopped");
+  expect(await statusOf(row.id)).toBe("stopped");
+});
+
+test("a starting worker stops the previews of workers that are no longer live, whatever their id", async () => {
+  // One stopped cleanly, one crashed and stopped heartbeating; both had the default id, which changes with the pid.
+  await registerWorker(db, { id: `${hostname()}:111`, hostname: hostname(), caps: {} });
+  await stopWorker(db, `${hostname()}:111`);
+  await registerWorker(db, { id: `${hostname()}:222`, hostname: hostname(), caps: {} });
+  await db.update(workers).set({ heartbeatAt: sql`now() - interval '5 minutes'` }).where(eq(workers.id, `${hostname()}:222`));
+  const stopped = await previewOf(`${hostname()}:111`);
+  const crashed = await previewOf(`${hostname()}:222`);
+  await registerWorker(db, { id: `${hostname()}:333`, hostname: hostname(), caps: {} });
+
+  await stopLeftPreviews(db, { workerId: `${hostname()}:333` });
+
+  await expect.poll(() => alive(stopped.pid!)).toBe(false);
+  await expect.poll(() => alive(crashed.pid!)).toBe(false);
+  expect(await statusOf(stopped.id)).toBe("stopped");
+  expect(await statusOf(crashed.id)).toBe("stopped");
+});
+
+test("it leaves a live worker's previews alone", async () => {
+  await registerWorker(db, { id: "live", hostname: hostname(), caps: {} });
+  const row = await previewOf("live");
+  await registerWorker(db, { id: "starting", hostname: hostname(), caps: {} });
+
+  await stopLeftPreviews(db, { workerId: "starting" });
+
+  expect(alive(row.pid!)).toBe(true);
+  expect(await statusOf(row.id)).toBe("running");
+  expect(await (await fetch(`http://127.0.0.1:${row.port}`)).text()).toBe(`hello from ${row.port}`);
+});
+
+test("it leaves the previews of a dead worker on another host alone: their pids are not this host's", async () => {
+  await registerWorker(db, { id: "elsewhere", hostname: "another-host", caps: {} });
+  await stopWorker(db, "elsewhere");
+  const row = await previewOf("elsewhere");
+  await registerWorker(db, { id: "starting", hostname: hostname(), caps: {} });
+
+  await stopLeftPreviews(db, { workerId: "starting" });
+
+  expect(alive(row.pid!)).toBe(true);
+  expect(await statusOf(row.id)).toBe("running");
 });
 
 test("a repository with a compose file gets its services started once per project, kept if already up", async () => {

@@ -8,7 +8,7 @@ import { brief, redactSecrets, runPath, RunStateSchema, type RunState } from "@h
 import { overlapKey } from "../backlog-scheduler/nudge.ts";
 import { overlapWith } from "../backlog-scheduler/overlap.ts";
 import { notifyFrom } from "../notify.ts";
-import { stopWorkerPreviews } from "../preview/preview.ts";
+import { stopLeftPreviews } from "../preview/preview.ts";
 import {
   appendEvents,
   claimNext,
@@ -144,8 +144,8 @@ export function startWorker(deps: EngineDeps, opts: { pollIntervalMs?: number; m
       return [];
     });
     if (orphans.length) deps.log?.(`stopped ${orphans.length} orphaned claude processes`);
-    // Apps this worker started for people to try, before it stopped: nothing else would end them.
-    await stopWorkerPreviews(deps.db, deps.workerId).catch((error) => deps.log?.("preview cleanup failed", String(error)));
+    // Apps that worker processes before this one started for people to try: nothing else would end them.
+    await stopLeftPreviews(deps.db, { workerId: deps.workerId }).catch((error) => deps.log?.("preview cleanup failed", String(error)));
     while (!stopping) {
       if (inFlight.size < maxInFlight) {
         try {

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { hostname } from "node:os";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { eq, liveWorkers, nodeExecutions, previews, runs } from "@handoff/db";
+import { eq, liveWorkers, nodeExecutions, previews, registerWorker, runs, stopWorker } from "@handoff/db";
 import { createTestDb, seedRun, truncateAll } from "@handoff/db/testing";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { schedulerOn } from "../testing/scheduler.ts";
@@ -68,6 +68,21 @@ test("a worker that starts again stops the previews it left running", async () =
     .values({ runId: run.id, configuration: "web", workerId: "lifecycle-worker", status: "running", pid: app.pid!, port: 41000, url: "http://localhost:41000", logPath: "/tmp/x.log" })
     .returning();
   const handle = startWorker(engineDeps(db, {}, { workerId: "lifecycle-worker" }), { pollIntervalMs: 20, heartbeatMs: 20 });
+  await expect.poll(async () => (await db.select({ status: previews.status }).from(previews).where(eq(previews.id, row!.id)))[0]!.status).toBe("stopped");
+  await handle.stop();
+  expect(alive(app.pid!)).toBe(false);
+});
+
+test("a worker that starts with a new id stops the previews its previous process left", async () => {
+  const { run } = await seedRun(db);
+  await registerWorker(db, { id: `${hostname()}:1`, hostname: hostname(), caps: {} });
+  await stopWorker(db, `${hostname()}:1`);
+  const app = spawn("sleep", ["30"], { detached: true, stdio: "ignore" });
+  const [row] = await db
+    .insert(previews)
+    .values({ runId: run.id, configuration: "web", workerId: `${hostname()}:1`, status: "running", pid: app.pid!, port: 41000, url: "http://localhost:41000", logPath: "/tmp/x.log" })
+    .returning();
+  const handle = startWorker(engineDeps(db, {}, { workerId: `${hostname()}:2` }), { pollIntervalMs: 20, heartbeatMs: 20 });
   await expect.poll(async () => (await db.select({ status: previews.status }).from(previews).where(eq(previews.id, row!.id)))[0]!.status).toBe("stopped");
   await handle.stop();
   expect(alive(app.pid!)).toBe(false);
