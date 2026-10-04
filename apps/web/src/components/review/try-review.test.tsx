@@ -159,6 +159,25 @@ test("the app link updates when the app is started again", async () => {
   expect(screen.getByText("port 41007 is taken")).toBeInTheDocument();
 });
 
+test("a Docker app says which container runs it and that only this machine reaches it", () => {
+  render(<TryReview {...props} preview={{ ...running, container: "handoff-preview-5e6f7a8b" }} />);
+  const app = section("The app");
+  expect(app).toHaveTextContent("Runs in Docker container handoff-preview-5e6f7a8b, reachable from this machine only.");
+  // A started again app names its new container; an app on the host names none.
+  const stream = FakeEventSource.instances.at(-1)!;
+  act(() =>
+    stream.emit({ seq: 41, type: "preview.started", payload: { id: "p2", url: "http://localhost:41007", container: "handoff-preview-9c0d1e2f" }, nodeExecutionId: "gate-1", createdAt: "2026-10-03T10:00:01Z" }),
+  );
+  expect(app).toHaveTextContent("Runs in Docker container handoff-preview-9c0d1e2f, reachable from this machine only.");
+  act(() => stream.emit({ seq: 42, type: "preview.started", payload: { id: "p3", url: "http://localhost:41008" }, nodeExecutionId: "gate-1", createdAt: "2026-10-03T10:00:02Z" }));
+  expect(app).not.toHaveTextContent("Docker container");
+});
+
+test("an app on the host names no container", () => {
+  render(<TryReview {...props} />);
+  expect(section("The app")).not.toHaveTextContent("Docker container");
+});
+
 test("an answered Try it does not follow the run's events", () => {
   FakeEventSource.instances = [];
   render(<TryReview {...props} answered={{ option: "approve", comments: [] }} />);

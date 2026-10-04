@@ -1,6 +1,8 @@
 import { commandLine, criteriaInIssue, demoConfiguration, LAUNCH_FILE, LaunchConfigurationSchema, parseLaunchFile } from "@handoff/core";
 import { and, desc, eq, graphs, gt, liveWorkers, projects, sql, webhookDeliveries, type Db } from "@handoff/db";
 import type { GitHubPort, ProjectsPort } from "@handoff/github";
+import { engineWarning, type DockerMode } from "@/lib/app-launch";
+import { dockerMode } from "./app-launch";
 import { projectsAccessProblem, SCOPE_FIX } from "./plan";
 
 /** ok: in place. todo: missing, with how to fix it. info: worth knowing, not needed. */
@@ -14,24 +16,32 @@ const check = (c: ReadinessCheck) => c;
 
 /**
  * Whether handoff can start the app for Demo and Try it: the launch file on the default branch, else the
- * project's App launch setting.
+ * project's App launch setting. In Docker workspace mode the app runs in its own container, so it must
+ * listen on 0.0.0.0, and a Docker Engine before 28 gets the warning App launch shows.
  */
-function launchCheck(text: string | undefined, setting: unknown): ReadinessCheck {
+export function launchCheck(text: string | undefined, setting: unknown, docker: DockerMode | null): ReadinessCheck {
   const base = { id: "launch", title: "The app starts", required: false };
   const fix =
     `Set the command in Project settings, App launch, or add ${LAUNCH_FILE} with one configuration (name, runtimeExecutable, runtimeArgs, port). ` +
-    "Make the dev server listen on the PORT environment variable, since handoff gives each run's app a free port. Put local, non-secret environment values such as a local database URL in its env. " +
+    "Make the dev server listen on the PORT environment variable, since handoff gives each run's app a free port. " +
+    (docker ? "In Docker workspaces the app runs in its own container and must listen on 0.0.0.0, for example with the dev server's host option. " : "") +
+    "Put local, non-secret environment values such as a local database URL in its env. " +
     "Without either, Demo and Try it steps cannot start the app.";
+  const warning = docker ? engineWarning(docker.engine) : undefined;
+  const ok = (detail: string) => check({ ...base, status: "ok", detail: warning ? `${detail} ${warning}` : detail });
+  const container = " It runs in its own container; it must listen on 0.0.0.0.";
   if (text === undefined) {
     const saved = LaunchConfigurationSchema.safeParse(setting);
-    if (setting && saved.success) return check({ ...base, status: "ok", detail: `No ${LAUNCH_FILE}; the project's App launch setting starts \`${commandLine(saved.data)}\`.` });
+    if (setting && saved.success) return ok(`No ${LAUNCH_FILE}; the project's App launch setting starts \`${commandLine(saved.data)}\`.${docker ? container : ""}`);
     return check({ ...base, status: "todo", detail: `No ${LAUNCH_FILE} on the default branch and no App launch setting.`, fix });
   }
   try {
     const launch = parseLaunchFile(text);
     const first = demoConfiguration(launch);
-    const portNote = first.autoPort === false ? ` It must have port ${first.port} (autoPort is false), so two runs cannot preview at once.` : " The app gets a free port in PORT.";
-    return check({ ...base, status: "ok", detail: `Starts configuration ${first.name} with ${first.runtimeExecutable ?? `node ${first.program}`}.${portNote}` });
+    let portNote: string;
+    if (first.autoPort === false) portNote = ` It must have port ${first.port} (autoPort is false), so two runs cannot preview at once.${docker ? container : ""}`;
+    else portNote = docker ? " The app gets a free port in PORT and runs in its own container; it must listen on 0.0.0.0." : " The app gets a free port in PORT.";
+    return ok(`Starts configuration ${first.name} with ${first.runtimeExecutable ?? `node ${first.program}`}.${portNote}`);
   } catch (error) {
     return check({ ...base, status: "todo", detail: (error as Error).message, fix });
   }
@@ -119,12 +129,12 @@ async function planCheck(plan: ProjectsPort | undefined, project: { repoOwner: s
  * The graph and a running worker are required; the rest makes runs better (an app the Demo and Try it
  * steps can start, CI the PR node waits for, criteria to check against, dependencies that order runs).
  */
-export async function projectReadiness(db: Db, github: GitHubPort | undefined, projectId: string, plan?: ProjectsPort) {
+export async function projectReadiness(db: Db, github: GitHubPort | undefined, projectId: string, plan?: ProjectsPort, docker: () => Promise<DockerMode | null> = () => dockerMode()) {
   const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
   if (!project) throw new Error(`no project ${projectId}`);
   const repo = { owner: project.repoOwner, name: project.repoName };
   const dayAgo = sql`now() - interval '1 day'`;
-  const [graphRows, workers, delivery, claudeMd, launch, ci, issues, planned] = await Promise.all([
+  const [graphRows, workers, delivery, claudeMd, launch, ci, issues, planned, workspace] = await Promise.all([
     db.select({ name: graphs.name }).from(graphs).where(eq(graphs.projectId, project.id)),
     liveWorkers(db, WORKER_WINDOW_MS),
     project.repoId === null
@@ -140,6 +150,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
     github?.expectsChecks(repo, project.defaultBranch).catch(() => false),
     github?.listIssues(repo).catch(() => []) ?? Promise.resolve([]),
     planCheck(plan, project),
+    docker(),
   ]);
   const lockfile = project.setupCommand || !github ? undefined : await lockfileOf(github, repo, project.defaultBranch);
 
@@ -168,7 +179,7 @@ export async function projectReadiness(db: Db, github: GitHubPort | undefined, p
           detail: "No CLAUDE.md on the default branch.",
           fix: "Add a CLAUDE.md with the commands to install, test, lint and run the app, the code layout and the conventions to follow. Every agent step reads it.",
         }),
-    launchCheck(launch, project.launch),
+    launchCheck(launch, project.launch, workspace),
     ci
       ? check({ id: "ci", title: "CI on pull requests", required: false, status: "ok", detail: "The PR node waits for the repository's checks." })
       : check({
