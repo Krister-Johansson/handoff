@@ -38,12 +38,20 @@ fragment PlanEstimateFields on ProjectV2 {
   }
 }
 
-query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
-  user(login: $login) {
-    id
-  }
+# The repository and its owner, a user or an organization, under whom setup creates the plan's Project.
+query PlanOwnerIds($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     id
+    owner {
+      __typename
+      id
+      ... on User {
+        viewerCanCreateProjects
+      }
+      ... on Organization {
+        viewerCanCreateProjects
+      }
+    }
   }
 }
 
@@ -78,49 +86,62 @@ fragment PlanProjectChoice on ProjectV2 {
   }
 }
 
+# The Project reads below take the repository owner's login, a user's or an organization's, and read
+# either owner's Projects in one request; __typename says which owns them.
+
+# Only Projects the token can write: an organization may have many that setup could not use.
 query PlanProjects($login: String!) {
-  user(login: $login) {
-    projectsV2(first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
-      nodes {
-        ...PlanProjectChoice
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectsV2(first: 100, minPermissionLevel: WRITE, orderBy: { field: UPDATED_AT, direction: DESC }) {
+        nodes {
+          ...PlanProjectChoice
+        }
       }
     }
   }
 }
 
 query PlanProjectSetup($login: String!, $number: Int!) {
-  user(login: $login) {
-    projectV2(number: $number) {
-      ...PlanProjectChoice
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        ...PlanProjectChoice
+      }
     }
   }
 }
 
 query PlanProject($login: String!, $number: Int!) {
-  user(login: $login) {
-    projectV2(number: $number) {
-      id
-      number
-      url
-      title
-      ...PlanDateFields
-      ...PlanEstimateFields
-      field(name: "Status") {
-        __typename
-        ... on ProjectV2SingleSelectField {
-          id
-          options {
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        id
+        number
+        url
+        title
+        ...PlanDateFields
+        ...PlanEstimateFields
+        field(name: "Status") {
+          __typename
+          ... on ProjectV2SingleSelectField {
             id
-            name
+            options {
+              id
+              name
+            }
           }
         }
-      }
-      # A Project without a Priority field answers with a NOT_FOUND error for this lookup, next to complete data.
-      priority: field(name: "Priority") {
-        __typename
-        ... on ProjectV2SingleSelectField {
-          options {
-            name
+        # A Project without a Priority field answers with a NOT_FOUND error for this lookup, next to complete data.
+        priority: field(name: "Priority") {
+          __typename
+          ... on ProjectV2SingleSelectField {
+            options {
+              name
+            }
           }
         }
       }

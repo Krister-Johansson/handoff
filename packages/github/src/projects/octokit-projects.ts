@@ -80,7 +80,10 @@ function byMutationCount<T extends { writes: unknown[] }>(items: T[], max: numbe
   return chunks;
 }
 
-type GqlItem = NonNullable<NonNullable<NonNullable<PlanItemsQuery["user"]>["projectV2"]>["items"]["nodes"]>[number];
+type GqlItem = NonNullable<NonNullable<NonNullable<PlanItemsQuery["repositoryOwner"]>["projectV2"]>["items"]["nodes"]>[number];
+type ProjectNode = NonNullable<NonNullable<PlanProjectQuery["repositoryOwner"]>["projectV2"]>;
+/** Whether a user or an organization owns a Project, as GitHub names the owner's type. */
+type OwnerType = NonNullable<PlanProject["owner"]>;
 
 /** ProjectsPort over Octokit with a classic personal token: GitHub Apps cannot reach user-owned Projects. */
 export class OctokitProjects implements ProjectsPort {
@@ -109,12 +112,13 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async getProject(login: string, number: number): Promise<PlanProject | undefined> {
-    const project = await this.projectNode(login, number);
+    const { owner, project } = await this.projectNode(login, number);
     if (!project) return undefined;
     return {
       number: project.number,
       url: project.url,
       title: project.title,
+      owner,
       statusOptions: optionIds(statusField(project.field)),
       dateFields: dateFieldIds(project),
       priorityOptions: project.priority?.__typename === "ProjectV2SingleSelectField" ? project.priority.options.map((o) => o.name) : undefined,
@@ -140,7 +144,7 @@ export class OctokitProjects implements ProjectsPort {
   async listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]> {
     const data = await this.octokit.graphql.paginate<PlanItemsQuery>(PlanItemsDocument.toString(), { login, number });
     // GitHub returns items by POSITION, so an item's index across the merged pages is its place in the Project.
-    return present<NonNullable<GqlItem>>(data.user?.projectV2?.items.nodes).flatMap((item, index) => toPlanItem(item, repo, index + 1));
+    return present<NonNullable<GqlItem>>(data.repositoryOwner?.projectV2?.items.nodes).flatMap((item, index) => toPlanItem(item, repo, index + 1));
   }
 
   async setStatus(repo: RepoRef, project: number, issue: number, status: PlanStatus, opts: { add?: boolean } = {}): Promise<SetStatusResult> {
@@ -149,7 +153,7 @@ export class OctokitProjects implements ProjectsPort {
       ? { projectId: plan.item.project.id, itemId: plan.item.id, field: plan.item.project.field }
       : undefined;
     if (!target && opts.add) {
-      const found = await this.projectNode(repo.owner, project);
+      const { project: found } = await this.projectNode(repo.owner, project);
       if (found) {
         const added = await this.octokit.graphql<AddPlanItemMutation>(AddPlanItemDocument.toString(), { projectId: found.id, contentId: plan.issue.id });
         const itemId = added.addProjectV2ItemById?.item?.id;
@@ -166,7 +170,7 @@ export class OctokitProjects implements ProjectsPort {
 
   async listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]> {
     const data = await this.withOptionalFields<PlanProjectsQuery>(PlanProjectsDocument.toString(), { login });
-    const choices = present(data.user?.projectsV2.nodes)
+    const choices = present(data.repositoryOwner?.projectsV2.nodes)
       .filter((p) => !p.closed)
       .map((p) => {
         const options = optionIds(choiceStatusField(p));
@@ -177,9 +181,10 @@ export class OctokitProjects implements ProjectsPort {
 
   async adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject> {
     const data = await this.withOptionalFields<PlanProjectSetupQuery>(PlanProjectSetupDocument.toString(), { login, number });
-    const project = data.user?.projectV2;
+    const owner = data.repositoryOwner?.__typename;
+    const project = data.repositoryOwner?.projectV2;
     const field = project ? choiceStatusField(project) : undefined;
-    if (!project || !field) throw new Error(`GitHub Project #${number} of ${login} does not exist or has no Status field`);
+    if (!project || !field) throw new Error(`GitHub Project #${number} of ${ownerName(login, owner)} does not exist or has no Status field`);
     const { options, renamed, added } = adoptedOptions(field.options);
     let ids = optionIds(field);
     if (renamed.length || added.length) {
@@ -187,17 +192,18 @@ export class OctokitProjects implements ProjectsPort {
       ids = optionIds(statusField(updated.updateProjectV2Field?.projectV2Field));
     }
     if (!isLinked(project, repo)) {
-      const owner = await this.octokit.graphql<PlanOwnerIdsQuery>(PlanOwnerIdsDocument.toString(), { login, owner: repo.owner, name: repo.name });
-      if (!owner.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
-      await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: owner.repository.id });
+      const repository = await this.repositoryWithOwner(repo);
+      await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: repository.id });
     }
-    return { project: { number: project.number, url: project.url, title: project.title, statusOptions: ids, dateFields: dateFieldIds(project) }, renamed, added };
+    return { project: { number: project.number, url: project.url, title: project.title, owner, statusOptions: ids, dateFields: dateFieldIds(project) }, renamed, added };
   }
 
   async createProject(login: string, repo: RepoRef, title: string, opts: { dateFields?: boolean } = {}): Promise<PlanProject> {
-    const ids = await this.octokit.graphql<PlanOwnerIdsQuery>(PlanOwnerIdsDocument.toString(), { login, owner: repo.owner, name: repo.name });
-    if (!ids.user || !ids.repository) throw new Error(`user ${login} or repository ${repo.owner}/${repo.name} not found`);
-    const created = await this.octokit.graphql<CreatePlanProjectMutation>(CreatePlanProjectDocument.toString(), { ownerId: ids.user.id, title });
+    // A repository links only its owner's Projects, so the Project goes to that owner, a user or an organization.
+    const repository = await this.repositoryWithOwner(repo);
+    const { owner } = repository;
+    if (!owner.viewerCanCreateProjects) throw new Error(cannotCreateProjects(login, owner.__typename));
+    const created = await this.octokit.graphql<CreatePlanProjectMutation>(CreatePlanProjectDocument.toString(), { ownerId: owner.id, title });
     const project = created.createProjectV2?.projectV2;
     const field = project?.field?.__typename === "ProjectV2SingleSelectField" ? project.field : undefined;
     if (!project || !field) throw new Error(`creating the Project "${title}" returned no Status field`);
@@ -211,8 +217,8 @@ export class OctokitProjects implements ProjectsPort {
       opts.dateFields === false
         ? { start: undefined, target: undefined }
         : { start: await this.createDateField(project.id, "start"), target: await this.createDateField(project.id, "target") };
-    await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: ids.repository.id });
-    return { number: project.number, url: project.url, title: project.title, statusOptions: optionIds(statusField(updated.updateProjectV2Field?.projectV2Field)), dateFields };
+    await this.octokit.graphql(LinkPlanRepositoryDocument.toString(), { projectId: project.id, repositoryId: repository.id });
+    return { number: project.number, url: project.url, title: project.title, owner: owner.__typename, statusOptions: optionIds(statusField(updated.updateProjectV2Field?.projectV2Field)), dateFields };
   }
 
   async createIssue(
@@ -264,8 +270,8 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds> {
-    const project = await this.projectNode(login, number);
-    if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
+    const { owner, project } = await this.projectNode(login, number);
+    if (!project) throw missingProject(login, number, owner);
     const ids = dateFieldIds(project);
     for (const key of DATE_KEYS) {
       if (project[key] && !ids[key]) {
@@ -277,8 +283,8 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async ensureEstimateFields(login: string, number: number, opts: { estimate?: boolean } = {}): Promise<PlanEstimateFieldIds> {
-    const project = await this.projectNode(login, number);
-    if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
+    const { owner, project } = await this.projectNode(login, number);
+    if (!project) throw missingProject(login, number, owner);
     const ids = estimateFieldIds(project);
     // Check both fields first, so a Project with a wrong Estimate does not get a Size either.
     if (project.size && !ids.size) throw new Error(`GitHub Project #${number} has a Size field that is not a single select. Rename it on GitHub, then try again.`);
@@ -358,7 +364,7 @@ export class OctokitProjects implements ProjectsPort {
   }
 
   async setManyPlanFields(repo: RepoRef, project: number, changes: PlanFieldsChange[]): Promise<{ issue: number; result: SetFieldsResult }[]> {
-    const node = await this.projectNode(repo.owner, project);
+    const { project: node } = await this.projectNode(repo.owner, project);
     const itemIds = node ? await this.itemIdsOf(repo, node.id, changes.map((c) => c.issue)) : new Map<number, string>();
     const ids = node ? { dates: dateFieldIds(node), estimates: estimateFieldIds(node) } : undefined;
     const checked = changes.map(({ issue, fields }) => {
@@ -386,8 +392,8 @@ export class OctokitProjects implements ProjectsPort {
 
   async moveItems(login: string, number: number, moves: ItemMove[]): Promise<void> {
     if (moves.length === 0) return;
-    const project = await this.projectNode(login, number);
-    if (!project) throw new Error(`GitHub Project #${number} of ${login} does not exist or GITHUB_TOKEN cannot see it.`);
+    const { owner, project } = await this.projectNode(login, number);
+    if (!project) throw missingProject(login, number, owner);
     let moved = 0;
     for (let at = 0; at < moves.length; at += MUTATIONS_PER_REQUEST) {
       const chunk = moves.slice(at, at + MUTATIONS_PER_REQUEST);
@@ -459,15 +465,26 @@ export class OctokitProjects implements ProjectsPort {
     }
   }
 
-  /** A user's Project with its Status, date and Priority fields, or undefined when there is none the token can see. */
-  private async projectNode(login: string, number: number) {
+  /**
+   * The Project `number` of the repository owner `login`, a user or an organization, with its Status, date and
+   * Priority fields; `project` is undefined when there is none the token can see. `owner` is the owner's type
+   * whenever GitHub knows the login, also next to a Project number it cannot resolve.
+   */
+  private async projectNode(login: string, number: number): Promise<{ owner: OwnerType | undefined; project: ProjectNode | undefined }> {
     try {
       const data = await this.withOptionalFields<PlanProjectQuery>(PlanProjectDocument.toString(), { login, number });
-      return data.user?.projectV2 ?? undefined;
+      return { owner: data.repositoryOwner?.__typename, project: data.repositoryOwner?.projectV2 ?? undefined };
     } catch (error) {
-      if (isNotFound(error)) return undefined;
+      if (isNotFound(error)) return { owner: (error as { data?: PlanProjectQuery | null }).data?.repositoryOwner?.__typename, project: undefined };
       throw error;
     }
+  }
+
+  /** The repository's node id and its owner's, with the owner's type and whether the token's user can create Projects there. */
+  private async repositoryWithOwner(repo: RepoRef) {
+    const data = await this.octokit.graphql<PlanOwnerIdsQuery>(PlanOwnerIdsDocument.toString(), { owner: repo.owner, name: repo.name });
+    if (!data.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
+    return data.repository;
   }
 
   /** The issue and its item in the repository owner's Project `project`, if it is one. */
@@ -479,6 +496,20 @@ export class OctokitProjects implements ProjectsPort {
     const item = present(issue.projectItems?.nodes).find((i) => i.project.number === project && i.project.owner.id === repository.owner.id);
     return { issue, item };
   }
+}
+
+/** The owner of a Project in a sentence: "the organization acme" for an organization, the login alone for a user or an owner GitHub did not name. */
+const ownerName = (login: string, owner: OwnerType | undefined) => (owner === "Organization" ? `the organization ${login}` : login);
+
+/** The error for a Project number the owner does not have or the token cannot see. */
+const missingProject = (login: string, number: number, owner: OwnerType | undefined) =>
+  new Error(`GitHub Project #${number} of ${ownerName(login, owner)} does not exist or GITHUB_TOKEN cannot see it.`);
+
+/** Why setup cannot create the plan's Project: GitHub says the token's user cannot create Projects for this owner. */
+function cannotCreateProjects(login: string, owner: OwnerType): string {
+  return owner === "Organization"
+    ? `Your GitHub account cannot create Projects in ${login}. An organization owner can let members create Projects, or create one and run setup_plan with use.`
+    : `Your GitHub account cannot create Projects for ${login}. Create one as ${login}, then run setup_plan with use.`;
 }
 
 type ChoiceOption = { id: string; name: string; color: ProjectV2SingleSelectFieldOptionInput["color"]; description: string };

@@ -150,6 +150,45 @@ test("FakeProjects creates a Project without date fields and only the Size field
   expect((await projects.getProject("octo", project.number))?.estimateFields?.estimate).toBeUndefined();
 });
 
+test("an organization's Project is found by the organization's login, and listItems reads issue types", async () => {
+  const github = new FakeGitHub();
+  const projects = new FakeProjects(github);
+  const web = { owner: "acme", name: "web" };
+  projects.owners.set("acme", "Organization");
+
+  const project = await projects.createProject("acme", web, "web plan");
+  expect(project).toMatchObject({ owner: "Organization", url: `https://github.com/orgs/acme/projects/${project.number}` });
+  expect(await projects.getProject("acme", project.number)).toMatchObject({ number: project.number, owner: "Organization" });
+  // The organization's Project is not a Project of a user who happens to share the number.
+  expect(await projects.getProject("octo", project.number)).toBeUndefined();
+  expect((await projects.listProjects("acme", web)).map((p) => [p.number, p.linked])).toEqual([[project.number, true]]);
+
+  const epic = await projects.createIssue(web, { project: project.number, title: "Billing", body: "", labels: [] });
+  const story = await projects.createIssue(web, { project: project.number, title: "Invoices", body: "", labels: ["story"], parent: epic.number });
+  // GitHub's issue types in the organization: a Task without a kind label, and a Task labelled story.
+  projects.issueTypes.set(epic.number, "Task");
+  projects.issueTypes.set(story.number, "Task");
+  const bug = await projects.createIssue(web, { project: project.number, title: "Crash", body: "", labels: [], parent: story.number });
+  projects.issueTypes.set(bug.number, "Bug");
+
+  expect((await projects.listItems("acme", project.number, web)).map((i) => [i.number, i.kind])).toEqual([
+    [epic.number, "task"],
+    [story.number, "story"],
+    [bug.number, "task"],
+  ]);
+
+  // A user's Project says a user owns it.
+  expect(await projects.createProject("octo", repo, "sample plan")).toMatchObject({ owner: "User", url: expect.stringContaining("/users/octo/") });
+});
+
+test("FakeProjects refuses to create a Project where the account cannot create one", async () => {
+  const projects = new FakeProjects(new FakeGitHub());
+  projects.owners.set("acme", "Organization");
+  projects.canCreateProjects.set("acme", false);
+  await expect(projects.createProject("acme", { owner: "acme", name: "web" }, "web plan")).rejects.toThrow("Your GitHub account cannot create Projects in acme.");
+  expect(projects.plans.size).toBe(0);
+});
+
 test("moveItems reorders listItems", async () => {
   const projects = new FakeProjects(new FakeGitHub());
   const project = await projects.createProject("octo", repo, "sample plan");

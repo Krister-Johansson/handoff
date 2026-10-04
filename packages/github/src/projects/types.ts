@@ -63,6 +63,8 @@ export type PlanProject = {
   number: number;
   url: string;
   title: string;
+  /** Whether a user or an organization owns the Project. Optional like `dateFields`. */
+  owner?: "User" | "Organization" | undefined;
   /** The option id of each Status handoff writes; undefined when the Project has no such option. */
   statusOptions: Record<PlanStatus, string | undefined>;
   /**
@@ -119,18 +121,19 @@ export type SetFieldsResult = "set" | "not-in-project" | "no-field" | "no-option
 /** The fields to write on one issue's item, for setManyPlanFields. */
 export type PlanFieldsChange = { issue: number; fields: PlanFields };
 
-/** One of a user's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
+/** One of the repository owner's Projects, as setup offers it: whether it is linked to the repository and which of handoff's Status options it lacks. */
 export type PlanProjectChoice = { number: number; title: string; url: string; linked: boolean; missingStatusOptions: PlanStatus[] };
 
 /** What adopting a Project changed: Status options renamed to handoff's names and those added. */
 export type AdoptedProject = { project: PlanProject; renamed: { from: string; to: PlanStatus }[]; added: PlanStatus[] };
 
 /**
- * The plan on a user-owned GitHub Project (v2). OctokitProjects in production, FakeProjects in tests.
- * `project` is a Project number of the repository's owner.
+ * The plan on a GitHub Project (v2) owned by the repository's owner, a user or an organization.
+ * OctokitProjects in production, FakeProjects in tests. `login` is the repository owner's login, and
+ * `project` is a Project number of that owner.
  */
 export interface ProjectsPort {
-  /** The Project by number for a user; undefined when it does not exist or the token cannot see it. */
+  /** The owner's Project by number; undefined when it does not exist or the token cannot see it. */
   getProject(login: string, number: number): Promise<PlanProject | undefined>;
   /** Every item that is an issue of `repo`, across pages; draft issues, pull requests and other repositories' issues are skipped. */
   listItems(login: string, number: number, repo: RepoRef): Promise<PlanItem[]>;
@@ -138,17 +141,19 @@ export interface ProjectsPort {
   getStatus(repo: RepoRef, project: number, issue: number): Promise<PlanStatus | undefined>;
   /** Sets Status; adds the issue to the Project first when `add` is true; returns what it did. */
   setStatus(repo: RepoRef, project: number, issue: number, status: PlanStatus, opts?: { add?: boolean }): Promise<SetStatusResult>;
-  /** A user's open Projects, those linked to `repo` first, most recently updated first within each group. */
+  /** The owner's open Projects the token can write, those linked to `repo` first, most recently updated first within each group. */
   listProjects(login: string, repo: RepoRef): Promise<PlanProjectChoice[]>;
   /**
-   * Makes an existing user Project the plan of `repo`: links it to the repository and gives its Status
+   * Makes an existing Project of the owner the plan of `repo`: links it to the repository and gives its Status
    * field handoff's options, renaming an option whose name matches apart from case and decoration
    * (an emoji, extra spaces) and adding the missing ones. Other options stay, so no item loses its value.
    */
   adoptProject(login: string, number: number, repo: RepoRef): Promise<AdoptedProject>;
   /**
-   * Creates a user Project with handoff's Status options, linked to the repository, and the Start and
-   * Target date fields unless `dateFields` is false, as for a project that plans in Flow mode.
+   * Creates a Project under the repository's owner, a user or an organization, with handoff's Status
+   * options, linked to the repository, and the Start and Target date fields unless `dateFields` is false,
+   * as for a project that plans in Flow mode. Throws before creating anything when GitHub says the
+   * token's user cannot create Projects for that owner.
    */
   createProject(login: string, repo: RepoRef, title: string, opts?: { dateFields?: boolean }): Promise<PlanProject>;
   /** Creates the kind labels epic, story and task on the repository when they are missing. */
@@ -171,7 +176,7 @@ export interface ProjectsPort {
    */
   setDates(repo: RepoRef, project: number, issue: number, dates: PlanDates): Promise<SetDatesResult>;
   /**
-   * Creates the Start and Target date fields on a user's Project when missing and returns their ids.
+   * Creates the Start and Target date fields on the owner's Project when missing and returns their ids.
    * Throws when a field of that name exists but is not a date field.
    */
   ensureDateFields(login: string, number: number): Promise<PlanDateFieldIds>;
@@ -190,14 +195,14 @@ export interface ProjectsPort {
    */
   setManyPlanFields(repo: RepoRef, project: number, changes: PlanFieldsChange[]): Promise<{ issue: number; result: SetFieldsResult }[]>;
   /**
-   * Creates the Size single select field with S, M and L and the Estimate number field on a user's
+   * Creates the Size single select field with S, M and L and the Estimate number field on the owner's
    * Project when missing, and adds S, M and L to an existing Size field after its own options, which
    * keep their ids. Returns the ids. Throws when a field of that name exists with another type. With
    * `estimate` false it leaves a missing Estimate field out, as for a project that plans in Flow mode.
    */
   ensureEstimateFields(login: string, number: number, opts?: { estimate?: boolean }): Promise<PlanEstimateFieldIds>;
   /**
-   * Moves items of a user's Project in Project order, one move after another in the order given, 20
+   * Moves items of the owner's Project in Project order, one move after another in the order given, 20
    * moves a request after one read of the Project. Throws naming how many moved when GitHub refuses part
    * way, and sends nothing after the refused request.
    */

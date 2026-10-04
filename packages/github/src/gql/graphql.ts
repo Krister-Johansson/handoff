@@ -272,112 +272,220 @@ export type PlanItemsQueryVariables = Exact<{
 }>;
 
 
-export type PlanItemsQuery = { user: { projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
-            | { __typename: 'ProjectV2ItemFieldDateValue' }
-            | { __typename: 'ProjectV2ItemFieldIterationValue' }
-            | { __typename: 'ProjectV2ItemFieldLabelValue' }
-            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
-            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldNumberValue' }
-            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
-            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
-            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
-            | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
-            | { __typename: 'ProjectV2ItemFieldTextValue' }
-            | { __typename: 'ProjectV2ItemFieldUserValue' }
-            | { __typename: 'ProjectV2ItemIssueFieldValue' }
-           | null, start:
-            | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
-            | { __typename: 'ProjectV2ItemFieldIterationValue' }
-            | { __typename: 'ProjectV2ItemFieldLabelValue' }
-            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
-            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldNumberValue' }
-            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
-            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
-            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
-            | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldTextValue' }
-            | { __typename: 'ProjectV2ItemFieldUserValue' }
-            | { __typename: 'ProjectV2ItemIssueFieldValue' }
-           | null, target:
-            | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
-            | { __typename: 'ProjectV2ItemFieldIterationValue' }
-            | { __typename: 'ProjectV2ItemFieldLabelValue' }
-            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
-            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldNumberValue' }
-            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
-            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
-            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
-            | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldTextValue' }
-            | { __typename: 'ProjectV2ItemFieldUserValue' }
-            | { __typename: 'ProjectV2ItemIssueFieldValue' }
-           | null, priority:
-            | { __typename: 'ProjectV2ItemFieldDateValue' }
-            | { __typename: 'ProjectV2ItemFieldIterationValue' }
-            | { __typename: 'ProjectV2ItemFieldLabelValue' }
-            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
-            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldNumberValue' }
-            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
-            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
-            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
-            | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
-            | { __typename: 'ProjectV2ItemFieldTextValue' }
-            | { __typename: 'ProjectV2ItemFieldUserValue' }
-            | { __typename: 'ProjectV2ItemIssueFieldValue' }
-           | null, size:
-            | { __typename: 'ProjectV2ItemFieldDateValue' }
-            | { __typename: 'ProjectV2ItemFieldIterationValue' }
-            | { __typename: 'ProjectV2ItemFieldLabelValue' }
-            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
-            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldNumberValue' }
-            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
-            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
-            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
-            | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
-            | { __typename: 'ProjectV2ItemFieldTextValue' }
-            | { __typename: 'ProjectV2ItemFieldUserValue' }
-            | { __typename: 'ProjectV2ItemIssueFieldValue' }
-           | null, estimate:
-            | { __typename: 'ProjectV2ItemFieldDateValue' }
-            | { __typename: 'ProjectV2ItemFieldIterationValue' }
-            | { __typename: 'ProjectV2ItemFieldLabelValue' }
-            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
-            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldNumberValue', number: number | null }
-            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
-            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
-            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
-            | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldTextValue' }
-            | { __typename: 'ProjectV2ItemFieldUserValue' }
-            | { __typename: 'ProjectV2ItemIssueFieldValue' }
-           | null, iteration:
-            | { __typename: 'ProjectV2ItemFieldDateValue' }
-            | { __typename: 'ProjectV2ItemFieldIterationValue', title: string, startDate: string, duration: number }
-            | { __typename: 'ProjectV2ItemFieldLabelValue' }
-            | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
-            | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldNumberValue' }
-            | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
-            | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
-            | { __typename: 'ProjectV2ItemFieldReviewerValue' }
-            | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
-            | { __typename: 'ProjectV2ItemFieldTextValue' }
-            | { __typename: 'ProjectV2ItemFieldUserValue' }
-            | { __typename: 'ProjectV2ItemIssueFieldValue' }
-           | null, content:
-            | { __typename: 'DraftIssue' }
-            | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
-                  | { login: string }
-                  | { login: string }
-                 }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
-            | { __typename: 'PullRequest' }
-           | null } | null> | null } } | null } | null };
+export type PlanItemsQuery = { repositoryOwner:
+    | { __typename: 'Organization', projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, start:
+              | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, target:
+              | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, priority:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, size:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, estimate:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue', number: number | null }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, iteration:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue', title: string, startDate: string, duration: number }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, content:
+              | { __typename: 'DraftIssue' }
+              | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
+                    | { login: string }
+                    | { login: string }
+                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
+              | { __typename: 'PullRequest' }
+             | null } | null> | null } } | null }
+    | { __typename: 'User', projectV2: { items: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ id: string, status:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, start:
+              | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, target:
+              | { __typename: 'ProjectV2ItemFieldDateValue', date: string | null }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, priority:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, size:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue', name: string | null }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, estimate:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue' }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue', number: number | null }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, iteration:
+              | { __typename: 'ProjectV2ItemFieldDateValue' }
+              | { __typename: 'ProjectV2ItemFieldIterationValue', title: string, startDate: string, duration: number }
+              | { __typename: 'ProjectV2ItemFieldLabelValue' }
+              | { __typename: 'ProjectV2ItemFieldMilestoneValue' }
+              | { __typename: 'ProjectV2ItemFieldMultiSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldNumberValue' }
+              | { __typename: 'ProjectV2ItemFieldPullRequestValue' }
+              | { __typename: 'ProjectV2ItemFieldRepositoryValue' }
+              | { __typename: 'ProjectV2ItemFieldReviewerValue' }
+              | { __typename: 'ProjectV2ItemFieldSingleSelectValue' }
+              | { __typename: 'ProjectV2ItemFieldTextValue' }
+              | { __typename: 'ProjectV2ItemFieldUserValue' }
+              | { __typename: 'ProjectV2ItemIssueFieldValue' }
+             | null, content:
+              | { __typename: 'DraftIssue' }
+              | { __typename: 'Issue', number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
+                    | { login: string }
+                    | { login: string }
+                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, parent: { number: number, parent: { number: number, parent: { number: number } | null } | null } | null, subIssuesSummary: { total: number, completed: number }, blockedBy: { nodes: Array<{ number: number, state: IssueState } | null> | null }, closedByPullRequestsReferences: { nodes: Array<{ number: number } | null> | null } | null }
+              | { __typename: 'PullRequest' }
+             | null } | null> | null } } | null }
+   | null };
 
 export type CreatePlanProjectMutationVariables = Exact<{
   ownerId: string | number;
@@ -563,13 +671,15 @@ export type PlanEstimateFieldsFragment = { size:
    | null };
 
 export type PlanOwnerIdsQueryVariables = Exact<{
-  login: string;
   owner: string;
   name: string;
 }>;
 
 
-export type PlanOwnerIdsQuery = { user: { id: string } | null, repository: { id: string } | null };
+export type PlanOwnerIdsQuery = { repository: { id: string, owner:
+      | { __typename: 'Organization', viewerCanCreateProjects: boolean, id: string }
+      | { __typename: 'User', viewerCanCreateProjects: boolean, id: string }
+     } | null };
 
 export type PlanProjectChoiceFragment = { id: string, number: number, title: string, url: string, closed: boolean, field:
     | { __typename: 'ProjectV2Field' }
@@ -606,7 +716,75 @@ export type PlanProjectsQueryVariables = Exact<{
 }>;
 
 
-export type PlanProjectsQuery = { user: { projectsV2: { nodes: Array<{ id: string, number: number, title: string, url: string, closed: boolean, field:
+export type PlanProjectsQuery = { repositoryOwner:
+    | { __typename: 'Organization', projectsV2: { nodes: Array<{ id: string, number: number, title: string, url: string, closed: boolean, field:
+            | { __typename: 'ProjectV2Field' }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+           | null, repositories: { nodes: Array<{ id: string, name: string, owner:
+                | { login: string }
+                | { login: string }
+               } | null> | null }, start:
+            | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField' }
+           | null, target:
+            | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField' }
+           | null, size:
+            | { __typename: 'ProjectV2Field' }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+           | null, estimate:
+            | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField' }
+           | null } | null> | null } }
+    | { __typename: 'User', projectsV2: { nodes: Array<{ id: string, number: number, title: string, url: string, closed: boolean, field:
+            | { __typename: 'ProjectV2Field' }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+           | null, repositories: { nodes: Array<{ id: string, name: string, owner:
+                | { login: string }
+                | { login: string }
+               } | null> | null }, start:
+            | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField' }
+           | null, target:
+            | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField' }
+           | null, size:
+            | { __typename: 'ProjectV2Field' }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+           | null, estimate:
+            | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+            | { __typename: 'ProjectV2IterationField' }
+            | { __typename: 'ProjectV2MultiSelectField' }
+            | { __typename: 'ProjectV2SingleSelectField' }
+           | null } | null> | null } }
+   | null };
+
+export type PlanProjectSetupQueryVariables = Exact<{
+  login: string;
+  number: number;
+}>;
+
+
+export type PlanProjectSetupQuery = { repositoryOwner:
+    | { __typename: 'Organization', projectV2: { id: string, number: number, title: string, url: string, closed: boolean, field:
           | { __typename: 'ProjectV2Field' }
           | { __typename: 'ProjectV2IterationField' }
           | { __typename: 'ProjectV2MultiSelectField' }
@@ -634,43 +812,37 @@ export type PlanProjectsQuery = { user: { projectsV2: { nodes: Array<{ id: strin
           | { __typename: 'ProjectV2IterationField' }
           | { __typename: 'ProjectV2MultiSelectField' }
           | { __typename: 'ProjectV2SingleSelectField' }
-         | null } | null> | null } } | null };
-
-export type PlanProjectSetupQueryVariables = Exact<{
-  login: string;
-  number: number;
-}>;
-
-
-export type PlanProjectSetupQuery = { user: { projectV2: { id: string, number: number, title: string, url: string, closed: boolean, field:
-        | { __typename: 'ProjectV2Field' }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
-       | null, repositories: { nodes: Array<{ id: string, name: string, owner:
-            | { login: string }
-            | { login: string }
-           } | null> | null }, start:
-        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField' }
-       | null, target:
-        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField' }
-       | null, size:
-        | { __typename: 'ProjectV2Field' }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
-       | null, estimate:
-        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField' }
-       | null } | null } | null };
+         | null } | null }
+    | { __typename: 'User', projectV2: { id: string, number: number, title: string, url: string, closed: boolean, field:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+         | null, repositories: { nodes: Array<{ id: string, name: string, owner:
+              | { login: string }
+              | { login: string }
+             } | null> | null }, start:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null, target:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null, size:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+         | null, estimate:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null } | null }
+   | null };
 
 export type PlanProjectQueryVariables = Exact<{
   login: string;
@@ -678,37 +850,70 @@ export type PlanProjectQueryVariables = Exact<{
 }>;
 
 
-export type PlanProjectQuery = { user: { projectV2: { id: string, number: number, url: string, title: string, field:
-        | { __typename: 'ProjectV2Field' }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
-       | null, priority:
-        | { __typename: 'ProjectV2Field' }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField', options: Array<{ name: string }> }
-       | null, start:
-        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField' }
-       | null, target:
-        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField' }
-       | null, size:
-        | { __typename: 'ProjectV2Field' }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
-       | null, estimate:
-        | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
-        | { __typename: 'ProjectV2IterationField' }
-        | { __typename: 'ProjectV2MultiSelectField' }
-        | { __typename: 'ProjectV2SingleSelectField' }
-       | null } | null } | null };
+export type PlanProjectQuery = { repositoryOwner:
+    | { __typename: 'Organization', projectV2: { id: string, number: number, url: string, title: string, field:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+         | null, priority:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', options: Array<{ name: string }> }
+         | null, start:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null, target:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null, size:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+         | null, estimate:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null } | null }
+    | { __typename: 'User', projectV2: { id: string, number: number, url: string, title: string, field:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string }> }
+         | null, priority:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', options: Array<{ name: string }> }
+         | null, start:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null, target:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null, size:
+          | { __typename: 'ProjectV2Field' }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField', id: string, options: Array<{ id: string, name: string, color: ProjectV2SingleSelectFieldOptionColor, description: string }> }
+         | null, estimate:
+          | { __typename: 'ProjectV2Field', id: string, dataType: ProjectV2FieldType }
+          | { __typename: 'ProjectV2IterationField' }
+          | { __typename: 'ProjectV2MultiSelectField' }
+          | { __typename: 'ProjectV2SingleSelectField' }
+         | null } | null }
+   | null };
 
 export type PullRequestSnapshotQueryVariables = Exact<{
   owner: string;
@@ -1102,109 +1307,112 @@ fragment PlanEstimateFields on ProjectV2 {
 }`) as unknown as TypedDocumentString<IssuePlanQuery, IssuePlanQueryVariables>;
 export const PlanItemsDocument = new TypedDocumentString(`
     query PlanItems($login: String!, $number: Int!, $cursor: String) {
-  user(login: $login) {
-    projectV2(number: $number) {
-      items(first: 100, after: $cursor) {
-        pageInfo {
-          hasNextPage
-          endCursor
-        }
-        nodes {
-          id
-          status: fieldValueByName(name: "Status") {
-            __typename
-            ... on ProjectV2ItemFieldSingleSelectValue {
-              name
-            }
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        items(first: 100, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
           }
-          start: fieldValueByName(name: "Start") {
-            __typename
-            ... on ProjectV2ItemFieldDateValue {
-              date
-            }
-          }
-          target: fieldValueByName(name: "Target") {
-            __typename
-            ... on ProjectV2ItemFieldDateValue {
-              date
-            }
-          }
-          priority: fieldValueByName(name: "Priority") {
-            __typename
-            ... on ProjectV2ItemFieldSingleSelectValue {
-              name
-            }
-          }
-          size: fieldValueByName(name: "Size") {
-            __typename
-            ... on ProjectV2ItemFieldSingleSelectValue {
-              name
-            }
-          }
-          estimate: fieldValueByName(name: "Estimate") {
-            __typename
-            ... on ProjectV2ItemFieldNumberValue {
-              number
-            }
-          }
-          iteration: fieldValueByName(name: "Iteration") {
-            __typename
-            ... on ProjectV2ItemFieldIterationValue {
-              title
-              startDate
-              duration
-            }
-          }
-          content {
-            __typename
-            ... on Issue {
-              number
-              title
-              url
-              state
-              updatedAt
-              repository {
+          nodes {
+            id
+            status: fieldValueByName(name: "Status") {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
                 name
-                owner {
-                  login
-                }
               }
-              labels(first: 20) {
-                nodes {
+            }
+            start: fieldValueByName(name: "Start") {
+              __typename
+              ... on ProjectV2ItemFieldDateValue {
+                date
+              }
+            }
+            target: fieldValueByName(name: "Target") {
+              __typename
+              ... on ProjectV2ItemFieldDateValue {
+                date
+              }
+            }
+            priority: fieldValueByName(name: "Priority") {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+              }
+            }
+            size: fieldValueByName(name: "Size") {
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name
+              }
+            }
+            estimate: fieldValueByName(name: "Estimate") {
+              __typename
+              ... on ProjectV2ItemFieldNumberValue {
+                number
+              }
+            }
+            iteration: fieldValueByName(name: "Iteration") {
+              __typename
+              ... on ProjectV2ItemFieldIterationValue {
+                title
+                startDate
+                duration
+              }
+            }
+            content {
+              __typename
+              ... on Issue {
+                number
+                title
+                url
+                state
+                updatedAt
+                repository {
+                  name
+                  owner {
+                    login
+                  }
+                }
+                labels(first: 20) {
+                  nodes {
+                    name
+                  }
+                }
+                assignees(first: 10) {
+                  nodes {
+                    login
+                    avatarUrl
+                  }
+                }
+                issueType {
                   name
                 }
-              }
-              assignees(first: 10) {
-                nodes {
-                  login
-                  avatarUrl
-                }
-              }
-              issueType {
-                name
-              }
-              parent {
-                number
                 parent {
                   number
                   parent {
                     number
+                    parent {
+                      number
+                    }
                   }
                 }
-              }
-              subIssuesSummary {
-                total
-                completed
-              }
-              blockedBy(first: 20) {
-                nodes {
-                  number
-                  state
+                subIssuesSummary {
+                  total
+                  completed
                 }
-              }
-              closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
-                nodes {
-                  number
+                blockedBy(first: 20) {
+                  nodes {
+                    number
+                    state
+                  }
+                }
+                closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
+                  nodes {
+                    number
+                  }
                 }
               }
             }
@@ -1434,21 +1642,35 @@ export const MovePlanItemDocument = new TypedDocumentString(`
 }
     `) as unknown as TypedDocumentString<MovePlanItemMutation, MovePlanItemMutationVariables>;
 export const PlanOwnerIdsDocument = new TypedDocumentString(`
-    query PlanOwnerIds($login: String!, $owner: String!, $name: String!) {
-  user(login: $login) {
-    id
-  }
+    query PlanOwnerIds($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     id
+    owner {
+      __typename
+      id
+      ... on User {
+        viewerCanCreateProjects
+      }
+      ... on Organization {
+        viewerCanCreateProjects
+      }
+    }
   }
 }
     `) as unknown as TypedDocumentString<PlanOwnerIdsQuery, PlanOwnerIdsQueryVariables>;
 export const PlanProjectsDocument = new TypedDocumentString(`
     query PlanProjects($login: String!) {
-  user(login: $login) {
-    projectsV2(first: 100, orderBy: { field: UPDATED_AT, direction: DESC }) {
-      nodes {
-        ...PlanProjectChoice
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectsV2(
+        first: 100
+        minPermissionLevel: WRITE
+        orderBy: { field: UPDATED_AT, direction: DESC }
+      ) {
+        nodes {
+          ...PlanProjectChoice
+        }
       }
     }
   }
@@ -1522,9 +1744,12 @@ fragment PlanProjectChoice on ProjectV2 {
 }`) as unknown as TypedDocumentString<PlanProjectsQuery, PlanProjectsQueryVariables>;
 export const PlanProjectSetupDocument = new TypedDocumentString(`
     query PlanProjectSetup($login: String!, $number: Int!) {
-  user(login: $login) {
-    projectV2(number: $number) {
-      ...PlanProjectChoice
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        ...PlanProjectChoice
+      }
     }
   }
 }
@@ -1597,29 +1822,32 @@ fragment PlanProjectChoice on ProjectV2 {
 }`) as unknown as TypedDocumentString<PlanProjectSetupQuery, PlanProjectSetupQueryVariables>;
 export const PlanProjectDocument = new TypedDocumentString(`
     query PlanProject($login: String!, $number: Int!) {
-  user(login: $login) {
-    projectV2(number: $number) {
-      id
-      number
-      url
-      title
-      ...PlanDateFields
-      ...PlanEstimateFields
-      field(name: "Status") {
-        __typename
-        ... on ProjectV2SingleSelectField {
-          id
-          options {
+  repositoryOwner(login: $login) {
+    __typename
+    ... on ProjectV2Owner {
+      projectV2(number: $number) {
+        id
+        number
+        url
+        title
+        ...PlanDateFields
+        ...PlanEstimateFields
+        field(name: "Status") {
+          __typename
+          ... on ProjectV2SingleSelectField {
             id
-            name
+            options {
+              id
+              name
+            }
           }
         }
-      }
-      priority: field(name: "Priority") {
-        __typename
-        ... on ProjectV2SingleSelectField {
-          options {
-            name
+        priority: field(name: "Priority") {
+          __typename
+          ... on ProjectV2SingleSelectField {
+            options {
+              name
+            }
           }
         }
       }
