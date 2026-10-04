@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { dockerOptionsFromEnv } from "@handoff/engine";
 import { parseEnv } from "./env.ts";
 
 const base = {
@@ -31,5 +32,11 @@ test("parseEnv reads cap overrides", () => {
 
 test("parseEnv defaults to worktrees and reads the Docker settings", () => {
   expect(parseEnv(base).HANDOFF_WORKSPACE).toBe("worktree");
-  expect(parseEnv({ ...base, HANDOFF_WORKSPACE: "docker", HANDOFF_DOCKER_IMAGE: "img:1" })).toMatchObject({ HANDOFF_WORKSPACE: "docker", HANDOFF_DOCKER_IMAGE: "img:1" });
+  expect(parseEnv({ ...base, HANDOFF_WORKSPACE: "docker", HANDOFF_DOCKER_IMAGE: "img:1" })).toMatchObject({ HANDOFF_WORKSPACE: "docker", docker: { image: "img:1" } });
+});
+
+test("parseEnv reads the Docker options the dashboard reads, with dockerOptionsFromEnv", () => {
+  const source = { ...base, HANDOFF_HOME: "/h", HANDOFF_DOCKER_MOUNTS: "/cache", HANDOFF_DOCKER_NETWORK: "egress" };
+  expect(parseEnv(source).docker).toEqual(dockerOptionsFromEnv(source));
+  expect(parseEnv(source).docker).toMatchObject({ mounts: ["/h", "/cache"], network: "egress" });
 });

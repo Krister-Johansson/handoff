@@ -14,6 +14,7 @@ export * from "./executors/human-gate.ts";
 export * from "./executors/tester.ts";
 export * from "./library/materialize.ts";
 export * from "./workdir/docker.ts";
+export * from "./workdir/docker-options.ts";
 
 export * from "./executors/flow.ts";
 export * from "./review/branch-diff.ts";
