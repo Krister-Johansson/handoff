@@ -10,6 +10,8 @@ The test case is todooverkill (project id `6c588fd7-a382-4b79-b10b-695212d490e2`
 
 The scheduler works the same in a Flow project ([`docs/plans/flow.md`](flow.md)). A Flow project uses neither dates nor Arrange by estimate; its plan is the order of its tasks and their blockers. The scheduler reads Project order in both plan modes and does not read pins. In a Flow project handoff also writes Project order, which no code did when this plan was written: a drag on the Flow, Optimize, `set_order` and a split plan's new parts move items with `updateProjectV2ItemPosition`.
 
+Repositories owned by an organization are covered in [`docs/plans/organizations.md`](organizations.md) (issue #575). The scheduler works the same on an organization's Project, and in an organization priority order can also come from the organization's Priority issue field when the Project has no Priority field of its own (Decision 5 there).
+
 Read `CLAUDE.md`, `GLOSSARY.md`, `docs/plan.md` and the three plans above first.
 
 ## Goals
