@@ -145,6 +145,14 @@ test("set_order is confirm and its summary lists each move and pin", () => {
   expect(toolSpec("set_order").input.safeParse({ project: "todooverkill", order: [] }).success).toBe(false);
 });
 
+test("start_scheduler names both sources of Priority, the Project's own field first, and get_scheduler says which one it reads", () => {
+  const start = toolSpec("start_scheduler").description;
+  expect(start).toMatch(/the Project's own Priority field/);
+  expect(start).toMatch(/organization's Priority issue field/);
+  expect(start).toMatch(/priority order with neither/);
+  expect(toolSpec("get_scheduler").description).toMatch(/which Priority field/);
+});
+
 test("start_scheduler is confirm and its summary names the project, the limit, the order and the graph", () => {
   expect(toolSpec("start_scheduler")).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true });
   expect(toolSpec("start_scheduler").summarize({ project: "todooverkill", max_runs: 2, order: "project", graph: "master" })).toBe(

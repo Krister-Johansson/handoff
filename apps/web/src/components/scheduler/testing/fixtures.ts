@@ -1,3 +1,4 @@
+import type { SchedulerFormContext } from "@/lib/scheduler-form";
 import type { SchedulerCard } from "@/server/scheduler-card";
 import type { SchedulerStatus } from "@/server/scheduler";
 
@@ -9,7 +10,7 @@ export const OTHER = "64fde8ef-2222-4000-8000-000000000000";
 const ago = (seconds: number) => new Date(NOW.getTime() - seconds * 1000);
 
 /** The form's context on the Plan page of todooverkill: graph master, GitHub Project #5 without a Priority field. */
-export const FORM = { graphs: ["master", "fast"], defaultGraph: "master", planNumber: 5, priority: false };
+export const FORM: SchedulerFormContext = { graphs: ["master", "fast"], defaultGraph: "master", planNumber: 5, priority: undefined };
 
 /** A scheduler card read, on and running with nothing active, unless `status` and the rest say otherwise. */
 export function cardOf(over: Partial<Omit<SchedulerCard, "status">> & { status?: Partial<SchedulerStatus> } = {}): SchedulerCard {

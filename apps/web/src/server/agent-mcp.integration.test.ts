@@ -1528,6 +1528,23 @@ test("get_scheduler says a scheduler just turned on has not checked yet and when
   expect((await call("get_scheduler", { project: "sandbox" })).check).toMatch(/^Checked \d+ s ago$/);
 });
 
+test("get_scheduler says which Priority orders the tasks", async () => {
+  await withPlan();
+  await call("start_scheduler", { project: "sandbox" });
+  // In Project order no Priority is read.
+  expect(await call("get_scheduler", { project: "sandbox" })).not.toHaveProperty("priority");
+
+  // The repository's owner is an organization with the Priority issue field, and the Project has no Priority field.
+  plan.owners.set("octo", "Organization");
+  plan.priorityIssueFields.set("octo", ["Urgent", "High", "Medium", "Low"]);
+  await call("start_scheduler", { project: "sandbox", order: "priority" });
+  expect(await call("get_scheduler", { project: "sandbox" })).toMatchObject({ priority: "Priority order from the organization's Priority issue field" });
+
+  // A Priority field of the Project's own wins.
+  sandboxProject().priorityOptions = ["P0", "P1"];
+  expect(await call("get_scheduler", { project: "sandbox" })).toMatchObject({ priority: "Priority order from the Project's Priority field" });
+});
+
 test("stop_scheduler turns the scheduler off, and start_scheduler takes a skip label and turns it on again as the first time", async () => {
   await withPlan();
   await call("start_scheduler", { project: "sandbox", max_runs: 2, skip_label: "manual" });

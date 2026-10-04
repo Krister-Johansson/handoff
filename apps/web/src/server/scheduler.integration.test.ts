@@ -234,6 +234,33 @@ test("each project whose scheduler is on has its state and its active runs of ma
   expect(await schedulerStates(db)).toEqual({});
 });
 
+/** A project for the repository acme/web of the organization acme, with a plan on a Project acme owns; returns its id and Project number. */
+async function orgProject() {
+  const project = await createProject(db, { name: "web", repo: "acme/web", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "linear", document: linear });
+  plan.owners.set("acme", "Organization");
+  const { number } = await plan.createProject("acme", { owner: "acme", name: "web" }, "web plan");
+  await db.update(projects).set({ planProjectNumber: number }).where(eq(projects.id, project.id));
+  return { id: project.id, number };
+}
+
+test("start_scheduler with priority order in an organization repository accepts the Priority issue field when the Project has none", async () => {
+  const org = await orgProject();
+  plan.priorityIssueFields.set("acme", ["Urgent", "High", "Medium", "Low"]);
+
+  expect(await startScheduler(deps(), org.id, { order: "priority" }, "dashboard")).toMatchObject({ state: "on", order: "priority" });
+  expect((await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, org.id)))[0]).toMatchObject({ enabled: true, order: "priority" });
+});
+
+test("start_scheduler refuses priority order with neither and names both", async () => {
+  const org = await orgProject();
+
+  await expect(startScheduler(deps(), org.id, { order: "priority" }, "dashboard")).rejects.toThrow(
+    `GitHub Project #${org.number} has no Priority field and acme has no Priority issue field, so the scheduler cannot order tasks by priority. Add a single select field named Priority, or use Project order.`,
+  );
+  expect(await db.select().from(projectSchedulers).where(eq(projectSchedulers.projectId, org.id))).toEqual([]);
+});
+
 test("only a task whose latest run was cancelled can be let to the scheduler", async () => {
   await startScheduler(deps(), projectId, {}, "dashboard");
   const failed = await taskWithRun("failed");

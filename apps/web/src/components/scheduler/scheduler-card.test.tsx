@@ -218,3 +218,23 @@ test("running shows active runs of max_runs and the Claude slots, with Pause", a
   fireEvent.click(within(pause).getByRole("button", { name: "Pause" }));
   await waitFor(() => expect(actions.pauseSchedulerAction).toHaveBeenCalledWith({ projectId: PROJECT.id, reason: "Waiting for the redesign review" }));
 });
+
+test("the card says which Priority orders the tasks", async () => {
+  const byPriority = cardOf({ status: { settings: { maxRuns: 2, order: "priority", graphName: "master", skipLabel: "human" } } });
+  const org = show(byPriority, { form: { ...FORM, priority: "issue-field" } });
+  expect(screen.getByRole("link", { name: "Up to 2 runs, Priority order from the organization's Priority issue field, master" })).toBeInTheDocument();
+  org.unmount();
+
+  const own = show(byPriority, { form: { ...FORM, priority: "project" } });
+  expect(screen.getByRole("link", { name: "Up to 2 runs, Priority order from the Project's Priority field, master" })).toBeInTheDocument();
+  own.unmount();
+
+  // Turning it on says where Priority would come from before anyone picks it.
+  show(OFF, { form: { ...FORM, priority: "issue-field" } });
+  fireEvent.click(screen.getByRole("button", { name: "Turn on the scheduler of todooverkill" }));
+  const form = await screen.findByRole("dialog", { name: "Turn on the scheduler" });
+  expect(within(form).getByRole("radio", { name: "Priority" })).toBeEnabled();
+  expect(within(form).getByText("Priority comes from the organization's Priority issue field.")).toBeInTheDocument();
+  fireEvent.click(within(form).getByRole("radio", { name: "Priority" }));
+  expect(within(form).getByText(/in todooverkill, by the organization's Priority issue field, with graph master\./)).toBeInTheDocument();
+});

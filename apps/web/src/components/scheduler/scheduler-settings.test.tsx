@@ -40,7 +40,7 @@ test("max runs takes 1 to 10, Priority order is disabled without a Priority fiel
 });
 
 test("with a Priority field the order can be Priority", () => {
-  render(<SchedulerSettings project={PROJECT} card={cardOf()} form={{ ...FORM, priority: true }} />, { wrapper });
+  render(<SchedulerSettings project={PROJECT} card={cardOf()} form={{ ...FORM, priority: "project" }} />, { wrapper });
   expect(within(section()).getByRole("radio", { name: "Priority" })).toBeEnabled();
   expect(within(section()).queryByText(/has no Priority field/)).not.toBeInTheDocument();
 });

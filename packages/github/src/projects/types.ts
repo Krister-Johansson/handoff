@@ -37,7 +37,11 @@ export type PlanItem = {
    * pull requests and other repositories' issues leave gaps.
    */
   position?: number | undefined;
-  /** The option name of the Project's single select field named Priority; undefined without a value or such a field. */
+  /**
+   * The Priority option name: the item's value in the Project's own single select field named Priority, or, when
+   * the Project has none, the issue's value of the organization's Priority issue field. Undefined without a value
+   * or either field.
+   */
   priority?: string | undefined;
   /** YYYY-MM-DD from the Project's Start date field. */
   start?: string | undefined;
@@ -73,13 +77,19 @@ export type PlanProject = {
    */
   dateFields?: PlanDateFieldIds | undefined;
   /**
-   * The option names of the single select field named Priority in the field's order, the highest first;
-   * undefined when the Project has no such field. Optional like `dateFields`.
+   * The Priority option names, the highest first: the Project's own single select field named Priority in the
+   * field's order, or, when the Project has none, the organization's single select issue field named Priority
+   * in the order of its options' priority numbers. Undefined with neither. Optional like `dateFields`.
    */
   priorityOptions?: string[] | undefined;
+  /** Where `priorityOptions` and each item's priority come from; undefined without Priority. Optional like `dateFields`. */
+  prioritySource?: PrioritySource | undefined;
   /** The Size and Estimate field ids, each undefined while the Project lacks it. Optional like `dateFields`. */
   estimateFields?: PlanEstimateFieldIds | undefined;
 };
+
+/** Where Priority comes from: the Project's own Priority field, or the organization's Priority issue field. */
+export type PrioritySource = "project" | "issue-field";
 
 /** The field ids of a Project's Start and Target date fields; undefined for one it lacks. */
 export type PlanDateFieldIds = { start: string | undefined; target: string | undefined };

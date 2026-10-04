@@ -102,6 +102,23 @@ test("a check in priority order starts the task with the highest Priority first"
   expect((await p.row()).lastResult).toMatchObject({ candidates: [{ number: low }] });
 });
 
+test("priority order from the issue field starts an Urgent task before a High one", async () => {
+  const p = await planned({ order: "priority" });
+  // The repository's owner is an organization with the default Priority issue field, and its Project has no Priority field.
+  p.plan.owners.set("octo", "Organization");
+  p.plan.priorityIssueFields.set("octo", ["Urgent", "High", "Medium", "Low"]);
+  const high = await p.task("High, first in Project order");
+  const none = await p.task("No priority");
+  const urgent = await p.task("Urgent");
+  p.plan.issuePriorities.set(high, "High");
+  p.plan.issuePriorities.set(urgent, "Urgent");
+
+  await p.check();
+
+  expect((await p.started()).map((r) => r.issue)).toEqual([urgent]);
+  expect((await p.row()).lastResult).toMatchObject({ candidates: [{ number: high }, { number: none }] });
+});
+
 test("runs a person started count toward max_runs", async () => {
   const p = await planned({ maxRuns: 2 });
   const mine = await p.task("Started by hand");

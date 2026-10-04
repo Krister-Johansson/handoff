@@ -106,7 +106,7 @@ function SettingsForm({ project, card, form }: { project: SchedulerProject; card
         <FieldDescription className="text-xs">Empty skips no label.</FieldDescription>
       </Field>
       <ClaudeCap slots={status.claudeSlots} />
-      {off && <p className="text-[13px]">{approvalSentence(project.name, values)}</p>}
+      {off && <p className="text-[13px]">{approvalSentence(project.name, values, form.priority)}</p>}
       {error && <FieldError>{error}</FieldError>}
       <div className="flex flex-wrap items-center gap-3">
         <Button size="sm" disabled={saving || !values.graph} onClick={save}>

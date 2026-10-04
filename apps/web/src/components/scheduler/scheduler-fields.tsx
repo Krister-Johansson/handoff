@@ -6,7 +6,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from "@/components/ui/input-group";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import type { SchedulerFormContext, SchedulerValues } from "@/lib/scheduler-form";
+import { priorityField, type SchedulerFormContext, type SchedulerValues } from "@/lib/scheduler-form";
 
 const MIN = 1;
 const MAX = 10;
@@ -14,7 +14,7 @@ const clamp = (n: number) => Math.min(MAX, Math.max(MIN, Math.round(n)));
 
 /**
  * Runs at a time (1 to 10, with one fewer and one more), the order (Priority disabled with the reason
- * when the GitHub Project has no Priority field) and the graph, each label beside its control; `wide`
+ * when there is no Priority to read, else with the field it reads) and the graph, each label beside its control; `wide`
  * gives the labels the settings section's width.
  */
 export function SchedulerFields({
@@ -85,7 +85,7 @@ export function SchedulerFields({
               Priority
             </ToggleGroupItem>
           </ToggleGroup>
-          {!form.priority && <FieldDescription className="text-xs">{noPriority}</FieldDescription>}
+          <FieldDescription className="text-xs">{form.priority ? `Priority comes from ${priorityField(form.priority)}.` : noPriority}</FieldDescription>
         </div>
       </Field>
       <Field orientation="horizontal" className="items-center">

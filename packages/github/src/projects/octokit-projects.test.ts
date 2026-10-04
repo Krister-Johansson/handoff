@@ -1386,3 +1386,117 @@ test("every plan document is valid against GitHub's schema", () => {
     expect(text, name).not.toMatch(/\buser\(/);
   }
 });
+
+/** An issue's value of an organization's single select issue field, as `issueFieldValues` answers it. */
+const issueFieldValue = (field: string, name: string) => ({ __typename: "IssueFieldSingleSelectValue", name, field: { __typename: "IssueFieldSingleSelect", name: field } });
+/** An issue's issue field values, as PlanItems reads them on each issue. */
+const issueFields = (...nodes: unknown[]) => ({ issueFieldValues: { nodes } });
+/** The organization's Priority issue field as `issueFields` lists it, in another order than its `priority` numbers. */
+const priorityIssueField = {
+  __typename: "IssueFieldSingleSelect",
+  name: "Priority",
+  options: [
+    { name: "Low", priority: 4 },
+    { name: "Urgent", priority: 1 },
+    { name: "Medium", priority: 3 },
+    { name: "High", priority: 2 },
+  ],
+};
+/** Other default issue fields of an organization, which handoff does not read, as Task-Insight answers PlanProject live. */
+const otherIssueFields = [
+  { __typename: "IssueFieldDate" },
+  { __typename: "IssueFieldSingleSelect", name: "Effort", options: [{ name: "High", priority: 1 }] },
+];
+/** How `field(name: "Priority")` answers on a Project without such a field: a NOT_FOUND next to the data. */
+const missingPriority = (path: string[]) => ({ type: "NOT_FOUND", path: [...path, "priority"], message: "Could not resolve to a Unions::ProjectV2FieldConfiguration with the name Priority" });
+/** A PlanItems page of an organization's Project whose `field(name: "Priority")` answers `priority`; null answers with a NOT_FOUND. */
+const orgPage = (nodes: unknown[], priority: unknown) => {
+  const data = { repositoryOwner: { __typename: "Organization", projectV2: { priority, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } } } };
+  return priority === null ? new GraphqlErrors(data, [missingPriority(["repositoryOwner", "projectV2"])]) : data;
+};
+/** A PlanProject answer for the organization acme's Project #4 with the given Priority field and the organization's issue fields. */
+const orgPlanProject = (priority: unknown, fields: unknown[]) => {
+  const data = {
+    repositoryOwner: {
+      __typename: "Organization",
+      issueFields: { nodes: fields },
+      projectV2: { ...planProject(4, "O_acme"), url: "https://github.com/orgs/acme/projects/4", title: "web plan", priority },
+    },
+  };
+  return priority === null ? new GraphqlErrors(data, [missingPriority(["repositoryOwner", "projectV2"])]) : data;
+};
+
+test("in an organization whose Project has no Priority field, listItems reads each issue's Priority issue field and getProject returns its options in priority order", async () => {
+  const urgent = { ...orgIssueItem(1, issueFields(issueFieldValue("Effort", "High"), issueFieldValue("Priority", "Urgent"))), priority: null };
+  const high = { ...orgIssueItem(2, issueFields(issueFieldValue("Priority", "High"))), priority: null };
+  const none = { ...orgIssueItem(3, issueFields(issueFieldValue("Effort", "Low"))), priority: null };
+  const { fetch } = fakeGraphql({
+    PlanItems: () => orgPage([urgent, high, none], null),
+    PlanProject: () => orgPlanProject(null, [priorityIssueField, ...otherIssueFields]),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("acme", 4, orgRepo)).map((i) => [i.number, i.priority])).toEqual([
+    [1, "Urgent"],
+    [2, "High"],
+    [3, undefined],
+  ]);
+  expect(await projects.getProject("acme", 4)).toMatchObject({ owner: "Organization", priorityOptions: ["Urgent", "High", "Medium", "Low"], prioritySource: "issue-field" });
+});
+
+test("a Project's own Priority field wins over the organization's issue field", async () => {
+  const own = { __typename: "ProjectV2SingleSelectField", isIssueField: false, options: [{ name: "P0" }, { name: "P1" }] };
+  const p1 = { ...orgIssueItem(1, issueFields(issueFieldValue("Priority", "Urgent"))), priority: { __typename: "ProjectV2ItemFieldSingleSelectValue", name: "P1" } };
+  // No value in the Project's own field: the issue field's Urgent does not stand in for it.
+  const unset = { ...orgIssueItem(2, issueFields(issueFieldValue("Priority", "Urgent"))), priority: null };
+  const { fetch } = fakeGraphql({
+    PlanItems: () => orgPage([p1, unset], own),
+    PlanProject: () => orgPlanProject(own, [priorityIssueField]),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("acme", 4, orgRepo)).map((i) => [i.number, i.priority])).toEqual([
+    [1, "P1"],
+    [2, undefined],
+  ]);
+  expect(await projects.getProject("acme", 4)).toMatchObject({ priorityOptions: ["P0", "P1"], prioritySource: "project" });
+});
+
+test("a Priority column backed by the issue field reads the issue's value", async () => {
+  const column = { __typename: "ProjectV2SingleSelectField", isIssueField: true, options: [{ name: "Urgent" }, { name: "High" }, { name: "Medium" }, { name: "Low" }] };
+  // How GitHub answers the item's value for such a column is unverified; handoff reads the issue's value instead.
+  const item = { ...orgIssueItem(1, issueFields(issueFieldValue("Priority", "Medium"))), priority: { __typename: "ProjectV2ItemIssueFieldValue" } };
+  const { fetch } = fakeGraphql({
+    PlanItems: () => orgPage([item], column),
+    PlanProject: () => orgPlanProject(column, [priorityIssueField]),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("acme", 4, orgRepo)).map((i) => [i.number, i.priority])).toEqual([[1, "Medium"]]);
+  expect(await projects.getProject("acme", 4)).toMatchObject({ priorityOptions: ["Urgent", "High", "Medium", "Low"], prioritySource: "issue-field" });
+});
+
+test("a user's Project reads Priority as before and has no issue field source", async () => {
+  const own = { __typename: "ProjectV2SingleSelectField", isIssueField: false, options: [{ name: "High" }, { name: "Low" }] };
+  // A user's repository has no issue fields: GitHub answers an empty list on each issue.
+  const high = { ...issueItem(1, issueFields()), priority: { __typename: "ProjectV2ItemFieldSingleSelectValue", name: "High" } };
+  // A Project without a Priority field answers each item's fieldValueByName with null.
+  const userPage = (priority: unknown) => ({
+    repositoryOwner: { __typename: "User", projectV2: { priority, items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [priority ? high : { ...high, priority: null }] } } },
+  });
+  const userAnswer = (number: number, priority: unknown) => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(number), url: "u", title: "t", priority } } });
+  const missing = [missingPriority(["repositoryOwner", "projectV2"])];
+  const { fetch } = fakeGraphql({
+    PlanItems: (v) => (v.number === 3 ? userPage(own) : new GraphqlErrors(userPage(null), missing)),
+    PlanProject: (v) => (v.number === 3 ? userAnswer(3, own) : new GraphqlErrors(userAnswer(5, null), missing)),
+  });
+  const projects = port(fetch);
+
+  expect((await projects.listItems("octo", 3, repo)).map((i) => [i.number, i.priority])).toEqual([[1, "High"]]);
+  expect(await projects.getProject("octo", 3)).toMatchObject({ owner: "User", priorityOptions: ["High", "Low"], prioritySource: "project" });
+  // Without a Priority field of its own, a user's Project has no Priority at all.
+  expect((await projects.listItems("octo", 5, repo)).map((i) => [i.number, i.priority])).toEqual([[1, undefined]]);
+  const bare = await projects.getProject("octo", 5);
+  expect(bare?.priorityOptions).toBeUndefined();
+  expect(bare?.prioritySource).toBeUndefined();
+});

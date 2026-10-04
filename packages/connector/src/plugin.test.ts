@@ -102,8 +102,10 @@ test("the handoff skill says a Flow project has no dates and names arrange_plan 
   expect(readFileSync(root("plugins/handoff/skills/handoff-setup/SKILL.md"), "utf8")).toMatch(/Flow project[^\n]*Size/);
 });
 
-test("the plugin is 0.18.0, whose bridge passes the dashboard's MCP Apps resources through", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.18.0");
+test("the plugin is 0.19.0, whose skill says Priority order reads the organization's Priority issue field when the Project has no Priority field", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.19.0");
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  expect(skill).toMatch(/Project's own Priority field[^\n]*organization's Priority issue field/);
 });
 
 test("both skills send the user to Project settings, Graphs for a graph, and arrange_plan takes a story and issues in Timeline mode too", () => {
