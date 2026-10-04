@@ -11,6 +11,12 @@ import { cliNodeExecutor, type CliNodeOptions } from "./cli-node.ts";
 /** The Playwright MCP server, pinned so a release does not change the demo under a running project. */
 export const PLAYWRIGHT_MCP = "@playwright/mcp@0.0.83";
 
+/**
+ * The browser the Playwright MCP server drives in a Docker workspace: the Chromium that docker/runner.Dockerfile
+ * installs. The server's default, Google Chrome, has no Linux arm64 build.
+ */
+export const DOCKER_DEMO_BROWSER = "chromium";
+
 export type DemoOptions = CliNodeOptions & {
   db: Db;
   workerId: string;
@@ -125,8 +131,11 @@ export function demoExecutor(options: DemoOptions): NodeExecutor {
         const mcpConfigPath = join(ctx.stagingDir, "demo-mcp.json");
         writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: { ...servers, playwright: { command: "npx", args } } }, null, 2), { mode: 0o600 });
 
+        // In a Docker workspace Claude, and the browser it starts, run in the app's container, where the app's URL is the app.
+        const workdir = preview.container ? { ...ctx.workdir, container: preview.container } : ctx.workdir;
         const outcome = await agent.execute({
           ...ctx,
+          workdir,
           library: { ...library, mcpConfigPath, mcpServers: [...library.mcpServers, "playwright"] },
           packet: { ...ctx.packet, app: { url: preview.url } },
         });
