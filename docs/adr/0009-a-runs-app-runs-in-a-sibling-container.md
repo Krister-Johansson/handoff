@@ -1,0 +1,34 @@
+# 9. A run's app runs in a sibling container
+
+Date: 2026-10-04. Status: accepted.
+
+## Context
+
+Demo and Try it steps start a run's app so a person can try it and Claude can take screenshots (issue #264). Test start in Project settings, App launch, runs the same steps outside a run. In worktree mode the app runs on the host from the run's worktree, on a free port passed as `PORT`. In Docker workspace mode (`HANDOFF_WORKSPACE=docker`) each run has a container `handoff-<runId>`, created when the run acquires its workdir, which publishes no port. `startPreview` refused that workdir, so the Try it gate showed no app, every Demo step failed and App launch hid Test start.
+
+The setup command runs in the run's container, so `node_modules` are built for the container's Linux, and a person picks Docker mode so that agent-written code runs isolated. Running the app on the host would break both. Docker cannot publish a port on a running container, and `docs/plans/docker-preview.md` recorded more constraints from Docker Desktop 28.5.1 on macOS: a container that shares another container's network namespace cannot publish ports; killing a `docker exec` client leaves its process running in the container; Docker Desktop's port proxy accepts a TCP connect on a published port with nothing listening behind it; and a new Docker network could not be created because the daemon's address pools were used up.
+
+## Decision
+
+Each app gets its own container, `handoff-preview-<id8>`, next to the run's. handoff reads the run container's image, user, environment, mounts, network and working directory with `docker inspect` and starts the new container from them with `--init` and `--add-host host.docker.internal:host-gateway`. The worktree is mounted at the same path, so the installed `node_modules`, the log file in the worktree's git directory and every path in the launch configuration resolve as in the run's container.
+
+- The port is the same number on both sides. handoff picks a free host port, passes it as `PORT`, and publishes it on `127.0.0.1` and `[::1]` only, or on `127.0.0.1` alone when Docker refuses `[::1]`. The URL stays `http://localhost:<port>`. When Docker reports the port taken, handoff removes the created container and tries up to three new ports; an app that must keep its port fails on the first try.
+- The container's main process is `handoff-forward.mjs`, a Node script handoff writes next to the log. For each port the compose file publishes, minus the app's, it listens on `127.0.0.1` and `[::1]` inside the container and forwards each connection to `host.docker.internal` on the same port. Compose services still start on the host once per project. Before the seed command, handoff connects to each forwarded port from inside the container and fails the services step with the ports it cannot reach.
+- The seed command runs in the app's container. The app starts with `docker exec -e NAME ... -w <cwd> <container> <command> <args>`, spawned on the host and detached, with `HOST=0.0.0.0` unless the configuration sets `HOST`. Values pass by name through the client's environment, never in argv. Container labels hold ids only.
+- The app is up once it answers `GET / HTTP/1.0` with any bytes through `127.0.0.1` on the published port. When it does not, a probe inside the container tells an app on loopback only, which gets a message to listen on `0.0.0.0`, from an app that never listens.
+- Stopping sends SIGTERM to every process in the container, waits up to 5 seconds, then runs `docker rm -f`. The `previews` row records the container's name before `docker run`, so a crash between the two leaves a row that cleanup finds. A starting worker stops the previews of this host's workers that are no longer live, whatever their id, then removes containers labelled `handoff.preview` whose row has ended.
+- The Demo step runs its Claude in the app's container, where `http://localhost:<port>` is the app. The runner image carries `@playwright/mcp@0.0.83` and Playwright's Chromium, and the worker passes `--browser chromium` in Docker mode, since Google Chrome has no Linux arm64 build.
+- Test start in Docker mode makes a `DockerWorkdirProvider` from the same `dockerOptionsFromEnv` the worker uses, so setup runs in `handoff-<id>` and the app in its sibling, labelled `handoff.launch-test` so the worker's sweep leaves it alone. `launch_tests.container` records it.
+
+Running the app in the run's container through `docker exec` was rejected: that container cannot publish a port once it runs. Publishing at acquire would reserve a host port for every run, preview or not, and a stopped container restarted later could find its port taken. Stopping would also need a pid file and a kill inside the container. Rewriting `localhost` in environment values was rejected because handoff sees only the launch configuration's env and the passed variables, not the repository's own `.env` files or config code. A per-project Docker network was rejected because new networks already failed on the development machine, and joining a compose network would bypass an egress-restricted `HANDOFF_DOCKER_NETWORK`. Running the Demo's browser in the run's container was rejected because it would reach the app at `host.docker.internal:<port>`, a different origin, and on Linux not at all for a port published on `127.0.0.1`.
+
+## Consequences
+
+- The app must listen on `0.0.0.0` inside its container. `HOST=0.0.0.0` covers dev servers that read it; the failure message names the fix for the others.
+- On Linux, `host-gateway` resolves to the host's bridge address, so a host service bound to `127.0.0.1` only is unreachable from the app's container. The services step names the port and says to publish it on all addresses or to use worktree mode. Docker Desktop reaches loopback services.
+- Loopback publishing is the only protection in front of the app. Docker documents that Engine releases before 28.0.0 may let hosts on the same L2 segment reach ports published on localhost, so App launch and the readiness check warn below Engine 28. Previews still start.
+- The runner image grew from 2.04 GB to 3.05 GB (`docker images`, arm64) with the browser and its system libraries. The Demo still starts the MCP server through `npx -y`, which asks the npm registry for the version, so a Demo needs registry access on `HANDOFF_DOCKER_NETWORK`.
+- The dashboard runs `docker` for Test start and the worker for runs. Both read the same `.env` through `dockerOptionsFromEnv`.
+- `previews.container` and `launch_tests.container` are nullable text columns, null in worktree mode.
+- handoff and Docker run on one machine. A remote Docker host or workers on several hosts are out of scope; `localhost` and loopback publishing assume the browser runs where Docker does.
+- A worker that crashed less than 60 seconds before the next one starts still counts as live, so its previews and their containers survive that start.
