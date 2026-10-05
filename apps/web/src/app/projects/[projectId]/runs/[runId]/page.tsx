@@ -24,6 +24,8 @@ import { StartedByScheduler } from "@/components/scheduler/scheduler-tag";
 import { OpenInEditor } from "@/components/runs/open-in-editor";
 import type { WorktreeState } from "@/lib/worktree-state";
 import { workerHome, worktreeState } from "@/server/worktree";
+import { RunTaskBody } from "@/components/runs/run-task";
+import { taskParts } from "@/lib/run-task";
 
 export const dynamic = "force-dynamic";
 
@@ -142,51 +144,55 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const blockedBy = blockersOf(detail);
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   const worktree = worktreeState(run, workerHome());
+  const task = taskParts(run.task);
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <RunLive
         header={{
           crumbs: [projectCrumb(project), projectRunsCrumb(project.id), await runCrumb(getDb(), project.id, run)],
-          title: <span className="whitespace-pre-line">{run.task}</span>,
+          title: task.title,
           meta: (
-            <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs [&_svg]:size-[13px] [&_svg]:shrink-0">
-              {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
-              <IssueLinks variant="meta" projectId={project.id} issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
-              <PartOf issues={run.issues} projectId={project.id} />
-              <StartedByScheduler startedBy={run.startedBy} place={scheduledPlace(events)} />
-              <RunLineage projectId={project.id} continues={RunStateSchema.shape.previousRun.parse(run.state.previousRun)?.runId ?? null} supersededBy={run.supersededBy} />
-              {graph && (
-                <Link href={graphPath(project.id, graph.name, graph.version)} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
-                  <GitForkIcon aria-hidden />
-                  <span>
-                    <span className="font-mono">{graph.name}</span> v{graph.version}
+            <>
+              {task.body && <RunTaskBody body={task.body} />}
+              <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs [&_svg]:size-[13px] [&_svg]:shrink-0">
+                {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
+                <IssueLinks variant="meta" projectId={project.id} issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
+                <PartOf issues={run.issues} projectId={project.id} />
+                <StartedByScheduler startedBy={run.startedBy} place={scheduledPlace(events)} />
+                <RunLineage projectId={project.id} continues={RunStateSchema.shape.previousRun.parse(run.state.previousRun)?.runId ?? null} supersededBy={run.supersededBy} />
+                {graph && (
+                  <Link href={graphPath(project.id, graph.name, graph.version)} className="inline-flex items-center gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3">
+                    <GitForkIcon aria-hidden />
+                    <span>
+                      <span className="font-mono">{graph.name}</span> v{graph.version}
+                    </span>
+                  </Link>
+                )}
+                <span className="inline-flex items-center gap-[5px]" title={run.createdAt.toISOString()}>
+                  <ClockIcon aria-hidden />
+                  started {run.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC
+                </span>
+                {run.startedAt && run.finishedAt && (
+                  <span className="inline-flex items-center gap-[5px]">
+                    <TimerIcon aria-hidden />
+                    took {formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}
                   </span>
-                </Link>
-              )}
-              <span className="inline-flex items-center gap-[5px]" title={run.createdAt.toISOString()}>
-                <ClockIcon aria-hidden />
-                started {run.createdAt.toISOString().slice(0, 16).replace("T", " ")} UTC
-              </span>
-              {run.startedAt && run.finishedAt && (
-                <span className="inline-flex items-center gap-[5px]">
-                  <TimerIcon aria-hidden />
-                  took {formatDuration(run.finishedAt.getTime() - run.startedAt.getTime())}
-                </span>
-              )}
-              {totalCost > 0 && (
-                <span className="inline-flex items-center gap-[5px]" title="Client-side estimate reported by the Claude CLI">
-                  <CoinsIcon aria-hidden />
-                  {formatCost(totalCost)} est.
-                </span>
-              )}
-              <a
-                className="inline-flex min-w-0 items-center gap-[5px] font-mono hover:text-foreground hover:underline hover:underline-offset-3"
-                href={`https://github.com/${project.repoOwner}/${project.repoName}/tree/${run.branchName}`}
-              >
-                <GitBranchIcon aria-hidden />
-                <span className="truncate">{run.branchName}</span>
-              </a>
-            </div>
+                )}
+                {totalCost > 0 && (
+                  <span className="inline-flex items-center gap-[5px]" title="Client-side estimate reported by the Claude CLI">
+                    <CoinsIcon aria-hidden />
+                    {formatCost(totalCost)} est.
+                  </span>
+                )}
+                <a
+                  className="inline-flex min-w-0 items-center gap-[5px] font-mono hover:text-foreground hover:underline hover:underline-offset-3"
+                  href={`https://github.com/${project.repoOwner}/${project.repoName}/tree/${run.branchName}`}
+                >
+                  <GitBranchIcon aria-hidden />
+                  <span className="truncate">{run.branchName}</span>
+                </a>
+              </div>
+            </>
           ),
           actions: <RunActions run={run} project={project} active={active} worktree={worktree} />,
         }}
