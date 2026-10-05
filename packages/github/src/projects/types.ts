@@ -1,4 +1,4 @@
-import type { Assignee, RepoRef } from "../types.ts";
+import type { Assignee, MilestoneRef, RepoRef } from "../types.ts";
 import type { PLAN_KINDS, PLAN_SIZES, STATUS_OPTIONS } from "./kinds.ts";
 
 export type PlanStatus = (typeof STATUS_OPTIONS)[number];
@@ -55,6 +55,8 @@ export type PlanItem = {
   estimate?: number | undefined;
   /** The item's node id in the Project, for order writes. */
   itemId?: string | undefined;
+  /** The issue's own milestone, open or closed; undefined without one. A task inherits none here. */
+  milestone?: MilestoneRef | undefined;
 };
 
 /** One move in Project order: the item goes right after `afterId`, or to the top for null. */
@@ -110,7 +112,7 @@ export type PlanAncestor = { number: number; title: string; body: string; kind: 
 export type SetStatusResult = "set" | "not-in-project" | "no-option";
 export type SetDatesResult = "set" | "not-in-project" | "no-field";
 
-/** An issue to create in the plan: its labels, its parent and blockers, and its Start and Target (YYYY-MM-DD). */
+/** An issue to create in the plan: its labels, its parent and blockers, its milestone's number, and its Start and Target (YYYY-MM-DD). */
 export type NewPlanIssue = {
   project: number;
   title: string;
@@ -118,6 +120,7 @@ export type NewPlanIssue = {
   labels: string[];
   parent?: number | undefined;
   blockedBy?: number[] | undefined;
+  milestone?: number | undefined;
   start?: string | undefined;
   target?: string | undefined;
 };
@@ -173,7 +176,10 @@ export interface ProjectsPort {
   createProject(login: string, repo: RepoRef, title: string, opts?: { dateFields?: boolean }): Promise<PlanProject>;
   /** Creates the kind labels epic, story and task on the repository when they are missing. */
   ensureLabels(repo: RepoRef): Promise<void>;
-  /** Creates an issue with its labels, parent and blockers, adds it to the Project in Shaping, then sets its Start and Target when given. */
+  /**
+   * Creates an issue with its labels, parent, milestone and blockers, adds it to the Project in Shaping, then sets its
+   * Start and Target when given. Throws before creating anything for a label, parent or milestone the repository lacks.
+   */
   createIssue(
     repo: RepoRef,
     input: NewPlanIssue,

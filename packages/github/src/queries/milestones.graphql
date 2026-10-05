@@ -1,0 +1,47 @@
+# A repository's milestones, open and closed, a hundred a page. GitHub has no GraphQL mutation that
+# creates, edits or closes a milestone, and handoff leaves that to GitHub.
+query RepositoryMilestones($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    milestones(first: 100, after: $cursor, states: [OPEN, CLOSED], orderBy: { field: NUMBER, direction: ASC }) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        number
+        title
+        description
+        dueOn
+        state
+        openIssueCount
+        closedIssueCount
+        url
+      }
+    }
+  }
+}
+
+# The node ids updateIssue takes. A milestone number the repository lacks answers null without an
+# error; an issue number it lacks answers NOT_FOUND.
+query IssueMilestoneRefs($owner: String!, $name: String!, $number: Int!, $milestone: Int!, $withMilestone: Boolean!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      id
+    }
+    milestone(number: $milestone) @include(if: $withMilestone) {
+      id
+    }
+  }
+}
+
+# Sets an issue's milestone, or clears it when milestoneId is null.
+mutation SetIssueMilestone($issueId: ID!, $milestoneId: ID) {
+  updateIssue(input: { id: $issueId, milestoneId: $milestoneId }) {
+    issue {
+      milestone {
+        number
+        title
+      }
+    }
+  }
+}

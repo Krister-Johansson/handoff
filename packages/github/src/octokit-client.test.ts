@@ -1,7 +1,9 @@
 import { generateKeyPairSync } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { buildSchema, parse, validate } from "graphql";
 import { expect, test } from "vitest";
 import { OctokitGitHub } from "./octokit-client.ts";
-import { fakeFetch, fakeGraphql } from "./testing/fake-fetch.ts";
+import { fakeFetch, fakeGraphql, GraphqlErrors } from "./testing/fake-fetch.ts";
 
 const repo = { owner: "octo", name: "sample" };
 
@@ -461,4 +463,103 @@ test("getFile reads a file's text on a branch, and is undefined when the file is
   expect(await gh.getFile(repo, "CLAUDE.md", "main")).toBeUndefined();
   // A folder is not a file.
   expect(await gh.getFile(repo, "src", "main")).toBeUndefined();
+});
+
+const githubSchema = buildSchema(readFileSync(new URL("./schema/schema.docs.graphql", import.meta.url), "utf8"), { assumeValid: true });
+/** The errors GitHub's published schema finds in the GraphQL documents a fake fetch received. */
+const schemaErrors = (calls: { url: string; body: unknown }[]) =>
+  calls.filter((c) => new URL(c.url).pathname === "/graphql").flatMap((c) => validate(githubSchema, parse((c.body as { query: string }).query)).map((e) => e.message));
+
+/** A milestone node as GitHub's GraphQL answers it. */
+const milestoneNode = (number: number, title: string, over: Record<string, unknown> = {}) => ({
+  number,
+  title,
+  description: null,
+  dueOn: null,
+  state: "OPEN",
+  openIssueCount: 0,
+  closedIssueCount: 0,
+  url: `https://github.com/octo/sample/milestone/${number}`,
+  ...over,
+});
+
+test("listMilestones reads the repository's open and closed milestones across pages, the dated ones by due date first", async () => {
+  const page = (nodes: unknown[], endCursor: string | null) => ({ repository: { milestones: { pageInfo: { hasNextPage: endCursor !== null, endCursor }, nodes } } });
+  const { fetch, operations, calls } = fakeGraphql({
+    RepositoryMilestones: (v) =>
+      v.cursor
+        ? page([milestoneNode(4, "Redesign beta", { dueOn: "2026-10-03T00:00:00Z", openIssueCount: 4, closedIssueCount: 2 })], null)
+        : page(
+            [
+              milestoneNode(1, "0.8", { state: "CLOSED", dueOn: "2026-09-01T07:00:00Z", description: "The first cut.", closedIssueCount: 9 }),
+              milestoneNode(2, "Someday"),
+              milestoneNode(3, "0.9", { dueOn: "2026-10-20T00:00:00Z", openIssueCount: 6, closedIssueCount: 3 }),
+            ],
+            "c1",
+          ),
+  });
+
+  const milestones = await OctokitGitHub.withToken("t", { fetch }).listMilestones(repo);
+
+  expect(milestones).toEqual([
+    { number: 1, title: "0.8", description: "The first cut.", dueOn: "2026-09-01", state: "closed", openIssues: 0, closedIssues: 9, url: "https://github.com/octo/sample/milestone/1" },
+    { number: 4, title: "Redesign beta", description: "", dueOn: "2026-10-03", state: "open", openIssues: 4, closedIssues: 2, url: "https://github.com/octo/sample/milestone/4" },
+    { number: 3, title: "0.9", description: "", dueOn: "2026-10-20", state: "open", openIssues: 6, closedIssues: 3, url: "https://github.com/octo/sample/milestone/3" },
+    // A milestone without a due date comes after the dated ones.
+    { number: 2, title: "Someday", description: "", dueOn: undefined, state: "open", openIssues: 0, closedIssues: 0, url: "https://github.com/octo/sample/milestone/2" },
+  ]);
+  expect(operations).toEqual([
+    { operation: "RepositoryMilestones", variables: { owner: "octo", name: "sample" } },
+    { operation: "RepositoryMilestones", variables: { owner: "octo", name: "sample", cursor: "c1" } },
+  ]);
+  expect(schemaErrors(calls)).toEqual([]);
+});
+
+/** setMilestone's two requests: the issue's and the milestone's node ids, then updateIssue answering the milestone it set. */
+function milestoneWrites(milestones: Record<number, { id: string; title: string }>) {
+  return fakeGraphql({
+    IssueMilestoneRefs: (v) => ({ repository: { issue: { id: `I_${v.number}` }, ...(v.withMilestone ? { milestone: milestones[v.milestone as number] ?? null } : {}) } }),
+    SetIssueMilestone: (v) => {
+      const found = Object.entries(milestones).find(([, m]) => m.id === v.milestoneId);
+      return { updateIssue: { issue: { milestone: found ? { number: Number(found[0]), title: found[1].title } : null } } };
+    },
+  });
+}
+
+test("setMilestone sets an issue's milestone through updateIssue and returns the milestone GitHub kept", async () => {
+  const { fetch, operations, calls } = milestoneWrites({ 3: { id: "MI_3", title: "0.9" } });
+
+  expect(await OctokitGitHub.withToken("t", { fetch }).setMilestone(repo, 12, 3)).toEqual({ number: 3, title: "0.9" });
+
+  expect(operations).toEqual([
+    { operation: "IssueMilestoneRefs", variables: { owner: "octo", name: "sample", number: 12, milestone: 3, withMilestone: true } },
+    { operation: "SetIssueMilestone", variables: { issueId: "I_12", milestoneId: "MI_3" } },
+  ]);
+  expect(schemaErrors(calls)).toEqual([]);
+});
+
+test("setMilestone with null clears the issue's milestone", async () => {
+  const { fetch, operations, calls } = milestoneWrites({ 3: { id: "MI_3", title: "0.9" } });
+
+  expect(await OctokitGitHub.withToken("t", { fetch }).setMilestone(repo, 12, null)).toBeNull();
+
+  expect(operations).toEqual([
+    { operation: "IssueMilestoneRefs", variables: { owner: "octo", name: "sample", number: 12, milestone: 0, withMilestone: false } },
+    // An explicit null, which updateIssue reads as no milestone; a missing key would leave the milestone as it is.
+    { operation: "SetIssueMilestone", variables: { issueId: "I_12", milestoneId: null } },
+  ]);
+  expect(schemaErrors(calls)).toEqual([]);
+});
+
+test("setMilestone refuses a milestone or an issue the repository does not have, and writes nothing", async () => {
+  const { fetch, operations } = milestoneWrites({ 3: { id: "MI_3", title: "0.9" } });
+  await expect(OctokitGitHub.withToken("t", { fetch }).setMilestone(repo, 12, 7)).rejects.toThrow("octo/sample has no milestone #7");
+
+  const missing = fakeGraphql({
+    IssueMilestoneRefs: () =>
+      new GraphqlErrors({ repository: { issue: null, milestone: { id: "MI_3" } } }, [{ type: "NOT_FOUND", path: ["repository", "issue"], message: "Could not resolve to an Issue with the number of 99." }]),
+  });
+  await expect(OctokitGitHub.withToken("t", { fetch: missing.fetch }).setMilestone(repo, 99, 3)).rejects.toThrow("issue octo/sample#99 not found");
+
+  expect([...operations, ...missing.operations].map((o) => o.operation)).not.toContain("SetIssueMilestone");
 });

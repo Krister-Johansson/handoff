@@ -56,6 +56,13 @@ export type MergeableState =
   /** The mergeability of the pull request is still being calculated. */
   | 'UNKNOWN';
 
+/** The possible states of a milestone. */
+export type MilestoneState =
+  /** A milestone that has been closed. */
+  | 'CLOSED'
+  /** A milestone that is still open. */
+  | 'OPEN';
+
 /** The type of a project field. */
 export type ProjectV2FieldType =
   /** Assignees */
@@ -204,10 +211,12 @@ export type IssueCreateRefsQueryVariables = Exact<{
   name: string;
   parent: number;
   withParent: boolean;
+  milestone?: number | null | undefined;
+  withMilestone?: boolean | null | undefined;
 }>;
 
 
-export type IssueCreateRefsQuery = { repository: { id: string, labels: { nodes: Array<{ id: string, name: string } | null> | null } | null, parent?: { id: string } | null } | null };
+export type IssueCreateRefsQuery = { repository: { id: string, labels: { nodes: Array<{ id: string, name: string } | null> | null } | null, parent?: { id: string } | null, milestone?: { id: string } | null } | null };
 
 export type IssuePlanQueryVariables = Exact<{
   owner: string;
@@ -264,6 +273,34 @@ export type IssuePlanQuery = { repository: { owner:
             | { __typename: 'ProjectV2ItemFieldUserValue' }
             | { __typename: 'ProjectV2ItemIssueFieldValue' }
            | null } | null> | null } | null } | null } | null };
+
+export type RepositoryMilestonesQueryVariables = Exact<{
+  owner: string;
+  name: string;
+  cursor?: string | null | undefined;
+}>;
+
+
+export type RepositoryMilestonesQuery = { repository: { milestones: { pageInfo: { hasNextPage: boolean, endCursor: string | null }, nodes: Array<{ number: number, title: string, description: string | null, dueOn: string | null, state: MilestoneState, openIssueCount: number, closedIssueCount: number, url: string } | null> | null } | null } | null };
+
+export type IssueMilestoneRefsQueryVariables = Exact<{
+  owner: string;
+  name: string;
+  number: number;
+  milestone: number;
+  withMilestone: boolean;
+}>;
+
+
+export type IssueMilestoneRefsQuery = { repository: { issue: { id: string } | null, milestone?: { id: string } | null } | null };
+
+export type SetIssueMilestoneMutationVariables = Exact<{
+  issueId: string | number;
+  milestoneId?: string | number | null | undefined;
+}>;
+
+
+export type SetIssueMilestoneMutation = { updateIssue: { issue: { milestone: { number: number, title: string } | null } | null } | null };
 
 export type PlanItemsQueryVariables = Exact<{
   login: string;
@@ -381,7 +418,7 @@ export type PlanItemsQuery = { repositoryOwner:
               | { __typename: 'Issue', id: string, number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
                     | { login: string }
                     | { login: string }
-                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, issueFieldValues: { nodes: Array<
+                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, milestone: { number: number, title: string } | null, issueFieldValues: { nodes: Array<
                     | { __typename: 'IssueFieldDateValue' }
                     | { __typename: 'IssueFieldMultiSelectValue' }
                     | { __typename: 'IssueFieldNumberValue' }
@@ -504,7 +541,7 @@ export type PlanItemsQuery = { repositoryOwner:
               | { __typename: 'Issue', id: string, number: number, title: string, url: string, state: IssueState, updatedAt: string, repository: { name: string, owner:
                     | { login: string }
                     | { login: string }
-                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, issueFieldValues: { nodes: Array<
+                   }, labels: { nodes: Array<{ name: string } | null> | null } | null, assignees: { nodes: Array<{ login: string, avatarUrl: string } | null> | null }, issueType: { name: string } | null, milestone: { number: number, title: string } | null, issueFieldValues: { nodes: Array<
                     | { __typename: 'IssueFieldDateValue' }
                     | { __typename: 'IssueFieldMultiSelectValue' }
                     | { __typename: 'IssueFieldNumberValue' }
@@ -561,6 +598,7 @@ export type CreatePlanIssueMutationVariables = Exact<{
   body: string;
   labelIds?: Array<string | number> | string | number | null | undefined;
   parentIssueId?: string | number | null | undefined;
+  milestoneId?: string | number | null | undefined;
 }>;
 
 
@@ -1206,7 +1244,7 @@ export const IssueNodeIdDocument = new TypedDocumentString(`
 }
     `) as unknown as TypedDocumentString<IssueNodeIdQuery, IssueNodeIdQueryVariables>;
 export const IssueCreateRefsDocument = new TypedDocumentString(`
-    query IssueCreateRefs($owner: String!, $name: String!, $parent: Int!, $withParent: Boolean!) {
+    query IssueCreateRefs($owner: String!, $name: String!, $parent: Int!, $withParent: Boolean!, $milestone: Int = 0, $withMilestone: Boolean = false) {
   repository(owner: $owner, name: $name) {
     id
     labels(first: 100) {
@@ -1216,6 +1254,9 @@ export const IssueCreateRefsDocument = new TypedDocumentString(`
       }
     }
     parent: issue(number: $parent) @include(if: $withParent) {
+      id
+    }
+    milestone(number: $milestone) @include(if: $withMilestone) {
       id
     }
   }
@@ -1345,6 +1386,57 @@ fragment PlanEstimateFields on ProjectV2 {
     }
   }
 }`) as unknown as TypedDocumentString<IssuePlanQuery, IssuePlanQueryVariables>;
+export const RepositoryMilestonesDocument = new TypedDocumentString(`
+    query RepositoryMilestones($owner: String!, $name: String!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    milestones(
+      first: 100
+      after: $cursor
+      states: [OPEN, CLOSED]
+      orderBy: { field: NUMBER, direction: ASC }
+    ) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        number
+        title
+        description
+        dueOn
+        state
+        openIssueCount
+        closedIssueCount
+        url
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<RepositoryMilestonesQuery, RepositoryMilestonesQueryVariables>;
+export const IssueMilestoneRefsDocument = new TypedDocumentString(`
+    query IssueMilestoneRefs($owner: String!, $name: String!, $number: Int!, $milestone: Int!, $withMilestone: Boolean!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      id
+    }
+    milestone(number: $milestone) @include(if: $withMilestone) {
+      id
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<IssueMilestoneRefsQuery, IssueMilestoneRefsQueryVariables>;
+export const SetIssueMilestoneDocument = new TypedDocumentString(`
+    mutation SetIssueMilestone($issueId: ID!, $milestoneId: ID) {
+  updateIssue(input: { id: $issueId, milestoneId: $milestoneId }) {
+    issue {
+      milestone {
+        number
+        title
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<SetIssueMilestoneMutation, SetIssueMilestoneMutationVariables>;
 export const PlanItemsDocument = new TypedDocumentString(`
     query PlanItems($login: String!, $number: Int!, $cursor: String) {
   repositoryOwner(login: $login) {
@@ -1436,6 +1528,10 @@ export const PlanItemsDocument = new TypedDocumentString(`
                 }
                 issueType {
                   name
+                }
+                milestone {
+                  number
+                  title
                 }
                 issueFieldValues(first: 10) {
                   nodes {
@@ -1538,7 +1634,7 @@ export const LinkPlanRepositoryDocument = new TypedDocumentString(`
 }
     `) as unknown as TypedDocumentString<LinkPlanRepositoryMutation, LinkPlanRepositoryMutationVariables>;
 export const CreatePlanIssueDocument = new TypedDocumentString(`
-    mutation CreatePlanIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $parentIssueId: ID) {
+    mutation CreatePlanIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $parentIssueId: ID, $milestoneId: ID) {
   createIssue(
     input: {
       repositoryId: $repositoryId
@@ -1546,6 +1642,7 @@ export const CreatePlanIssueDocument = new TypedDocumentString(`
       body: $body
       labelIds: $labelIds
       parentIssueId: $parentIssueId
+      milestoneId: $milestoneId
     }
   ) {
     issue {
