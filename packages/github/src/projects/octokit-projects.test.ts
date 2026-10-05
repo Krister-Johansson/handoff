@@ -425,6 +425,47 @@ test("createIssue sends the parent, the labels and the blockers, and leaves the 
   expect(operations.at(-1)!.operation).toBe("SetPlanStatus");
 });
 
+test("createIssue sets Shaping on the item GitHub's auto-add workflow put in the Project between the item read and the add", async () => {
+  let addTried = false;
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_story", name: "story" }] }, parent: { id: "I_11" } } }),
+    CreatePlanIssue: () => ({ createIssue: { issue: { id: "I_20", number: 20, url: "https://github.com/octo/sample/issues/20" } } }),
+    IssuePlan: () => issuePlan(20, addTried ? [{ id: "PVTI_auto", project: planProject(3) }] : []),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    AddPlanItem: () => {
+      addTried = true;
+      return new GraphqlErrors({ addProjectV2ItemById: null }, [{ type: "UNPROCESSABLE", message: "Content already exists in this project" }]);
+    },
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_auto" } } }),
+  });
+
+  const created = await port(fetch).createIssue(repo, { project: 3, title: "Shaping with the assistant", body: "B", labels: ["story"], parent: 11 });
+
+  expect(created).toEqual({ number: 20, url: "https://github.com/octo/sample/issues/20" });
+  expect(operations.filter((o) => o.operation === "SetPlanStatus").map((o) => o.variables)).toEqual([
+    { projectId: "PVT_3", itemId: "PVTI_auto", fieldId: "F_status", optionId: "o_shaping" },
+  ]);
+});
+
+test("createIssue names the created issue when a write after creating it fails", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] } } }),
+    CreatePlanIssue: () => ({ createIssue: { issue: { id: "I_20", number: 20, url: "https://github.com/octo/sample/issues/20" } } }),
+    IssuePlan: () => issuePlan(20, []),
+    PlanProject: () => ({ repositoryOwner: { __typename: "User", projectV2: { ...planProject(3), url: "u", title: "t" } } }),
+    AddPlanItem: () => new GraphqlErrors({ addProjectV2ItemById: null }, [{ type: "UNPROCESSABLE", message: "This project cannot take more items." }]),
+  });
+
+  const failure = await port(fetch)
+    .createIssue(repo, { project: 3, title: "Add the migration", body: "A column.", labels: ["task"] })
+    .then(() => undefined, (error: unknown) => error as Error);
+
+  expect(failure?.message).toMatch(/^Created #20 \(https:\/\/github\.com\/octo\/sample\/issues\/20\), then failed: [\s\S]*This project cannot take more items\./);
+  expect(failure?.cause).toBeInstanceOf(Error);
+  // Another refusal of the add is not the auto-add race: nothing reads the item again or writes a Status.
+  expect(operations.map((o) => o.operation)).toEqual(["IssueCreateRefs", "CreatePlanIssue", "IssuePlan", "PlanProject", "AddPlanItem"]);
+});
+
 test("createIssue sets Start and Target after adding the item", async () => {
   let added = false;
   const { fetch, operations } = fakeGraphql({
