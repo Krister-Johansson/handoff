@@ -2,9 +2,10 @@ import { inArray, liveWorkers, nodeExecutions, sql, type DbExecutor } from "@han
 
 /**
  * What a waiting step waits on: a person (permission or question), GitHub (ci), the merge queue, the worker,
- * another run's paths (overlap), or a person resolving a pull request's review threads (review_threads).
+ * another run's paths (overlap), a person resolving a pull request's review threads (review_threads), or a
+ * reviewer's next review after handoff answered its comments (re_review).
  */
-export type WaitingOn = "permission" | "question" | "ci" | "merge_queue" | "worker" | "overlap" | "review_threads";
+export type WaitingOn = "permission" | "question" | "ci" | "merge_queue" | "worker" | "overlap" | "review_threads" | "re_review";
 
 /** A review thread a merge waits on someone to resolve, as the merge step named it. */
 export type ReviewThread = { path: string; line: number | null; outdated: boolean; author: string; body: string; url: string };
@@ -35,9 +36,15 @@ export async function stepStates(db: DbExecutor, executionIds: string[]): Promis
     where e.node_execution_id = "node_executions"."id" and e.type = 'merge.threads_unresolved'
     order by e.seq desc limit 1
   )`;
+  // A PR step waits for a reviewer's next review when its latest look ended on github.re_review: each look
+  // starts its word on GitHub with github.pr, and says github.re_review last when answers hold it.
+  const latestOf = (type: string) => sql`(
+    select max(e.seq) from events e where e.node_execution_id = "node_executions"."id" and e.type = ${type}
+  )`;
+  const reReview = sql<boolean | null>`(${latestOf("github.re_review")} > coalesce(${latestOf("github.pr")}, 0))`;
   const [rows, places, workers] = await Promise.all([
     db
-      .select({ id: nodeExecutions.id, status: nodeExecutions.status, waitingOn: nodeExecutions.waitingOn, waitKind: nodeExecutions.waitKind, threads: latestThreads })
+      .select({ id: nodeExecutions.id, status: nodeExecutions.status, waitingOn: nodeExecutions.waitingOn, waitKind: nodeExecutions.waitKind, threads: latestThreads, reReview })
       .from(nodeExecutions)
       .where(inArray(nodeExecutions.id, executionIds)),
     db.execute<{ id: string; place: number }>(sql`
@@ -63,6 +70,8 @@ export async function stepStates(db: DbExecutor, executionIds: string[]): Promis
       states.set(row.id, row.waitingOn === "permission" ? { state: "waiting", waiting_on: "permission" } : { state: "running" });
     } else if (row.status === "waiting" && row.waitKind === "github_pr" && row.threads) {
       states.set(row.id, { state: "waiting", waiting_on: "review_threads", review_threads: row.threads });
+    } else if (row.status === "waiting" && row.waitKind === "github_pr" && row.reReview) {
+      states.set(row.id, { state: "waiting", waiting_on: "re_review" });
     } else if (row.status === "waiting") {
       const on = row.waitKind ? WAIT_KINDS[row.waitKind] : undefined;
       states.set(row.id, on ? { state: "waiting", waiting_on: on } : { state: "waiting" });

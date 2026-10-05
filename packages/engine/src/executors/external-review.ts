@@ -1,5 +1,5 @@
 import type { Feedback } from "@handoff/core";
-import { HANDOFF_COMMENT_PREFIX, summaryCoversHead, type CheckContext, type CodeRabbitSummary, type PrSnapshot } from "@handoff/github";
+import { HANDOFF_COMMENT_PREFIX, summaryCoversHead, type CheckContext, type CodeRabbitSummary, type PrSnapshot, type ReviewThread } from "@handoff/github";
 
 /** A login as GitHub shows it in GraphQL or REST: coderabbitai and coderabbitai[bot] are the same reviewer. */
 export const sameLogin = (a: string, b: string) => a.toLowerCase().replace(/\[bot\]$/, "") === b.toLowerCase().replace(/\[bot\]$/, "");
@@ -20,19 +20,37 @@ export function reviewSettings(config: Record<string, unknown>): ReviewSettings 
  * coder answers and handoff answers on GitHub; it is off by default, since it posts on GitHub, and it
  * needs review comments sent back. `resolveAfterReview` defaults to `reply`. `summary` names the bot
  * whose summary comment is read for notes and pre-merge checks. `maxPerRound` caps the items one round sends.
+ * `botWaitMs` and `personWaitMs` are how long the PR node waits for a reviewer's next review after an
+ * answer, by the reviewer's type: 30 minutes for a bot and 24 hours for a person unless set.
  */
-export type ReviewThreadsSettings = { reply: boolean; resolveAfterReview: boolean; summary: string | undefined; maxPerRound: number };
+export type ReviewThreadsSettings = {
+  reply: boolean;
+  resolveAfterReview: boolean;
+  summary: string | undefined;
+  maxPerRound: number;
+  botWaitMs: number;
+  personWaitMs: number;
+};
+
+const atLeastZero = (value: unknown, fallback: number) => (typeof value === "number" && value >= 0 ? value : fallback);
 
 export function reviewThreadsSettings(config: Record<string, unknown>): ReviewThreadsSettings {
   const raw = typeof config.reviewThreads === "object" && config.reviewThreads !== null ? (config.reviewThreads as Record<string, unknown>) : {};
   const reply = raw.reply === true;
   const summary = typeof raw.summary === "string" && raw.summary.trim() ? raw.summary.trim().replace(/\[bot\]$/i, "") : undefined;
   const maxPerRound = typeof raw.maxPerRound === "number" && raw.maxPerRound >= 1 ? Math.floor(raw.maxPerRound) : 20;
-  return { reply, resolveAfterReview: reply && raw.resolveAfterReview !== false, summary, maxPerRound };
+  return {
+    reply,
+    resolveAfterReview: reply && raw.resolveAfterReview !== false,
+    summary,
+    maxPerRound,
+    botWaitMs: atLeastZero(raw.botWaitMinutes, 30) * 60_000,
+    personWaitMs: atLeastZero(raw.personWaitHours, 24) * 3_600_000,
+  };
 }
 
 /** A review bot's summary comment as the PR node read it, parsed. */
-export type SummaryRead = { comment: { id?: number | undefined; url: string; body: string }; summary: CodeRabbitSummary };
+export type SummaryRead = { comment: { id?: number | undefined; url: string; body: string; updatedAt?: string | undefined }; summary: CodeRabbitSummary };
 
 /** Merge risks under which a note that only says there is no merge-blocking issue asks nothing of the coder. */
 const QUIET_RISKS = new Set(["minimal", "low"]);
@@ -123,6 +141,37 @@ export type Finding = {
 /** Whether handoff wrote a comment: every comment it posts carries its marker. */
 export const byHandoff = (body: string) => body.includes(HANDOFF_COMMENT_PREFIX);
 
+/** An inline thread as a finding, from its first comment; undefined for a thread handoff started or one without a first comment. */
+export function threadFinding(thread: ReviewThread): Finding | undefined {
+  const first = thread.comments[0];
+  if (!first?.id || byHandoff(first.body)) return undefined;
+  const line = first.line ?? thread.line ?? thread.originalLine ?? undefined;
+  return {
+    id: `thread:${first.id}`,
+    key: `thread:${thread.id}`,
+    kind: "thread",
+    author: first.author,
+    authorBot: first.authorBot,
+    body: first.body,
+    ...(first.path || thread.path ? { path: first.path || thread.path } : {}),
+    ...(line ? { line } : {}),
+    url: first.url,
+    githubId: thread.id,
+  };
+}
+
+/**
+ * The reviewers behind a CHANGES_REQUESTED decision: those whose latest approving, requesting or dismissed
+ * review requests changes. A comment-only review changes nothing, as on GitHub.
+ */
+export function changeRequesters(snapshot: PrSnapshot): string[] {
+  const latest = new Map<string, string>();
+  for (const review of snapshot.reviews) {
+    if (review.state === "APPROVED" || review.state === "CHANGES_REQUESTED" || review.state === "DISMISSED") latest.set(review.author, review.state);
+  }
+  return [...latest].filter(([, state]) => state === "CHANGES_REQUESTED").map(([author]) => author);
+}
+
 /**
  * Where the reviews of the PR's head commit stand: which listed reviewers have not reviewed it yet,
  * whether the wait has run out, and what reviewers said that has not been sent back yet (unresolved
@@ -144,21 +193,9 @@ export function externalReview(
   const timedOut = missing.length > 0 && waitingForMs >= settings.timeoutMs;
   const findings: Finding[] = [];
   for (const thread of snapshot.reviewThreads) {
-    const first = thread.comments[0];
-    if (thread.isResolved || !first?.id || handled.has(`thread:${first.id}`) || byHandoff(first.body)) continue;
-    const line = first.line ?? thread.line ?? thread.originalLine ?? undefined;
-    findings.push({
-      id: `thread:${first.id}`,
-      key: `thread:${thread.id}`,
-      kind: "thread",
-      author: first.author,
-      authorBot: first.authorBot,
-      body: first.body,
-      ...(first.path || thread.path ? { path: first.path || thread.path } : {}),
-      ...(line ? { line } : {}),
-      url: first.url,
-      githubId: thread.id,
-    });
+    const finding = threadFinding(thread);
+    if (thread.isResolved || !finding || handled.has(finding.id)) continue;
+    findings.push(finding);
   }
   for (const review of onHead) {
     if (review.state === "APPROVED" || review.state === "DISMISSED" || !review.body.trim() || byHandoff(review.body) || handled.has(`review:${review.id}`)) continue;
