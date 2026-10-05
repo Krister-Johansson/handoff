@@ -15,10 +15,34 @@ const readGitTools = ["Bash(git log *)", "Bash(git show *)", "Bash(git diff *)",
  * Shell commands that read and cannot write a file or run another program. Claude Code matches each part
  * of a compound command (`&&`, `||`, `;`, `|`) against the rules on its own and checks a redirect's
  * target against the file rules, so `cat a | grep b` is allowed and `cat a > b` still needs Edit.
- * sed (-i), find (-exec), awk (system) and rg (--pre) stay out, and git branch only in forms that cannot
+ * sed (-i), find (-exec), awk (system) and rg (--pre) stay out. sort (-o) and uniq (a second file name)
+ * can write a file, so they come only in fixed forms that read standard input; cut cannot write one.
+ * node runs any script, so it comes only as its version check. git branch comes only in forms that cannot
  * create or delete one.
  */
-const readShellTools = ["Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc *)", "Bash(ls *)", "Bash(grep *)", "Bash(git branch)", "Bash(git branch --show-current)", "Bash(git branch -a)"];
+const readShellTools = [
+  "Bash(cat *)",
+  "Bash(head *)",
+  "Bash(tail *)",
+  "Bash(wc *)",
+  "Bash(ls *)",
+  "Bash(grep *)",
+  "Bash(sort)",
+  "Bash(sort -n)",
+  "Bash(sort -r)",
+  "Bash(sort -rn)",
+  "Bash(sort -u)",
+  "Bash(uniq)",
+  "Bash(uniq -c)",
+  "Bash(cut *)",
+  "Bash(node -v)",
+  "Bash(node --version)",
+  "Bash(pnpm -v)",
+  "Bash(pnpm --version)",
+  "Bash(git branch)",
+  "Bash(git branch --show-current)",
+  "Bash(git branch -a)",
+];
 
 /**
  * Every Claude Code tool a headless step can use, for a node that allows every tool: still passed
@@ -27,7 +51,7 @@ const readShellTools = ["Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(wc 
  * turn on for models that leave them off.
  */
 export const ALL_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "Bash", "WebFetch", "WebSearch", "Agent", "Skill"];
-const coderTools = [...readOnlyTools, "Edit", "Write", "Bash(git *)", "Bash(pnpm *)", "Bash(npm *)", "Bash(npx *)"];
+const coderTools = [...readOnlyTools, "Edit", "Write", "Bash(git *)", "Bash(pnpm *)", "Bash(npm *)", "Bash(npx *)", ...readShellTools];
 
 export const nodeCatalog: Record<NodeType, CatalogEntry> = {
   start: { executorKind: "function", contract: "start_output", allowedTools: [] },
