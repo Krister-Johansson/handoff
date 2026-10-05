@@ -83,7 +83,7 @@ const effortOf = (ctx: ExecutorContext, options: CliNodeOptions) => (typeof ctx.
 function codeReviewPrompt(ctx: ExecutorContext): string {
   const level = typeof ctx.node.config.level === "string" ? ctx.node.config.level : DEFAULT_REVIEW_LEVEL;
   return [
-    `Review this branch's changes against ${ctx.run.baseBranch} with the code-review skill: invoke it with the Skill tool, skill code-review, args "${level} ${ctx.run.branchName}".`,
+    `Review this branch's changes against origin/${ctx.run.baseBranch} with the code-review skill: invoke it with the Skill tool, skill code-review, args "${level} ${ctx.run.branchName}".`,
     `Do not edit files. Then return one comment per finding (path, line, body, severity). ${SEVERITIES}`,
   ].join(" ");
 }

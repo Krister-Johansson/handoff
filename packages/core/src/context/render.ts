@@ -80,10 +80,11 @@ export type ContextPacket = {
   /** What earlier attempts of this step were told in this run: allowed files, operator notes, answers. */
   memory?: NodeMemory;
   /**
-   * Where the step works: the run's branch, the project's setup command that ran in its worktree (null
-   * when the project has none), and the project's notes about its environment. Steps with a worktree only.
+   * Where the step works: the run's branch, the base branch it started from, the project's setup command
+   * that ran in its worktree (null when the project has none), and the project's notes about its
+   * environment. Steps with a worktree only.
    */
-  environment?: { branch: string; setupCommand: string | null; agentNotes?: string | undefined };
+  environment?: { branch: string; base: string; setupCommand: string | null; agentNotes?: string | undefined };
   /** For a planner: the failed run this run continues, whose branch this run's branch starts from. */
   earlierRun?: PreviousRun;
   /** The base branch moved and now changes the same lines as this branch: the work is to merge it in. */
@@ -163,9 +164,11 @@ function renderEarlierRun({ branch, plan, decisions, findings }: PreviousRun): s
 /** The worktree the step works in: its branch, what setup installed, and the run's identity. */
 function renderWorktree(environment: ContextPacket["environment"]): string[] {
   if (!environment) return ["The current working directory is a git worktree of the repository on this run's branch.", ""];
-  const { branch, setupCommand } = environment;
+  const { branch, base, setupCommand } = environment;
   return [
     `The current working directory is a git worktree of the repository on this run's branch, \`${branch}\`. Commit to it. Do not create or switch to another branch.`,
+    "",
+    `The run's changes are what differs from \`origin/${base}\`: compare with it, as in \`git log origin/${base}..HEAD\`.`,
     "",
     setupCommand
       ? `The project's setup command, \`${setupCommand}\`, ran in this worktree before this step. What it installs and creates is in place.`

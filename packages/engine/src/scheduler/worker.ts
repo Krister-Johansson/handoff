@@ -327,7 +327,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
         packet.budget = budgetFor(project, graph, node.key);
         packet.otherWork = await otherWorkOf(db, deps.github, run, project);
       }
-      if (workdir) packet.environment = { branch: run.branchName, setupCommand: project.setupCommand, ...(project.agentNotes ? { agentNotes: project.agentNotes } : {}) };
+      if (workdir) packet.environment = { branch: run.branchName, base: run.baseBranch, setupCommand: project.setupCommand, ...(project.agentNotes ? { agentNotes: project.agentNotes } : {}) };
       // A person's Always allow in this run covers the node's later attempts too, though the run keeps its graph version.
       const allowedInRun = graph.executorKind(node.key) === "cli" ? await runAllowRules(db, run.id, node.key) : [];
       const extraTools = [...(library?.allowedTools ?? []), ...allowedInRun];
