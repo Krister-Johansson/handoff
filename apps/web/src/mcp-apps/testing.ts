@@ -1,9 +1,7 @@
 // A host for the views' tests: an AppBridge on one end, the view on the other, as a host that renders MCP Apps mounts it.
 import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { App, McpUiHostCapabilities } from "@modelcontextprotocol/ext-apps";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { InMemoryTransport, type CallToolResult, type Transport } from "@modelcontextprotocol/client";
 
 export type ToolCall = { name: string; arguments: Record<string, unknown> };
 type Handler = (args: Record<string, unknown>) => CallToolResult | Promise<CallToolResult>;

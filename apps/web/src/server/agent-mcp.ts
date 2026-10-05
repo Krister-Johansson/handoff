@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
 import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, permissionWaits, planPins, projects, questions, type Db, type PermissionWait, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop } from "@handoff/engine/operations";

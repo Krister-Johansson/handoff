@@ -1,6 +1,6 @@
 import type { McpUiResourceMeta } from "@modelcontextprotocol/ext-apps";
 import { registerAppResource, RESOURCE_MIME_TYPE, RESOURCE_URI_META_KEY } from "@modelcontextprotocol/ext-apps/server";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { NEEDS_YOU_URI, PERMISSION_CARD_URI, PLAN_LIST_URI, QUESTION_CARD_URI, RUN_CARD_URI, viewOf } from "../lib/assistant/catalog";
 import { NEEDS_YOU_HTML, PERMISSION_CARD_HTML, PLAN_LIST_HTML, QUESTION_CARD_HTML, RUN_CARD_HTML } from "../mcp-apps/views.generated";
 

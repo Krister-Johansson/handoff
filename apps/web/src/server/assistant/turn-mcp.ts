@@ -1,5 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { McpServer, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { annotationsOf, CATALOG, forChatProject, withChatProject, type ToolSpec } from "../../lib/assistant/catalog";
 import { pageSpecsOf, type PageToolSpec } from "../../lib/assistant/page-tools";
@@ -46,7 +45,7 @@ export function createTurnMcpServer(turn: LiveTurn, deps: TurnMcpDeps): McpServe
     "approve",
     {
       description: "Asks the person looking at the dashboard to approve a tool call. Claude Code calls this itself; do not call it.",
-      inputSchema: { tool_name: z.string(), input: z.record(z.string(), z.unknown()), tool_use_id: z.string().optional() },
+      inputSchema: z.object({ tool_name: z.string(), input: z.record(z.string(), z.unknown()), tool_use_id: z.string().optional() }),
     },
     async ({ tool_name, input, tool_use_id }) => {
       const spec = tool_name.startsWith(TOOL_PREFIX) ? specs.get(tool_name.slice(TOOL_PREFIX.length)) : undefined;
@@ -85,8 +84,7 @@ export async function handleTurnMcpRequest(request: Request, deps: TurnMcpDeps):
   }
   const server = createTurnMcpServer(turn, deps);
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-  // The SDK's transport declares optional members without `| undefined`, which exactOptionalPropertyTypes rejects.
-  await server.connect(transport as never);
+  await server.connect(transport);
   try {
     return await transport.handleRequest(request);
   } finally {

@@ -1,6 +1,6 @@
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import type { McpUiHostCapabilities } from "@modelcontextprotocol/ext-apps";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { InMemoryTransport } from "@modelcontextprotocol/client";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, onTestFinished, test, vi } from "vitest";
 import { mountView, textResult as jsonResult, unmountViews } from "../testing";

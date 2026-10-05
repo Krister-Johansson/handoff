@@ -30,9 +30,10 @@ test("each view is one HTML document that loads nothing from another origin and 
   }
 });
 
-test("the views stay small: each page under 320 KB, with one runtime they share, committed once", async () => {
+// ext-apps 2 runs on the MCP SDK 2 client, which adds about 80 KB to the shared runtime (about 370 KB a page).
+test("the views stay small: each page under 400 KB, with one runtime they share, committed once", async () => {
   const sizes = VIEWS.map((view) => ({ view: view.name, kb: Buffer.byteLength(committed(view.constant)) / 1024 }));
-  for (const { view, kb } of sizes) expect(kb, view).toBeLessThan(320);
+  for (const { view, kb } of sizes) expect(kb, view).toBeLessThan(400);
   // The generated file holds the script and the style once, not once per view.
   const file = Buffer.byteLength(await readFile(GENERATED_FILE, "utf8")) / 1024;
   expect(file).toBeLessThan(Math.max(...sizes.map((s) => s.kb)) * 1.25);

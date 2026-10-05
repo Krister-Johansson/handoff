@@ -1,5 +1,5 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { Transport } from "@modelcontextprotocol/client";
 import { say, statusLine } from "../shared/act";
 import { startView, valueOf, type Outcome, type ViewHost } from "../shared/app";
 import { cardActions, cardContext, cardTitle, inboxCard, openRun, type QuestionData } from "../shared/cards";
