@@ -269,12 +269,24 @@ export class FakeGitHub implements GitHubPort {
     return n;
   }
 
+  /**
+   * Whether a merge closes the open issues the pull request's body names with "Closes #N", as GitHub does
+   * on a merge into the default branch. Off by default, since GitHub does not always do it.
+   */
+  closesOnMerge = false;
+
   async mergePr(_repo: RepoRef, number: number) {
     const pr = this.prs.get(number);
     if (!pr || pr.state !== "open" || pr.mergeable === "CONFLICTING") return { merged: false };
     pr.state = "merged";
     pr.merged = true;
     this.merged.push(number);
+    if (this.closesOnMerge) {
+      for (const [, n] of pr.body.matchAll(/^Closes #(\d+)$/gm)) {
+        const issue = this.issues.get(Number(n));
+        if (issue) issue.state = "closed";
+      }
+    }
     return { merged: true, sha: `merge-${number}` };
   }
 

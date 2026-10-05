@@ -186,11 +186,12 @@ Mapping from handoff's run states to Status, written by handoff:
 | A run starts on the task (`startRunFromGraph`) | Running | `apps/web/src/server/graphs.ts` |
 | The PR node opens the pull request (first `github.pr` for the run) | In review | `packages/engine/src/executors/github.ts` |
 | The merge node merged and `closeLinkedIssues` closed the issue | Done (GitHub's "Item closed" workflow also sets it) | `executors/github.ts` |
+| The merge closed a story's last open sub-issue, and in turn an epic's (issue #598) | Done on the story and the epic, which the merge node closes, with `from` | `executors/github.ts` |
 | The run is cancelled (`cancelRun`) | Ready | `packages/engine/src/operations.ts` |
 | The run fails or is stuck | unchanged (Running); the card shows the failure | nothing |
 | A run finishes without a pull request node | unchanged | nothing |
 
-Epics and stories get no status writes from runs. Their progress is derived in the Plan tab from their descendants' statuses and from `subIssuesSummary` (GitHub counts closed sub-issues). Open question 6 asks whether handoff should also set a story's Status to Done when every task is done.
+Epics and stories get one status write from runs: Done, when a merge closes their last open sub-issue (open question 6). Until then their progress is derived in the Plan tab from their descendants' statuses and from `subIssuesSummary` (GitHub counts closed sub-issues).
 
 ### 3. Ready is the gate
 
@@ -518,7 +519,7 @@ Each with a recommended answer. Unanswered, the implementation takes the recomme
 3. Where do failed runs show on the board? Decided (to try): in Running with a red "failed" badge and the repair link, not a sixth column.
 4. Should unplanned issues stay startable with a plan in place? Recommended: yes, marked unplanned, so bug fixes do not need shaping; "Plan it" moves them into the plan when wanted.
 5. Should a person dragging a Running task to Ready on GitHub cancel its run? Decided by the user on 2026-10-02: no; a running task keeps running. A board move never changes a run. The card shows the run and the next transition writes the status back.
-6. Should handoff set a story's and an epic's Status to Done when all their tasks are done? Recommended: not in v1; progress is derived and shown; a later PR can add it once the shape of stories in practice is known.
+6. Should handoff set a story's and an epic's Status to Done when all their tasks are done? Decided in issue #598: yes, after a merge. When a run's merge closes the last open sub-issue of a story, the merge node closes the story and sets it to Done, then the epic the same way. An issue closed by hand and a cancelled run close no parent.
 7. Should the Plan be a project tab or a top-level page across projects? Decided: its own page per project at `/projects/<id>/plan`, linked from a "Plan" entry in the project page's tab bar; a cross-project view can be added later.
 8. Should Ready tasks of a story be released one at a time (the story's tasks run in order through blocked-by) or all at once? Recommended: all at once by default; `create_task` takes `blocked_by` so the shaping conversation decides the order, and the backlog already respects it.
 9. Where do dates live: two Date fields Start and Target (recommended, Decision 8), an Iteration field, or an Estimate with automatic scheduling? Recommended: the two Date fields now; iterations readable when present; automatic scheduling as a later `schedule` with `propose: true`.

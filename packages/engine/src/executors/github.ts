@@ -320,21 +320,70 @@ export function prNodeExecutor(deps: {
  * Closes the run's linked issues that are still open once its pull request merged. The PR body's
  * "Closes #N" is not always honoured by GitHub (a real run merged without closing its issue), so the
  * engine closes them itself. A failure here is reported as an event and does not fail the merge.
+ * Returns the linked issues that are closed now, by GitHub or by this call.
  */
-async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, prNumber: number) {
-  const issues = ctx.state.issues ?? [];
-  if (issues.length === 0) return;
-  const closed: number[] = [];
-  for (const issue of issues) {
+async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, prNumber: number): Promise<number[]> {
+  const closedNow: number[] = [];
+  const closedHere: number[] = [];
+  for (const { number } of ctx.state.issues ?? []) {
     try {
-      if ((await github.getIssue(repo, issue.number)).state !== "open") continue;
-      await github.closeIssue(repo, issue.number, `Fixed by #${prNumber}, merged by handoff run \`${ctx.run.id}\`.`);
-      closed.push(issue.number);
+      if ((await github.getIssue(repo, number)).state === "open") {
+        await github.closeIssue(repo, number, `Fixed by #${prNumber}, merged by handoff run \`${ctx.run.id}\`.`);
+        closedHere.push(number);
+      }
+      closedNow.push(number);
     } catch (error) {
-      ctx.emit("github.issue_close_failed", { number: issue.number, message: (error as Error).message });
+      ctx.emit("github.issue_close_failed", { number, message: (error as Error).message });
     }
   }
-  if (closed.length) ctx.emit("github.issues_closed", { numbers: closed });
+  if (closedHere.length) ctx.emit("github.issues_closed", { numbers: closedHere });
+  return closedNow;
+}
+
+/** The run's linked issues that are open on GitHub; an issue that cannot be read is left out. */
+async function openLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef): Promise<Set<number>> {
+  const issues = ctx.state.issues ?? [];
+  const open = await Promise.all(issues.map((i) => github.getIssue(repo, i.number).then((d) => d.state === "open", () => false)));
+  return new Set(issues.filter((_, index) => open[index]).map((i) => i.number));
+}
+
+/**
+ * Closes each parent whose last open sub-issue the merge closed, then that parent's own parent the same
+ * way, up to the epic, and sets each one it closed to Done on the plan with the Status it had. `finished`
+ * are the issues the merge closed. A parent with an open sub-issue, or already closed, is left as it is.
+ * A failure is a `github.parent_close_failed` event and never fails the merge.
+ */
+async function closeFinishedParents(github: GitHubPort, projects: ProjectsPort | undefined, ctx: ExecutorContext, repo: RepoRef, prNumber: number, finished: number[]) {
+  const plan = ctx.project.planProjectNumber;
+  // Read before the close: GitHub's "Item closed" workflow may set Done on the item as soon as it closes.
+  const statusOf = async (issue: number) => (projects && plan !== null ? projects.getStatus(repo, plan, issue).catch(() => undefined) : undefined);
+  const before = new Map<number, PlanStatus | undefined>();
+  const closed: number[] = [];
+  const seen = new Set<number>();
+  for (let level = finished; level.length; ) {
+    const next: number[] = [];
+    for (const child of level) {
+      let parent: number | undefined;
+      try {
+        parent = (await github.getIssue(repo, child, { parents: true })).parents?.[0]?.number;
+        if (parent === undefined || seen.has(parent)) continue;
+        seen.add(parent);
+        if ((await github.listSubIssues(repo, parent)).some((s) => s.state === "open")) continue;
+        if ((await github.getIssue(repo, parent)).state !== "open") continue;
+        before.set(parent, await statusOf(parent));
+        await github.closeIssue(repo, parent, `Finished by #${prNumber}, merged by handoff run \`${ctx.run.id}\`, which closed #${child}, its last open sub-issue.`);
+        closed.push(parent);
+        next.push(parent);
+      } catch (error) {
+        ctx.emit("github.parent_close_failed", { parent: parent ?? null, child, message: (error as Error).message });
+      }
+    }
+    level = next;
+  }
+  if (closed.length === 0) return;
+  ctx.emit("github.parents_closed", { numbers: closed });
+  const written = await writePlanStatus(projects, ctx.project, closed, "Done", before);
+  for (const event of written) ctx.emit(event.type, event.payload);
 }
 
 /** Whether this execution already recorded an event of this type, across its waits. */
@@ -415,13 +464,16 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
       }
       const method = ctx.node.config.method === "merge" || ctx.node.config.method === "rebase" ? ctx.node.config.method : "squash";
       try {
+        // Only an issue still open now is one this merge closes; a parent never closes for an issue closed by hand.
+        const openBefore = await openLinkedIssues(deps.github, ctx, repo);
         const result = await deps.github.mergePr(repo, number, method);
         if (!result.merged) return done({ kind: "failed", error: { code: "merge_failed", message: `GitHub did not merge PR #${number}` } });
         ctx.emit("github.merged", { number, sha: result.sha });
         await ctx.notify("merged", { title: `${ctx.project.name}: PR #${number} merged`, body: brief(ctx.run.task), href: runPath(ctx.project.id, ctx.run.id) });
-        await closeLinkedIssues(deps.github, ctx, repo, number);
+        const closedNow = await closeLinkedIssues(deps.github, ctx, repo, number);
         // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless.
         await movePlan(deps.projects, ctx, "Done");
+        await closeFinishedParents(deps.github, deps.projects, ctx, repo, number, closedNow.filter((n) => openBefore.has(n)));
         // Closed issues may unblock other runs of the project waiting at their Start, and tasks the scheduler may start.
         // Runs held on overlap check again, since the merged work is on the base now.
         if (db) {

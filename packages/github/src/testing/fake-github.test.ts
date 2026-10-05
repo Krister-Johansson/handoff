@@ -88,3 +88,14 @@ test("listSubIssues lists the sub-issues in the order they became sub-issues, as
   fake.parents.set(16, 132);
   expect((await fake.listSubIssues(repo, 132)).map((i) => i.number)).toEqual([88, 16]);
 });
+
+test("with closesOnMerge, a merge closes the open issues the pull request's body names with Closes, as GitHub does", async () => {
+  const fake = github({ 12: "Slugify drops digits", 14: "Not named" });
+  fake.closesOnMerge = true;
+  const pr = await fake.createPr(repo, { head: "fix", base: "main", title: "Fix", body: "Keeps digits.\n\nCloses #12\n\nOpened by handoff." });
+  await fake.mergePr(repo, pr.number);
+  expect(fake.issues.get(12)!.state).toBe("closed");
+  expect(fake.issues.get(14)!.state).toBe("open");
+  // GitHub closed it, not handoff: no closeIssue call is recorded.
+  expect(fake.closedIssues).toEqual([]);
+});
