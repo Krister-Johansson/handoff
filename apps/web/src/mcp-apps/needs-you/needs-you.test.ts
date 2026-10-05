@@ -92,7 +92,7 @@ test("a refused answer shows why and lets the person answer again", async () => 
   expect(card.getByRole("button", { name: "Allow once" })).toBeEnabled();
 });
 
-test("a host that fails the call shows its error too", async () => {
+test("a host that fails the call shows its error too, as the host worded it", async () => {
   await mountView(startNeedsYou, {
     input: {},
     result: textResult(inbox),
@@ -104,7 +104,7 @@ test("a host that fails the call shows its error too", async () => {
   });
   const card = within(await screen.findByRole("article", { name: "coder asks to run a command" }));
   fireEvent.click(card.getByRole("button", { name: "Allow once" }));
-  await waitFor(() => expect(card.getByRole("alert")).toHaveTextContent("Not approved"));
+  await waitFor(() => expect(card.getByRole("alert")).toHaveTextContent(/^Not approved$/));
 });
 
 test("an option answers the question with that option, and the details as the answer when given", async () => {

@@ -1,6 +1,5 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterAll, afterEach, beforeEach, expect, test, vi } from "vitest";
 import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, planPins, projects, projectSchedulers, questions, registerWorker, runs, schedulerEvents, sql, workers } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
@@ -9,7 +8,7 @@ import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { CATALOG, toolSpec } from "../lib/assistant/catalog";
 import { runPath } from "../lib/paths";
 import { addDays } from "../lib/plan/timeline-scale";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { createHandoffMcpServer, registerDataTools } from "./agent-mcp";
 import { createProject, saveGraphVersion } from "./graphs";
 
@@ -55,6 +54,10 @@ test("the agent MCP server lists exactly the catalog's data tools with their des
     expect(listed.annotations).toMatchObject({ readOnlyHint: spec.readOnly, title: spec.title });
   }
   expect(tools.find((t) => t.name === "cancel_run")?.annotations?.destructiveHint).toBe(true);
+});
+
+test("a call to a tool handoff does not have is refused as invalid params, not answered as a failed tool", async () => {
+  await expect(client.callTool({ name: "no_such_tool", arguments: {} })).rejects.toMatchObject({ code: -32602, message: expect.stringMatching(/^Tool no_such_tool not found/) });
 });
 
 test("setup_project says what the project still needs to work well with handoff, and how to fix it", async () => {

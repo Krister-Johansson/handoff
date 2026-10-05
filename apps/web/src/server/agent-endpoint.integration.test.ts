@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
 import { beforeEach, expect, test } from "vitest";
 import { lastAgentConnection, handleMcpRequest } from "./agent-endpoint";
 import { AgentTokenStore } from "./agent-token";

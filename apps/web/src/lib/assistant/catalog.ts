@@ -943,13 +943,13 @@ function chatProjectArgument(spec: ToolSpec | PageToolSpec): "project" | "projec
 }
 
 /** A tool's description and input as a chat on `project` sees them: its project argument is optional and says what it uses. */
-export function forChatProject(spec: ToolSpec | PageToolSpec, project: ChatProject | undefined): { description: string; inputSchema: z.ZodRawShape } {
+export function forChatProject(spec: ToolSpec | PageToolSpec, project: ChatProject | undefined): { description: string; inputSchema: z.ZodObject } {
   const key = project && chatProjectArgument(spec);
   const shape = spec.input.shape as Record<string, z.ZodType>;
-  if (!key) return { description: spec.description, inputSchema: shape };
+  if (!key) return { description: spec.description, inputSchema: z.object(shape) };
   return {
     description: `${spec.description} Without ${key}, it uses ${project.name}, this chat's project.`,
-    inputSchema: { ...shape, [key]: shape[key]!.optional() },
+    inputSchema: z.object({ ...shape, [key]: shape[key]!.optional() }),
   };
 }
 

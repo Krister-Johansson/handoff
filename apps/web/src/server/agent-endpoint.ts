@@ -1,5 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport, type McpServer } from "@modelcontextprotocol/server";
 import type { AgentTokenStore } from "./agent-token";
 import { isSameLocalOrigin } from "./local-request";
 
@@ -43,8 +42,7 @@ export async function handleMcpRequest(request: Request, deps: { tokens: AgentTo
 
   const server = deps.makeServer();
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-  // The SDK's transport declares optional members without `| undefined`, which exactOptionalPropertyTypes rejects.
-  await server.connect(transport as never);
+  await server.connect(transport);
   try {
     return await transport.handleRequest(request);
   } finally {

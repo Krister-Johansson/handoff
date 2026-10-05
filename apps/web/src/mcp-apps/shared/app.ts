@@ -1,6 +1,5 @@
 import { App, applyDocumentTheme, applyHostFonts, applyHostStyleVariables, type McpUiHostContext } from "@modelcontextprotocol/ext-apps";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { CallToolResult, Transport } from "@modelcontextprotocol/client";
 import type { OpenLink } from "./dom";
 
 type ToolResult = { content?: { type: string; text?: string }[]; structuredContent?: unknown; isError?: boolean };

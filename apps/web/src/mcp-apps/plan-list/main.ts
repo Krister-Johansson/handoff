@@ -1,5 +1,5 @@
 import type { App } from "@modelcontextprotocol/ext-apps";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { Transport } from "@modelcontextprotocol/client";
 import { startView, valueOf, type ViewHost } from "../shared/app";
 import { renderState } from "../shared/dom";
 import { isPlan, planUrlOf, renderPlanList, type PlanData } from "./view";
