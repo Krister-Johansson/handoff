@@ -416,6 +416,17 @@ async function emittedBefore(db: Db, executionId: string, type: string) {
   return row !== undefined;
 }
 
+/** The payload of this execution's latest event of this type, across its waits. */
+async function lastPayload(db: Db, executionId: string, type: string) {
+  const [row] = await db
+    .select({ payload: events.payload })
+    .from(events)
+    .where(and(eq(events.nodeExecutionId, executionId), eq(events.type, type)))
+    .orderBy(desc(events.seq))
+    .limit(1);
+  return row?.payload as { threads?: { url: string }[] } | undefined;
+}
+
 /** The run's issues that GitHub records as blocked by open issues, with their blockers. */
 async function blockedIssues(github: GitHubPort, repo: RepoRef, issues: { number: number }[]) {
   const all = await Promise.all(issues.map(async (i) => ({ issue: i.number, blockedBy: await github.openBlockers(repo, i.number) })));
@@ -432,7 +443,9 @@ const QUEUE_RECHECK_MS = 60_000;
  * Merges the run's pull request (squash by default). With the database, it first takes its place in
  * the project's merge queue and waits for its turn: first in line, and, unless the node's mode is
  * auto, asked to merge by a person. At its turn a pull request that conflicts with the base branch or
- * is behind it goes back on the update edge to catch up, keeping its place. Merging wakes the queue.
+ * is behind it goes back on the update edge to catch up, keeping its place. One that GitHub reports as
+ * blocked while it has unresolved review threads waits, keeping its place, until a person resolves them:
+ * the step names the threads and notifies once. Merging wakes the queue.
  */
 export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?: ProjectsPort | undefined }): NodeExecutor {
   return {
@@ -485,6 +498,28 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
       if (routes(ctx, "update") && (await deps.github.behindBy(repo, ctx.run.baseBranch, snapshot.headSha)) > 0) {
         ctx.emit("merge.behind", { number, base: ctx.run.baseBranch });
         return catchUp("is behind");
+      }
+      // A ruleset that requires resolved conversations blocks the merge while a review thread is open. Resolving
+      // one is a person's call, so the step names the threads and waits for a webhook or the next look.
+      const review = await deps.github.unresolvedReviewThreads(repo, number);
+      if (review.mergeState === "BLOCKED" && review.threads.length > 0) {
+        let repoId = ctx.project.repoId;
+        if (repoId === null) {
+          repoId = await deps.github.getRepoId(repo);
+          await ctx.recordRepoId(repoId);
+        }
+        const key = prKey(repoId, number);
+        await ctx.registerWait(key);
+        const before = db ? await lastPayload(db, ctx.execution.id, "merge.threads_unresolved") : undefined;
+        const urls = (threads: { url: string }[]) => threads.map((t) => t.url).join("\n");
+        if (!before || urls(before.threads ?? []) !== urls(review.threads)) {
+          ctx.emit("merge.threads_unresolved", { number, url: snapshot.url, threads: review.threads });
+        }
+        if (!before) {
+          const count = review.threads.length;
+          await ctx.notify("input", { title: `${ctx.project.name}: PR #${number} has ${count} unresolved review ${count === 1 ? "thread" : "threads"}`, body: brief(ctx.run.task), href: snapshot.url });
+        }
+        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Date.now() + BLOCKED_RECHECK_MS) } };
       }
       const method = ctx.node.config.method === "merge" || ctx.node.config.method === "rebase" ? ctx.node.config.method : "squash";
       try {

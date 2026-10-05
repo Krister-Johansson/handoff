@@ -437,7 +437,8 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
   const actor = deps.actor ?? "claude-code";
   // The dashboard address of a run known only by id, under its project.
   const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
-  const url = (href: string) => `${baseUrl}${href}`;
+  // Dashboard paths get the base URL; a link elsewhere, such as a pull request on GitHub, stays as it is.
+  const url = (href: string) => (/^https?:\/\//.test(href) ? href : `${baseUrl}${href}`);
   const shaping = { db, github, projects: plan };
   /** The project's plan as the Plan page loads it, or the sentence that says why it cannot be read. */
   const planView = async (projectId: string) => {
@@ -613,7 +614,17 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         ready_to_merge: mine(groups.readyToMerge).map((r) => ({ run_id: r.runId, project: r.projectName, run: r.task, pr: r.prNumber, url: url(runPath(r.projectId, r.runId)) })),
         failed_runs: mine(groups.failedRuns).map((f) => ({ run_id: f.runId, project: f.projectName, run: f.task, node: f.nodeKey, url: url(runPath(f.projectId, f.runId)) })),
         stuck_runs: mine(groups.stuckRuns).map((s) => ({ run_id: s.runId, project: s.projectName, run: s.task, node: s.nodeKey, loop: s.loop, attempts: s.attempts, url: url(runPath(s.projectId, s.runId)) })),
-        pull_requests: mine(groups.pullRequests).map((p) => ({ run_id: p.runId, project: p.projectName, run: p.task, pr: p.number, pr_url: p.url, ci: p.ci, url: url(runPath(p.projectId, p.runId)) })),
+        pull_requests: mine(groups.pullRequests).map((p) => ({
+          run_id: p.runId,
+          project: p.projectName,
+          run: p.task,
+          pr: p.number,
+          pr_url: p.url,
+          ci: p.ci,
+          // How many review threads its merge waits on someone to resolve, when that is what it waits on.
+          ...(p.threads !== undefined ? { unresolved_threads: p.threads } : {}),
+          url: url(runPath(p.projectId, p.runId)),
+        })),
       };
     },
 

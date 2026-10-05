@@ -250,12 +250,13 @@ const withNode = (id: string, nodeType: string, data: Partial<FlowGraph["nodes"]
   nodes: [...graph.nodes, { id, type: "handoff", position: { x: 0, y: 0 }, data: { nodeType, label: id, isStart: false, config: {}, ...data } }],
 });
 
-test("a merge node says it is ready to merge and when it fails, and stays quiet about merging until turned on", () => {
+test("a merge node says it is ready to merge, when it waits for you and when it fails, and stays quiet about merging until turned on", () => {
   const dispatch = vi.fn();
   render(<Inspector graph={withNode("merge", "merge")} selection={{ nodeId: "merge" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
   const section = screen.getByRole("group", { name: "Notifications" });
   expect(within(section).getAllByRole("switch").map((s) => [s.getAttribute("aria-label") ?? s.id, (s as HTMLButtonElement).getAttribute("aria-checked")])).toEqual([
     ["notify-ready", "true"],
+    ["notify-input", "true"],
     ["notify-merged", "false"],
     ["notify-failed", "true"],
   ]);

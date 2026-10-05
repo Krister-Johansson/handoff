@@ -140,6 +140,14 @@ test("a pull request waiting for review links to GitHub and says how CI went", (
   expect(screen.getByText("handoff/7-todo-crud")).toBeInTheDocument();
 });
 
+test("a pull request whose merge waits on unresolved review threads asks the person to resolve them on GitHub", () => {
+  render(<PullRequestCard item={{ ...run, executionId: "x3", number: 62, url: "https://github.com/octo/app/pull/62", ci: null, branch: "handoff/8-todo", threads: 2 }} />);
+  expect(screen.getByText("2 unresolved review threads")).toBeInTheDocument();
+  expect(screen.getByText("The merge goes on once they are resolved.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Resolve on GitHub" })).toHaveAttribute("href", "https://github.com/octo/app/pull/62");
+  expect(screen.queryByText("The run goes on once the PR is approved.")).not.toBeInTheDocument();
+});
+
 test("a question's answer form is a WebMCP tool the person still submits", () => {
   render(<QuestionCard item={{ ...run, id: "q1", question: "Which license?", options: [], nodeKey: "gate", reason: "needs_input" }} />);
   const form = screen.getByRole("button", { name: "Send answer" }).closest("form")!;

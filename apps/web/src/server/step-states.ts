@@ -1,13 +1,19 @@
 import { inArray, liveWorkers, nodeExecutions, sql, type DbExecutor } from "@handoff/db";
 
-/** What a waiting step waits on: a person (permission or question), GitHub (ci), the merge queue, the worker, or another run's paths (overlap). */
-export type WaitingOn = "permission" | "question" | "ci" | "merge_queue" | "worker" | "overlap";
+/**
+ * What a waiting step waits on: a person (permission or question), GitHub (ci), the merge queue, the worker,
+ * another run's paths (overlap), or a person resolving a pull request's review threads (review_threads).
+ */
+export type WaitingOn = "permission" | "question" | "ci" | "merge_queue" | "worker" | "overlap" | "review_threads";
+
+/** A review thread a merge waits on someone to resolve, as the merge step named it. */
+export type ReviewThread = { path: string; line: number | null; outdated: boolean; author: string; body: string; url: string };
 
 /**
  * Where a step stands now. queued: ready, and `place` steps of its kind are ahead of it in the claim
  * order, counting itself (1 is next). running: its process works. waiting: on what `waiting_on` says.
  */
-export type StepState = { state: "queued" | "running" | "waiting"; place?: number; waiting_on?: WaitingOn };
+export type StepState = { state: "queued" | "running" | "waiting"; place?: number; waiting_on?: WaitingOn; review_threads?: ReviewThread[] };
 
 /** A worker that has not heartbeated for this long is not running. */
 const WORKER_WINDOW_MS = 60_000;
@@ -22,9 +28,16 @@ const WAIT_KINDS: Record<string, WaitingOn> = { human: "question", github_pr: "c
 export async function stepStates(db: DbExecutor, executionIds: string[]): Promise<Map<string, StepState>> {
   const states = new Map<string, StepState>();
   if (executionIds.length === 0) return states;
+  // A merge step that waits on GitHub names the unresolved review threads it waits on. The column is spelled
+  // out: inside the subquery a bare "id" would be the event's.
+  const latestThreads = sql<ReviewThread[] | null>`(
+    select e.payload->'threads' from events e
+    where e.node_execution_id = "node_executions"."id" and e.type = 'merge.threads_unresolved'
+    order by e.seq desc limit 1
+  )`;
   const [rows, places, workers] = await Promise.all([
     db
-      .select({ id: nodeExecutions.id, status: nodeExecutions.status, waitingOn: nodeExecutions.waitingOn, waitKind: nodeExecutions.waitKind })
+      .select({ id: nodeExecutions.id, status: nodeExecutions.status, waitingOn: nodeExecutions.waitingOn, waitKind: nodeExecutions.waitKind, threads: latestThreads })
       .from(nodeExecutions)
       .where(inArray(nodeExecutions.id, executionIds)),
     db.execute<{ id: string; place: number }>(sql`
@@ -48,6 +61,8 @@ export async function stepStates(db: DbExecutor, executionIds: string[]): Promis
       states.set(row.id, workers.length ? { state: "queued", ...queued } : { state: "waiting", waiting_on: "worker", ...queued });
     } else if (row.status === "running") {
       states.set(row.id, row.waitingOn === "permission" ? { state: "waiting", waiting_on: "permission" } : { state: "running" });
+    } else if (row.status === "waiting" && row.waitKind === "github_pr" && row.threads) {
+      states.set(row.id, { state: "waiting", waiting_on: "review_threads", review_threads: row.threads });
     } else if (row.status === "waiting") {
       const on = row.waitKind ? WAIT_KINDS[row.waitKind] : undefined;
       states.set(row.id, on ? { state: "waiting", waiting_on: on } : { state: "waiting" });

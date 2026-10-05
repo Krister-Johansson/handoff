@@ -1,6 +1,9 @@
 /** Something to tell a person about. A finished run is news, but needs no action, unlike the other kinds. */
 export type AttentionItem = { id: string; kind: "permission" | "question" | "failed" | "review" | "finished"; title: string; body: string; href: string; projectId: string };
 
+/** "1 unresolved review thread", "2 unresolved review threads". */
+export const unresolvedThreads = (count: number) => `${count} unresolved review ${count === 1 ? "thread" : "threads"}`;
+
 export type NotifyPrefs = { desktop: boolean; sound: boolean };
 
 const PREFS_KEY = "handoff.notify";

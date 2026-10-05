@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { unresolvedThreads } from "@/lib/attention";
 import { formatAgo } from "@/lib/format";
 import { reviewPath, runPath, tryPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
@@ -375,16 +376,18 @@ export function ReadyToMergeCard({ item }: { item: ReadyToMergeItem }) {
   );
 }
 
-export type PullRequestItem = RunRef & { executionId: string; number: number; url: string | null; ci: string | null; branch: string };
+/** `threads` is set when the merge waits on review threads nobody resolved, rather than on an approving review. */
+export type PullRequestItem = RunRef & { executionId: string; number: number; url: string | null; ci: string | null; branch: string; threads?: number };
 
 const CI: Record<string, { label: string; dot: string }> = {
   success: { label: "CI passing", dot: "bg-success-dot" },
   failure: { label: "CI failing", dot: "bg-danger-dot" },
 };
 
-/** A pull request whose PR node waits for an approving review on GitHub. */
+/** A pull request whose PR node waits for an approving review on GitHub, or whose merge waits on unresolved review threads. */
 export function PullRequestCard({ item }: { item: PullRequestItem }) {
   const ci = item.ci ? CI[item.ci] : undefined;
+  const threads = item.threads !== undefined;
   return (
     <InboxCard icon={GitPullRequestIcon} tone="success">
       <CardContext tag="PR to review on GitHub" item={item} compact={false} />
@@ -398,15 +401,16 @@ export function PullRequestCard({ item }: { item: PullRequestItem }) {
             {ci.label}
           </span>
         )}
+        {threads && <span>{unresolvedThreads(item.threads!)}</span>}
         <span className="font-mono">{item.branch}</span>
-        <span>The run goes on once the PR is approved.</span>
+        <span>{threads ? "The merge goes on once they are resolved." : "The run goes on once the PR is approved."}</span>
       </div>
       <CardActions>
         {item.url && (
           <Button asChild>
             <a href={item.url} target="_blank" rel="noreferrer">
               <ExternalLinkIcon data-icon="inline-start" />
-              Review on GitHub
+              {threads ? "Resolve on GitHub" : "Review on GitHub"}
             </a>
           </Button>
         )}

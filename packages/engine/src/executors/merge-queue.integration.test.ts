@@ -195,6 +195,92 @@ describe("merge queue", () => {
   });
 });
 
+describe("a ruleset that requires resolved review threads", () => {
+  /** Two review threads the coder answered with commits but nobody resolved. */
+  const leaveThreads = (github: FakeGitHub, number: number) =>
+    github.prs.get(number)!.reviewThreads.push(
+      { isResolved: false, comments: [{ author: "coderabbitai", body: "Handle the empty list.", path: "src/app.ts", line: 12, url: `https://github.com/octo/sample/pull/${number}#discussion_r1` }] },
+      { isResolved: false, comments: [{ author: "octocat", body: "Say how to run it.", path: "README.md", url: `https://github.com/octo/sample/pull/${number}#discussion_r2` }] },
+    );
+  const told = async (runId: string) => (await db.select().from(notifications).where(eq(notifications.runId, runId))).filter((n) => n.title.includes("unresolved review threads"));
+
+  test("a merge blocked by unresolved review threads waits, names them, and tells a person once", async () => {
+    const { github, project, first, deps, ready, prOf } = await twoRuns("manual");
+    github.requireResolvedThreads = true;
+    await ready(first.id);
+    const number = await prOf(first.id);
+    leaveThreads(github, number);
+    await requestMerge(db, first.id);
+    await drain(deps);
+
+    expect(github.merged).toEqual([]);
+    expect(await mergeStep(first.id)).toMatchObject({ status: "waiting", waitKind: "github_pr", waitKey: `gh:pr:42:${number}` });
+    const named = (await inspect(db, first.id)).events.filter((e) => e.type === "merge.threads_unresolved");
+    expect(named.map((e) => e.payload)).toEqual([
+      {
+        number,
+        url: `https://github.com/octo/sample/pull/${number}`,
+        threads: [
+          { path: "src/app.ts", line: 12, outdated: false, author: "coderabbitai", body: "Handle the empty list.", url: `https://github.com/octo/sample/pull/${number}#discussion_r1` },
+          { path: "README.md", line: null, outdated: false, author: "octocat", body: "Say how to run it.", url: `https://github.com/octo/sample/pull/${number}#discussion_r2` },
+        ],
+      },
+    ]);
+    expect((await told(first.id)).map(({ tone, title, href }) => ({ tone, title, href }))).toEqual([
+      { tone: "attention", title: `${project.name}: PR #${number} has 2 unresolved review threads`, href: `https://github.com/octo/sample/pull/${number}` },
+    ]);
+
+    // Another webhook, or the reconcile poll, finds the threads still open: the step keeps waiting and says nothing new.
+    await wakeByKey(db, `gh:pr:42:${number}`, { reason: "webhook" });
+    await drain(deps);
+    expect(await mergeStep(first.id)).toMatchObject({ status: "waiting", waitKind: "github_pr" });
+    expect(await told(first.id)).toHaveLength(1);
+    // It keeps its place in the queue, so the merge a person asked for goes on once the threads are resolved.
+    expect(await mergeQueue(db, project.id)).toMatchObject([{ runId: first.id, position: 1, requested: true }]);
+  });
+
+  test("once a person resolves the threads, the next webhook lets the merge go on", async () => {
+    const { github, project, first, deps, ready, prOf } = await twoRuns("manual");
+    github.requireResolvedThreads = true;
+    await ready(first.id);
+    const number = await prOf(first.id);
+    leaveThreads(github, number);
+    await requestMerge(db, first.id);
+    await drain(deps);
+    expect(github.merged).toEqual([]);
+
+    github.resolveThreads(number);
+    await wakeByKey(db, `gh:pr:42:${number}`, { reason: "webhook" });
+    await drain(deps);
+    expect(github.merged).toEqual([number]);
+    expect((await inspect(db, first.id)).run.status).toBe("succeeded");
+    expect(await mergeQueue(db, project.id)).toEqual([]);
+  });
+
+  test("open threads on a pull request GitHub does not block merge as before, and nobody is told about them", async () => {
+    const { github, first, deps, ready, prOf } = await twoRuns("manual");
+    await ready(first.id);
+    const number = await prOf(first.id);
+    leaveThreads(github, number);
+    await requestMerge(db, first.id);
+    await drain(deps);
+    expect(github.merged).toEqual([number]);
+    expect((await inspect(db, first.id)).events.some((e) => e.type === "merge.threads_unresolved")).toBe(false);
+    expect(await told(first.id)).toEqual([]);
+  });
+
+  test("a merge another rule blocks, with every thread resolved, fails with what GitHub said", async () => {
+    const { github, first, deps, ready, prOf } = await twoRuns("manual");
+    await ready(first.id);
+    const number = await prOf(first.id);
+    github.prs.get(number)!.mergeState = "BLOCKED";
+    await requestMerge(db, first.id);
+    await drain(deps);
+    expect(github.merged).toEqual([]);
+    expect(await mergeStep(first.id)).toMatchObject({ status: "failed", error: { code: "merge_failed", message: expect.stringContaining("Repository rule violations found") } });
+  });
+});
+
 test("a merge that closes a task nudges the scheduler, and the next check starts the task whose last blocker it closed", async () => {
   const repo = { owner: "octo", name: "sample" };
   const github = new FakeGitHub();

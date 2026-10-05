@@ -1,15 +1,18 @@
 import { and, appendEvents, desc, eq, events, isNull, nodeExecutions, projects, runs, sql, type Db } from "@handoff/db";
 import { brief, describePermission, questionBrief } from "@handoff/core";
 import { reviewPath, runPath } from "../lib/paths";
-import type { AttentionItem } from "../lib/attention";
+import { unresolvedThreads, type AttentionItem } from "../lib/attention";
 import { listInbox } from "./inbox";
 import { allPendingPermissions } from "./permissions";
 
-/** Pull requests whose PR node still waits after CI finished, which only happens when it needs an approving review. */
+/**
+ * Pull requests that wait on a person on GitHub: a PR node that still waits after CI finished, which only
+ * happens when it needs an approving review, and a merge step that waits on unresolved review threads.
+ */
 export async function waitingReviews(db: Db) {
-  const latestPr = sql<{ number?: number; url?: string; ci?: string } | null>`(
+  const latestPr = sql<{ number?: number; url?: string; ci?: string; threads?: unknown[] } | null>`(
     select e.payload from events e
-    where e.node_execution_id = ${nodeExecutions.id} and e.type = 'github.pr'
+    where e.node_execution_id = ${nodeExecutions.id} and e.type in ('github.pr', 'merge.threads_unresolved')
     order by e.seq desc limit 1
   )`;
   const rows = await db
@@ -126,7 +129,7 @@ export async function listAttention(db: Db, opts: { projectId?: string } = {}): 
     ...reviews.map((r): AttentionItem => ({
       id: `review:${r.executionId}:${r.pr!.number}`,
       kind: "review",
-      title: `${r.projectName}: PR #${r.pr!.number} waits for your review`,
+      title: `${r.projectName}: PR #${r.pr!.number} ${r.pr!.threads ? `has ${unresolvedThreads(r.pr!.threads.length)}` : "waits for your review"}`,
       body: brief(r.task),
       href: runPath(r.projectId, r.runId),
       projectId: r.projectId,

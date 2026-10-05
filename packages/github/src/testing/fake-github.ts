@@ -2,9 +2,10 @@ import { execFileSync } from "node:child_process";
 import { kindOf } from "../projects/kinds.ts";
 import type { PlanAncestor } from "../projects/types.ts";
 import { GitHubReadError } from "../errors.ts";
-import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
+import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary, ReviewThreadState } from "../types.ts";
 
-type FakePr = PrSnapshot & { base: string; body: string; files?: string[] };
+/** A pull request of the fake; `mergeState` is GitHub's mergeStateStatus when a test sets one, CLEAN otherwise. */
+type FakePr = PrSnapshot & { base: string; body: string; files?: string[]; mergeState?: string };
 
 /**
  * An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set.
@@ -317,9 +318,37 @@ export class FakeGitHub implements GitHubPort {
    */
   closesOnMerge = false;
 
+  /** The base branch's ruleset requires every review conversation to be resolved before a merge. */
+  requireResolvedThreads = false;
+
+  /** GitHub's merge state: BLOCKED while the ruleset waits on an unresolved thread, else what the test set, else CLEAN. */
+  private mergeStateOf(pr: FakePr) {
+    if (this.requireResolvedThreads && pr.reviewThreads.some((t) => !t.isResolved)) return "BLOCKED";
+    return pr.mergeState ?? "CLEAN";
+  }
+
+  async unresolvedReviewThreads(_repo: RepoRef, number: number): Promise<ReviewThreadState> {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    const threads = pr.reviewThreads
+      .filter((t) => !t.isResolved)
+      .map((t) => {
+        const first = t.comments[0];
+        return { path: first?.path ?? "", line: first?.line ?? null, outdated: false, author: first?.author ?? "ghost", body: first?.body ?? "", url: first?.url ?? "" };
+      });
+    return { mergeState: this.mergeStateOf(pr), threads };
+  }
+
+  /** Resolves every review thread of the pull request, as a person does on GitHub. */
+  resolveThreads(number: number) {
+    for (const thread of this.prs.get(number)!.reviewThreads) thread.isResolved = true;
+  }
+
   async mergePr(_repo: RepoRef, number: number) {
     const pr = this.prs.get(number);
     if (!pr || pr.state !== "open" || pr.mergeable === "CONFLICTING") return { merged: false };
+    // GitHub answers 405 when a ruleset blocks the merge.
+    if (this.mergeStateOf(pr) === "BLOCKED") throw new Error(`Repository rule violations found. PR #${number} is blocked by the base branch's rules.`);
     pr.state = "merged";
     pr.merged = true;
     this.merged.push(number);
