@@ -31,20 +31,23 @@ export function KindBadge({ kind }: { kind: PlanKind }) {
 /** Done first, then the work in flight, then what waits. */
 const SEGMENTS: PlanColumn[] = ["Done", "In review", "Running", "Ready", "Shaping", "Other"];
 
+/** A bar of segments coloured by status, Done first, each as wide as its share of the tasks. */
+export function StatusSegments({ byStatus, total, className }: { byStatus: Record<PlanColumn, number>; total: number; className?: string }) {
+  const parts = SEGMENTS.filter((c) => byStatus[c] > 0);
+  return (
+    <span role="img" aria-label={total ? parts.map((c) => `${byStatus[c]} ${c}`).join(", ") : "No tasks"} className={cn("flex h-1.5 overflow-hidden rounded-full bg-muted", className)}>
+      {parts.map((c) => (
+        <span key={c} className={cn("h-full", COLUMN_TONE[c].dot)} style={{ width: `${(byStatus[c] / total) * 100}%` }} />
+      ))}
+    </span>
+  );
+}
+
 /** Five segments coloured by status, Done first, with "3 of 8 done" beside them. */
 export function ProgressBar({ progress, className }: { progress: PlanProgress; className?: string }) {
-  const parts = SEGMENTS.filter((c) => progress.byStatus[c] > 0);
   return (
     <span className={cn("flex shrink-0 items-center gap-2.5", className)}>
-      <span
-        role="img"
-        aria-label={progress.total ? parts.map((c) => `${progress.byStatus[c]} ${c}`).join(", ") : "No tasks"}
-        className="flex h-1.5 w-16 overflow-hidden rounded-full bg-muted sm:w-[72px]"
-      >
-        {parts.map((c) => (
-          <span key={c} className={cn("h-full", COLUMN_TONE[c].dot)} style={{ width: `${(progress.byStatus[c] / progress.total) * 100}%` }} />
-        ))}
-      </span>
+      <StatusSegments byStatus={progress.byStatus} total={progress.total} className="w-16 sm:w-[72px]" />
       <span className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
         {progress.done} of {progress.total} done
       </span>

@@ -21,6 +21,8 @@ export type PlanFilters = {
   status: PlanStatus[];
   run: RunFilter;
   assignee: AssigneeFilter;
+  /** One milestone by number (open or closed), the tasks in no milestone, or everything. */
+  milestone: number | "none" | undefined;
   /** The search text from ?q=, trimmed; empty searches nothing. It narrows the view but is not a filter. */
   q: string;
 };
@@ -28,23 +30,25 @@ export type PlanFilters = {
 type Params = Record<string, string | string[] | undefined>;
 const one = (value: string | string[] | undefined) => (typeof value === "string" ? value : undefined);
 
-/** The Plan page's filters from ?epic=, ?status= (comma separated), ?run= and ?assignee=, and the search from ?q=; anything unknown means no filter. */
+/** The Plan page's filters from ?epic=, ?status= (comma separated), ?run=, ?assignee= and ?milestone=, and the search from ?q=; anything unknown means no filter. */
 export function parsePlanFilters(params: Params): PlanFilters {
   const epic = one(params.epic);
   const run = one(params.run);
   const status = one(params.status)?.split(",") ?? [];
   const assignee = one(params.assignee);
+  const milestone = one(params.milestone);
   return {
     epic: epic === "unplanned" ? "unplanned" : epic && /^\d+$/.test(epic) ? Number(epic) : undefined,
     status: PLAN_STATUSES.filter((s) => status.includes(s)),
     run: (RUN_FILTERS as readonly string[]).includes(run ?? "") ? (run as RunFilter) : "any",
     assignee: assignee && LOGIN.test(assignee) ? assignee : "anyone",
+    milestone: milestone === "none" ? "none" : milestone && /^\d+$/.test(milestone) ? Number(milestone) : undefined,
     q: one(params.q)?.trim() ?? "",
   };
 }
 
 /** Whether any filter narrows the plan. */
-export const isFiltered = (f: PlanFilters) => f.epic !== undefined || f.status.length > 0 || f.run !== "any" || f.assignee !== "anyone";
+export const isFiltered = (f: PlanFilters) => f.epic !== undefined || f.status.length > 0 || f.run !== "any" || f.assignee !== "anyone" || f.milestone !== undefined;
 
 const ACTIVE = new Set(["queued", "running", "waiting"]);
 const columnOf = (task: PlanTask): PlanColumn => (task.state === "closed" ? "Done" : (task.status ?? "Other"));
@@ -56,8 +60,8 @@ export type NarrowedPlan = Pick<PlanView, "epics" | "unparented" | "board" | "un
 
 /**
  * The plan narrowed by the filters, for the tree and the board alike. Progress keeps counting every
- * task of an epic or a story; with a status, run or assignee filter, stories and epics left without a
- * matching task drop out, and each epic says how many of its tasks are hidden. `me` is the login of
+ * task of an epic or a story; with a status, run, assignee or milestone filter, stories and epics left
+ * without a matching task drop out, and each epic says how many of its tasks are hidden. `me` is the login of
  * the token handoff uses; without one the Assignee filter Me keeps nothing.
  */
 export function filterPlan(view: PlanView, filters: PlanFilters, needsYou: readonly string[], me?: string): NarrowedPlan {
@@ -73,8 +77,10 @@ export function filterPlan(view: PlanView, filters: PlanFilters, needsYou: reado
     const login = filters.assignee === "me" ? me : filters.assignee;
     return login !== undefined && task.assignees.some((a) => a.login.toLowerCase() === login.toLowerCase());
   };
-  const keep = (task: PlanTask) => (filters.status.length === 0 || filters.status.some((s) => s === columnOf(task))) && keepRun(task.run) && keepAssignee(task);
-  const narrowing = filters.status.length > 0 || filters.run !== "any" || filters.assignee !== "anyone";
+  // A task's milestone is its own or the one it inherits from its story or epic, as loadPlan gives it.
+  const keepMilestone = (task: PlanTask): boolean => filters.milestone === undefined || (task.milestone?.number ?? "none") === filters.milestone;
+  const keep = (task: PlanTask) => (filters.status.length === 0 || filters.status.some((s) => s === columnOf(task))) && keepRun(task.run) && keepAssignee(task) && keepMilestone(task);
+  const narrowing = filters.status.length > 0 || filters.run !== "any" || filters.assignee !== "anyone" || filters.milestone !== undefined;
   const hidden: Record<number, number> = {};
   const inEpic = (epic: PlanEpic) => filters.epic === undefined || filters.epic === epic.number;
 
@@ -95,6 +101,6 @@ export function filterPlan(view: PlanView, filters: PlanFilters, needsYou: reado
   const onBoard = (t: PlanTask) => filters.epic !== "unplanned" && (ofEpic === undefined ? outside : ofEpic.has(t.number)) && keep(t);
   const board = Object.fromEntries(Object.entries(view.board).map(([column, tasks]) => [column, tasks.filter(onBoard)])) as Record<PlanColumn, PlanTask[]>;
   const unplanned =
-    (outside || filters.epic === "unplanned") && filters.status.length === 0 && filters.assignee === "anyone" ? view.unplanned.filter((i) => keepRun(i.run && i.run.status !== "cancelled" ? i.run : null)) : [];
+    (outside || filters.epic === "unplanned") && filters.status.length === 0 && filters.assignee === "anyone" && filters.milestone === undefined ? view.unplanned.filter((i) => keepRun(i.run && i.run.status !== "cancelled" ? i.run : null)) : [];
   return { epics, unparented, board, unplanned, hidden };
 }

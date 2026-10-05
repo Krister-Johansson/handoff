@@ -25,6 +25,7 @@ import { PlanEmpty } from "./plan-empty";
 import { FlowControls } from "./flow-parts";
 import { PlanFlow } from "./plan-flow";
 import { FilterChips, PlanFilters } from "./plan-filters";
+import { MilestoneStrip } from "./milestone-strip";
 import { PlanRefresher } from "./plan-refresher";
 import { PlanSearchField } from "./plan-search";
 import { PlanTimeline } from "./plan-timeline";
@@ -138,12 +139,24 @@ function PlanBody(props: BodyProps) {
   const shared = { projectId: project.id, repoUrl: `https://github.com/${project.repoOwner}/${project.repoName}`, needsYou: signals.needsYou, skipped: signals.skipped, ...start };
   const shown = found.active ? found : narrowed;
   const searchOpen = found.active ? found.open : undefined;
+  // The milestone the filter names draws its line on the Timeline and in the Flow.
+  const milestone = typeof filters.milestone === "number" ? plan.milestones?.find((m) => m.number === filters.milestone) : undefined;
   if (view === "flow" && plan.flow) {
-    return <PlanFlow {...shared} epics={shown.epics} unparented={shown.unparented} flow={plan.flow} scheduler={props.scheduler} searchOpen={searchOpen} />;
+    return (
+      <PlanFlow
+        {...shared}
+        epics={shown.epics}
+        unparented={shown.unparented}
+        flow={plan.flow}
+        scheduler={props.scheduler}
+        searchOpen={searchOpen}
+        milestone={milestone}
+      />
+    );
   }
   switch (view) {
     case "board":
-      return <PlanBoard {...shared} project={plan.project} board={shown.board} epics={plan.epics} now={readAt} searching={found.active} />;
+      return <PlanBoard {...shared} project={plan.project} board={shown.board} epics={plan.epics} now={readAt} searching={found.active} milestone={filters.milestone} />;
     case "timeline":
       return (
         <PlanTimeline
@@ -154,6 +167,7 @@ function PlanBody(props: BodyProps) {
           timeline={timeline}
           zoom={zoom}
           filters={filters}
+          milestone={milestone}
           readAt={readAt}
           todayRef={todayRef}
           searchOpen={searchOpen}
@@ -252,6 +266,15 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
       <SearchQuery value={found.active ? query.trim() : ""}>
       <FlowSelection value={view === "flow" ? selection : undefined}>
         <div className="flex flex-col gap-3">
+          <MilestoneStrip
+            projectId={project.id}
+            repo={`${project.repoOwner}/${project.repoName}`}
+            view={view}
+            mode={mode}
+            filters={current}
+            milestones={plan.milestones}
+            none={plan.noMilestone}
+          />
           <PlanToolbar
             projectId={project.id}
             view={view}
@@ -269,7 +292,20 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
                 className="max-w-90 min-w-36 flex-1 basis-40"
               />
             }
-            filterButtons={<PlanFilters projectId={project.id} view={view} filters={current} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
+            filterButtons={
+              <PlanFilters
+                projectId={project.id}
+                view={view}
+                filters={current}
+                epics={plan.epics}
+                counts={counts}
+                unplanned={plan.unplanned.length}
+                me={me}
+                people={people}
+                milestones={plan.milestones}
+                noMilestone={plan.noMilestone}
+              />
+            }
             controls={
               view === "timeline" ? (
                 <TimelineControls projectId={project.id} filters={current} timeline={timeline} zoom={zoom} narrow={narrow} onToday={() => todayRef.current?.()} />
@@ -278,7 +314,7 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
               )
             }
           />
-          <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} />
+          <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} milestones={plan.milestones} />
           <div ref={body} onKeyDown={onBodyKeyDown}>
             <IssuePages projectId={project.id}>
               <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} timeline={timeline} todayRef={todayRef} />

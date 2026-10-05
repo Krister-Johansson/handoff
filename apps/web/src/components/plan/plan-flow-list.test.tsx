@@ -1,8 +1,11 @@
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { filterPlan, parsePlanFilters } from "@/lib/plan/filters";
+import { layoutFlow } from "@/lib/plan/flow";
+import { milestoneProgress } from "@/lib/plan/milestones";
 import { PlanFlow } from "./plan-flow";
-import { epic, flowOf, flowRun, planView, REPO_URL, story, task } from "./testing/plan-fixtures";
+import { epic, flowOf, flowRun, milestone, planView, REPO_URL, story, task, withMilestones } from "./testing/plan-fixtures";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }) }));
 vi.mock("@/app/projects/actions", () => ({ moveToReadyAction: vi.fn(), moveToShapingAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn() }));
@@ -117,4 +120,55 @@ test("under 640 px each task names the next task of its story in a Then tag", ()
   // The last task of a story and a skipped task have none.
   expect(within(item(64)).queryByText(/^Then /)).not.toBeInTheDocument();
   expect(within(item(63)).queryByText(/^Then /)).not.toBeInTheDocument();
+});
+
+test("under 640 px the end of the filtered milestone is a row of its own after its last task, and without a filter each task shows its milestone", () => {
+  const marked = withMilestones(
+    planView([
+      epic(
+        12,
+        "Project management",
+        [
+          story(41, "Shaping with the assistant", 12, [
+            task(55, "Shaping tools", "Running", { size: "L" }),
+            task(57, "Add the migration", "Ready", { size: "S" }),
+            task(58, "Plan page tree and board", "Ready", { size: "M", milestone: { number: 5, title: "1.0" } }),
+            task(62, "Size chip", "Ready", { size: "M" }),
+            task(63, "Release notes", "Ready", { size: "S", labels: ["task", "human"] }),
+          ]),
+        ],
+        [],
+        { milestone: { number: 4, title: "0.9" } },
+      ),
+    ]),
+    [milestone(4, "0.9", { dueOn: "2026-10-20" }), milestone(5, "1.0")],
+  );
+  const flow = flowOf(marked, { lanes: 1, runs: [flowRun(55, 0, 3, 7)] });
+  const nine = { ...marked.milestones![0]!, progress: milestoneProgress(marked.milestones!, flow.tasks, { flow: layoutFlow(flow) }).milestones[0]!.progress };
+  const shown = filterPlan(marked, parsePlanFilters({ milestone: "4" }), []);
+  const props = { projectId: "p1", repoUrl: REPO_URL, unparented: [], flow, scheduler: { state: "running" as const, claudeSlots: 1 }, graphs: ["loop"], graphName: "loop" };
+  const { unmount } = render(
+    <TooltipProvider>
+      <PlanFlow {...props} epics={shown.epics} milestone={nine} />
+    </TooltipProvider>,
+  );
+  const list = screen.getByRole("list", { name: "Flow" });
+  const rows = [...list.children].map((li) => li.getAttribute("aria-label"));
+  // #58 is in 1.0, so the filter hides it; #62 at Next 3 is the last 0.9 task in the order, and the skipped #63 follows the line.
+  expect(rows).toEqual(["Task #55 Shaping tools", "Task #57 Add the migration", "Task #62 Size chip", "0.9 ends here, after Next 3, due Oct 20", "Task #63 Release notes"]);
+  const end = within(list).getByRole("separator", { name: "0.9 ends here, after Next 3, due Oct 20" });
+  expect(end).toHaveTextContent("0.9 ends here, after Next 3Due Oct 20");
+  // Filtered to 0.9, the rows do not repeat it.
+  expect(within(list).queryByTitle(/^Milestone 0\.9/)).not.toBeInTheDocument();
+  unmount();
+
+  render(
+    <TooltipProvider>
+      <PlanFlow {...props} epics={marked.epics} />
+    </TooltipProvider>,
+  );
+  const item = (n: number) => within(screen.getByRole("list", { name: "Flow" })).getByRole("listitem", { name: new RegExp(`^Task #${n} `) });
+  expect(within(item(57)).getByTitle("Milestone 0.9, from epic #12")).toHaveTextContent("0.9from epic #12");
+  expect(within(item(58)).getByTitle("Milestone 1.0, set on this issue")).toHaveTextContent("1.0");
+  expect(screen.queryByRole("separator", { name: /ends here/ })).not.toBeInTheDocument();
 });

@@ -1,7 +1,22 @@
-import type { Milestone } from "@handoff/github";
+import type { Milestone, PlanItem } from "@handoff/github";
 import { fromToday } from "../issue-dates";
-import type { MilestoneProgress } from "./milestones";
+import type { ItemMilestone, MilestoneFlow, MilestoneProgress } from "./milestones";
 import { shortDay } from "./timeline-scale";
+
+/** Where an item's milestone comes from, in words: "set on this issue", or "from epic #12". */
+export const milestoneSource = (m: ItemMilestone) => (m.inherited ? `from ${m.inherited.kind} #${m.inherited.issue}` : "set on this issue");
+
+/** The milestone an item sets on itself; undefined when it has none or inherits one, which its story's or epic's row shows. */
+export function ownMilestone(item: PlanItem): ItemMilestone | undefined {
+  const m = item.milestone as ItemMilestone | undefined;
+  return m && !m.inherited ? m : undefined;
+}
+
+/** The Flow's line after a milestone's last card in the order: "0.9 ends here, after Next 6". */
+export const flowLineText = (title: string, flow: MilestoneFlow) => (flow.last ? `${title} ends here, after Next ${flow.last.place}` : undefined);
+
+/** "1 skipped": the milestone's tasks the scheduler passes over. */
+export const skippedText = (flow: MilestoneFlow) => (flow.skipped.length ? `${flow.skipped.length} skipped` : undefined);
 
 /** "Due Oct 20, in 15 days", "Due Oct 3, 2 days ago", or "No due date". */
 export const dueText = (milestone: Pick<Milestone, "dueOn">, today: string) => (milestone.dueOn ? `Due ${shortDay(milestone.dueOn)}, ${fromToday(milestone.dueOn, today)}` : "No due date");

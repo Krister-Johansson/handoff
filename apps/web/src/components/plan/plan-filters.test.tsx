@@ -4,7 +4,7 @@ import { filterPlan, parsePlanFilters } from "@/lib/plan/filters";
 import { PlanBoard } from "./plan-board";
 import { FilterChips, PlanFilters } from "./plan-filters";
 import { PlanTree } from "./plan-tree";
-import { epic, planView, PROJECT, REPO_URL, run, story, task, unplannedIssue } from "./testing/plan-fixtures";
+import { epic, milestone, planView, PROJECT, REPO_URL, run, story, task, unplannedIssue, withMilestones } from "./testing/plan-fixtures";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -87,4 +87,50 @@ test("epic, status and run filters live in the URL and narrow both views", () =>
   expect(filters({ run: "needs-you" }).narrowed.board.Running.map((t) => t.number)).toEqual([56]);
   const unplannedOnly = filters({ epic: "unplanned" }).narrowed;
   expect([unplannedOnly.epics.length, unplannedOnly.unplanned.map((i) => i.number)]).toEqual([0, [301]]);
+});
+
+test("the Milestone filter lists the open milestones, No milestone and the closed ones under Closed, and its chip undoes it", () => {
+  const marked = withMilestones(
+    planView([
+      epic(12, "Redesign", [story(41, "Foundations", 12, [task(55, "Tokens", "Done", { state: "closed" }), task(56, "Type", "Ready")])], [], { milestone: { number: 1, title: "Redesign beta" } }),
+      epic(10, "Voice", [story(18, "Settings", 10, [task(70, "Speak", "Ready"), task(71, "Picker", "Ready")])]),
+    ]),
+    [milestone(1, "Redesign beta", { dueOn: "2026-10-03" }), milestone(2, "Redesign 1.0"), milestone(3, "Alpha", { state: "closed", dueOn: "2026-09-01" })],
+  );
+  const counts = { Shaping: 0, Ready: 3, Running: 0, "In review": 0, Done: 1, Other: 0 };
+  const { unmount } = render(
+    <PlanFilters projectId="p1" view="flow" filters={parsePlanFilters({ q: "type" })} epics={marked.epics} counts={counts} unplanned={0} people={[]} milestones={marked.milestones} noMilestone={marked.noMilestone} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Milestone" }));
+  const options = screen.getAllByRole("option").map((o) => o.textContent);
+  expect(options).toEqual(["All milestones", "Redesign betaDue Oct 31 of 2 done", "Redesign 1.0No due date0 of 0 done", "No milestone2 open", "AlphaDue Sep 1"]);
+  expect(within(screen.getByRole("group", { name: "Closed" })).getByRole("option", { name: /Alpha/ })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("option", { name: /Redesign beta/ }));
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=flow&milestone=1&q=type", { scroll: false });
+  fireEvent.click(screen.getByRole("button", { name: "Milestone" }));
+  fireEvent.click(screen.getByRole("option", { name: /No milestone/ }));
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=flow&milestone=none&q=type", { scroll: false });
+  fireEvent.click(screen.getByRole("button", { name: "Milestone" }));
+  fireEvent.click(screen.getByRole("option", { name: /Alpha/ }));
+  expect(router.replace).toHaveBeenLastCalledWith("/projects/p1/plan?view=flow&milestone=3&q=type", { scroll: false });
+  unmount();
+
+  const set = parsePlanFilters({ milestone: "3", status: "Ready" });
+  const { unmount: again } = render(
+    <>
+      <PlanFilters projectId="p1" view="tree" filters={set} epics={marked.epics} counts={counts} unplanned={0} people={[]} milestones={marked.milestones} noMilestone={marked.noMilestone} />
+      <FilterChips projectId="p1" view="tree" filters={set} epics={marked.epics} milestones={marked.milestones} />
+    </>,
+  );
+  expect(screen.getByRole("button", { name: "Milestone Alpha" })).toBeInTheDocument();
+  expect(within(screen.getByRole("list", { name: "Filters" })).getByRole("link", { name: "Remove Milestone: Alpha" })).toHaveAttribute("href", "/projects/p1/plan?view=tree&status=Ready");
+  again();
+
+  render(<FilterChips projectId="p1" view="tree" filters={parsePlanFilters({ milestone: "none" })} epics={marked.epics} milestones={marked.milestones} />);
+  expect(screen.getByRole("link", { name: "Remove Milestone: No milestone" })).toHaveAttribute("href", "/projects/p1/plan?view=tree");
+});
+
+test("a repository without milestones has no Milestone filter", () => {
+  render(<PlanFilters projectId="p1" view="tree" filters={parsePlanFilters({})} epics={view.epics} counts={{ Shaping: 1, Ready: 0, Running: 3, "In review": 1, Done: 1, Other: 0 }} unplanned={1} people={[]} milestones={[]} />);
+  expect(screen.queryByRole("button", { name: /^Milestone/ })).not.toBeInTheDocument();
 });
