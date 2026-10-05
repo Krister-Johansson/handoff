@@ -49,6 +49,7 @@ query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
           body
           submittedAt
           author {
+            __typename
             login
           }
           commit {
@@ -58,30 +59,54 @@ query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
       }
       reviewThreads(first: 100) {
         nodes {
+          id
           isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          viewerCanReply
+          viewerCanResolve
+          resolvedBy {
+            login
+          }
           comments(first: 1) {
             nodes {
-              databaseId
-              author {
-                login
-              }
-              body
-              path
-              line
-              url
+              ...ThreadComment
+            }
+          }
+          latest: comments(last: 10) {
+            nodes {
+              ...ThreadComment
             }
           }
         }
       }
       comments(last: 50) {
         nodes {
+          databaseId
           author {
             login
           }
           body
           url
+          createdAt
+          updatedAt
         }
       }
     }
   }
+}
+
+fragment ThreadComment on PullRequestReviewComment {
+  databaseId
+  author {
+    __typename
+    login
+  }
+  body
+  path
+  line
+  url
+  createdAt
 }

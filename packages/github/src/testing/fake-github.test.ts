@@ -145,3 +145,91 @@ test("setMilestone sets and clears an issue's milestone and records each write, 
   await expect(fake.setMilestone(repo, 99, 2)).rejects.toThrow("issue octo/sample#99 not found");
   expect(fake.milestoneWrites).toHaveLength(2);
 });
+
+/** A FakeGitHub with one open pull request on which coderabbitai left one thread on the head commit. */
+async function reviewedPr() {
+  const fake = new FakeGitHub();
+  const pr = await fake.createPr(repo, { head: "fix", base: "main", title: "Fix", body: "" });
+  fake.reviewOnHead(pr.number, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "Exclude the e2e folder." }] });
+  const [thread] = (await fake.getPrSnapshot(repo, pr.number)).reviewThreads;
+  return { fake, number: pr.number, thread: thread! };
+}
+
+test("a reviewer's thread has an id, the viewer's rights and the author's type, and replyToThread adds the viewer's reply to its latest comments", async () => {
+  const { fake, number, thread } = await reviewedPr();
+  expect(thread).toMatchObject({
+    isResolved: false,
+    isOutdated: false,
+    path: "vitest.config.ts",
+    line: 12,
+    originalLine: 12,
+    viewerCanReply: true,
+    viewerCanResolve: true,
+    resolvedBy: null,
+    comments: [{ author: "coderabbitai", authorBot: true, body: "Exclude the e2e folder.", path: "vitest.config.ts", line: 12 }],
+  });
+  expect(thread.id).toMatch(/^PRRT_/);
+  expect((await fake.getPrSnapshot(repo, number)).reviews[0]).toMatchObject({ author: "coderabbitai", authorBot: true });
+
+  const reply = await fake.replyToThread(repo, thread.id, "Not changed: the comment does not hold.");
+  fake.replyInThread(number, thread.id, "coderabbitai", "Thanks, that settles it.");
+
+  const after = (await fake.getPrSnapshot(repo, number)).reviewThreads[0]!;
+  // The first comment stays the reviewer's; the latest comments carry the conversation.
+  expect(after.comments.map((c) => c.author)).toEqual(["coderabbitai"]);
+  expect(after.latest.map((c) => [c.author, c.authorBot, c.body])).toEqual([
+    ["coderabbitai", true, "Exclude the e2e folder."],
+    ["octocat", false, "Not changed: the comment does not hold."],
+    ["coderabbitai", true, "Thanks, that settles it."],
+  ]);
+  expect(after.latest[1]).toMatchObject({ id: reply.id, url: reply.url });
+
+  // A GitHub App replies as its bot.
+  fake.login = undefined;
+  await fake.replyToThread(repo, thread.id, "Valid. Fixed in abc.");
+  expect((await fake.getPrSnapshot(repo, number)).reviewThreads[0]!.latest.at(-1)).toMatchObject({ author: "handoff[bot]", authorBot: true });
+
+  fake.prs.get(number)!.reviewThreads[0]!.viewerCanReply = false;
+  await expect(fake.replyToThread(repo, thread.id, "Again.")).rejects.toThrow("may not reply");
+});
+
+test("resolveThread resolves one thread by id as the viewer, refuses without viewerCanResolve, and a thread the reviewer resolved names the reviewer", async () => {
+  const { fake, number, thread } = await reviewedPr();
+  fake.reviewOnHead(number, "ann", { threads: [{ path: "README.md", line: 3, body: "Say how to run it." }, { path: "src/app.ts", line: 1, body: "Rename." }] });
+  const [, annFirst, annSecond] = (await fake.getPrSnapshot(repo, number)).reviewThreads;
+
+  expect(await fake.resolveThread(repo, thread.id)).toEqual({ resolved: true });
+  // Resolving it again is no error, as on GitHub.
+  expect(await fake.resolveThread(repo, thread.id)).toEqual({ resolved: true });
+  fake.resolveThreadAs(number, annFirst!.id, "ann");
+  fake.prs.get(number)!.reviewThreads[2]!.viewerCanResolve = false;
+  await expect(fake.resolveThread(repo, annSecond!.id)).rejects.toThrow("may not resolve");
+
+  const threads = (await fake.getPrSnapshot(repo, number)).reviewThreads;
+  expect(threads.map((t) => [t.isResolved, t.resolvedBy])).toEqual([
+    [true, "octocat"],
+    [true, "ann"],
+    [false, null],
+  ]);
+});
+
+test("a deleted thread is gone from the snapshot, and replying in it or resolving it fails as on GitHub", async () => {
+  const { fake, number, thread } = await reviewedPr();
+  fake.deleteThread(number, thread.id);
+  expect((await fake.getPrSnapshot(repo, number)).reviewThreads).toEqual([]);
+  await expect(fake.replyToThread(repo, thread.id, "Valid.")).rejects.toThrow(`Could not resolve to a node with the global id of '${thread.id}'`);
+  await expect(fake.resolveThread(repo, thread.id)).rejects.toThrow(`Could not resolve to a node with the global id of '${thread.id}'`);
+});
+
+test("summaryComment creates a bot's summary comment and then edits it in place, in the snapshot and in the issue's comments", async () => {
+  const fake = new FakeGitHub();
+  const pr = await fake.createPr(repo, { head: "fix", base: "main", title: "Fix", body: "" });
+  const marker = "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->";
+  const id = fake.summaryComment(pr.number, `${marker}\nFirst summary`, { at: "2026-10-05T17:59:45Z" });
+  fake.comment(pr.number, "ann", "Looks fine.", { at: "2026-10-05T18:00:00Z" });
+  expect(fake.summaryComment(pr.number, `${marker}\nSecond summary`, { at: "2026-10-05T18:12:37Z" })).toBe(id);
+
+  const summary = { id, author: "coderabbitai", body: `${marker}\nSecond summary`, createdAt: "2026-10-05T17:59:45Z", updatedAt: "2026-10-05T18:12:37Z" };
+  expect((await fake.getPrSnapshot(repo, pr.number)).comments).toEqual([expect.objectContaining(summary)]);
+  expect(await fake.listIssueComments(repo, pr.number)).toEqual([expect.objectContaining(summary), expect.objectContaining({ author: "ann", body: "Looks fine." })]);
+});
