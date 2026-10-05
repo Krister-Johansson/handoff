@@ -1047,7 +1047,7 @@ test("schedule on a Project without date fields names setup_plan", async () => {
   await timeline();
   const { story } = await epicAndStory();
   plan.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
-  expect((await call("schedule", { project: "sandbox", items: [{ issue: story, target: "2026-10-30" }] })).error).toMatch(/no Start and Target date fields\. Run setup_plan/);
+  expect((await call("schedule", { project: "sandbox", items: [{ issue: story, target: "2026-10-30" }] })).error).toMatch(/has no Start or Target field, which Timeline mode reads\. Run setup_plan/);
   expect((await call("create_task", { project: "sandbox", story, title: "Dated", brief: "A brief.", start: "2026-10-06" })).error).toMatch(/setup_plan/);
   expect([...plan.itemsOf(repo).values()].some((i) => i.start || i.target)).toBe(false);
 
@@ -1131,7 +1131,7 @@ test("set_size refuses an epic, an issue outside the plan, an unknown estimate a
   ]);
 
   plan.plans.get("octo/sample")!.project.estimateFields = undefined;
-  expect(await refused([{ issue: undated, size: "M" }])).toMatch(/has no Size and no Estimate field\. .*run setup_plan/);
+  expect(await refused([{ issue: undated, size: "M" }])).toMatch(/has no Size field, which Timeline mode reads\. Run setup_plan/);
   expect(sizeOf(undated)).toEqual({ size: undefined, estimate: undefined });
 });
 
@@ -1196,12 +1196,68 @@ test("create_task with a size sets it", async () => {
   // A Project without the fields refuses before the issue exists.
   plan.plans.get("octo/sample")!.project.estimateFields = undefined;
   const count = github.issues.size;
-  expect((await call("create_task", { project: "sandbox", story, title: "Unsized", brief: "A brief.", size: "S" })).error).toMatch(/no Size and no Estimate field\. .*run setup_plan/);
+  expect((await call("create_task", { project: "sandbox", story, title: "Unsized", brief: "A brief.", size: "S" })).error).toMatch(/has no Size field, which Timeline mode reads\. Run setup_plan/);
   expect(github.issues.size).toBe(count);
 });
 
 /** The sentence every date path refuses with in a Flow project. */
 const NO_DATES = "sandbox plans in Flow mode: tasks have an order and blockers, no dates. Use arrange_plan and set_order, or a person can switch the plan mode in Project settings.";
+
+/** A Flow project's plan as setup_plan made it, with the Size field only, switched to Timeline mode (#587). */
+async function switchedToTimeline() {
+  const { project } = await call("setup_plan", { project: "sandbox" });
+  const epic = await call("create_epic", { project: "sandbox", title: "Project management", goal: "See what each task is part of." });
+  const story = await call("create_story", { project: "sandbox", epic: epic.number, title: "Shaping tools", acceptance: ["Every write asks first"] });
+  const task = (await call("create_task", { project: "sandbox", story: story.number, title: "Sized", brief: "Sized.", size: "M" })).number as number;
+  await timeline();
+  return { number: project.number as number, story: story.number as number, task };
+}
+
+test("list_plan in a Timeline project names the Start, Target and Estimate fields its Project lacks", async () => {
+  const { number } = await switchedToTimeline();
+  const listed = await call("list_plan", { project: "sandbox" });
+  expect(listed).toMatchObject({
+    mode: "timeline",
+    missing_fields: ["Start", "Target", "Estimate"],
+    fields_note: `GitHub Project #${number} has no Start, Target or Estimate field, which Timeline mode reads. Run setup_plan to add them, or a person can press Add the fields in Settings, Projects.`,
+  });
+
+  // setup_plan in Timeline mode adds them, and list_plan then names none.
+  await call("setup_plan", { project: "sandbox" });
+  const after = await call("list_plan", { project: "sandbox" });
+  expect(after.missing_fields).toBeUndefined();
+  expect(after.fields_note).toBeUndefined();
+});
+
+test("arrange_plan in a Timeline project without Start and Target refuses and names the missing fields", async () => {
+  const { number } = await switchedToTimeline();
+  expect(await call("arrange_plan", { project: "sandbox" })).toEqual({
+    error: `GitHub Project #${number} has no Start, Target or Estimate field, which Timeline mode reads. Run setup_plan to add them, or a person can press Add the fields in Settings, Projects.`,
+  });
+
+  // With the dates in place, a missing Estimate alone is named in the answer and the preview still comes back.
+  await plan.ensureDateFields("octo", number);
+  expect(await call("arrange_plan", { project: "sandbox" })).toMatchObject({
+    missing_fields: ["Estimate"],
+    fields_note: `GitHub Project #${number} has no Estimate field, which Timeline mode reads. Run setup_plan to add it, or a person can press Add the fields in Settings, Projects.`,
+    placements: [{ title: "Sized", hours: 1 }],
+  });
+});
+
+test("schedule and set_size with an estimate in a Timeline project name the fields its Project lacks and write nothing", async () => {
+  const { number, task } = await switchedToTimeline();
+  const writes = vi.spyOn(plan, "setManyPlanFields");
+  expect(await call("schedule", { project: "sandbox", items: [{ issue: task, start: "2026-10-06", target: "2026-10-09" }] })).toEqual({
+    error: `GitHub Project #${number} has no Start or Target field, which Timeline mode reads. Run setup_plan to add them, or a person can press Add the fields in Settings, Projects.`,
+  });
+  expect(await call("set_size", { project: "sandbox", items: [{ issue: task, estimate: "3h" }] })).toEqual({
+    error: `GitHub Project #${number} has no Estimate field, which Timeline mode reads. Run setup_plan to add it, or a person can press Add the fields in Settings, Projects.`,
+  });
+  expect(writes).not.toHaveBeenCalled();
+
+  // A size alone needs only the Size field the Project has.
+  expect(await call("set_size", { project: "sandbox", items: [{ issue: task, size: "L" }] })).toMatchObject({ sized: [{ issue: task, size: { from: "M", to: "L" } }] });
+});
 
 /** Ready tasks of a Flow plan with the Size field, created through the tools in this order, each with its size and the titles of its blockers. */
 async function flowPlan(ready: Record<string, { size?: "S" | "M" | "L"; after?: string[] }>) {

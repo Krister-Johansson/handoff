@@ -490,20 +490,37 @@ export async function unpinAction(input: z.input<typeof PlanTaskSchema>): Promis
   return onPlan(parsed.data.projectId, (deps) => unpin(deps.db, parsed.data.projectId, parsed.data.issue));
 }
 
-/** Add the fields, on the timeline's banner and in Settings, Projects: creates Size and Estimate on the plan's GitHub Project, Size only in a Flow project. */
-export async function addEstimateFieldsAction(input: { projectId: string }): Promise<ActionState> {
-  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+/**
+ * A project for Add the fields, and the plan mode the fields are for: left out, the stored mode; Timeline while a
+ * person picks it in Plan mode before saving.
+ */
+const AddFieldsSchema = z.object({ projectId: z.string().uuid(), mode: z.enum(PLAN_MODES).optional() });
+
+/** Settings, Projects, Project settings' Plan mode and the Plan page all list the Project's fields, so each is refreshed. */
+function revalidateFields(projectId: string) {
+  revalidatePath("/settings");
+  revalidatePath(projectSettingsPath(projectId));
+}
+
+/**
+ * Add the fields, on the Plan page's timeline, in Settings, Projects and in Plan mode: creates Size and Estimate on
+ * the plan's GitHub Project, Size only for a Flow project.
+ */
+export async function addEstimateFieldsAction(input: z.input<typeof AddFieldsSchema>): Promise<ActionState> {
+  const parsed = AddFieldsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That project has no plan to add fields to." };
-  const result = await onPlan(parsed.data.projectId, (deps) => addEstimateFields(deps, parsed.data.projectId));
-  if (result.ok) revalidatePath("/settings");
+  const { projectId, mode } = parsed.data;
+  const result = await onPlan(projectId, (deps) => addEstimateFields(deps, projectId, mode));
+  if (result.ok) revalidateFields(projectId);
   return result;
 }
 
-/** Add date fields, on the timeline's banner and in Settings, Projects: creates the Start and Target fields on the plan's GitHub Project. */
-export async function addDateFieldsAction(input: { projectId: string }): Promise<ActionState> {
-  const parsed = z.object({ projectId: z.string().uuid() }).safeParse(input);
+/** Add the fields, as addEstimateFieldsAction: creates the Start and Target fields on the plan's GitHub Project, refused for a Flow project. */
+export async function addDateFieldsAction(input: z.input<typeof AddFieldsSchema>): Promise<ActionState> {
+  const parsed = AddFieldsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That project has no plan to add dates to." };
-  const result = await onPlan(parsed.data.projectId, (deps) => addDateFields(deps, parsed.data.projectId));
-  if (result.ok) revalidatePath("/settings");
+  const { projectId, mode } = parsed.data;
+  const result = await onPlan(projectId, (deps) => addDateFields(deps, projectId, mode));
+  if (result.ok) revalidateFields(projectId);
   return result;
 }

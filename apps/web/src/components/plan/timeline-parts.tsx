@@ -6,7 +6,7 @@ import { CalendarClockIcon, CalendarIcon, ClockAlertIcon,
  LocateFixedIcon, LockIcon, MoveHorizontalIcon, PlusIcon, RulerIcon, TimerIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
-import { addDateFieldsAction, addEstimateFieldsAction } from "@/app/projects/actions";
+import { addMissingFields } from "@/components/projects/add-missing-fields";
 import { Tag } from "@/components/tag";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -28,6 +28,7 @@ import type { Timeline, TimelineItem } from "@/lib/plan/schedule";
 import type { PlanFilters } from "@/lib/plan/filters";
 import { formatDuration } from "@/lib/plan/duration";
 import { BAR_TONE, taskColumn } from "@/lib/plan/task";
+import type { TimelineFieldsGap } from "@/lib/plan/timeline-rows";
 import { chartRange } from "@/lib/plan/timeline-rows";
 import { defaultZoom, shortDay, timeScale, ZOOMS, type Zoom } from "@/lib/plan/timeline-scale";
 import { cn } from "@/lib/utils";
@@ -272,40 +273,30 @@ function FieldsBanner({ icon, title, description, label, confirmTitle, confirmDe
   );
 }
 
-/**
- * A Project without Size or Estimate, or with a Size field that lacks S, M or L: says what it lacks and
- * offers to add the fields, behind a confirmation. Existing Size options stay.
- */
-export function EstimateFieldsBanner({ projectId, project, title }: { projectId: string; project: PlanProject; title: string }) {
-  const both = !project.estimateFields?.size && !project.estimateFields?.estimate;
-  return (
-    <FieldsBanner
-      icon={<RulerIcon className="text-attention" />}
-      title={title}
-      description={`Size is a single select with S, M and L. Estimate is a Number field in hours. ${both ? "Both are added to the GitHub Project." : "The missing ones are added to the GitHub Project, and its own Size options stay."}`}
-      label="Add the fields"
-      confirmTitle={`Add Size and Estimate to ${project.title}?`}
-      confirmDescription="handoff creates a single select field Size with S, M and L and a Number field Estimate on the GitHub Project, or adds what is missing of them. Existing options and values stay; nothing else changes."
-      add={() => addEstimateFieldsAction({ projectId })}
-    />
-  );
-}
+/** "Start, Target and Estimate". */
+const both = (names: readonly string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : (names[0] ?? ""));
 
-/** A Project without Start or Target: says so and offers to add them, behind a confirmation. */
-export function DateFieldsBanner({ projectId, project }: { projectId: string; project: PlanProject }) {
+/**
+ * The Timeline's notice for a Project that lacks Start, Target, Size or Estimate, or has a Size field without S,
+ * M or L: names what it lacks and offers Add the fields, behind a confirmation, with the same actions as
+ * Settings, Projects. Existing fields and Size options stay.
+ */
+export function TimelineFieldsBanner({ projectId, project, gap }: { projectId: string; project: PlanProject; gap: TimelineFieldsGap }) {
+  const dates = gap.adding.includes("Start") || gap.adding.includes("Target");
   return (
     <FieldsBanner
-      icon={<CalendarIcon className="text-attention" />}
-      title="This Project has no Start and Target fields"
-      description={<>GitHub&apos;s roadmap also needs them picked once under &quot;Date fields&quot;.</>}
-      label="Add date fields"
-      confirmTitle={`Add Start and Target to ${project.title}?`}
-      confirmDescription={
+      icon={dates ? <CalendarIcon className="text-attention" /> : <RulerIcon className="text-attention" />}
+      title={gap.title}
+      description={
         <>
-          handoff creates two Date fields, Start and Target, on the GitHub Project. Nothing else changes. To see them on GitHub&apos;s roadmap, pick them once under &quot;Date fields&quot;.
+          The missing fields are added to the GitHub Project.
+          {dates && <> GitHub&apos;s roadmap also needs Start and Target picked once under &quot;Date fields&quot;.</>}
         </>
       }
-      add={() => addDateFieldsAction({ projectId })}
+      label="Add the fields"
+      confirmTitle={`Add ${both(gap.adding)} to ${project.title}?`}
+      confirmDescription="handoff creates what the GitHub Project lacks of Start and Target, two Date fields, Size, a single select with S, M and L, and Estimate, a Number field in hours. Existing fields, options and values stay; nothing else changes."
+      add={() => addMissingFields(projectId, "timeline", gap.fields)}
     />
   );
 }

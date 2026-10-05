@@ -4,10 +4,12 @@ import { useId, useState, useTransition } from "react";
 import { InfoIcon } from "lucide-react";
 import type { PlanMode } from "@handoff/db";
 import { setPlanModeAction } from "@/app/projects/actions";
+import { AddFieldsButton } from "@/components/projects/add-fields";
 import { CARD_BODY, SectionCard } from "@/components/section-card";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { missingFields, noFields, type PlanFieldsPresent } from "@/lib/plan/plan-fields";
 import { cn } from "@/lib/utils";
 
 type Bar = { left: number; top: number; width: number; tone: "running" | "next" | "done" };
@@ -68,11 +70,29 @@ const CHOICES: { mode: PlanMode; label: string; short: string; agents: string }[
 ];
 
 /**
+ * Which fields the picked mode reads that the plan's GitHub Project lacks, and Add the fields, as Settings,
+ * Projects offers it. Nothing when the Project has them all, or when there is no Project or GitHub cannot say.
+ */
+function MissingFields({ projectId, mode, initial, fields }: { projectId: string; mode: PlanMode; initial: PlanMode; fields: PlanFieldsPresent | undefined }) {
+  const missing = fields ? missingFields(fields, mode) : [];
+  if (!fields || !missing.length) return null;
+  return (
+    <div className="flex flex-col items-start gap-1.5 text-[12.5px] leading-normal">
+      <p>
+        The GitHub Project has {noFields(missing)}, which {mode === "flow" ? "Flow" : "Timeline"} mode reads.
+      </p>
+      <AddFieldsButton key={mode} projectId={projectId} mode={mode} fields={fields} picked={mode !== initial} />
+    </div>
+  );
+}
+
+/**
  * Project settings' Plan mode: Flow or Timeline as two radio cards, each with a small picture and what agents
  * do in it. Save writes the picked mode. The page keys the section on the saved mode, so `initial` is what is
- * saved and a save shows it again.
+ * saved and a save shows it again. `fields` are the fields the plan's GitHub Project has: the section names the
+ * ones the picked mode reads that it lacks, with Add the fields, and Save works without them.
  */
-export function PlanModeSettings({ projectId, initial }: { projectId: string; initial: PlanMode }) {
+export function PlanModeSettings({ projectId, initial, fields }: { projectId: string; initial: PlanMode; fields?: PlanFieldsPresent | undefined }) {
   const id = useId();
   const [picked, setPicked] = useState<PlanMode>(initial);
   const [error, setError] = useState<string>();
@@ -117,6 +137,7 @@ export function PlanModeSettings({ projectId, initial }: { projectId: string; in
               The Plan page shows Flow or Timeline to match. A tool for the other mode says so instead of doing the work, for example <span className="font-mono">schedule</span> in a Flow project.
             </span>
           </p>
+          <MissingFields projectId={projectId} mode={picked} initial={initial} fields={fields} />
           {error && <FieldError>{error}</FieldError>}
           <div className="flex flex-wrap items-center gap-2.5">
             <Button size="sm" onClick={save} disabled={saving || picked === initial}>

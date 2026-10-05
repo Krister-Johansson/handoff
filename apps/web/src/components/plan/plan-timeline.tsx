@@ -26,12 +26,10 @@ import { BAR_TONE, canMove, prNumberOf, taskColumn } from "@/lib/plan/task";
 import {
   arrowPath,
   chartRange,
-  estimateFieldsGap,
   isHead,
   itemsOf,
   KIND_NAME,
   LABEL_WIDTH,
-  lacksDateFields,
   placeItem,
   progressOf,
   rowLabel,
@@ -40,6 +38,7 @@ import {
   stripClock,
   stripDates,
   tasksOf,
+  timelineFieldsGap,
   timelineRows,
   type TimelineRow,
 } from "@/lib/plan/timeline-rows";
@@ -58,7 +57,7 @@ import { IssueTitle } from "./plan-task-parts";
 import { PlanTimelineList } from "./plan-timeline-list";
 import { ScheduleDialog } from "./schedule-dialog";
 import { FlagCard, type FlagContext } from "./timeline-flag-card";
-import { DateFieldsBanner, EstimateFieldsBanner, TimeChips, useNarrow, type TimelineProps } from "./timeline-parts";
+import { TimeChips, TimelineFieldsBanner, useNarrow, type TimelineProps } from "./timeline-parts";
 import { CapacityPopover } from "@/components/settings/capacity-popover";
 import { LoadRow } from "./load-row";
 import { useBarDrag, type DragBar } from "./use-bar-drag";
@@ -1132,12 +1131,11 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   const unscheduled = unscheduledGroups(epics, unparented, listed);
 
   const offscreen = pane && (todayX < pane.left ? "left" : todayX > pane.left + pane.width ? "right" : undefined);
-  const fieldsGap = estimateFieldsGap(project);
+  const fieldsGap = timelineFieldsGap(project);
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
-      {lacksDateFields(project) && <DateFieldsBanner projectId={projectId} project={project} />}
-      {fieldsGap && <EstimateFieldsBanner projectId={projectId} project={project} title={fieldsGap} />}
+      {fieldsGap && <TimelineFieldsBanner projectId={projectId} project={project} gap={fieldsGap} />}
       {sizing && <ArrangeBanner arrange={arrange} capacity={sizing.capacity} />}
       <div className="relative">
         <div ref={scroller} className="overflow-x-auto overscroll-x-contain" onScroll={measure}>

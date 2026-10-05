@@ -12,6 +12,7 @@ import { ProjectSettingsNav } from "@/components/settings/settings-nav";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import { PROJECTS_SETTINGS_PATH } from "@/lib/paths";
+import { planFieldsOf } from "@/lib/plan/plan-fields";
 import { parseProjectSettingsTab, projectSettingsPath, projectSettingsTabLabel, type ProjectSettingsTab } from "@/lib/settings-tab";
 import { cn } from "@/lib/utils";
 import { loadAppLaunch } from "@/server/app-launch";
@@ -27,13 +28,17 @@ const LINK = "font-medium text-foreground underline underline-offset-3";
 
 const TEMPLATE_CHOICES = Object.entries(TEMPLATES).map(([value, t]) => ({ value, label: t.label }));
 
-/** Where the project's Priority comes from, the Project's own field or the organization's issue field; undefined with neither or when GitHub cannot say. */
-async function prioritySource(owner: string, number: number | null) {
+/** The plan's GitHub Project, a user's or an organization's; undefined without one or when GitHub cannot say. */
+async function planProject(owner: string, number: number | null) {
   if (number === null) return undefined;
-  const plan = await getProjects()
+  return getProjects()
     ?.getProject(owner, number)
     .catch(() => undefined);
-  return plan?.prioritySource;
+}
+
+/** Where the project's Priority comes from, the Project's own field or the organization's issue field; undefined with neither or when GitHub cannot say. */
+async function prioritySource(owner: string, number: number | null) {
+  return (await planProject(owner, number))?.prioritySource;
 }
 
 /** The open section with what it reads on the server; only the open section reads anything. */
@@ -57,9 +62,12 @@ async function openSection({ tab, detail }: { tab: ProjectSettingsTab; detail: P
       // A save gives the section its stored setting again.
       return <AppLaunchSettings key={JSON.stringify(view.saved)} view={view} />;
     }
-    case "mode":
+    case "mode": {
+      // The section names the fields the picked mode reads that the plan's Project lacks.
+      const plan = await planProject(project.repoOwner, project.planProjectNumber);
       // A save gives the section its stored mode again.
-      return <PlanModeSettings key={project.planMode} projectId={project.id} initial={project.planMode} />;
+      return <PlanModeSettings key={project.planMode} projectId={project.id} initial={project.planMode} fields={plan && planFieldsOf(plan)} />;
+    }
     case "scheduler": {
       if (project.isDemo) {
         return (

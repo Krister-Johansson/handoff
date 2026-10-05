@@ -1,6 +1,5 @@
 import { eq, projects, type Db } from "@handoff/db";
 import {
-  PLAN_SIZES,
   STATUS_OPTIONS,
   type CopyField,
   type GitHubPort,
@@ -18,6 +17,7 @@ import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import { recordPlanStatus } from "@handoff/engine/plan-status";
 import { parseEstimate } from "../lib/plan/duration.ts";
 import { durationOf } from "../lib/plan/forecast.ts";
+import { missingFields, missingFieldsSentence, planFieldsOf } from "../lib/plan/plan-fields.ts";
 import { sizedBars, type PlannedSpan } from "../lib/plan/schedule.ts";
 import { latestRuns, type BacklogRun } from "./backlog.ts";
 import { latestProposals, loadForecasts, type Proposal } from "./forecasts.ts";
@@ -219,7 +219,7 @@ export async function createTask(
 ) {
   const planned = await plannedProject(deps, projectId);
   const sizeFields = async () => {
-    if (input.size) requireEstimateFields(await planned.plan.getProject(planned.repo.owner, planned.number), planned.number, planned.project.planMode);
+    if (input.size) requireEstimateFields(await planned.plan.getProject(planned.repo.owner, planned.number), planned.number, planned.project.planMode, { size: true, estimate: false });
   };
   await checkNewDates(planned, input);
   await Promise.all([parentOf(planned, input.story, "story"), sizeFields()]);
@@ -363,37 +363,37 @@ function checkDates(label: string, start: string | null | undefined, target: str
   if (start && target && target < start) throw new Error(`${label}: Target ${target} is before its Start ${start}.`);
 }
 
-/** Refuses before any write when the plan's Project lacks the Start or Target date field. */
+/** Refuses before any write when the plan's Project lacks the Start or Target date field, naming the ones it lacks. */
 async function requireDateFields({ plan, repo, number }: Planned) {
   const found = await plan.getProject(repo.owner, number);
-  if (!found?.dateFields?.start || !found.dateFields.target) {
-    throw new Error(`GitHub Project #${number} has no Start and Target date fields. Run setup_plan to add them, then schedule again.`);
-  }
+  const missing = missingFields(planFieldsOf(found ?? {}), "timeline").filter((name) => name === "Start" || name === "Target");
+  if (missing.length) throw new Error(missingFieldsSentence(number, missing, "timeline"));
 }
 
 const shown = (date: string | null | undefined) => date ?? "none";
 
-/** Gives the plan's Project its Start and Target date fields when it lacks them, as the timeline's banner asks. A Flow project has no dates and is refused. */
-export async function addDateFields(deps: ShapingDeps, projectId: string) {
+/**
+ * Gives the plan's Project its Start and Target date fields when it lacks them, as Add the fields asks. A Flow
+ * project has no dates and is refused, unless `mode` is Timeline: a person picking Timeline in Plan mode adds the
+ * fields before saving the mode.
+ */
+export async function addDateFields(deps: ShapingDeps, projectId: string, mode?: PlanMode) {
   const { project, plan, repo, number } = await plannedProject(deps, projectId);
-  refuseInMode(project, "flow", MODE_REFUSALS.dateFields);
+  refuseInMode({ ...project, planMode: mode ?? project.planMode }, "flow", MODE_REFUSALS.dateFields);
   return { date_fields: await plan.ensureDateFields(repo.owner, number), roadmap: ROADMAP_NOTE };
 }
 
 /** The Size and Estimate fields a Project lacks: a Size field without S, M or L counts as missing. A Flow project needs no Estimate. */
-function missingEstimateFields(project: PlanProject, mode: PlanMode): ("Size" | "Estimate")[] {
-  const fields = project.estimateFields;
-  const size = fields?.size && PLAN_SIZES.every((s) => fields.size?.options[s]);
-  return [...(size ? [] : (["Size"] as const)), ...(fields?.estimate || mode === "flow" ? [] : (["Estimate"] as const))];
-}
+const missingEstimateFields = (project: PlanProject, mode: PlanMode) => missingFields(planFieldsOf(project), mode).filter((name) => name === "Size" || name === "Estimate");
 
 /**
- * Gives the plan's Project its Size and Estimate fields when it lacks them, as the timeline's banner asks. A
- * Flow project gets Size only, as setup_plan gives it.
+ * Gives the plan's Project its Size and Estimate fields when it lacks them, as Add the fields asks. A Flow
+ * project gets Size only, as setup_plan gives it; `mode` Timeline, from a person picking Timeline in Plan mode,
+ * adds Estimate too.
  */
-export async function addEstimateFields(deps: ShapingDeps, projectId: string) {
+export async function addEstimateFields(deps: ShapingDeps, projectId: string, mode?: PlanMode) {
   const { project, plan, repo, number } = await plannedProject(deps, projectId);
-  return { estimate_fields: await plan.ensureEstimateFields(repo.owner, number, { estimate: project.planMode !== "flow" }) };
+  return { estimate_fields: await plan.ensureEstimateFields(repo.owner, number, { estimate: (mode ?? project.planMode) !== "flow" }) };
 }
 
 /** The most hours a manual estimate may hold. */
@@ -413,13 +413,14 @@ function estimateHours(issue: number, estimate: number | string | null | undefin
   return parsed.hours;
 }
 
-/** Refuses before any write when the plan's Project lacks the Size or the Estimate field; a Flow project needs Size only. */
-function requireEstimateFields(found: PlanProject | undefined, number: number, mode: PlanMode) {
+/**
+ * Refuses before any write when the plan's Project lacks a field the write needs, naming the ones it lacks: Size
+ * for a size, Estimate for an estimate. A Flow project never takes an estimate.
+ */
+function requireEstimateFields(found: PlanProject | undefined, number: number, mode: PlanMode, writes: { size: boolean; estimate: boolean }) {
   const fields = found?.estimateFields;
-  if (mode === "flow" && !fields?.size) throw new Error(`GitHub Project #${number} has no Size field. Run setup_plan to add it.`);
-  if (mode === "timeline" && (!fields?.size || !fields.estimate)) {
-    throw new Error(`GitHub Project #${number} has no Size and no Estimate field. Add them with Add the fields on the Plan timeline, or run setup_plan.`);
-  }
+  const missing = [...(writes.size && !fields?.size ? (["Size"] as const) : []), ...(writes.estimate && !fields?.estimate ? (["Estimate"] as const) : [])];
+  if (missing.length) throw new Error(missingFieldsSentence(number, missing, mode));
 }
 
 /** Why GitHub refused a task's Size or Estimate, as a clause. */
@@ -457,7 +458,7 @@ export async function setSizes(deps: ShapingDeps, projectId: string, inputs: Siz
     const estimate = estimates[k] === undefined ? undefined : estimates[k] || null;
     return { input, item, estimate };
   });
-  requireEstimateFields(found, number, project.planMode);
+  requireEstimateFields(found, number, project.planMode, { size: inputs.some((i) => i.size !== undefined), estimate: inputs.some((i) => i.estimate !== undefined) });
 
   // The Targets follow from every change at once, so tasks sized together on one day stack in order. A Flow
   // project reads no dates, so the Targets it kept from Timeline mode stay.
