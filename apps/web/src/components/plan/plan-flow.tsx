@@ -551,8 +551,8 @@ function FlowRowLabel({
 }
 
 /**
- * Where the filtered milestone ends in the order (issue #602): the tasks in it, its last card's right edge on the
- * axis, and the flag's words. Flow has no dates, so the due date is only named in the flag's title.
+ * Where the filtered milestone ends in the order (issue #602): the tasks in it, the right edge of its card that ends
+ * last on the axis, and the flag's words. Flow has no dates, so the due date is only named in the flag's title.
  */
 type MilestoneEnd = { title: string; members: ReadonlySet<number>; last: number | undefined; x: number | undefined; text: string | undefined; note: string };
 
@@ -562,18 +562,24 @@ function milestoneEnd(milestone: PlanMilestone | undefined, tasks: FlowInput["ta
   const of = itemMilestones(tasks);
   const members = new Set(tasks.flatMap((t) => (of.get(t.number)?.number === milestone.number ? [t.number] : [])));
   const judged = milestoneProgress([milestone], tasks, { flow }).milestones[0]?.progress.flow;
-  const card = judged?.last && cards.get(judged.last.issue);
-  const box = card && boxOf(axis, card);
+  // The line goes after the milestone's card that ends last, so none of its cards crosses it; the flag names the last place.
+  const rights = [...members].flatMap((n) => {
+    const card = cards.get(n);
+    return card ? [boxOf(axis, card).left + boxOf(axis, card).width] : [];
+  });
   const due = milestone.dueOn ? `${milestone.title} is due ${shortDay(milestone.dueOn)}. ` : "";
   return {
     title: milestone.title,
     members,
     last: judged?.last?.issue,
-    x: box && box.left + box.width,
+    x: judged?.last && rights.length ? Math.max(...rights) : undefined,
     text: judged && flowLineText(milestone.title, judged),
     note: `${due}Flow has no dates, so this is where its last task ends in the order, not a day.`,
   };
 }
+
+/** The room the milestone's flag needs right of its line; with less, it sits on the left. */
+const FLAG_ROOM = 220;
 
 /** The dashed line after the milestone's last card; nothing when no card of it is in the order. */
 function EndLine({ x }: { x: number | undefined }) {
@@ -659,8 +665,12 @@ function LaneHeader({
             <EndLine x={ending.x} />
             <span
               title={ending.note}
-              className="absolute top-[3px] z-[6] inline-flex h-[18px] items-center gap-1 rounded-[4px] bg-foreground px-[7px] text-[10px] font-semibold whitespace-nowrap text-background [&_svg]:size-2.5"
-              style={{ left: ending.x + 5 }}
+              className={cn(
+                "absolute top-[3px] z-[6] inline-flex h-[18px] items-center gap-1 rounded-[4px] bg-foreground px-[7px] text-[10px] font-semibold whitespace-nowrap text-background [&_svg]:size-2.5",
+                // Near the axis's right end the flag sits left of the line, so it stays in view.
+                ending.x > axis.width - FLAG_ROOM && "-translate-x-full",
+              )}
+              style={{ left: ending.x > axis.width - FLAG_ROOM ? ending.x - 5 : ending.x + 5 }}
             >
               <MilestoneIcon aria-hidden />
               {ending.text}

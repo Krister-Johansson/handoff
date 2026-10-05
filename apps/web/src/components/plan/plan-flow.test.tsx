@@ -760,10 +760,12 @@ test("filtered to a milestone, a dashed line follows its last card in the order 
   expect(flag).toHaveAttribute("title", "0.9 is due Oct 20. Flow has no dates, so this is where its last task ends in the order, not a day.");
   expect(within(rowOf("Task #60 Ready count in the sidebar")).getByText("Last of 0.9")).toBeInTheDocument();
   expect(within(rowOf("Task #62 Size chip on board cards")).queryByText("Last of 0.9")).not.toBeInTheDocument();
-  const card60 = cardOf(60);
+  // The line follows the 0.9 card that ends last: #62, Next 4 in slot 2, ends after #60, so no 0.9 card crosses it.
+  const right = (n: number) => leftOf(cardOf(n)) + parseFloat(cardOf(n).style.width);
+  expect(right(62)).toBeGreaterThan(right(60));
   const lines = container.querySelectorAll<HTMLElement>("[data-milestone-end]");
   expect(lines).toHaveLength(2);
-  for (const line of lines) expect(leftOf(line)).toBeCloseTo(leftOf(card60) + parseFloat(card60.style.width), 2);
+  for (const line of lines) expect(leftOf(line)).toBeCloseTo(right(62), 2);
   expect(grid).not.toHaveTextContent(/\blate\b|\bearly\b|Oct 20/);
   // The slot strips keep every run; the cards outside 0.9 fade.
   const faded = (lane: number) =>
