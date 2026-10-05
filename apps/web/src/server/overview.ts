@@ -2,6 +2,9 @@ import { eq, projects, type Db } from "@handoff/db";
 import type { GitHubPort, PlanProject, ProjectsPort } from "@handoff/github";
 import type { InboxView } from "../components/inbox/inbox-view";
 import { isTodo, listBacklog, type BacklogIssue } from "./backlog";
+import { layoutFlow } from "../lib/plan/flow";
+import type { PlanMilestone } from "../lib/plan/milestones";
+import type { PlanModeName } from "../lib/project-tab";
 import { inboxGroups } from "./inbox-groups";
 import { loadPlan, type PlanEpic, type PlanProgress, type PlanTask, type PlanUnavailable, type PlanView } from "./plan";
 import { listRuns } from "./queries";
@@ -19,8 +22,26 @@ export type OverviewFeature = { number: number; title: string; url: string; prog
 /** A Ready task no run works on, with the title of the epic it belongs to when it has one. */
 export type ReadyTask = PlanTask & { epic: string | undefined };
 
-/** The work of a project with a plan: features in progress, Ready tasks and how many unplanned issues can start too. */
-export type PlanWork = { kind: "plan"; project: PlanProject; features: OverviewFeature[]; ready: ReadyTask[]; unplannedToDo: number };
+/**
+ * An open milestone on Home: its due date, its tasks by status and the plan mode's judgement, and in Flow mode why
+ * each of its skipped tasks is not in the order ("label human").
+ */
+export type OverviewMilestone = PlanMilestone & { skipped: { issue: number; why: string }[] };
+
+/**
+ * The work of a project with a plan: its open milestones, features in progress, Ready tasks and how many unplanned
+ * issues can start too. `mode` is the plan mode, which decides what a milestone says: where it ends in the Flow's
+ * order, or when it ends on the Timeline.
+ */
+export type PlanWork = {
+  kind: "plan";
+  project: PlanProject;
+  mode: PlanModeName;
+  milestones: OverviewMilestone[];
+  features: OverviewFeature[];
+  ready: ReadyTask[];
+  unplannedToDo: number;
+};
 
 /**
  * The work of a project without a plan it can read, and why: its open issues with runs (one in flight,
@@ -69,7 +90,17 @@ function planWork(plan: PlanView, waiting: Set<string>): PlanWork {
   const toDo = plan.board.Ready.filter(isTodo).map((task): ReadyTask => ({ ...task, epic: epicOf.get(task.number) }));
   // Tasks that can start come first; blocked ones follow, as in the backlog.
   const ready = [...toDo.filter((t) => t.blockedBy.length === 0), ...toDo.filter((t) => t.blockedBy.length > 0)];
-  return { kind: "plan", project: plan.project, features, ready, unplannedToDo: plan.unplanned.filter(isTodo).length };
+  return { kind: "plan", project: plan.project, mode: plan.flow ? "flow" : "timeline", milestones: openMilestones(plan), features, ready, unplannedToDo: plan.unplanned.filter(isTodo).length };
+}
+
+const SKIPPED = "Skipped: ";
+
+/** The plan's open milestones in the port's order, each with why its skipped tasks are not in the Flow's order. */
+function openMilestones(plan: PlanView): OverviewMilestone[] {
+  const open = (plan.milestones ?? []).filter((m) => m.state === "open");
+  const skips = plan.flow && open.some((m) => m.progress.flow?.skipped.length) ? layoutFlow(plan.flow).rows : [];
+  const why = new Map(skips.flatMap((row) => row.tags.filter((t) => t.startsWith(SKIPPED)).map((t) => [row.issue, t.slice(SKIPPED.length)] as const)));
+  return open.map((m) => ({ ...m, skipped: (m.progress.flow?.skipped ?? []).map((issue) => ({ issue, why: why.get(issue) ?? "skipped" })) }));
 }
 
 /** The project's plan, unless it has none linked; GitHub is only asked when it has. */

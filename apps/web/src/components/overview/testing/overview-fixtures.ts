@@ -1,5 +1,6 @@
 import type { InboxView } from "@/components/inbox/inbox-view";
-import type { Overview, OverviewRun } from "@/server/overview";
+import type { MilestoneProgress } from "@/lib/plan/milestones";
+import type { Overview, OverviewMilestone, OverviewRun } from "@/server/overview";
 import type { PlanProgress, PlanTask } from "@/server/plan";
 
 export const NOW = new Date("2026-10-02T12:00:00Z");
@@ -62,8 +63,34 @@ export const QUIET: Overview = {
   work: {
     kind: "plan",
     project: { number: 5, url: "https://github.com/users/Krister-Johansson/projects/5", title: "handoff plan", statusOptions: { Shaping: "a", Ready: "b", Running: "c", "In review": "d", Done: "e" } },
+    mode: "flow",
+    milestones: [],
     features: [],
     ready: [],
     unplannedToDo: 0,
   },
 };
+
+/** An open milestone of handoff on Home: its tasks by status, and the plan mode's judgement given. */
+export function milestone(
+  number: number,
+  title: string,
+  dueOn: string | undefined,
+  byStatus: Partial<PlanProgress["byStatus"]>,
+  judge: Pick<MilestoneProgress, "flow" | "timeline"> & { skipped?: OverviewMilestone["skipped"] } = {},
+): OverviewMilestone {
+  const { done, total, byStatus: counts } = progress(byStatus);
+  const tasks = { done, total, byStatus: counts };
+  return {
+    number,
+    title,
+    description: "",
+    dueOn,
+    state: "open",
+    openIssues: 0,
+    closedIssues: 0,
+    url: `https://github.com/Krister-Johansson/handoff/milestone/${number}`,
+    progress: { ...tasks, ...(judge.flow ? { flow: judge.flow } : {}), ...(judge.timeline ? { timeline: judge.timeline } : {}) },
+    skipped: judge.skipped ?? [],
+  };
+}

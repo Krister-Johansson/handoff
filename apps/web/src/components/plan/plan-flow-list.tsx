@@ -6,7 +6,7 @@ import type { PlanTask } from "@/server/plan";
 import { Tag } from "@/components/tag";
 import { layoutFlow, type FlowCard } from "@/lib/plan/flow";
 import { lowerFirst, runsText, schedulerNote } from "@/lib/plan/flow-text";
-import { dueText, flowLineText } from "@/lib/plan/milestone-text";
+import { dueShort, flowLineText } from "@/lib/plan/milestone-text";
 import { taskColumn } from "@/lib/plan/task";
 import { chainPlace } from "@/lib/plan/story-order";
 import { itemsOf } from "@/lib/plan/timeline-rows";
@@ -46,6 +46,7 @@ export function PlanFlowList({ epics, unparented, flow: input, scheduler, milest
   // The list keeps loadPlan's order, so the milestone's end is the one loadPlan judged.
   const judged = milestone?.progress.flow;
   const line = milestone && judged && flowLineText(milestone.title, judged);
+  const due = (milestone && dueShort(milestone)) ?? "No due date";
 
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border bg-card">
@@ -94,12 +95,12 @@ export function PlanFlowList({ epics, unparented, flow: input, scheduler, milest
             {ends && (
               <li
                 role="separator"
-                aria-label={`${line}, ${lowerFirst(dueText(milestone))}`}
+                aria-label={`${line}, ${lowerFirst(due)}`}
                 className="flex items-center gap-2 border-t-2 border-b border-dashed border-t-foreground/70 bg-muted/50 px-3.5 py-2 text-xs font-medium [&_svg]:size-3.5 [&_svg]:text-muted-foreground"
               >
                 <MilestoneIcon aria-hidden />
                 {line}
-                <span className="font-normal text-muted-foreground">{dueText(milestone)}</span>
+                <span className="font-normal text-muted-foreground">{due}</span>
               </li>
             )}
             </Fragment>

@@ -278,7 +278,26 @@ test("getIssue reads an issue with its body, labels, assignees with their avatar
     createdAt: "2026-09-30T10:00:00Z",
     updatedAt: "2026-10-01T12:00:00Z",
     pullRequest: false,
+    milestone: null,
   });
+});
+
+test("getIssue reads the issue's own milestone by number and title", async () => {
+  const { fetch } = fakeFetch({
+    "GET /repos/octo/sample/issues/57": () => ({
+      json: {
+        number: 57,
+        title: "Milestone picker",
+        html_url: "https://github.com/octo/sample/issues/57",
+        body: "",
+        state: "open",
+        labels: ["task"],
+        milestone: { number: 3, title: "0.9", state: "open", due_on: "2026-10-20T07:00:00Z", html_url: "https://github.com/octo/sample/milestone/3" },
+      },
+    }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  expect((await gh.getIssue(repo, 57)).milestone).toEqual({ number: 3, title: "0.9" });
 });
 
 test("getIssue tells a pull request's number from an issue's", async () => {

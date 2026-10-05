@@ -11,14 +11,14 @@ type FakePr = PrSnapshot & { base: string; body: string; files?: string[] };
  * Assignees are logins; the reads give each one an avatar. `milestone` is a milestone's number.
  */
 export type FakeIssue = Pick<IssueDetail, "number" | "title" | "url" | "body" | "state"> &
-  Partial<Omit<IssueDetail, "number" | "title" | "url" | "body" | "state" | "parents" | "assignees">> &
+  Partial<Omit<IssueDetail, "number" | "title" | "url" | "body" | "state" | "parents" | "assignees" | "milestone">> &
   Partial<Pick<IssueSummary, "blockedBy">> & { assignees?: string[]; milestone?: number | undefined };
 
 /** A milestone of the fake: its number and title, and any other fact a test sets. The counts come from the fake's issues. */
 export type FakeMilestone = MilestoneRef & Partial<Pick<Milestone, "description" | "dueOn" | "state" | "url">>;
 
 /** An issue as getIssue gives it, with GitHub's defaults for the facts a test left out. */
-function detailOf(issue: FakeIssue, person: (login: string) => Assignee): IssueDetail {
+function detailOf(issue: FakeIssue, person: (login: string) => Assignee, milestone: MilestoneRef | undefined): IssueDetail {
   return {
     number: issue.number,
     title: issue.title,
@@ -33,6 +33,7 @@ function detailOf(issue: FakeIssue, person: (login: string) => Assignee): IssueD
     createdAt: issue.createdAt ?? issue.updatedAt ?? "",
     updatedAt: issue.updatedAt ?? issue.createdAt ?? "",
     pullRequest: issue.pullRequest ?? false,
+    milestone: milestone ?? null,
   };
 }
 
@@ -99,9 +100,9 @@ export class FakeGitHub implements GitHubPort {
     if (this.unreachable) throw new GitHubReadError("unreachable", `GitHub did not answer for #${number}.`);
     const issue = this.issues.get(number);
     const pr = issue ? undefined : this.prs.get(number);
-    if (pr) return { ...detailOf({ number, title: pr.title, url: pr.url, body: pr.body, state: pr.state === "open" ? "open" : "closed", updatedAt: pr.updatedAt }, (login) => this.person(login)), pullRequest: true };
+    if (pr) return { ...detailOf({ number, title: pr.title, url: pr.url, body: pr.body, state: pr.state === "open" ? "open" : "closed", updatedAt: pr.updatedAt }, (login) => this.person(login), undefined), pullRequest: true };
     if (!issue) throw new GitHubReadError("not-found", `no issue ${number}`);
-    return { ...detailOf(issue, (login) => this.person(login)), ...(opts.parents ? { parents: this.ancestorsOf(number) } : {}) };
+    return { ...detailOf(issue, (login) => this.person(login), this.milestoneOf(number)), ...(opts.parents ? { parents: this.ancestorsOf(number) } : {}) };
   }
 
   async dependencies(_repo: RepoRef, number: number): Promise<IssueDependencies> {

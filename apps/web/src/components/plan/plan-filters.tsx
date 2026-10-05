@@ -24,7 +24,7 @@ import { planPath } from "@/lib/paths";
 import { PLAN_STATUSES, type AssigneeFilter, type PlanFilters as Filters, type RunFilter } from "@/lib/plan/filters";
 import type { PlanViewName } from "@/lib/project-tab";
 import { COLUMN_TONE } from "@/lib/plan/task";
-import { dueText } from "@/lib/plan/milestone-text";
+import { dueShort } from "@/lib/plan/milestone-text";
 import type { MilestoneTasks, PlanMilestone } from "@/lib/plan/milestones";
 import { cn } from "@/lib/utils";
 
@@ -104,7 +104,7 @@ function MilestoneFilter({ filters, milestones, noMilestone, go }: { filters: Fi
                 <CommandItem key={m.number} value={`${m.title} #${m.number}`} data-checked={filters.milestone === m.number ? "true" : undefined} onSelect={() => choose(m.number)}>
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">{m.title}</span>
-                    <span className="text-xs text-muted-foreground">{dueText(m)}</span>
+                    <span className="text-xs text-muted-foreground">{dueShort(m) ?? "No due date"}</span>
                   </span>
                   <span className="text-xs text-muted-foreground tabular-nums">
                     {m.progress.done} of {m.progress.total} done
@@ -123,7 +123,7 @@ function MilestoneFilter({ filters, milestones, noMilestone, go }: { filters: Fi
                   {closed.map((m) => (
                     <CommandItem key={m.number} value={`${m.title} #${m.number} closed`} data-checked={filters.milestone === m.number ? "true" : undefined} onSelect={() => choose(m.number)}>
                       <span className="min-w-0 flex-1 truncate">{m.title}</span>
-                      <span className="text-xs text-muted-foreground">{dueText(m)}</span>
+                      <span className="text-xs text-muted-foreground">{dueShort(m) ?? "No due date"}</span>
                     </CommandItem>
                   ))}
                 </CommandGroup>

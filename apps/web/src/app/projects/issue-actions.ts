@@ -2,13 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import type { Assignee } from "@handoff/github";
+import type { Assignee, MilestoneRef } from "@handoff/github";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
 import type { AssignablePerson } from "@/components/plan/plan-context";
-import { issuePath, planPath } from "@/lib/paths";
+import { issuePath, planPath, projectPath } from "@/lib/paths";
 import { assignableUsers, assignmentOf, setIssueAssignees, type AssignableUser } from "@/server/assignees";
 import { startRunFromGraph } from "@/server/graphs";
+import { setMilestone } from "@/server/shaping";
 
 const IssueSchema = z.object({ projectId: z.string().uuid(), issue: z.number().int().positive() });
 const StartSchema = IssueSchema.extend({ graphName: z.string().min(1) });
@@ -57,6 +58,29 @@ export async function planAssignAction(projectId: string, issue: number, change:
   if (!result.ok) return result;
   revalidatePath(planPath(projectId));
   return { ok: true };
+}
+
+const MilestoneSchema = IssueSchema.extend({ milestone: z.number().int().positive().nullable() });
+
+/**
+ * The issue page's milestone picker, its Clear and its Undo: sets the issue's own milestone on GitHub at once, or
+ * clears it with null, by set_milestone's rules: an open milestone only, an issue of the plan only, and on an epic
+ * or a story that issue alone. `from` is the milestone it had of its own, which Undo writes back.
+ */
+export async function setMilestoneAction(
+  input: z.input<typeof MilestoneSchema>,
+): Promise<{ ok: true; milestone: MilestoneRef | null; from: MilestoneRef | null } | { ok: false; error: string }> {
+  const parsed = MilestoneSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That issue's milestone cannot be set from here." };
+  const { projectId, issue, milestone } = parsed.data;
+  try {
+    const result = await setMilestone({ db: getDb(), github: getGitHub(), projects: getProjects() }, projectId, { issues: [issue], milestone });
+    // The issue page, the Plan page and Home all show the milestone.
+    for (const path of [issuePath(projectId, issue), planPath(projectId), projectPath(projectId)]) revalidatePath(path);
+    return { ok: true, milestone: result.milestone, from: result.set[0]?.from ?? null };
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
 }
 
 const AssignSchema =IssueSchema.extend({ logins: z.array(z.string().min(1)), me: z.boolean().optional() });

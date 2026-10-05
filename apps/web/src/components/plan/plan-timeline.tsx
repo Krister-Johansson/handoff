@@ -20,7 +20,7 @@ import type { Duration, Forecast } from "@/lib/plan/forecast";
 import { hoursByDay } from "@/lib/plan/load";
 import { arrangeTimeline } from "@/lib/plan/arrange";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
-import { endsText } from "@/lib/plan/milestone-text";
+import { milestoneLine } from "@/lib/plan/milestone-text";
 import type { PlanMilestone } from "@/lib/plan/milestones";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
 import { durationInWords, hoursInWords, usually } from "@/lib/plan/size-text";
@@ -524,7 +524,7 @@ function dueMarkOf(milestone: PlanMilestone | undefined, scale: TimeScale): DueM
     flag: `${milestone.title}, due ${shortDay(due)}`,
     title: `${milestone.title} is due ${shortDay(due)}.${judged?.ends ? ` Its last task ends ${shortDay(judged.ends)}.` : ""}`,
     past: late && judged?.ends ? { left: x, width: scale.x(addDays(judged.ends, 1)) - x } : undefined,
-    ends: late && judged ? endsText(judged)?.text : undefined,
+    ends: late ? milestoneLine(milestone.progress).text : undefined,
   };
 }
 

@@ -53,7 +53,7 @@ test("the strip shows the open milestones with the due date, tasks done of total
   expect(within(beta).getByText("Ends Oct 4, 1 day late")).toHaveAttribute("data-tone", "late");
   expect(within(beta).getByText("#152 has no dates")).toBeInTheDocument();
   expect(within(beta).getByRole("img", { name: "1 Done, 1 Running, 1 Ready, 9 Shaping" })).toBeInTheDocument();
-  expect(within(release).getByText("Ends Oct 13, 3 days early")).toHaveAttribute("data-tone", "early");
+  expect(within(release).getByText("Ends Oct 13, 3 days early")).toHaveAttribute("data-tone", "ok");
   expect(nothing).toHaveTextContent("4 open tasks");
   expect(nothing).toHaveTextContent("Tasks whose epic, story and own issue have no milestone.");
   expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
@@ -83,7 +83,7 @@ test("in Flow mode a card says where its milestone ends in the order and what it
   expect(within(strip).getByText("Flow has no dates, so each milestone shows where it ends in the order.")).toBeInTheDocument();
   const nine = within(strip).getByRole("button", { name: /^Milestone 0\.9/ });
   expect(nine).toHaveAccessibleName("Milestone 0.9, due Oct 20, 2 of 11 tasks done, ends after Next 6, 1 skipped");
-  expect(within(nine).getByText("Ends after Next 6")).toHaveAttribute("data-tone", "flow");
+  expect(within(nine).getByText("Ends after Next 6")).toHaveAttribute("data-tone", "plain");
   expect(within(nine).getByText("1 skipped")).toBeInTheDocument();
   expect(within(strip).getByRole("button", { name: /^Milestone 1\.0/ })).toHaveTextContent("Ends after Next 13");
   expect(strip).not.toHaveTextContent(/late|early/);
@@ -97,7 +97,7 @@ test("a milestone without a due date or tasks says so, and the strip hides when 
     { ...milestone(7, "Later"), progress: { done: 0, total: 3, byStatus: byStatus({ Ready: 3 }), timeline: { ends: "2026-10-09", daysPastDue: undefined, undated: [70, 71, 72, 73] } } },
   ];
   const { unmount } = render(<MilestoneStrip projectId="p1" repo="o/r" view="tree" mode="timeline" filters={parsePlanFilters({})} milestones={plain} none={undefined} />);
-  expect(screen.getByRole("button", { name: /^Milestone Someday/ })).toHaveAccessibleName("Milestone Someday, no due date, no tasks yet");
+  expect(screen.getByRole("button", { name: /^Milestone Someday/ })).toHaveAccessibleName("Milestone Someday, no due date, no tasks in it yet");
   const later = screen.getByRole("button", { name: /^Milestone Later/ });
   expect(later).toHaveAccessibleName("Milestone Later, no due date, 0 of 3 tasks done, ends Oct 9, 4 tasks have no dates");
   expect(within(later).getByText("4 tasks have no dates")).toHaveAttribute("title", "#70, #71, #72 and #73 have no dates");
