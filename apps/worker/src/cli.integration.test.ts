@@ -182,6 +182,26 @@ test("handoff run cancel sets the run's task back to Ready on the plan", async (
   expect(await plan.getStatus(repo, number, task.number)).toBe("Ready");
 });
 
+test("handoff run unlink takes an issue off the run and drops its Closes line from the pull request", async () => {
+  const { out, lines } = capture();
+  const github = new FakeGitHub();
+  for (const number of [3, 4]) github.issues.set(number, { number, title: `Part ${number}`, url: `https://github.com/octo/sample/issues/${number}`, body: "", state: "open" });
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
+  await runCli(["run", "--project", "scratch", "--graph", "linear", "--issue", "3", "--issue", "4"], { db, out, github });
+  const [run] = await db.select().from(runs);
+  const pr = await github.createPr({ owner: "octo", name: "sample" }, { head: run!.branchName, base: "main", title: "Parts", body: "Closes #3\nCloses #4" });
+  await db.update(runs).set({ prNumber: pr.number }).where(eq(runs.id, run!.id));
+
+  await runCli(["run", "unlink", run!.id, "#4"], { db, out, github, projects: null });
+
+  const [row] = await db.select().from(runs).where(eq(runs.id, run!.id));
+  expect(row!.issues.map((i) => i.number)).toEqual([3]);
+  expect(github.prs.get(pr.number)!.body).toBe("Closes #3\n");
+  expect(lines.at(-1)).toBe(`run ${run!.id} no longer links #4; pull request #${pr.number} no longer closes it`);
+  await expect(runCli(["run", "unlink", run!.id, "four"], { db, out, github, projects: null })).rejects.toThrow(/usage/);
+});
+
 test("handoff run repair requires a failed node", async () => {
   const { out } = capture();
   const run = await queuedRun(out);

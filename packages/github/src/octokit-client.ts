@@ -374,6 +374,7 @@ export class OctokitGitHub implements GitHubPort {
     return {
       number: pr.number,
       title: pr.title,
+      body: pr.body,
       draft: pr.isDraft,
       additions: pr.additions,
       deletions: pr.deletions,

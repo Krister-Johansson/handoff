@@ -53,7 +53,7 @@ test("expectsChecks is true when the repository has an active workflow or the br
   expect(await OctokitGitHub.withToken("t", { fetch: required.fetch }).expectsChecks(repo, "main")).toBe(true);
 });
 
-test("getPrSnapshot maps the GraphQL pull request, rollup and review threads", async () => {
+test("getPrSnapshot maps the GraphQL pull request, its description, rollup and review threads", async () => {
   const { fetch } = fakeFetch({
     "POST /graphql": () => ({
       json: {
@@ -62,6 +62,7 @@ test("getPrSnapshot maps the GraphQL pull request, rollup and review threads", a
             pullRequest: {
               number: 7,
               title: "Add a changelog",
+              body: "Adds CHANGELOG.md.\n\nCloses #12",
               isDraft: false,
               additions: 12,
               deletions: 3,
@@ -103,7 +104,7 @@ test("getPrSnapshot maps the GraphQL pull request, rollup and review threads", a
   });
   const gh = OctokitGitHub.withToken("t", { fetch });
   const snap = await gh.getPrSnapshot(repo, 7);
-  expect(snap).toMatchObject({ number: 7, headSha: "abc", state: "open", reviewDecision: "CHANGES_REQUESTED", title: "Add a changelog", additions: 12, deletions: 3, changedFiles: 1, draft: false });
+  expect(snap).toMatchObject({ number: 7, headSha: "abc", state: "open", reviewDecision: "CHANGES_REQUESTED", title: "Add a changelog", body: "Adds CHANGELOG.md.\n\nCloses #12", additions: 12, deletions: 3, changedFiles: 1, draft: false });
   expect(snap.checks).toEqual({
     state: "FAILURE",
     contexts: [

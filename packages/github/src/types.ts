@@ -15,6 +15,8 @@ export type CheckContext = {
 export type PrSnapshot = {
   number: number;
   title: string;
+  /** The pull request's description, as Markdown. */
+  body: string;
   draft: boolean;
   additions: number;
   deletions: number;

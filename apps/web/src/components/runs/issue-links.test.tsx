@@ -1,6 +1,11 @@
-import { render, screen } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { beforeEach, expect, test, vi } from "vitest";
 import { IssueLinks, PartOf } from "./issue-links";
+import { UnlinkIssueButton } from "./unlink-issue-button";
+
+const unlinkIssueAction = vi.hoisted(() => vi.fn(async (): Promise<{ ok?: boolean; error?: string }> => ({ ok: true })));
+vi.mock("@/app/inbox/actions", () => ({ unlinkIssueAction }));
+beforeEach(() => unlinkIssueAction.mockClear());
 
 const issues = [
   { number: 12, title: "Slugify drops digits", url: "https://github.com/o/r/issues/12" },
@@ -46,4 +51,30 @@ test("an issue outside any story or epic has no Part of line", () => {
 test("no issues renders nothing", () => {
   const { container } = render(<IssueLinks issues={[]} />);
   expect(container).toBeEmptyDOMElement();
+});
+
+test("on a run, each issue has an Unlink button that asks first and then takes the issue off the run", async () => {
+  render(<IssueLinks issues={issues} variant="meta" projectId="p1" after={(issue) => <UnlinkIssueButton runId="r1" issue={issue} />} />);
+  fireEvent.click(screen.getByRole("button", { name: "Unlink #14" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Unlink #14 Document slugify from this run?" });
+  expect(dialog).toHaveTextContent("The pull request no longer closes it");
+  expect(unlinkIssueAction).not.toHaveBeenCalled();
+
+  fireEvent.click(within(dialog).getByRole("button", { name: "Unlink" }));
+  await waitFor(() => expect(unlinkIssueAction).toHaveBeenCalledWith({ runId: "r1", issue: 14 }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+});
+
+test("a refused unlink keeps the dialog open with the reason", async () => {
+  unlinkIssueAction.mockResolvedValueOnce({ ok: false, error: "Pull request #9 of run r1 merged, so #12 stays linked." });
+  render(<IssueLinks issues={issues} variant="meta" projectId="p1" after={(issue) => <UnlinkIssueButton runId="r1" issue={issue} />} />);
+  fireEvent.click(screen.getByRole("button", { name: "Unlink #12" }));
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Unlink" }));
+  expect(await within(dialog).findByText("Pull request #9 of run r1 merged, so #12 stays linked.")).toBeInTheDocument();
+});
+
+test("without a control after each issue, issue links have no Unlink button", () => {
+  render(<IssueLinks issues={issues} variant="meta" projectId="p1" />);
+  expect(screen.queryByRole("button", { name: /Unlink/ })).not.toBeInTheDocument();
 });

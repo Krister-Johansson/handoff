@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, resolveExhaustedLoop, restartTryIt } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, decidePermission, repairNodeExecution, resolveExhaustedLoop, restartTryIt, unlinkIssue } from "@handoff/engine/operations";
 import { allowPathsOf } from "@/lib/allow-paths";
 import { getDb } from "@/lib/db";
 import { getGitHub, getProjects } from "@/lib/github";
@@ -54,6 +54,24 @@ export async function repairAction(_: InboxActionState, form: FormData): Promise
 export async function cancelAction(_: InboxActionState, form: FormData): Promise<InboxActionState> {
   try {
     await cancelRun(getDb(), field(form, "runId"), { reason: "cancelled from the dashboard", projects: getProjects() });
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  refresh();
+  return { ok: true };
+}
+
+const UnlinkSchema = z.object({ runId: z.string().uuid(), issue: z.number().int().positive() });
+
+/**
+ * Takes an issue off a run from the run page: its pull request no longer closes it, and a task the run
+ * moved goes back to the Status it had before the run. Refused once the pull request merged.
+ */
+export async function unlinkIssueAction(input: z.input<typeof UnlinkSchema>): Promise<InboxActionState> {
+  const parsed = UnlinkSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That issue cannot be unlinked from here." };
+  try {
+    await unlinkIssue(getDb(), parsed.data.runId, parsed.data.issue, { by: "dashboard", github: getGitHub(), projects: getProjects() });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

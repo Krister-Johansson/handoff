@@ -3,6 +3,7 @@ query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
     pullRequest(number: $number) {
       number
       title
+      body
       isDraft
       additions
       deletions

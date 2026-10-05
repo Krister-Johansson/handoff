@@ -38,6 +38,11 @@ test("summarizes a failure with its error message", () => {
   );
 });
 
+test("summarizes an issue unlinked from the run, with who did it and the pull request that no longer closes it", () => {
+  expect(summarizeEvent({ type: "run.issue_unlinked", payload: { issue: 4, by: "dashboard", pr: 9 } })).toBe("#4 unlinked by dashboard; PR #9 no longer closes it");
+  expect(summarizeEvent({ type: "run.issue_unlinked", payload: { issue: 4, by: "cli" } })).toBe("#4 unlinked by cli");
+});
+
 test("summarizes a status write on the plan and one that was skipped, with the reason", () => {
   expect(summarizeEvent({ type: "plan.status", payload: { issue: 57, status: "In review" } })).toBe("#57 to In review");
   expect(summarizeEvent({ type: "plan.skipped", payload: { issue: 90, status: "Running", reason: "not-in-project" } })).toBe(

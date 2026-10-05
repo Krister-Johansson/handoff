@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ClockIcon, CoinsIcon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, TimerIcon } from "lucide-react";
@@ -9,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { CancelRunButton, FailedRunCard, QuestionCard } from "@/components/inbox/cards";
 import { PermissionCard, type PermissionRequestView } from "@/components/runs/permission-card";
 import { pendingPermissions } from "@/server/permissions";
-import { IssueLinks, PartOf } from "@/components/runs/issue-links";
+import { IssueLinks, PartOf, type IssueLink } from "@/components/runs/issue-links";
+import { UnlinkIssueButton } from "@/components/runs/unlink-issue-button";
 import { RunAgainButton } from "@/components/runs/run-again-button";
 import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
 import { projectCrumb, projectRunsCrumb, runCrumb } from "@/server/crumbs";
@@ -88,6 +90,18 @@ function blockersOf({ run, executions, events }: Detail): number[] | undefined {
   return blockers.length ? [...new Set(blockers)] : undefined;
 }
 
+/**
+ * An Unlink button for each of the header's issues, until the run's pull request merges; undefined after.
+ * A cancelled run already gave its issues back.
+ */
+function unlinkButton({ run, executions, events }: Detail): ((issue: IssueLink) => ReactNode) | undefined {
+  if (run.status === "cancelled" || events.some((e) => e.type === "github.merged")) return undefined;
+  if (executions.some((e) => e.status === "passed" && (e.output as { merged?: unknown } | null)?.merged === true)) return undefined;
+  return function unlink(issue) {
+    return <UnlinkIssueButton runId={run.id} issue={issue} />;
+  };
+}
+
 /** The run's place in the scheduler's order, when the scheduler started it. */
 function scheduledPlace(events: Detail["events"]): number | undefined {
   const place = (events.find((e) => e.type === "run.scheduled")?.payload as { place?: unknown } | undefined)?.place;
@@ -160,7 +174,13 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
               {task.body && <RunTaskBody body={task.body} />}
               <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-1 text-xs [&_svg]:size-[13px] [&_svg]:shrink-0">
                 {/* A task made from the issues' titles already names them; then only the numbers are linked. */}
-                <IssueLinks variant="meta" projectId={project.id} issues={run.issues} showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))} />
+                <IssueLinks
+                  variant="meta"
+                  projectId={project.id}
+                  issues={run.issues}
+                  showTitles={!run.issues.every((i) => run.task.includes(`#${i.number} ${i.title}`))}
+                  after={unlinkButton(detail)}
+                />
                 <PartOf issues={run.issues} projectId={project.id} />
                 <StartedByScheduler startedBy={run.startedBy} place={scheduledPlace(events)} />
                 <RunLineage projectId={project.id} continues={RunStateSchema.shape.previousRun.parse(run.state.previousRun)?.runId ?? null} supersededBy={run.supersededBy} />

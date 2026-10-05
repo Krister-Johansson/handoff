@@ -83,11 +83,11 @@ A run can link more than one issue, for example `start_run` with issues `[16, 88
 - Each linked task moves to Running when the run starts, to In review when the pull request opens, and to Done when it merges. Cancelling the run puts each task it moved back to the Status it had before.
 - The pull request says `Closes #N` for each issue, and the Merge node closes every linked issue itself. When that closes the last open task of a story, it closes the story too, and then the epic in the same way (see Finished stories and epics under The Plan).
 - The Plan shows the same run on each of its tasks.
+- Until its pull request merges, a run can let go of an issue its work does not cover, for example after a split. Unlink it with the button next to the issue in the run page's header, `unlink_issue` with the run and the issue number, or `pnpm handoff run unlink <run> <issue>`. The issue leaves the run's issues and its state, the open pull request's description loses the issue's closing line (such as `Closes #4`), and the merge leaves the issue open. A task the run moved on the plan goes back to the Status it had before the run, unless the run was cancelled or a newer run links it. The issue returns to the backlog, and the run records `run.issue_unlinked` with who unlinked it. Once the pull request merged, unlinking is refused. A run with a pull request needs GitHub access to unlink, since it edits the pull request. The run's task text stays as it was.
 
 Known limits, to address when a real project needs them:
 
 - The scheduler starts one task per run. Only a person groups issues.
-- A run cannot drop one of its issues. If only some of them should ship, cancel the run and start separate runs.
 - An issue blocked by another issue in the same run is still refused at start, although both would ship in one pull request.
 
 The library holds skills, MCP servers and subagents that nodes enable by name. In the dashboard it is the Library group of **Settings**: Skills, Agents, MCP servers and Groups. A project's graphs are listed in its **Project settings**, under Graphs, and each opens in the graph editor. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.

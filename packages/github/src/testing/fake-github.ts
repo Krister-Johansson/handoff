@@ -4,7 +4,7 @@ import type { PlanAncestor } from "../projects/types.ts";
 import { GitHubReadError } from "../errors.ts";
 import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
-type FakePr = PrSnapshot & { base: string; body: string; files?: string[] };
+type FakePr = PrSnapshot & { base: string; files?: string[] };
 
 /**
  * An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set.

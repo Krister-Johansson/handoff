@@ -195,6 +195,23 @@ test("a failed run is repaired at its failed step, and a run can be cancelled", 
   expect((await call("get_run", { run_id })).status).toBe("cancelled");
 });
 
+test("unlink_issue takes an issue off a run, drops its Closes line from the pull request and returns it to the backlog", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", issues: [11, 12] });
+  const [run] = await db.select().from(runs).where(eq(runs.id, run_id));
+  const pr = await github.createPr({ owner: "octo", name: "sample" }, { head: run!.branchName, base: "main", title: "Two issues", body: "Closes #11\nCloses #12\n" });
+  await db.update(runs).set({ prNumber: pr.number }).where(eq(runs.id, run_id));
+  expect(toolSpec("unlink_issue")).toMatchObject({ confirm: true, readOnly: false });
+
+  expect(await call("unlink_issue", { run_id, issue: 12 })).toEqual({ unlinked: 12, pr: pr.number, status: null, url: `${BASE}${runPath(projectId, run_id)}` });
+
+  expect((await call("get_run", { run_id })).issues.map((i: { number: number }) => i.number)).toEqual([11]);
+  expect(github.prs.get(pr.number)!.body).toBe("Closes #11\n");
+  expect((await call("list_backlog", { project: "sandbox" })).map((i: { number: number }) => i.number)).toEqual([12]);
+  const [event] = await db.select().from(events).where(and(eq(events.runId, run_id), eq(events.type, "run.issue_unlinked")));
+  expect(event!.payload).toEqual({ issue: 12, by: "claude-code", pr: pr.number });
+  expect(await call("unlink_issue", { run_id, issue: 12 })).toEqual({ error: `Run ${run_id} does not link #12.` });
+});
+
 test("repair_run allows the files it is given outside the plan for the repaired step", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.update(nodeExecutions).set({ status: "failed", error: { code: "paths_outside_plan", message: "files outside the plan: pnpm-lock.yaml" } }).where(eq(nodeExecutions.runId, run_id));
