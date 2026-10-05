@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
-import { appendEvents, edgeTraversals, events, graphs, graphVersions, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type DbTx, type QuestionComment } from "@handoff/db";
+import { appendEvents, edgeTraversals, events, graphs, graphVersions, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type DbTx, type QuestionChoice, type QuestionComment } from "@handoff/db";
 import { compileGraph, PlanPartSchema, remember, ReviewerOutputSchema, RunStateSchema, type PlanPart, type ReviewerOutput, type RunState } from "@handoff/core";
 import type { GitHubPort, PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
@@ -193,7 +193,15 @@ export async function restartTryIt(db: Db, questionId: string) {
  * findings the person keeps on Fix now, by their place in the review from 0; without it, every Blocking
  * and Should fix finding. Changes and fix send them back. Later steps get only them as suggestions.
  */
-type Answer = { answer: string; option?: string; answeredBy: string; comments?: QuestionComment[]; findings?: number[] | undefined };
+type Answer = {
+  answer: string;
+  option?: string;
+  answeredBy: string;
+  comments?: QuestionComment[];
+  findings?: number[] | undefined;
+  /** For a review items question: a choice per item, by handle, with a note. An item without one takes `option`. */
+  items?: QuestionChoice[] | undefined;
+};
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type Reader = Db | Tx;
 
@@ -241,17 +249,49 @@ async function pickedFindings(tx: Tx, questionId: string, input: Answer): Promis
   return { kept, comments };
 }
 
+/**
+ * A review items question's choices, one per item it lists: from `items`, else the option, which applies
+ * to every item without one. Refuses an item the question does not list, a choice it does not offer, and an
+ * item left without a choice. Null when one option answers every item, or the question is of another kind.
+ */
+export function itemChoices(question: { options: string[]; context: Record<string, unknown> }, input: Pick<Answer, "answer" | "option" | "items">): QuestionChoice[] | null {
+  const given = input.items ?? [];
+  if (question.context.reason !== "review_items") {
+    if (given.length) throw new Error("This question takes no choice per item.");
+    return null;
+  }
+  const listed = (Array.isArray(question.context.items) ? (question.context.items as { id?: unknown }[]) : []).map((i) => String(i.id));
+  const offered = question.options.join(", ");
+  for (const [index, c] of given.entries()) {
+    if (!listed.includes(c.id)) throw new Error(`The question does not list ${c.id}; it asks about ${listed.join(", ")}.`);
+    if (!question.options.includes(c.choice)) throw new Error(`${c.id} takes one of ${offered}; "${c.choice}" is not one of them.`);
+    if (given.findIndex((o) => o.id === c.id) !== index) throw new Error(`${c.id} has more than one choice.`);
+  }
+  const option = input.option !== undefined && question.options.includes(input.option) ? input.option : undefined;
+  const missing = listed.filter((id) => !given.some((c) => c.id === id));
+  if (missing.length && !option) throw new Error(`Give a choice for ${missing.join(", ")}: one of ${offered}.`);
+  if (given.length === 0) return null;
+  const note = input.answer.trim() && input.answer.trim() !== option ? input.answer.trim() : "";
+  return listed.map((id) => {
+    const c = given.find((o) => o.id === id);
+    if (c) return { id, choice: c.choice, ...(c.note?.trim() ? { note: c.note.trim() } : {}) };
+    return { id, choice: option!, ...(note ? { note } : {}) };
+  });
+}
+
 export async function answerQuestion(db: Db, questionId: string, input: Answer) {
   // Accepting a split opens the later parts' issues first, which needs GitHub: splitRun answers it.
   if (input.option === "split") throw new Error("Split as proposed opens an issue for each later part first; accept a split through the split, not as a plain answer.");
   return db.transaction(async (tx) => {
+    const [asked] = await tx.select({ options: questions.options, context: questions.context }).from(questions).where(eq(questions.id, questionId));
+    const choices = asked ? itemChoices(asked, input) : null;
     const { kept, comments } = await pickedFindings(tx, questionId, input);
-    return answerIn(tx, questionId, { ...input, comments: [...comments, ...(input.comments ?? [])], findings: kept });
+    return answerIn(tx, questionId, { ...input, comments: [...comments, ...(input.comments ?? [])], findings: kept }, [], choices);
   });
 }
 
 /** Records a person's answer to an open question and wakes the step that waits on it. */
-async function answerIn(tx: Tx, questionId: string, input: Answer, extra: { type: string; payload: unknown }[] = []) {
+async function answerIn(tx: Tx, questionId: string, input: Answer, extra: { type: string; payload: unknown }[] = [], choices: QuestionChoice[] | null = null) {
   const comments = (input.comments ?? [])
     .map(
       (c): QuestionComment => ({
@@ -268,7 +308,7 @@ async function answerIn(tx: Tx, questionId: string, input: Answer, extra: { type
     .filter((c) => c.body);
   const [question] = await tx
     .update(questions)
-    .set({ answer: input.answer, option: input.option ?? null, comments, findings: input.findings ?? null, answeredBy: input.answeredBy, answeredAt: sql`now()` })
+    .set({ answer: input.answer, option: input.option ?? null, comments, findings: input.findings ?? null, choices, answeredBy: input.answeredBy, answeredAt: sql`now()` })
     .where(and(eq(questions.id, questionId), sql`${questions.answer} is null`))
     .returning();
   if (!question) {
@@ -282,7 +322,7 @@ async function answerIn(tx: Tx, questionId: string, input: Answer, extra: { type
   await appendEvents(tx, question.runId, [
     {
       type: "human.answered",
-      payload: { questionId: question.id, answer: input.answer, option: input.option ?? null, comments: comments.length, answeredBy: input.answeredBy },
+      payload: { questionId: question.id, answer: input.answer, option: input.option ?? null, comments: comments.length, ...(choices ? { choices } : {}), answeredBy: input.answeredBy },
       nodeExecutionId: question.nodeExecutionId,
     },
     ...extra.map((e) => ({ ...e, nodeExecutionId: question.nodeExecutionId })),

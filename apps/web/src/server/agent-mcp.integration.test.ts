@@ -1,7 +1,7 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { afterAll, afterEach, beforeEach, expect, test, vi } from "vitest";
-import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, planPins, projects, projectSchedulers, questions, registerWorker, runs, schedulerEvents, sql, workers } from "@handoff/db";
+import { and, appendEvents, createNotification, eq, events, nodeExecutions, permissionRequests, planPins, projects, projectSchedulers, questions, registerWorker, reviewItems, runs, schedulerEvents, sql, workers } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { checkProject } from "@handoff/engine/backlog-scheduler";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
@@ -697,6 +697,69 @@ test("a PR step that waits for a reviewer's next review after handoff answered i
   // A later look that waits on CI only, after the reviewer reviewed again.
   await db.transaction((tx) => appendEvents(tx, runId, look(false)));
   expect((await call("get_run", { run_id: runId })).steps.at(-1)).toMatchObject({ node: "pr", state: "waiting", waiting_on: "ci" });
+});
+
+/** A run whose PR step asks a person about review items R1 and R2, as the PR node does after a dispute. */
+async function reviewItemsQuestion() {
+  const runId = (await call("start_run", { project: "sandbox", task: "Add usage docs" })).run_id as string;
+  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.runId, runId));
+  const pr = await seedExecution(db, runId, { nodeKey: "pr", nodeType: "pr", executorKind: "github", status: "waiting", waitKind: "human" });
+  const asked = [
+    { id: "R1", kind: "thread", reviewer: "coderabbitai", path: "vitest.config.ts", line: 12, url: "https://github.com/octo/sample/pull/9#discussion_r1", why: "disputed", reason: "the reviewer answered back, and the coder declined the comment again", comment: "The integration project never runs in CI.", conversation: [{ author: "coderabbitai", body: "CI runs test:unit only." }], verdict: "declined", evidence: "vitest.config.ts:12 lists it." },
+    { id: "R2", kind: "thread", reviewer: "alice", path: "README.md", line: 3, url: "https://github.com/octo/sample/pull/9#discussion_r2", why: "no_review", reason: "no review from alice within 1440 minutes of the answer", comment: "Say how to run it.", conversation: [], verdict: "fixed", evidence: "README.md:3 says it.", commit: "94c0c6c8a1" },
+  ];
+  const [question] = await db
+    .insert(questions)
+    .values({ runId, nodeExecutionId: pr.id, question: "Decide on review comments R1 and R2 on PR #9: resolve, send back or leave.", options: ["resolve", "send_back", "leave"], context: { reason: "review_items", summary: "2 review comments on PR #9 need your decision", pr: { number: 9, url: "https://github.com/octo/sample/pull/9" }, items: asked } })
+    .returning();
+  await db.insert(reviewItems).values([
+    { runId, handle: 1, key: "thread:PRRT_1", kind: "thread", githubId: "PRRT_1", reviewer: "coderabbitai", reviewerBot: true, path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI.", url: asked[0]!.url, round: 1, verdict: "declined", evidence: "vitest.config.ts:12 lists it.", replyUrl: "https://github.com/octo/sample/pull/9#discussion_r3", state: "disputed", stateReason: asked[0]!.reason, questionId: question!.id },
+    { runId, handle: 2, key: "thread:PRRT_2", kind: "thread", githubId: "PRRT_2", reviewer: "alice", path: "README.md", line: 3, body: "Say how to run it.", url: asked[1]!.url, round: 1, verdict: "fixed", evidence: "README.md:3 says it.", fixCommit: "94c0c6c8a1", replyUrl: "https://github.com/octo/sample/pull/9#discussion_r4", state: "disputed", stateReason: asked[1]!.reason, questionId: question!.id },
+    { runId, handle: 3, key: "check:Title check", kind: "pre_merge_check", reviewer: "coderabbitai", reviewerBot: true, body: "Title check (warning): the title names the branch.", url: "https://github.com/octo/sample/pull/9#issuecomment-5", round: 1, verdict: "declined", evidence: "The title says what it does.", state: "resolved", resolvedBy: "summary_dropped" },
+  ]);
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, runId));
+  return { runId, question: question! };
+}
+
+test("answer_question takes a choice per item and refuses an item the question does not list", async () => {
+  const { runId, question } = await reviewItemsQuestion();
+  const listed = (await call("get_run", { run_id: runId })).questions[0];
+  expect(listed).toMatchObject({ id: question.id, options: ["resolve", "send_back", "leave"], items: [expect.objectContaining({ id: "R1", why: "disputed", verdict: "declined" }), expect.objectContaining({ id: "R2", why: "no_review", commit: "94c0c6c8a1" })] });
+
+  expect(await call("answer_question", { question_id: question.id, items: [{ id: "R3", choice: "resolve" }] })).toEqual({ error: "The question does not list R3; it asks about R1, R2." });
+  expect(await call("answer_question", { question_id: question.id, items: [{ id: "R1", choice: "merge" }] })).toEqual({ error: expect.stringContaining('items.0.choice: Invalid option: expected one of "resolve"|"send_back"|"leave"') });
+  expect(await call("answer_question", { question_id: question.id, items: [{ id: "R1", choice: "resolve" }] })).toEqual({ error: "Give a choice for R2: one of resolve, send_back, leave." });
+  expect((await db.select().from(questions).where(eq(questions.id, question.id)))[0]?.answer).toBeNull();
+
+  const answered = await call("answer_question", { question_id: question.id, items: [{ id: "R1", choice: "send_back", note: "Add the integration project to CI." }, { id: "R2", choice: "resolve" }] });
+  expect(answered).toMatchObject({ answered: true, run_id: runId });
+  const [row] = await db.select().from(questions).where(eq(questions.id, question.id));
+  expect(row).toMatchObject({
+    option: null,
+    answer: "R1: send_back. Add the integration project to CI.\nR2: resolve.",
+    choices: [
+      { id: "R1", choice: "send_back", note: "Add the integration project to CI." },
+      { id: "R2", choice: "resolve" },
+    ],
+    answeredBy: "claude-code",
+  });
+});
+
+test("answer_question with one option answers every item of a review items question", async () => {
+  const { question } = await reviewItemsQuestion();
+  expect(await call("answer_question", { question_id: question.id, answer: "Both are fine.", option: "resolve" })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, question.id)))[0]).toMatchObject({ option: "resolve", answer: "Both are fine.", choices: null });
+});
+
+test("get_run lists review items with verdicts, evidence, commits, replies and states", async () => {
+  const { runId, question } = await reviewItemsQuestion();
+  const detail = await call("get_run", { run_id: runId });
+  expect(detail.review_items).toEqual([
+    { id: "R1", kind: "thread", reviewer: "coderabbitai", path: "vitest.config.ts", line: 12, url: "https://github.com/octo/sample/pull/9#discussion_r1", verdict: "declined", evidence: "vitest.config.ts:12 lists it.", commit: null, reply_url: "https://github.com/octo/sample/pull/9#discussion_r3", state: "disputed", state_reason: "the reviewer answered back, and the coder declined the comment again", resolved_by: null, question_id: question.id },
+    { id: "R2", kind: "thread", reviewer: "alice", path: "README.md", line: 3, url: "https://github.com/octo/sample/pull/9#discussion_r2", verdict: "fixed", evidence: "README.md:3 says it.", commit: "94c0c6c8a1", reply_url: "https://github.com/octo/sample/pull/9#discussion_r4", state: "disputed", state_reason: "no review from alice within 1440 minutes of the answer", resolved_by: null, question_id: question.id },
+    { id: "R3", kind: "pre_merge_check", reviewer: "coderabbitai", path: null, line: null, url: "https://github.com/octo/sample/pull/9#issuecomment-5", verdict: "declined", evidence: "The title says what it does.", commit: null, reply_url: null, state: "resolved", state_reason: null, resolved_by: "summary_dropped", question_id: null },
+  ]);
+  expect(detail.steps.at(-1)).toMatchObject({ node: "pr", state: "waiting", waiting_on: "question" });
 });
 
 test("answer_permission cannot always allow", async () => {

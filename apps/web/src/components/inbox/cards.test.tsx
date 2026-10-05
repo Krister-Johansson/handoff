@@ -68,6 +68,17 @@ test("a Try it question opens its own page, where the app and the criteria are",
   expect(screen.queryByRole("button", { name: "approve" })).not.toBeInTheDocument();
 });
 
+test("a question about review comments says so and answers every comment with the option chosen", async () => {
+  const context = { reason: "review_items", items: [{ id: "R1", reviewer: "coderabbitai", why: "disputed" }] };
+  render(<QuestionCard item={{ ...run, id: "q5", question: "Decide on review comment R1 on PR #9: resolve, send back or leave.", options: ["resolve", "send_back", "leave"], nodeKey: "pr", reason: "review_items", context }} />);
+  expect(screen.getByText("Review comments need a decision")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Decide on review comment R1 on PR #9: resolve, send back or leave." })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "leave" }));
+  await waitFor(() => expect(actions.answerAction).toHaveBeenCalled());
+  const form = actions.answerAction.mock.calls[0]![1] as FormData;
+  expect([form.get("questionId"), form.get("option")]).toEqual(["q5", "leave"]);
+});
+
 test("a question about files outside the plan offers to allow them, send the work back or fail the step", () => {
   const context = { reason: "paths", from: "coder", files: ["notes.txt"] };
   render(<QuestionCard item={{ ...run, id: "q4", question: "coder changed files outside the plan: `notes.txt`", options: ["allow", "send_back", "fail"], nodeKey: "coder", reason: "paths", context }} />);

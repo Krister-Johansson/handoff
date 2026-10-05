@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import type { ReviewAnswer, ReviewItem } from "@handoff/core";
-import { wakeByKey } from "@handoff/db";
+import { and, eq, isNull, questions, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import type { RepoRef } from "@handoff/github";
 import { FakeGitHub } from "@handoff/github/testing";
+import { answerQuestion } from "../operations.ts";
 import { createRun } from "../runs.ts";
 import { reviewRoundOf, withAnswers } from "../review-answers.ts";
 import { createOriginRepo, git } from "../testing/git.ts";
@@ -93,7 +94,13 @@ async function opened(prConfig: Record<string, unknown>, coder: NodeExecutor, gi
     await drain(deps());
   };
   const pr = () => github.prs.get(1)!;
-  return { origin, github, run, wake, pr };
+  /** A person answers the run's open question, and the run goes on. */
+  const answer = async (input: Omit<Parameters<typeof answerQuestion>[2], "answeredBy">) => {
+    const [open] = await db.select().from(questions).where(and(eq(questions.runId, run.id), isNull(questions.answer)));
+    await answerQuestion(db, open!.id, { answeredBy: "krister", ...input });
+    await drain(deps());
+  };
+  return { origin, github, run, wake, pr, answer };
 }
 
 const coderAttempt = async (runId: string, attempt: number) => (await inspect(db, runId)).executions.find((e) => e.nodeKey === "coder" && e.attempt === attempt);
@@ -531,10 +538,246 @@ test("the step reports waiting_on re_review while items wait", async () => {
   expect(mine.at(-1)).toMatchObject({ type: "github.re_review", payload: { reviewers: ["coderabbitai"], items: ["R1"] } });
 });
 
-test("an item its reviewer does not review within the limit is reported and no longer holds the step", async () => {
-  const { github, run } = await declined({ ...replies, reviewThreads: { reply: true, botWaitMinutes: 0 } });
-  const { events } = await inspect(db, run.id);
-  expect(events.find((e) => e.type === "github.items_review_overdue")?.payload).toMatchObject({ items: [expect.objectContaining({ item: "R1", reviewer: "coderabbitai", limitMinutes: 0 })] });
-  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "awaiting_review", stateReason: expect.stringContaining("no review") });
+/** The coder's answer to a review comment that came back with the reviewer's reply: settled when the reply accepts the answer. */
+const settleOnReply: Answer = (item, ctx) => (item.conversation?.length ? { verdict: "settled", evidence: "The reviewer agrees that the config lists it." } : decline(item, ctx));
+
+test("a reviewer reply goes to the coder with the thread; settled resolves it", async () => {
+  const { github, run, wake, thread } = await declined(replies, new FakeGitHub(), answeringCoder(settleOnReply));
+  github.replyInThread(1, thread().id!, "coderabbitai", "You are right, vitest.config.ts lists the integration project.");
+  await wake();
+
+  const packet = (await coderAttempt(run.id, 3))?.contextPacket as { reviewItems?: ReviewItem[] };
+  expect(packet.reviewItems).toEqual([
+    expect.objectContaining({
+      id: "R1",
+      body: "The integration project never runs in CI.",
+      conversation: [
+        { author: "handoff", body: expect.stringContaining("Not changed: the comment does not hold.") },
+        { author: "coderabbitai", body: "You are right, vitest.config.ts lists the integration project." },
+      ],
+    }),
+  ]);
+  expect(JSON.stringify(packet.reviewItems)).not.toContain("<!-- handoff:");
+  expect((await inspect(db, run.id)).events.find((e) => e.type === "github.item_reviewer_replied")?.payload).toMatchObject({ item: "R1" });
+
+  // The coder settles it: handoff posts nothing more and resolves the thread at once.
+  expect(repliesIn(github)).toHaveLength(2);
+  expect(thread().isResolved).toBe(true);
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "resolved", resolvedBy: "handoff", verdict: "settled" });
   expect(github.merged).toEqual([1]);
+});
+
+/** The run's questions, oldest first. */
+const questionsOf = async (runId: string) => (await db.select().from(questions).where(eq(questions.runId, runId))).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+/** CodeRabbit answers back in R1's thread after the coder declined it, and the coder declines it again: a person decides. */
+async function disputed(prConfig: Record<string, unknown> = replies, github = new FakeGitHub(), coder: NodeExecutor = answeringCoder(decline)) {
+  const run = await declined(prConfig, github, coder);
+  github.replyInThread(1, run.thread().id!, "coderabbitai", "CI runs `pnpm test:unit` only, so the integration project is skipped.");
+  await run.wake();
+  return run;
+}
+
+test("a second decline makes the item disputed and asks one question with both sides and the choices resolve, send back and leave", async () => {
+  const { github, run, thread } = await disputed();
+
+  // handoff posts nothing more in the thread: its first answer and the reviewer's reply.
+  expect(repliesIn(github).map((c) => c.author)).toEqual(["octocat", "coderabbitai"]);
+  const [question, ...more] = await questionsOf(run.id);
+  expect(more).toEqual([]);
+  const step = await prStep(run.id, 3);
+  expect(step).toMatchObject({ status: "waiting", waitKind: "human", waitToken: question!.id, waitKey: "gh:pr:42:1" });
+  expect(question).toMatchObject({ nodeExecutionId: step!.id, options: ["resolve", "send_back", "leave"], answer: null });
+  expect(question!.question).toContain("R1");
+  expect(question!.context).toMatchObject({
+    reason: "review_items",
+    pr: { number: 1, url: expect.any(String) },
+    items: [
+      {
+        id: "R1",
+        kind: "thread",
+        reviewer: "coderabbitai",
+        path: "vitest.config.ts",
+        line: 12,
+        url: thread().comments[0]!.url,
+        why: "disputed",
+        comment: "The integration project never runs in CI.",
+        conversation: [
+          { author: "handoff", body: expect.stringContaining("Not changed: the comment does not hold.") },
+          { author: "coderabbitai", body: "CI runs `pnpm test:unit` only, so the integration project is skipped." },
+        ],
+        verdict: "declined",
+        evidence: "`pnpm test` passes with the integration project; vitest.config.ts:12 lists it.",
+        replyUrl: repliesIn(github)[0]!.url,
+      },
+    ],
+  });
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "disputed", questionId: question!.id });
+  const { events } = await inspect(db, run.id);
+  expect(events.find((e) => e.type === "github.item_disputed")?.payload).toMatchObject({ item: "R1" });
+  expect(events.find((e) => e.type === "human.asked")?.payload).toMatchObject({ questionId: question!.id, options: ["resolve", "send_back", "leave"] });
+  expect(github.merged).toEqual([]);
+});
+
+/** Moves the pull request's reviews and review comments back by `minutes`, as if that much time had passed since. */
+function later(github: FakeGitHub, minutes: number) {
+  const back = <T extends string | null | undefined>(iso: T) => (iso ? new Date(Date.parse(iso) - minutes * 60_000).toISOString() : iso) as T;
+  const pr = github.prs.get(1)!;
+  for (const review of pr.reviews) review.submittedAt = back(review.submittedAt);
+  for (const comment of pr.reviewThreads.flatMap((t) => t.comments)) if (comment.createdAt) comment.createdAt = back(comment.createdAt);
+}
+
+test("a bot that does not review within 30 minutes, and a person within 24 hours, makes the step ask", async () => {
+  const bot = await declined();
+  later(bot.github, 29);
+  await bot.wake();
+  expect(await questionsOf(bot.run.id)).toEqual([]);
+  expect((await prStep(bot.run.id, 2))?.status).toBe("waiting");
+
+  later(bot.github, 2);
+  await bot.wake();
+  const [asked] = await questionsOf(bot.run.id);
+  expect(asked?.context).toMatchObject({ reason: "review_items", items: [expect.objectContaining({ id: "R1", why: "no_review", reason: "no review from coderabbitai within 30 minutes of the answer" })] });
+  expect((await itemsOf(bot.run.id)).R1).toMatchObject({ state: "disputed", questionId: asked!.id });
+  expect((await prStep(bot.run.id, 2))?.status).toBe("waiting");
+  expect((await prStep(bot.run.id, 2))?.waitKind).toBe("human");
+  expect((await inspect(db, bot.run.id)).events.find((e) => e.type === "github.items_review_overdue")?.payload).toMatchObject({ items: [expect.objectContaining({ item: "R1", limitMinutes: 30 })] });
+  expect(bot.github.merged).toEqual([]);
+
+  await truncateAll(db);
+  const github = new FakeGitHub();
+  const person = await opened({ ...replies, waitForReviewers: ["alice"] }, answeringCoder(decline), github);
+  github.reviewOnHead(1, "alice", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  await person.wake();
+  later(github, 23 * 60);
+  await person.wake();
+  expect(await questionsOf(person.run.id)).toEqual([]);
+
+  later(github, 2 * 60);
+  await person.wake();
+  const [question] = await questionsOf(person.run.id);
+  expect(question?.context).toMatchObject({ items: [expect.objectContaining({ id: "R1", reviewer: "alice", why: "no_review", reason: "no review from alice within 1440 minutes of the answer" })] });
+  expect(github.merged).toEqual([]);
+});
+
+test("resolve resolves the thread and the run goes on", async () => {
+  const { github, run, thread, answer } = await disputed();
+  await answer({ answer: "The unit project covers it; ADR 0041 keeps integration tests out of CI.", option: "resolve" });
+
+  expect(thread().isResolved).toBe(true);
+  const said = repliesIn(github).at(-1)!;
+  expect(said.author).toBe("octocat");
+  expect(said.body.split("\n")[0]).toBe("Resolved by krister in handoff.");
+  expect(said.body).toContain("The unit project covers it; ADR 0041 keeps integration tests out of CI.");
+  expect(said.body).toContain("<!-- handoff:item-decision R1 ");
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "resolved", resolvedBy: "krister" });
+  expect((await prStep(run.id, 3))?.status).toBe("passed");
+  expect(await coderAttempt(run.id, 4)).toBeUndefined();
+  expect(github.merged).toEqual([1]);
+});
+
+type Decided = { reviewItems?: ReviewItem[]; decisions?: { gate: string; note?: string }[] };
+
+test("send back gives the coder the item with the person's note as a decision", async () => {
+  // The coder declines until a person decides; then it fixes the comment.
+  const fixOnDecision: Answer = (item, ctx) =>
+    (ctx.packet as Decided).decisions?.length ? { verdict: "fixed", evidence: "CI now runs the integration project.", commit: commitChange(ctx, "Run the integration project in CI") } : decline(item, ctx);
+  const { github, run, answer } = await disputed(replies, new FakeGitHub(), answeringCoder(fixOnDecision));
+  const note = "CI runs test:unit only; add the integration project to the CI job.";
+  await answer({ answer: "R1 goes back.", items: [{ id: "R1", choice: "send_back", note }] });
+
+  const packet = (await coderAttempt(run.id, 4))?.contextPacket as Decided;
+  expect(packet.reviewItems?.map((i) => i.id)).toEqual(["R1"]);
+  expect(packet.reviewItems?.[0]?.conversation?.at(-1)).toEqual({ author: "krister", body: `Sent back to fix: ${note}` });
+  expect(packet.decisions).toEqual([{ gate: "pr", note: expect.stringContaining(note), comments: [] }]);
+  expect(packet.decisions?.[0]?.note).toContain("R1");
+
+  // The fix is answered on GitHub and waits for CodeRabbit's next review, as any fix does.
+  expect(repliesIn(github).at(-1)?.body.split("\n")[0]).toMatch(/^Valid\. Fixed in /);
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "awaiting_review", verdict: "fixed" });
+  expect((await inspect(db, run.id)).events.find((e) => e.type === "github.item_sent_back")?.payload).toMatchObject({ item: "R1", by: "krister" });
+});
+
+test("a fixed summary note that the next summary still lists goes back to the coder once, then a person decides", async () => {
+  const note = "The changelog omits the date of the release, which the release workflow reads.";
+  let fixes = 0;
+  const fixing: Answer = (_item, ctx) => ({ verdict: "fixed", evidence: "CHANGELOG.md has the date now.", commit: commitChange(ctx, `Date the release ${++fixes}`) });
+  const { github, run, wake, pr } = await opened(withSummary, answeringCoder(fixing));
+  const reviewed = () => {
+    github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+    github.summaryComment(1, summaryOf(pr().headSha, { note }));
+  };
+  reviewed();
+  await wake();
+  expect((await itemsOf(run.id)).R1).toMatchObject({ kind: "summary_note", state: "awaiting_review", verdict: "fixed" });
+
+  // CodeRabbit's summary of the fix still lists the note: it goes back to the coder, saying so.
+  reviewed();
+  await wake();
+  const packet = (await coderAttempt(run.id, 3))?.contextPacket as { reviewItems?: ReviewItem[] };
+  expect(packet.reviewItems?.map((i) => i.id)).toEqual(["R1"]);
+  expect(packet.reviewItems?.[0]?.conversation).toEqual([{ author: "handoff", body: expect.stringContaining("still lists this") }]);
+  expect((await inspect(db, run.id)).events.find((e) => e.type === "github.item_returned")?.payload).toMatchObject({ item: "R1" });
+
+  // The summary of the second fix lists it again: a person decides.
+  reviewed();
+  await wake();
+  expect(await coderAttempt(run.id, 4)).toBeUndefined();
+  const [question] = await questionsOf(run.id);
+  expect(question?.context).toMatchObject({ items: [expect.objectContaining({ id: "R1", kind: "summary_note", why: "disputed", verdict: "fixed" })] });
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "disputed", questionId: question!.id });
+  expect(github.merged).toEqual([]);
+});
+
+test("an unclear answer is posted to the reviewer first, and a second unclear goes to a person", async () => {
+  const unclear: Answer = () => ({ verdict: "unclear", evidence: "Which CI job do you mean: test or e2e?" });
+  const { github, run, thread, wake } = await declined(replies, new FakeGitHub(), answeringCoder(unclear));
+  expect(repliesIn(github)[0]?.body.split("\n")[0]).toBe("Unclear: Which CI job do you mean: test or e2e?");
+  expect(await questionsOf(run.id)).toEqual([]);
+
+  github.replyInThread(1, thread().id!, "coderabbitai", "The test job.");
+  await wake();
+  const [question] = await questionsOf(run.id);
+  expect(question?.context).toMatchObject({ items: [expect.objectContaining({ id: "R1", why: "disputed", verdict: "unclear", reason: "the reviewer answered back, and the comment is still unclear to the coder" })] });
+  expect(repliesIn(github)).toHaveLength(2);
+});
+
+test("a disputed thread resolved on GitHub while the question waits closes the question, and the run goes on", async () => {
+  const { github, run, wake, thread } = await disputed();
+  github.resolveThreadAs(1, thread().id!, "krister");
+  await wake();
+
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "resolved", resolvedBy: "krister" });
+  const [question] = await questionsOf(run.id);
+  expect(question).toMatchObject({ answeredBy: "handoff", answer: expect.stringContaining("R1") });
+  expect((await prStep(run.id, 3))?.status).toBe("passed");
+  expect(github.merged).toEqual([1]);
+});
+
+test("leave stops handoff from touching the thread", async () => {
+  const github = new FakeGitHub();
+  github.requireResolvedThreads = true;
+  const { run, wake, thread, answer } = await disputed(replies, github);
+  await answer({ answer: "leave", option: "leave" });
+
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "left", stateReason: "krister chose to leave it" });
+  expect((await prStep(run.id, 3))?.status).toBe("passed");
+  // The merge waits on the thread, which is the person's to settle on GitHub.
+  const merge = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "merge");
+  expect(merge?.status).toBe("waiting");
+  const before = repliesIn(github).length;
+
+  // CodeRabbit answers back and reviews again: handoff neither replies nor resolves.
+  github.replyInThread(1, thread().id!, "coderabbitai", "Still skipped in CI.");
+  github.reviewOnHead(1, "coderabbitai", { state: "APPROVED" });
+  await wake();
+  expect(repliesIn(github)).toHaveLength(before + 1);
+  expect(thread().isResolved).toBe(false);
+  expect((await itemsOf(run.id)).R1?.state).toBe("left");
+  expect(await coderAttempt(run.id, 4)).toBeUndefined();
+
+  github.resolveThreadAs(1, thread().id!, "krister");
+  await wake();
+  expect(github.merged).toEqual([1]);
+  expect((await itemsOf(run.id)).R1?.state).toBe("left");
 });

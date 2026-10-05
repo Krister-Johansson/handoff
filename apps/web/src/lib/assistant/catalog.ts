@@ -248,7 +248,7 @@ export const CATALOG: ToolSpec[] = [
     name: "get_run",
     title: "Show a run",
     description:
-      "Where a run stands: status, waiting_on { kind: permission, step, since } while a step waits for a person to allow a tool call (status stays running), cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue, the worker, or review threads a person must resolve before the merge, which the step lists as review_threads, or a reviewer's next review after handoff answered its comments, re_review), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, and a stuck loop's last review.",
+      "Where a run stands: status, waiting_on { kind: permission, step, since } while a step waits for a person to allow a tool call (status stays running), cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue, the worker, or review threads a person must resolve before the merge, which the step lists as review_threads, or a reviewer's next review after handoff answered its comments, re_review), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes; a question about review comments with each comment's items), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, a stuck loop's last review, and review_items: each comment external reviewers left on the pull request, with the coder's verdict, evidence and fixing commit, handoff's reply, and its state (open, answered, awaiting_review, resolved, disputed, reraised, left or gone).",
     input: z.object({ run_id: runId }),
     kind: "data",
     confirm: false,
@@ -337,10 +337,10 @@ export const CATALOG: ToolSpec[] = [
     name: "answer_question",
     title: "Answer a question",
     description:
-      "Answers a question a run asked, which lets it continue. The option must be one the question lists (get_run shows them): approve, changes or fix (approve once the comments are fixed) for a review. At a code review with findings, changes and fix send the findings marked fix_now back to the coder unless findings names others. Later steps get only those findings as suggestions, with approve too. At a Try it gate, give criteria: a verdict for each acceptance criterion. Only answer with the user's decision.",
+      "Answers a question a run asked, which lets it continue. The option must be one the question lists (get_run shows them): approve, changes or fix (approve once the comments are fixed) for a review. At a code review with findings, changes and fix send the findings marked fix_now back to the coder unless findings names others. Later steps get only those findings as suggestions, with approve too. At a Try it gate, give criteria: a verdict for each acceptance criterion. A question about review comments (get_run lists its items with the reviewer's side and the coder's) takes items, a choice per comment, or one option for all of them. Only answer with the user's decision.",
     input: z.object({
       question_id: z.string(),
-      answer: z.string().min(1).optional().describe("The answer or note; required unless criteria answer a Try it gate"),
+      answer: z.string().min(1).optional().describe("The answer or note; required unless criteria answer a Try it gate or items answer a question about review comments"),
       option: z.string().optional().describe("One of the question's options, when it has them"),
       criteria: z
         .array(z.object({ criterion: z.string(), works: z.boolean(), note: z.string().optional().describe("What is wrong, when it does not work") }))
@@ -362,6 +362,16 @@ export const CATALOG: ToolSpec[] = [
         .array(z.number().int().positive())
         .optional()
         .describe("For a code review with findings: the findings to fix now, by index from 1 as get_run lists them. changes and fix send them back to the coder, and later steps get only them as suggestions. Without it, every finding marked fix_now (Blocking and Should fix); [] names none."),
+      items: z
+        .array(
+          z.object({
+            id: z.string().describe("The review comment's id as the question lists it, such as R1"),
+            choice: z.enum(["resolve", "send_back", "leave"]),
+            note: z.string().optional().describe("The person's note: posted with resolve, and given to the coder as a decision with send_back"),
+          }),
+        )
+        .optional()
+        .describe("For a question about review comments: a choice per comment it lists. resolve resolves the thread on GitHub, send_back gives the comment to the coder with the note, leave hands it to the person on GitHub. A comment without a choice takes option."),
     }),
     kind: "data",
     confirm: true,
@@ -370,7 +380,9 @@ export const CATALOG: ToolSpec[] = [
     summarize: (a) =>
       a.criteria
         ? `Answer the Try it gate: ${a.criteria.filter((c) => !c.works).length} of ${a.criteria.length} criteria do not work`
-        : `Answer the question${a.option ? ` with ${a.option}` : ""}: ${a.answer ?? ""}`,
+        : a.items?.length
+          ? `Answer the review comments: ${a.items.map((i) => `${i.id} ${i.choice.replace("_", " ")}`).join(", ")}`
+          : `Answer the question${a.option ? ` with ${a.option}` : ""}: ${a.answer ?? ""}`,
     view: QUESTION_CARD_URI,
   }),
   spec({

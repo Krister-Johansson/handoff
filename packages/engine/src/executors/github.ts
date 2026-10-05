@@ -37,7 +37,7 @@ import {
   type ReviewRequest,
   type SummaryRead,
 } from "./external-review.ts";
-import { awaitingReview, handleOf, hasUnsent, postAnswers, recordAnswers, reReview, sendItems, syncItems, withItems } from "./review-items.ts";
+import { applyDecisions, askAboutItems, awaitingReview, closeIfSettled, handleOf, hasUnsent, listItems, postAnswers, questionOf, recordAnswers, reReview, sendItems, sentBack, settleItems, syncItems, withItems } from "./review-items.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -327,16 +327,30 @@ export function prNodeExecutor(deps: {
       const summary = summaryBot ? { login: summaryBot, read: await readSummary(deps.github, repo, snapshot, summaryBot) } : undefined;
       // The answered thread items the step waits on until their reviewer reviews again.
       let reReviewing: { items: { handle: number; reviewer: string }[]; until?: number | undefined } = { items: [] };
+      // The question this step asked a person about items handoff cannot settle, if it asked one.
+      let question = itemsDb ? await questionOf(itemsDb, ctx.execution.id) : undefined;
       if (itemsDb) {
         const items = { db: itemsDb, github: deps.github };
         await recordAnswers(itemsDb, ctx);
+        // A person answered the step's question: their choice for each item comes first.
+        if (question?.answer != null) await applyDecisions(items, ctx, { repo, snapshot, question });
         // What the reviewers made of the answers already on GitHub; before this step posts any, so none is resolved in the step that answered it.
         if (threads.resolveAfterReview) await reReview(items, ctx, { repo, snapshot, summary });
+        // A question whose items were all settled on GitHub meanwhile needs no answer.
+        if (question) question = await closeIfSettled(itemsDb, ctx, question);
+        // An answer that settles a reviewer's reply resolves its thread at once.
+        await settleItems(items, ctx, { repo, snapshot });
         // After the push, so a fixing commit is on GitHub when the reply names it. Threads and comments come from the whole snapshot.
         const headSha = ctx.workdir ? await headOf(ctx.workdir.path).catch(() => snapshot.headSha) : snapshot.headSha;
         await postAnswers(items, ctx, { repo, snapshot, headSha, resolveAfterReview: threads.resolveAfterReview });
         if (threads.resolveAfterReview) reReviewing = await awaitingReview(items, ctx, { snapshot, settings: threads, now: Date.now() });
+        // Items handoff cannot settle go to a person in one question, once nothing else waits on a reviewer. The step
+        // waits for the answer on the PR's key too, so news from GitHub still updates the items meanwhile.
+        if (!question && reReviewing.items.length === 0) question = await askAboutItems(items, ctx, { snapshot });
+        if (question && question.answer === null) return { kind: "waiting", wait: { kind: "human", key, token: question.id } };
       }
+      // The items a person sent back go to the coder with their note, which binds later steps as a decision.
+      const back = itemsDb ? sentBack(question, await listItems(itemsDb, ctx.run.id), ctx.node.key) : undefined;
 
       // A check named after one of them (CodeRabbit's "CodeRabbit"), or after the summary bot, is its review in
       // progress, not CI: the review wait below covers it, up to the review time limit, and it never goes to the
@@ -383,7 +397,7 @@ export function prNodeExecutor(deps: {
         reReviewing.items.length > 0 &&
         snapshot.state === "open" &&
         feedback.ci.status !== "failure" &&
-        !(itemsDb && (await hasUnsent(itemsDb, ctx.run.id, external.findings)));
+        !(itemsDb && (await hasUnsent(itemsDb, ctx.run.id, external.findings, back?.handles)));
 
       if (checksPending || awaitingApproval || awaitingReviewers || awaitingReReview) {
         // Also wake when a PR without checks reaches its limit, so a repository without CI does not wait for the reconcile.
@@ -414,9 +428,9 @@ export function prNodeExecutor(deps: {
       if (itemsDb) {
         // Each finding is an item once; the open ones go to the coder by handle, up to the round's cap.
         const rows = await syncItems(itemsDb, ctx.run.id, external.findings, ctx.execution.attempt);
-        const sent = await sendItems(itemsDb, rows, external.findings, ctx.execution.attempt, threads.maxPerRound);
+        const sent = await sendItems(itemsDb, rows, external.findings, ctx.execution.attempt, threads.maxPerRound, back?.handles);
         if (sent.length) {
-          routed = withItems(feedback, sent);
+          routed = withItems(feedback, sent, snapshot, back?.notes);
           ctx.emit("github.review_findings", { number, findings: sent.length, items: sent.map(handleOf) });
         } else if (feedback.review.decision === "changes_requested") {
           // GitHub keeps a reviewer's CHANGES_REQUESTED until it approves (with a ruleset, a later commit). Once
@@ -438,6 +452,7 @@ export function prNodeExecutor(deps: {
       const output = { sync: "clean", prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha, feedback: routed };
       const statePatch: Record<string, unknown> = { prNumber: number, feedback: routed };
       if (sentFindings.length) statePatch.prHandledReviews = [...handled, ...sentFindings];
+      if (back?.decisions.length) statePatch.decisions = [...(Array.isArray(ctx.state.decisions) ? ctx.state.decisions : []), ...back.decisions];
       return { kind: "completed", output, statePatch };
     },
   };
