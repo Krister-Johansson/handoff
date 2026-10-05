@@ -30,9 +30,9 @@ const parts = [
   { title: "Filter the board", body: "Filter cards by tag.", ownedPaths: ["src/filter.ts"] },
 ];
 
-/** A run on #11 waiting at its plan gate, where the planner proposed a split into three parts. */
-async function splitGate() {
-  const run = await startRunFromGraph(db, { projectId, graphName: "linear", task: "Add a board", issues: [11] }, github);
+/** A run on #11 (or the given issues) waiting at its plan gate, where the planner proposed a split into three parts. */
+async function splitGate(issues = [11]) {
+  const run = await startRunFromGraph(db, { projectId, graphName: "linear", task: "Add a board", issues }, github);
   const split = { status: "split", plan: "Three changes.", steps: [], ownedPaths: [], parts };
   await db.update(runs).set({ state: { ...run.state, plan: split } }).where(eq(runs.id, run.id));
   const gate = await seedExecution(db, run.id, { nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" });
@@ -77,7 +77,30 @@ test("Split as proposed opens an issue per later part with Depends on links and 
   expect(recorded.find((e) => e.type === "run.split")?.payload).toMatchObject({ issues: opened });
 });
 
-test("with a plan, the parts are sub-issues of the run's issue", async () => {
+test("with a plan, the parts are tasks under the task's story, with its labels, each blocked by the one before", async () => {
+  github.issues.set(10, { number: 10, title: "Boards", url: "https://github.com/octo/sample/issues/10", body: "Boards for todos.", state: "open", labels: ["story"] });
+  github.parents.set(11, 10);
+  github.issues.get(11)!.labels = ["task", "human", "area: ui"];
+  const gate = await splitGate();
+  await setupPlan({ db, github, projects: plan }, projectId);
+
+  const opened = await splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" });
+
+  const [drag, filter] = await Promise.all(opened.map((i) => github.getIssue(repo, i.number, { parents: true })));
+  for (const created of [drag!, filter!]) {
+    expect(created.parents?.map((p) => p.number)).toEqual([10]);
+    expect(created.labels).toEqual(["task", "human", "area: ui"]);
+    expect(plan.itemsOf(repo).get(created.number)?.status).toBe("Shaping");
+  }
+  expect(await github.openBlockers(repo, drag!.number)).toEqual([11]);
+  expect(await github.openBlockers(repo, filter!.number)).toEqual([drag!.number]);
+  // A second answer finds the question answered and opens nothing more.
+  const before = github.issues.size;
+  await expect(splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" })).rejects.toThrow(/already answered/);
+  expect(github.issues.size).toBe(before);
+});
+
+test("with a plan, the parts have no parent when the run's issue has none", async () => {
   const gate = await splitGate();
   await setupPlan({ db, github, projects: plan }, projectId);
 
@@ -85,13 +108,25 @@ test("with a plan, the parts are sub-issues of the run's issue", async () => {
 
   for (const issue of opened) {
     const created = await github.getIssue(repo, issue.number, { parents: true });
-    expect(created.parents?.map((p) => p.number)).toEqual([11]);
-    expect(plan.itemsOf(repo).get(issue.number)?.status).toBe("Shaping");
+    expect(created.parents).toEqual([]);
+    expect(created.labels).toEqual(["task"]);
   }
-  // A second answer finds the question answered and opens nothing more.
-  const before = github.issues.size;
-  await expect(splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" })).rejects.toThrow(/already answered/);
-  expect(github.issues.size).toBe(before);
+});
+
+test("a run on two issues drops the issue a later part repeats and names it in the answer", async () => {
+  github.issues.set(12, { number: 12, title: "Filter the board", url: "https://github.com/octo/sample/issues/12", body: "Filter cards by tag.", state: "open" });
+  const gate = await splitGate([11, 12]);
+
+  const opened = await splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" });
+
+  const filter = opened[1]!;
+  const [run] = await db.select().from(runs).where(eq(runs.id, gate.runId));
+  expect(run!.issues.map((i) => i.number)).toEqual([11]);
+  expect(run!.state.issues?.map((i) => i.number)).toEqual([11]);
+  const [answered] = await db.select().from(questions).where(eq(questions.id, gate.questionId));
+  expect(answered!.answer).toContain(`#12 "Filter the board" is no longer part of this run; #${filter.number} holds its work.`);
+  const recorded = await db.select().from(events).where(eq(events.runId, gate.runId));
+  expect(recorded.find((e) => e.type === "run.split")?.payload).toMatchObject({ dropped: [{ number: 12, title: "Filter the board", heldBy: filter.number }] });
 });
 
 test("in a Flow project a split's parts land right after the run's task in Project order", async () => {

@@ -6,7 +6,7 @@ import { and, desc, eq, graphs, graphVersions, inArray, projects, questions, run
 import { cancelRun, splitPartsOf, splitRun, statusesBeforeRun, type SplitIssue } from "@handoff/engine/operations";
 import { branchHasWork, previousRunOf } from "@handoff/engine/runs";
 import { startRun, type StartRunInput } from "@handoff/engine/start-run";
-import type { GitHubPort, ProjectsPort } from "@handoff/github";
+import { PLAN_KINDS, type GitHubPort, type ProjectsPort } from "@handoff/github";
 
 export const TEMPLATES = {
   plan: { label: "Plan, review, approve, build: a reviewer and you approve the plan before any code, and you try UI changes before the PR", document: planReview },
@@ -253,12 +253,24 @@ async function partsAfterTask(plan: ProjectsPort, repo: { owner: string; name: s
 }
 
 /**
+ * Where a split's parts go in the plan: under the parent of the run's issue (its story), or under no issue
+ * when it has none, labelled `task` with the run's issue's labels other than the kind labels.
+ */
+async function placeOfParts(deps: SplitDeps, repo: { owner: string; name: string }, issue: number): Promise<{ labels: string[]; parent?: number | undefined }> {
+  const [[parent], labels] = await Promise.all([deps.projects!.lineage(repo, issue), deps.github ? deps.github.getIssue(repo, issue).then((i) => i.labels) : []]);
+  const kinds = new Set<string>(PLAN_KINDS);
+  return { labels: ["task", ...labels.filter((l) => !kinds.has(l.toLowerCase()))], parent: parent?.number };
+}
+
+/**
  * "Split as proposed" at a plan gate: opens one issue for each part after the first, then narrows the
- * run to the first part and answers the gate, which sends the planner back to plan that part. With a
- * plan on GitHub Projects each issue is a sub-issue of the run's issue; without one, each issue depends
- * on the one before it (the first on the run's issue) through a "Depends on" line and GitHub's
- * blocked-by link, so the parts run in order. In a Flow project the parts land right after the run's task in
- * Project order. Returns the opened issues.
+ * run to the first part and answers the gate, which sends the planner back to plan that part. Each issue
+ * is blocked by the one before it (the first by the run's issue) through GitHub's blocked-by link, so the
+ * parts run in order. With a plan on GitHub Projects each issue is a task with the run's issue's other
+ * labels, and a sub-issue of the run's issue's parent, or of no issue when that has none. Without a plan
+ * each issue also names the one before it in a "Depends on" line. In a Flow project the parts land right
+ * after the run's task in Project order. When a later part repeats another issue of the run, splitRun
+ * drops that issue from the run. Returns the opened issues.
  */
 export async function splitPlan(deps: SplitDeps, input: { runId: string; questionId: string; answeredBy: string; note?: string | undefined }): Promise<SplitIssue[]> {
   const [row] = await deps.db
@@ -277,6 +289,7 @@ export async function splitPlan(deps: SplitDeps, input: { runId: string; questio
   const withPlan = row.planNumber !== null && deps.projects !== undefined;
   if (!withPlan && !deps.github) throw new Error("handoff has no GitHub credentials to open the parts' issues with.");
 
+  const placed = withPlan && parent ? await placeOfParts(deps, repo, parent.number) : { labels: ["task"] };
   const opened: SplitIssue[] = [];
   for (const [index, part] of parts.entries()) {
     if (index === 0) continue;
@@ -284,7 +297,14 @@ export async function splitPlan(deps: SplitDeps, input: { runId: string; questio
     const before = opened.at(-1)?.number ?? parent?.number;
     let created: { number: number; url: string };
     if (withPlan) {
-      created = await deps.projects!.createIssue(repo, { project: row.planNumber!, title: part.title, body: `${part.body.trim()}\n\n${about}`, labels: [], ...(parent ? { parent: parent.number } : {}) });
+      created = await deps.projects!.createIssue(repo, {
+        project: row.planNumber!,
+        title: part.title,
+        body: `${part.body.trim()}\n\n${about}`,
+        labels: placed.labels,
+        ...(placed.parent !== undefined ? { parent: placed.parent } : {}),
+        ...(before ? { blockedBy: [before] } : {}),
+      });
     } else {
       created = await deps.github!.createIssue(repo, { title: part.title, body: [part.body.trim(), about, ...(before ? [`Depends on: #${before}`] : [])].join("\n\n") });
       if (before) await deps.github!.addBlockedBy(repo, created.number, before);

@@ -262,7 +262,9 @@ export function splitPartsOf(context: Record<string, unknown>): PlanPart[] | und
 /**
  * Accepts the split a plan gate shows, once the later parts' issues are open: the run narrows to the
  * first part (its task becomes that part, and its plan is dropped for the planner to plan the part
- * again) and the gate is answered "split", which sends the work back to the planner. Records `run.split`.
+ * again) and the gate is answered "split", which sends the work back to the planner. An issue of the run
+ * other than its first whose title a later part repeats leaves the run, so its pull request does not
+ * close it, and the answer names it. Records `run.split` with the dropped issues.
  */
 export async function splitRun(db: Db, questionId: string, input: { note?: string | undefined; answeredBy: string; issues: SplitIssue[] }) {
   return db.transaction(async (tx) => {
@@ -276,14 +278,24 @@ export async function splitRun(db: Db, questionId: string, input: { note?: strin
     if (!run) throw new Error(`run ${question.runId} not found`);
     const first = parts[0]!;
     const task = `${first.title}\n\n${first.body.trim()}`;
+    // An issue of the run, other than its first, whose title a later part repeats now lives in that part's
+    // issue, so the run lets go of it and its pull request does not close it.
+    const titleOf = (title: string) => title.trim().toLowerCase();
+    const dropped = run.issues.slice(1).flatMap((issue) => {
+      const index = parts.findIndex((part, i) => i > 0 && titleOf(part.title) === titleOf(issue.title));
+      return index > 0 ? [{ ...issue, heldBy: input.issues[index - 1]!.number }] : [];
+    });
+    const kept = (issue: { number: number }) => !dropped.some((d) => d.number === issue.number);
     const { plan: _split, ...rest } = RunStateSchema.parse(run.state);
-    await tx.update(runs).set({ task, state: { ...rest, task }, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, run.id));
+    const state = { ...rest, task, ...(rest.issues ? { issues: rest.issues.filter(kept) } : {}) };
+    await tx.update(runs).set({ task, issues: run.issues.filter(kept), state, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, run.id));
     const later = input.issues.map((i) => `#${i.number} "${i.title}"`).join(", ");
     const answer = [
       `Split as proposed. This run builds part 1, "${first.title}", and nothing of the later parts: ${later} hold them, each for a run of its own. Plan part 1 on its own.`,
+      ...dropped.map((d) => `#${d.number} "${d.title}" is no longer part of this run; #${d.heldBy} holds its work.`),
       ...(input.note?.trim() ? [input.note.trim()] : []),
     ].join("\n\n");
-    return answerIn(tx, questionId, { answer, option: "split", answeredBy: input.answeredBy }, [{ type: "run.split", payload: { questionId, task, issues: input.issues } }]);
+    return answerIn(tx, questionId, { answer, option: "split", answeredBy: input.answeredBy }, [{ type: "run.split", payload: { questionId, task, issues: input.issues, dropped } }]);
   });
 }
 
