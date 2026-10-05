@@ -1,0 +1,56 @@
+[
+  {
+    "id": 6000133859,
+    "author": "Krister-Johansson",
+    "authorAssociation": "MEMBER",
+    "createdAt": "2026-10-05T17:59:35Z",
+    "updatedAt": "2026-10-05T17:59:35Z",
+    "body": "@coderabbitai review",
+    "url": "https://github.com/northMES/northmes/pull/208#issuecomment-6000133859"
+  },
+  {
+    "id": 6000136492,
+    "author": "coderabbitai[bot]",
+    "authorAssociation": "NONE",
+    "createdAt": "2026-10-05T17:59:45Z",
+    "updatedAt": "2026-10-05T18:20:58Z",
+    "body": "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n<!-- review_stack_entry_start -->\n",
+    "url": "https://github.com/northMES/northmes/pull/208#issuecomment-6000136492"
+  },
+  {
+    "id": 6000273105,
+    "author": "coderabbitai[bot]",
+    "authorAssociation": "NONE",
+    "createdAt": "2026-10-05T18:08:07Z",
+    "updatedAt": "2026-10-05T18:08:21Z",
+    "body": "<!-- This is an auto-generated reply by CodeRabbit -->\n<!-- CodeRabbit review command invocation: v2:d7a9b2cd51aa195c31c155de33a1684b70f2b530ea624f0a923efb1529e58add -->\n<details>",
+    "url": "https://github.com/northMES/northmes/pull/208#issuecomment-6000273105"
+  },
+  {
+    "id": 6000387583,
+    "author": "Krister-Johansson",
+    "authorAssociation": "MEMBER",
+    "createdAt": "2026-10-05T18:15:13Z",
+    "updatedAt": "2026-10-05T18:15:13Z",
+    "body": "@coderabbitai review\n\nOn the title check: this pull request changes only `docs/design/` and `docs/plan/`, so it has no user-visible outcome and needs no release note. `docs` is the intended type and stays out of the changelog. I reworded the title to state the outcome for readers of the design docs: design pages live in area folders, and the chosen shell direction is recorded.",
+    "url": "https://github.com/northMES/northmes/pull/208#issuecomment-6000387583"
+  },
+  {
+    "id": 6000446706,
+    "author": "coderabbitai[bot]",
+    "authorAssociation": "NONE",
+    "createdAt": "2026-10-05T18:18:52Z",
+    "updatedAt": "2026-10-05T18:19:11Z",
+    "body": "<!-- This is an auto-generated reply by CodeRabbit -->\n<!-- CodeRabbit review command invocation: v2:a837e2cfd0d4cce8669b3006e26466289036562c5cf6881a7151991970eacd69 -->\n<details>",
+    "url": "https://github.com/northMES/northmes/pull/208#issuecomment-6000446706"
+  },
+  {
+    "id": 6000466285,
+    "author": "coderabbitai[bot]",
+    "authorAssociation": "NONE",
+    "createdAt": "2026-10-05T18:20:07Z",
+    "updatedAt": "2026-10-05T18:20:59Z",
+    "body": "<!-- autopilot:action -->\nAutopilot was disabled. [Check current status in the Coding task](https://app.coderabbit.ai/code/tasks/839170d5ff55b85ed7199e9aebd3b3ec17aa9abc?source=coding_agent_github_pr_comment).",
+    "url": "https://github.com/northMES/northmes/pull/208#issuecomment-6000466285"
+  }
+]
