@@ -3,13 +3,26 @@ import { matchesGlob } from "node:path";
 import { promisify } from "node:util";
 import { trackDescendants } from "@handoff/cli-adapter";
 import { extraPathsOf, memoryOf, passEnvProblem, pickEnv, redactSecrets, type CheckResult, type DeterministicCheck, type RunState } from "@handoff/core";
+import { answersOf, type ReviewRound } from "../review-answers.ts";
 import { baseOf, dirOf, LOCKFILES, WORKSPACE_FILE } from "./package-files.ts";
 
 const execFileAsync = promisify(execFile);
 const TAIL_LINES = 200;
 
-/** What a check may look at; `output` is the node's own output being checked, `nodeKey` the node that wrote it. */
-export type CheckContext = { state: RunState; baseBranch: string; workdir?: string | undefined; container?: string | undefined; output?: unknown; nodeKey?: string | undefined };
+/**
+ * What a check may look at; `output` is the node's own output being checked, `nodeKey` the node that
+ * wrote it. `reviewRound` holds the review items a PR step sent this attempt to answer, from run state
+ * before the attempt.
+ */
+export type CheckContext = {
+  state: RunState;
+  baseBranch: string;
+  workdir?: string | undefined;
+  container?: string | undefined;
+  output?: unknown;
+  nodeKey?: string | undefined;
+  reviewRound?: ReviewRound | undefined;
+};
 
 const COMMAND_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TMPDIR", "TERM"];
 
@@ -129,6 +142,60 @@ export function outsideOwned(files: string[], allowed: string[]): string[] {
     if (LOCKFILES.has(baseOf(file))) return !isOwned(`${dir}/package.json`, allowed);
     return true;
   });
+}
+
+/** Whether a git command succeeds in `cwd`. */
+async function gitSucceeds(cwd: string, args: string[]): Promise<boolean> {
+  try {
+    await execFileAsync("git", args, { cwd });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The implicit check on a coder attempt a PR step sent review items to: every item has exactly one
+ * answer, no answer names an item that was not sent, a fix names a commit made on the branch in this
+ * round, the other verdicts carry evidence, and only an item the reviewer replied to is settled.
+ */
+export async function reviewItemsAnswered(round: ReviewRound, output: unknown, workdir: string | undefined): Promise<CheckResult> {
+  const started = Date.now();
+  const answers = answersOf(output);
+  const sent = new Map(round.items.map((i) => [i.id, i]));
+  const problems: string[] = [];
+  for (const item of round.items) {
+    const count = answers.filter((a) => a.id === item.id).length;
+    if (count === 0) problems.push(`${item.id} has no answer`);
+    if (count > 1) problems.push(`${item.id} has ${count} answers`);
+  }
+  for (const answer of answers) {
+    const item = sent.get(answer.id);
+    if (!item) {
+      problems.push(`${answer.id} is not one of the comments sent (${round.items.map((i) => i.id).join(", ")})`);
+      continue;
+    }
+    if (answer.verdict === "fixed") {
+      const commit = `${answer.commit ?? ""}^{commit}`;
+      if (!answer.commit) problems.push(`${answer.id}: fixed needs the commit that fixes it`);
+      else if (!workdir || !(await gitSucceeds(workdir, ["merge-base", "--is-ancestor", commit, "HEAD"]))) problems.push(`${answer.id}: commit ${answer.commit} is not on the branch`);
+      else if (await gitSucceeds(workdir, ["merge-base", "--is-ancestor", commit, round.headSha])) {
+        problems.push(`${answer.id}: commit ${answer.commit} was on the branch before this round; commit the fix and give that commit`);
+      }
+    }
+    if ((answer.verdict === "declined" || answer.verdict === "unclear" || answer.verdict === "duplicate") && !answer.evidence.trim()) problems.push(`${answer.id}: ${answer.verdict} needs evidence`);
+    if (answer.verdict === "duplicate") {
+      if (!answer.of) problems.push(`${answer.id}: duplicate needs the comment it repeats in of`);
+      else if (!sent.has(answer.of) || answer.of === answer.id) problems.push(`${answer.id}: duplicate of ${answer.of}, which is not another comment sent`);
+    }
+    if (answer.verdict === "settled" && !item.replied) problems.push(`${answer.id}: settled is only for a comment that came back with the reviewer's reply`);
+  }
+  return {
+    kind: "review_items_answered",
+    passed: problems.length === 0,
+    detail: problems.length ? problems.join("; ") : `${round.items.length} review comments answered`,
+    durationMs: Date.now() - started,
+  };
 }
 
 function needWorkdir(check: DeterministicCheck, ctx: CheckContext): string {

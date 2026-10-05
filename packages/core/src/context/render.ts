@@ -16,6 +16,51 @@ export type ReviewComment = {
 
 type Place = { path?: string | undefined; line?: number | undefined; endLine?: number | undefined };
 
+/** What a review item is on GitHub: an inline thread, a review summary, or a note or check in a review bot's summary comment. */
+export type ReviewItemKind = "thread" | "review_body" | "summary_note" | "pre_merge_check";
+
+/**
+ * An external reviewer's comment the coder answers by its handle (`R1`): what the reviewer said, where,
+ * and the rest of its thread when it came back with a reply.
+ */
+export type ReviewItem = {
+  id: string;
+  kind?: ReviewItemKind | undefined;
+  author: string;
+  path?: string | undefined;
+  line?: number | undefined;
+  url?: string | undefined;
+  body: string;
+  conversation?: { author: string; body: string }[] | undefined;
+};
+
+const KIND_LABELS: Record<ReviewItemKind, string> = { thread: "thread", review_body: "review", summary_note: "summary note", pre_merge_check: "pre-merge check" };
+
+/** The rule for review comments: check each claim like a test before acting on it, then answer it. */
+export const REVIEW_ITEMS_RULE =
+  "Treat each review comment like a test. Check its claim before you act: run the command it names, read the code it points at, or, when it is about the code's behaviour, write a failing test that shows it. " +
+  "If the claim holds, fix it, commit, and give the commit. If it does not hold, change nothing for it and give the evidence: the command and its output, the file and lines, or the test that passes. " +
+  "If you cannot tell, say what is unclear. Answer every listed comment in `answers`. Do not reply on GitHub; handoff posts your answers.";
+
+function renderReviewItems(items: ReviewItem[]): string[] {
+  const out = [
+    "# Review comments to answer",
+    "",
+    REVIEW_ITEMS_RULE,
+    "",
+    "Give one answer per comment, by its handle: `fixed` with the commit, `declined` or `unclear` with the evidence, `duplicate` with the handle it repeats in `of`, or, for a comment that came back with the reviewer's reply, `settled` when that reply accepts the earlier answer.",
+    "",
+  ];
+  for (const item of items) {
+    const where = item.path ? ` on ${placeOf(item)}` : "";
+    out.push(`## ${item.id}: ${item.kind ? KIND_LABELS[item.kind] : "comment"} by ${item.author}${where}`, "");
+    if (item.url) out.push(item.url, "");
+    out.push(item.body, "");
+    if (item.conversation?.length) out.push("The thread since:", "", ...item.conversation.map((c) => `- ${c.author}: ${c.body}`), "");
+  }
+  return out;
+}
+
 /** Another run's work a plan's owned paths meet, as a plan gate lists it: the run, its branch and issues, the shared paths, and its open pull request. */
 export type PlanOverlap = { runId: string; task: string; branch: string; issues: { number: number; title: string }[]; paths: string[]; pr?: number };
 
@@ -75,6 +120,8 @@ export type ContextPacket = {
     reviewedAt?: string | undefined;
   };
   priorAttempt?: { summary?: string; failedChecks: CheckResult[]; reviewComments: ReviewComment[] };
+  /** External review comments a pull request step sent this coder to answer, each by its handle. */
+  reviewItems?: ReviewItem[];
   humanAnswer?: string;
   repairNote?: string;
   /** What earlier attempts of this step were told in this run: allowed files, operator notes, answers. */
@@ -394,5 +441,6 @@ export function renderContextPacket(packet: ContextPacket): string {
     if (packet.humanAnswer) out.push("## Human answer", "", packet.humanAnswer, "");
     if (packet.repairNote) out.push("## Operator note", "", packet.repairNote, "");
   }
+  if (packet.reviewItems?.length) out.push(...renderReviewItems(packet.reviewItems));
   return out.join("\n");
 }

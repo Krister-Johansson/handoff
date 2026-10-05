@@ -33,6 +33,7 @@ import { LibraryUnavailableError, materializeLibrary, type MaterializedLibrary }
 import { runIdentity, SetupFailedError, setUpWorkdir } from "../workdir/setup.ts";
 import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
+import { itemsToAnswer, reviewSourcesOf } from "../review-answers.ts";
 import { budgetFor, freshIssues, otherWorkOf } from "../planning.ts";
 import type { GitHubPort } from "@handoff/github";
 import { runAllowRules } from "../permissions/broker.ts";
@@ -322,7 +323,7 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       // Every planner attempt reads its issues again, with their comments, and is told its budget and the project's other work.
       if (node.type === "planner" && deps.github && state.issues?.length) fresh = await freshIssues(deps.github, project, state.issues);
       const seen = fresh ? { ...state, issues: fresh } : state;
-      const packet = selectContext(node, seen, row, sentBackTo);
+      const packet = selectContext(node, seen, row, sentBackTo, reviewSourcesOf(graph, node.key));
       if (node.type === "planner") {
         packet.budget = budgetFor(project, graph, node.key);
         packet.otherWork = await otherWorkOf(db, deps.github, run, project);
@@ -555,6 +556,8 @@ async function applyOutcome(
         workdir: workdir?.path,
         container: workdir?.container,
         nodeKey: row.nodeKey,
+        // From the state before the attempt: its own answers are in the patch.
+        ...(node.type === "coder" ? { reviewRound: itemsToAnswer(state, reviewSourcesOf(graph, row.nodeKey)) } : {}),
       });
       if (contract.passed) {
         await db.transaction((tx) =>
