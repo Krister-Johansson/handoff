@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: (path: string) => void env.redirec
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { addDateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, setPlanModeAction, startRunAction, unpinAction, writeOrderAction } = await import("./actions");
+const { addDateFieldsAction, addEstimateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, setPlanModeAction, startRunAction, unpinAction, writeOrderAction } = await import("./actions");
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -89,10 +89,29 @@ test("Add date fields gives the plan's Project its Start and Target fields", asy
   const { project, plan, issue } = await readyTask();
   await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
   plan.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
-  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: null })).toEqual({ ok: false, error: expect.stringContaining("no Start and Target date fields") });
+  expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: null })).toEqual({ ok: false, error: expect.stringContaining("no Start or Target field") });
   expect(await addDateFieldsAction({ projectId: project.id })).toEqual({ ok: true });
   expect(plan.plans.get("octo/sample")!.project.dateFields).toEqual({ start: expect.any(String), target: expect.any(String) });
   expect(await scheduleAction({ projectId: project.id, issue, start: "2026-10-06", target: null })).toEqual({ ok: true });
+});
+
+test("Add the fields for Timeline, while a person picks Timeline in Plan mode, gives a Flow project's Project Start, Target and Estimate", async () => {
+  const { project, plan } = await readyTask();
+  const fields = () => {
+    const { dateFields, estimateFields } = plan.plans.get("octo/sample")!.project;
+    return { start: dateFields?.start, target: dateFields?.target, size: estimateFields?.size?.id, estimate: estimateFields?.estimate };
+  };
+  // A Flow project's setup_plan added Size only.
+  plan.plans.get("octo/sample")!.project.dateFields = { start: undefined, target: undefined };
+  await plan.ensureEstimateFields("octo", 1, { estimate: false });
+  // Without a mode the stored Flow mode decides, as before: no dates.
+  expect(await addDateFieldsAction({ projectId: project.id })).toEqual({ ok: false, error: expect.stringContaining("plans in Flow mode") });
+
+  expect(await addDateFieldsAction({ projectId: project.id, mode: "timeline" })).toEqual({ ok: true });
+  expect(await addEstimateFieldsAction({ projectId: project.id, mode: "timeline" })).toEqual({ ok: true });
+  expect(fields()).toEqual({ start: expect.any(String), target: expect.any(String), size: expect.any(String), estimate: expect.any(String) });
+  // Adding the fields leaves the plan mode to Save.
+  expect((await db.select({ mode: projects.planMode }).from(projects).where(eq(projects.id, project.id)))[0]?.mode).toBe("flow");
 });
 
 test("setCapacityAction stores hours a day for the project and refuses a value outside 1 to 24", async () => {

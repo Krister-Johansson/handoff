@@ -191,7 +191,7 @@ A third zoom, Days, at 96 px a day, with day cells "Wed 30". The default zoom ru
 
 ### 14. The fields are added on demand
 
-A Project without Size or Estimate shows the banner "This Project has no Size and no Estimate field" with "Add the fields". `setup_plan` creates both on a new Project and adds the missing ones when it adopts one. An existing field named Size that is not a single select, or Estimate that is not a Number, is refused with a sentence, as `ensureDateFields` does for dates.
+A Project without Size or Estimate shows the banner "This Project has no Size or Estimate field" with "Add the fields". `setup_plan` creates both on a new Project and adds the missing ones when it adopts one. An existing field named Size that is not a single select, or Estimate that is not a Number, is refused with a sentence, as `ensureDateFields` does for dates.
 
 ## Design
 
@@ -353,7 +353,7 @@ pnpm doctor:react
 
 By hand on todooverkill (project `6c588fd7-a382-4b79-b10b-695212d490e2`, GitHub Project #5), with `pnpm dev:web` and `pnpm dev:worker` running (the worker from a separate worktree, since `tsx watch` restarts it on edits):
 
-1. Open the Plan timeline. Expect the banner "This Project has no Size and no Estimate field". Press "Add the fields". With `gh api graphql`, expect a single select Size with S, M and L and a Number field Estimate on Project #5, and Status, Start and Target unchanged.
+1. Open the Plan timeline. Expect the banner "This Project has no Size or Estimate field". Press "Add the fields". With `gh api graphql`, expect a single select Size with S, M and L and a Number field Estimate on Project #5, and Status, Start and Target unchanged.
 2. Measure `rateLimit { cost }` of the `PlanItems` query on Project #5 after PR 1: expect 4 points per page, as before.
 3. Open Settings, Projects. Expect Capacity "6h a day" and the forecasts table with Default for S, M and L and 0 runs. Size five tasks whose runs succeeded as M on GitHub's board. Expect M to show a forecast from 5 runs whose median matches `percentile_cont(0.5)` of those runs' wall times in the database (open question 2's recommendation).
 4. In the tree, size #146 M from its chip. Expect "Saved" and the Size on GitHub. Type "1.5d" as #149's estimate: expect "9 hours", Estimate 9 on GitHub, and the pinned chip. Press "Use the forecast": expect the Estimate field cleared.

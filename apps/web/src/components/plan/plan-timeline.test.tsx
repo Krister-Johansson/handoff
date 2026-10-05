@@ -385,62 +385,48 @@ test("the chart opens on today with Weeks under ten weeks of dates, its Today bu
   scrollTo.mockRestore();
 });
 
-test("a Project without date fields shows the banner and Add date fields", async () => {
-  const { unmount } = renderTimeline();
-  expect(screen.queryByText("This Project has no Start and Target fields")).not.toBeInTheDocument();
-  unmount();
-
-  actions.addDateFieldsAction.mockResolvedValueOnce({ ok: false, error: "GitHub refused the field." });
-  renderTimeline({ project: { ...PROJECT, dateFields: { start: "f-start", target: undefined } } });
-  const banner = screen.getByRole("alert");
-  expect(within(banner).getByText("This Project has no Start and Target fields")).toBeInTheDocument();
-  expect(within(banner).getByText('GitHub\'s roadmap also needs them picked once under "Date fields".')).toBeInTheDocument();
-
-  fireEvent.click(within(banner).getByRole("button", { name: "Add date fields" }));
-  const confirm = await screen.findByRole("alertdialog", { name: "Add Start and Target to handoff plan?" });
-  expect(actions.addDateFieldsAction).not.toHaveBeenCalled();
-  fireEvent.click(within(confirm).getByRole("button", { name: "Add date fields" }));
-  await waitFor(() => expect(actions.addDateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
-  expect(await within(confirm).findByText("GitHub refused the field.")).toBeInTheDocument();
-
-  // The error shows before the first attempt's transition ends; the button stays disabled until it does.
-  const again = within(confirm).getByRole("button", { name: "Add date fields" });
-  await waitFor(() => expect(again).toBeEnabled());
-  fireEvent.click(again);
-  await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-  expect(actions.addDateFieldsAction).toHaveBeenCalledTimes(2);
-});
-
 const SIZE_FIELDS = { size: { id: "f-size", options: { S: "s", M: "m", L: "l" } }, estimate: "f-estimate" };
 
-test("a Project without Size and Estimate shows the banner and Add the fields", async () => {
+test("a Project without Start, Target or Estimate shows one notice naming them, with Add the fields", async () => {
   const { unmount } = renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: SIZE_FIELDS } });
-  expect(screen.queryByText(/no Size/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/This Project has no/)).not.toBeInTheDocument();
   unmount();
 
-  // A Size field without S, M and L counts as missing too; the banner says what it lacks.
-  const partial = renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: { size: { id: "f-size", options: { S: undefined, M: undefined, L: undefined } }, estimate: "f-estimate" } } });
-  expect(screen.getByText("The Size field has no S, M or L option")).toBeInTheDocument();
-  partial.unmount();
+  // A Flow project's Project, as setup_plan made it with Size only, after the switch to Timeline (#587).
+  actions.addDateFieldsAction.mockResolvedValueOnce({ ok: false, error: "GitHub refused the field." });
+  renderTimeline({ project: { ...PROJECT, dateFields: { start: undefined, target: undefined }, estimateFields: { size: SIZE_FIELDS.size, estimate: undefined } } });
+  const notice = screen.getByRole("alert");
+  expect(within(notice).getByText("This Project has no Start, Target or Estimate field")).toBeInTheDocument();
+  expect(notice).toHaveTextContent('The missing fields are added to the GitHub Project. GitHub\'s roadmap also needs Start and Target picked once under "Date fields".');
 
-  actions.addEstimateFieldsAction.mockResolvedValueOnce({ ok: false, error: "GitHub refused the field." });
-  renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: { size: undefined, estimate: undefined } } });
-  const banner = screen.getByText("This Project has no Size and no Estimate field").closest<HTMLElement>("[role=alert]")!;
-  expect(within(banner).getByText("Size is a single select with S, M and L. Estimate is a Number field in hours. Both are added to the GitHub Project.")).toBeInTheDocument();
-
-  fireEvent.click(within(banner).getByRole("button", { name: "Add the fields" }));
-  const confirm = await screen.findByRole("alertdialog", { name: "Add Size and Estimate to handoff plan?" });
-  expect(actions.addEstimateFieldsAction).not.toHaveBeenCalled();
+  fireEvent.click(within(notice).getByRole("button", { name: "Add the fields" }));
+  const confirm = await screen.findByRole("alertdialog", { name: "Add Start, Target and Estimate to handoff plan?" });
+  expect(actions.addDateFieldsAction).not.toHaveBeenCalled();
   const add = within(confirm).getByRole("button", { name: "Add the fields" });
   fireEvent.click(add);
+  // The same actions as Add the fields in Settings, Projects: the date fields, then Size and Estimate.
   await waitFor(() => expect(actions.addEstimateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" }));
+  expect(actions.addDateFieldsAction).toHaveBeenCalledWith({ projectId: "p1" });
   expect(await within(confirm).findByText("GitHub refused the field.")).toBeInTheDocument();
 
   // The button comes back once the refused write has settled; the second try closes the dialog.
   await waitFor(() => expect(add).toBeEnabled());
   fireEvent.click(add);
   await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-  expect(actions.addEstimateFieldsAction).toHaveBeenCalledTimes(2);
+  expect(actions.addDateFieldsAction).toHaveBeenCalledTimes(2);
+});
+
+test("the notice names a Size field without S, M or L, and a Project without Size and Estimate", () => {
+  const partial = renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: { size: { id: "f-size", options: { S: undefined, M: undefined, L: undefined } }, estimate: "f-estimate" } } });
+  expect(screen.getByText("The Size field has no S, M or L option")).toBeInTheDocument();
+  partial.unmount();
+
+  const none = renderTimeline({ project: { ...PROJECT_WITH_DATES, estimateFields: { size: undefined, estimate: undefined } } });
+  expect(screen.getByText("This Project has no Size or Estimate field")).toBeInTheDocument();
+  none.unmount();
+
+  renderTimeline({ project: { ...PROJECT, dateFields: { start: "f-start", target: undefined }, estimateFields: { size: { id: "f-size", options: { S: "s", M: "m", L: undefined } }, estimate: "f-estimate" } } });
+  expect(screen.getByText("This Project has no Target field, and the Size field has no L option")).toBeInTheDocument();
 });
 
 test("timeline task rows and Unscheduled carry the size chip, and stories and epics the sum of their tasks", () => {

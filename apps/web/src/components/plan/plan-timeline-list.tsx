@@ -14,7 +14,7 @@ import { durationIn, planMove, type MoveContext } from "@/lib/plan/move";
 
 import type { TimelineItem } from "@/lib/plan/schedule";
 import { canMove, COLUMN_TONE, taskColumn } from "@/lib/plan/task";
-import { chartRange, estimateFieldsGap, itemsOf, KIND_NAME, lacksDateFields, progressOf, scheduleNotes, spanText, stripDates, type ScheduleNote } from "@/lib/plan/timeline-rows";
+import { chartRange, itemsOf, KIND_NAME, progressOf, scheduleNotes, spanText, stripDates, timelineFieldsGap, type ScheduleNote } from "@/lib/plan/timeline-rows";
 import { addDays, defaultZoom, shortDay, timeScale, type TimeScale } from "@/lib/plan/timeline-scale";
 
 import { cn } from "@/lib/utils";
@@ -24,7 +24,7 @@ import { SizeChip } from "./size-chip";
 import { IssueTitle } from "./plan-task-parts";
 import { ScheduleDialog } from "./schedule-dialog";
 import { FlagCard, type FlagContext } from "./timeline-flag-card";
-import { DateFieldsBanner, EstimateFieldsBanner, type TimelineProps } from "./timeline-parts";
+import { TimelineFieldsBanner, type TimelineProps } from "./timeline-parts";
 
 type ListRow = { item: PlanItem; kind: "epic" | "story" | "task"; task: PlanTask | undefined; level: 1 | 2 | 3 };
 
@@ -172,12 +172,11 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
   const range = chartRange(timeline);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
-  const fieldsGap = estimateFieldsGap(project);
+  const fieldsGap = timelineFieldsGap(project);
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
-      {lacksDateFields(project) && <DateFieldsBanner projectId={projectId} project={project} />}
-      {fieldsGap && <EstimateFieldsBanner projectId={projectId} project={project} title={fieldsGap} />}
+      {fieldsGap && <TimelineFieldsBanner projectId={projectId} project={project} gap={fieldsGap} />}
       <ul aria-label="Timeline">
         {listRows(epics, unparented).map((row) => {
           const entry = entries.get(row.item.number);

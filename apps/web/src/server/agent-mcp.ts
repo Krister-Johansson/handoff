@@ -23,6 +23,7 @@ import { annotationsOf, CATALOG, forChatProject, withChatProject, type ChatProje
 import { summarizeEvent } from "../lib/event-summary";
 import { arrangeTimeline } from "../lib/plan/arrange";
 import type { Forecast } from "../lib/plan/forecast";
+import { missingFields, missingFieldsSentence, planFieldsOf } from "../lib/plan/plan-fields";
 import { canMove } from "../lib/plan/task";
 import type { NotificationFilter } from "../lib/notifications";
 import { planPath, reviewPath, runPath, tryPath } from "../lib/paths";
@@ -675,9 +676,13 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       });
       const progress = (p: PlanProgress) => `${p.done} of ${p.total} done`;
       const forecast = (f: Forecast) => ({ source: f.source, minutes: f.minutes, parts: f.parts, cost_usd: f.costUsd, runs: f.runs, measured_minutes: f.measuredMinutes });
+      const mode = flow ? "flow" : "timeline";
+      // A Project set up in Flow mode has Size only; the Timeline names what it lacks instead of showing no dates (#587).
+      const missing = missingFields(planFieldsOf(view.project), mode);
       return {
-        mode: flow ? "flow" : "timeline",
+        mode,
         project: { number: view.project.number, title: view.project.title, url: view.project.url },
+        ...(missing.length ? { missing_fields: missing, fields_note: missingFieldsSentence(view.project.number, missing, mode) } : {}),
         ...(flow
           ? flow.top
           : {
@@ -757,6 +762,11 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       if (view.flow) return arrangeFlow(view.flow, scope, found.name);
       const { timeline, capacity = 6 } = view;
       if (!timeline) throw new Error("The plan has no timeline.");
+      // Placements are Start and Target dates: without those fields there is nothing to write them to.
+      const fields = planFieldsOf(view.project);
+      const missing = missingFields(fields, "timeline");
+      const note = missing.length ? missingFieldsSentence(view.project.number, missing, "timeline") : undefined;
+      if (note && (!fields.start || !fields.target)) throw new Error(note);
       // Only the tasks asked for are placed; every bar on the timeline, in any epic, is planned work.
       const unscheduled = new Set(timeline.items.filter((i) => i.unscheduled).map((i) => i.number));
       const tasks = [...view.epics.flatMap((e) => [...e.stories.flatMap((s) => s.tasks), ...e.tasks]), ...view.unparented].filter(
@@ -772,6 +782,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return {
         today: timeline.today,
         capacity_hours: capacity,
+        ...(note ? { missing_fields: missing, fields_note: note } : {}),
         placements: arranged.placements.map((p) => ({ issue: p.issue, title: byNumber.get(p.issue)!.title, start: p.start, target: p.target, hours: byNumber.get(p.issue)!.duration!.hours })),
         left_out: arranged.leftOut.map((l) => ({ issue: l.issue, title: byNumber.get(l.issue)!.title, reason: "needs a size" })),
       };

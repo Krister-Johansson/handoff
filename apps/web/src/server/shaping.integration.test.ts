@@ -276,8 +276,8 @@ test("setSize writes Size and moves the Target of a task with a Start", async ()
   await expect(setSize(deps, projectId, { issue: 22, estimate: -1 })).rejects.toThrow("An estimate is hours from 0 to 1000.");
 
   plan.plans.get("octo/sample")!.project.estimateFields = undefined;
-  await expect(setSize(deps, projectId, { issue: 22, size: "M" })).rejects.toThrow(
-    "GitHub Project #1 has no Size and no Estimate field. Add them with Add the fields on the Plan timeline, or run setup_plan.",
+  await expect(setSize(deps, projectId, { issue: 22, size: "M", estimate: 2 })).rejects.toThrow(
+    "GitHub Project #1 has no Size or Estimate field, which Timeline mode reads. Run setup_plan to add them, or a person can press Add the fields in Settings, Projects.",
   );
   expect(items.get(22)?.size).toBe("S");
 });

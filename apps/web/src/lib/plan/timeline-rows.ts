@@ -1,6 +1,7 @@
 import type { PlanItem, PlanProject } from "@handoff/github";
 import type { PlanEpic, PlanProgress, PlanStory, PlanTask } from "@/server/plan";
 import type { ActualStrip, DaySpan, Timeline, TimelineItem } from "./schedule";
+import { missingFields, noFields, planFieldsOf, type PlanFieldName, type PlanFieldsPresent } from "./plan-fields";
 import { dayOfInstant, shortDay, visibleRange } from "./timeline-scale";
 
 export const KIND_NAME = { epic: "Epic", story: "Story", task: "Task", group: "Unparented" } as const;
@@ -26,22 +27,34 @@ export function stripClock(strip: ActualStrip): string {
   return `${from} to ${endDay === startDay ? "" : `${shortDay(endDay)}, `}${clockOf(strip.end)}`;
 }
 
-/** Whether the Project lacks Start or Target. */
-export const lacksDateFields = (project: PlanProject) => !project.dateFields?.start || !project.dateFields.target;
+/** What the timeline's notice says about the fields a Timeline Project lacks, and which fields Add the fields creates. */
+export type TimelineFieldsGap = {
+  /** "This Project has no Start, Target or Estimate field", with the Size options the Size field lacks. */
+  title: string;
+  /** The fields Add the fields creates or completes, a Size field without S, M or L among them. */
+  adding: PlanFieldName[];
+  /** The fields as Add the fields reads them. */
+  fields: PlanFieldsPresent;
+};
+
+/** "S, M or L". */
+const either = (names: readonly string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} or ${names.at(-1)}` : (names[0] ?? ""));
 
 /**
- * What the Project lacks of Size and Estimate, as the banner's title says it; undefined when it has both with
- * S, M and L, or when the Project was built without reading them.
+ * The Start, Target, Size and Estimate fields the Timeline reads that the Project lacks, as the notice names them;
+ * undefined when it has them all. Size and Estimate count as present when the Project was built without reading them.
  */
-export function estimateFieldsGap(project: PlanProject): string | undefined {
-  const fields = project.estimateFields;
-  if (!fields) return undefined;
-  if (!fields.size) return fields.estimate ? "This Project has no Size field" : "This Project has no Size and no Estimate field";
-  const lacking = (["S", "M", "L"] as const).filter((s) => !fields.size?.options[s]);
-  // "S, M or L": the options GitHub's Size field lacks, its own options kept.
-  const options = lacking.length ? `The Size field has no ${[lacking.slice(0, -1).join(", "), lacking.at(-1)].filter(Boolean).join(" or ")} option` : undefined;
-  if (fields.estimate) return options;
-  return options ? `${options}, and the Project has no Estimate field` : "This Project has no Estimate field";
+export function timelineFieldsGap(project: PlanProject): TimelineFieldsGap | undefined {
+  const read = project.estimateFields;
+  const fields = { ...planFieldsOf(project), ...(read ? {} : { size: true, estimate: true }) };
+  const adding = missingFields(fields, "timeline");
+  if (!adding.length) return undefined;
+  // A Size field that exists keeps its own options; the notice names the ones of S, M and L it lacks.
+  const lacking = read?.size ? (["S", "M", "L"] as const).filter((s) => !read.size?.options[s]) : [];
+  const absent = adding.filter((name) => name !== "Size" || !lacking.length);
+  const options = lacking.length ? `the Size field has no ${either(lacking)} option` : undefined;
+  const title = absent.length ? `This Project has ${noFields(absent)}${options ? `, and ${options}` : ""}` : `T${options!.slice(1)}`;
+  return { title, adding, fields };
 }
 
 /** "Oct 6 to Oct 17", or one day alone. */

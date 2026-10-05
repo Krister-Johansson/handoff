@@ -2,9 +2,10 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRightLeftIcon, CheckIcon, ExternalLinkIcon, PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
-import { addDateFieldsAction, addEstimateFieldsAction, unlinkPlanAction } from "@/app/projects/actions";
+import { ArrowRightLeftIcon, CheckIcon, ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { unlinkPlanAction } from "@/app/projects/actions";
 import { SetUpPlanDialog } from "@/components/plan/set-up-plan-dialog";
+import { AddFieldsButton } from "@/components/projects/add-fields";
 import { AddProjectDialog } from "@/components/projects/add-project-dialog";
 import { DeleteProjectDialog, EditProjectDialog } from "@/components/projects/project-dialogs";
 import { RepositoryMovedDialog } from "@/components/projects/repository-moved";
@@ -25,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
+import { MODE_FIELDS } from "@/lib/plan/plan-fields";
 import type { PlanModeName } from "@/lib/project-tab";
 import { projectSettingsPath, projectSettingsTabLabel } from "@/lib/settings-tab";
 import type { PlanFieldsPresent, PlanLink } from "@/server/project-admin";
@@ -118,29 +120,16 @@ const FIELDS: { key: keyof PlanFieldsPresent; present: string; missing: string }
   { key: "estimate", present: "Estimate, Number", missing: "No Estimate field" },
 ];
 
-/** The fields each plan mode reads: a Flow project has no dates and no estimates, so only Size. */
-const MODE_FIELDS: Record<PlanModeName, typeof FIELDS> = { timeline: FIELDS, flow: FIELDS.filter(({ key }) => key === "size") };
-
 /**
  * The Project's fields that the plan mode reads, and Add the fields when any is missing: in a Timeline project
  * it adds the date fields and the Size and Estimate fields the Project lacks; in a Flow project, Size only, as
  * setup_plan does.
  */
 function PlanFields({ projectId, mode, fields }: { projectId: string; mode: PlanModeName; fields: PlanFieldsPresent }) {
-  const [error, setError] = useState<string>();
-  const [pending, startTransition] = useTransition();
-  const flow = mode === "flow";
-  const dates = !flow && (!fields.start || !fields.target);
-  const estimates = !fields.size || (!flow && !fields.estimate);
-  const add = () =>
-    startTransition(async () => {
-      const results = [...(dates ? [await addDateFieldsAction({ projectId })] : []), ...(estimates ? [await addEstimateFieldsAction({ projectId })] : [])];
-      setError(results.find((r) => r.error)?.error);
-    });
   return (
     <div className="mt-1.5 flex flex-col items-start gap-1.5">
       <ul aria-label="Fields" className="flex flex-wrap gap-1">
-        {MODE_FIELDS[mode].map(({ key, present, missing }) => (
+        {FIELDS.filter(({ key }) => MODE_FIELDS[mode].has(key)).map(({ key, present, missing }) => (
           <li key={key}>
             {fields[key] ? (
               <Tag tone="success">
@@ -153,13 +142,7 @@ function PlanFields({ projectId, mode, fields }: { projectId: string; mode: Plan
           </li>
         ))}
       </ul>
-      {(dates || estimates) && (
-        <Button size="xs" variant="outline" disabled={pending} onClick={add}>
-          <PlusIcon data-icon="inline-start" />
-          Add the fields
-        </Button>
-      )}
-      {error && <FieldError>{error}</FieldError>}
+      <AddFieldsButton projectId={projectId} mode={mode} fields={fields} />
     </div>
   );
 }

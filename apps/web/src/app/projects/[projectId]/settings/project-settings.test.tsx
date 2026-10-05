@@ -41,6 +41,8 @@ vi.mock("@/app/projects/actions", () => ({
   setCapacityAction: vi.fn(),
   setPlanBudgetAction: vi.fn(),
   setPlanModeAction: vi.fn(),
+  addDateFieldsAction: vi.fn(),
+  addEstimateFieldsAction: vi.fn(),
 }));
 const forecastsForSettings = vi.hoisted(() =>
   vi.fn(async () => ({
@@ -163,4 +165,20 @@ test("?tab=mode shows the Plan mode with the project's mode picked", async () =>
   expect(within(section).getByRole("radio", { name: "Timeline" })).toBeChecked();
   expect(within(section).getByRole("radio", { name: "Flow" })).not.toBeChecked();
   expect(screen.queryByRole("heading", { name: "Graphs" })).not.toBeInTheDocument();
+});
+
+test("?tab=mode reads the plan's Project and names the fields Timeline reads that it lacks", async () => {
+  // An organization's Project that setup_plan made in Flow mode: Size only.
+  getProject.mockResolvedValueOnce({
+    number: 5,
+    priorityOptions: [],
+    prioritySource: "project",
+    dateFields: { start: undefined, target: undefined },
+    estimateFields: { size: { id: "f-size", options: { S: "s", M: "m", L: "l" } }, estimate: undefined },
+  } as never);
+  await open("mode", { ...project, repoOwner: "acme", planMode: "timeline" } as typeof project);
+  expect(getProject).toHaveBeenLastCalledWith("acme", 5);
+  const section = screen.getByRole("region", { name: "Plan mode" });
+  expect(section).toHaveTextContent("The GitHub Project has no Start, Target or Estimate field, which Timeline mode reads.");
+  expect(within(section).getByRole("button", { name: "Add the fields" })).toBeInTheDocument();
 });

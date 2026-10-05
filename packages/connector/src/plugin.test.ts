@@ -107,8 +107,14 @@ test("the handoff skill says Priority order reads the organization's Priority is
   expect(skill).toMatch(/Project's own Priority field[^\n]*organization's Priority issue field/);
 });
 
-test("the plugin is 0.21.0, whose skills offer the repository owner's Projects and say how a moved repository's project and plan move", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.21.0");
+test("the plugin is 0.22.0, whose skill says how the Timeline tools name the fields a Project lacks", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.22.0");
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const dates = skill.split("\n").find((line) => line.startsWith("8. Dates, only in Timeline mode"));
+  expect(dates).toMatch(/`list_plan` names them in `missing_fields`[^\n]*`arrange_plan`[^\n]*Start or Target[^\n]*`schedule` and `set_size`[^\n]*ask the user before `setup_plan`/);
+});
+
+test("the skills offer the repository owner's Projects and say how a moved repository's project and plan move", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   const first = skill.split("\n").find((line) => line.startsWith("1. Once per project, `setup_plan`."));
   expect(first).toMatch(/one of the Projects of the repository's owner, a user or an organization/);

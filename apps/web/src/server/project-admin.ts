@@ -1,7 +1,8 @@
 import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, notifications, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { planBudgetOf } from "@handoff/core";
 import { moveProject, type MoveProjectDeps } from "@handoff/engine/move-project";
-import { PLAN_SIZES, type PlanProject, type ProjectsPort } from "@handoff/github";
+import type { ProjectsPort } from "@handoff/github";
+import { planFieldsOf, type PlanFieldsPresent } from "../lib/plan/plan-fields.ts";
 import { projectsAccessProblem } from "./plan.ts";
 
 const PROJECT_NAME = /^[a-z0-9][a-z0-9-]*$/;
@@ -101,25 +102,10 @@ export async function updateProject(db: Db, projectId: string, input: ProjectEdi
   await db.update(projects).set({ name, defaultBranch, ...changed, updatedAt: new Date() }).where(eq(projects.id, projectId));
 }
 
-/**
- * Which of the fields handoff reads the GitHub Project has: the Start and Target dates, a Size single select
- * with all of S, M and L, and an Estimate number.
- */
-export type PlanFieldsPresent = { start: boolean; target: boolean; size: boolean; estimate: boolean };
+export type { PlanFieldsPresent };
 
 /** The GitHub Project that holds a project's plan; title, url and fields are missing when GitHub cannot be read. */
 export type PlanLink = { number: number; title?: string; url?: string; fields?: PlanFieldsPresent };
-
-/** The fields a Project has, as Settings, Projects lists them. */
-function fieldsOf(project: PlanProject): PlanFieldsPresent {
-  const size = project.estimateFields?.size;
-  return {
-    start: Boolean(project.dateFields?.start),
-    target: Boolean(project.dateFields?.target),
-    size: Boolean(size && PLAN_SIZES.every((s) => size.options[s])),
-    estimate: Boolean(project.estimateFields?.estimate),
-  };
-}
 
 /**
  * Every project as Settings, Projects lists it, by name: repository, default branch, setup and
@@ -150,7 +136,7 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
   const linkOf = async (owner: string, number: number | null): Promise<PlanLink | null> => {
     if (number === null) return null;
     const found = await readable?.getProject(owner, number).catch(() => undefined);
-    return found ? { number, title: found.title, url: found.url, fields: fieldsOf(found) } : { number };
+    return found ? { number, title: found.title, url: found.url, fields: planFieldsOf(found) } : { number };
   };
   return Promise.all(rows.map(async ({ planProjectNumber, ...row }) => ({ ...row, plan: await linkOf(row.repoOwner, planProjectNumber) })));
 }
