@@ -13,7 +13,7 @@ vi.mock("next/cache", () => ({ revalidatePath: env.revalidatePath }));
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { answerAction, cancelAction, resolveLoopAction } = await import("./actions");
+const { answerAction, cancelAction, repairAction, resolveLoopAction } = await import("./actions");
 
 beforeEach(async () => {
   env.revalidatePath.mockClear();
@@ -64,6 +64,18 @@ test("stopping a run whose loop ran out from the inbox sets its task back to Rea
   );
   expect(await resolveLoopAction({ runId: run.id, action: "stop" })).toEqual({ ok: true });
   expect(await statusOf()).toBe("Ready");
+});
+
+test("repairing from the inbox with the latest graph ticked moves the run to the newest version, and refusals come back as errors", async () => {
+  const { run } = await runOnReadyTask();
+  const [planner] = await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run.id)).returning();
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+  expect(await repairAction({}, form({ executionId: planner!.id, runId: run.id, latestGraph: "on" }))).toEqual({ ok: false, error: "the run is already on version 1 of graph linear, its latest" });
+
+  await saveGraphVersion(db, { projectId: run.projectId, name: "linear", document: linear });
+  expect(await repairAction({}, form({ executionId: planner!.id, runId: run.id, latestGraph: "on" }))).toEqual({ ok: true });
+  const [moved] = await db.select({ graphVersionId: runs.graphVersionId }).from(runs).where(eq(runs.id, run.id));
+  expect(moved!.graphVersionId).not.toBe(run.graphVersionId);
 });
 
 test("answering a question from the inbox revalidates the layout, so the sidebar's Inbox badge drops it", async () => {

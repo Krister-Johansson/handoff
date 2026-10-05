@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { MergeButton } from "@/components/runs/merge-button";
 import { FailureDetail, type FailureError } from "@/components/runs/failure-detail";
 import { PathsQuestionCard } from "@/components/runs/paths-question-card";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { formatAgo } from "@/lib/format";
@@ -259,6 +260,8 @@ export type FailedRunItem = {
   attempt: number;
   error: FailureError | null;
   finishedAt?: Date | string | null;
+  /** The newest version of the run's graph, set only when it is newer than the version the run is on. */
+  latestGraphVersion?: number | null;
 };
 
 export function FailedRunCard({ item, compact = false }: { item: FailedRunItem; compact?: boolean }) {
@@ -287,6 +290,15 @@ export function FailedRunCard({ item, compact = false }: { item: FailedRunItem; 
             <Input id={`allow-${item.executionId}`} name="allowPaths" placeholder="pnpm-lock.yaml, docs/setup.md" />
             <FieldDescription>Separated by commas. The path check lets {item.nodeKey} change them for the rest of the run.</FieldDescription>
           </Field>
+          {item.latestGraphVersion && (
+            <Field orientation="horizontal">
+              <Checkbox id={`latest-${item.executionId}`} name="latestGraph" />
+              <FieldContent>
+                <FieldLabel htmlFor={`latest-${item.executionId}`}>Use the latest graph version (v{item.latestGraphVersion})</FieldLabel>
+                <FieldDescription>The run moves to it before {item.nodeKey} runs again, so a fix saved to the graph applies.</FieldDescription>
+              </FieldContent>
+            </Field>
+          )}
         </form>
         {error && <FieldError>{error}</FieldError>}
       </div>

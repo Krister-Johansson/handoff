@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, nodeExecutions, questions, runs } from "@handoff/db";
+import { eq, graphVersions, nodeExecutions, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, seedRun, truncateAll } from "@handoff/db/testing";
 import { listInbox } from "./inbox.ts";
 
@@ -32,6 +32,17 @@ test("failed runs awaiting repair are listed with the failed node and its error"
   await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
   const inbox = await listInbox(db);
   expect(inbox.failedRuns).toEqual([expect.objectContaining({ runId: run.id, nodeKey: "tester", executionId: failed.id, error: { code: "no_command", message: "tester has no command" } })]);
+});
+
+test("a failed run carries its graph's latest version only while that is newer than the run's", async () => {
+  const { run } = await seedRun(db, { status: "running" });
+  await seedExecution(db, run.id, { nodeKey: "tester", status: "failed" });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+  expect((await listInbox(db)).failedRuns).toEqual([expect.objectContaining({ runId: run.id, latestGraphVersion: null })]);
+
+  const [pinned] = await db.select().from(graphVersions).where(eq(graphVersions.id, run.graphVersionId));
+  await db.insert(graphVersions).values({ graphId: pinned!.graphId, version: 2, document: {} });
+  expect((await listInbox(db)).failedRuns).toEqual([expect.objectContaining({ runId: run.id, latestGraphVersion: 2 })]);
 });
 
 test("failed runs whose failed node was already repaired are not listed", async () => {

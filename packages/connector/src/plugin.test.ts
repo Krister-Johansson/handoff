@@ -107,8 +107,16 @@ test("the handoff skill says Priority order reads the organization's Priority is
   expect(skill).toMatch(/Project's own Priority field[^\n]*organization's Priority issue field/);
 });
 
-test("the plugin is 0.24.1, whose bundled bridge is built with @modelcontextprotocol/sdk 1.32.0", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.24.1");
+test("the handoff skill says repair_run keeps the run's graph version unless latest_graph moves it to the newest", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const line = skill.split("\n").find((l) => l.includes("`repair_run`"));
+  expect(line).toMatch(/graph version it started on/);
+  expect(line).toMatch(/`latest_graph: true`[^\n]*newest version/);
+  expect(line).toMatch(/refuses/);
+});
+
+test("the plugin is 0.25.0, whose bundled bridge is built with @modelcontextprotocol/sdk 1.32.0", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.25.0");
   expect(json("packages/connector/package.json").dependencies["@modelcontextprotocol/sdk"]).toBe("1.32.0");
 });
 

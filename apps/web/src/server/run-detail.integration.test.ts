@@ -31,6 +31,16 @@ test("a passed execution that took a loop edge reads as sent back, one that went
   expect((await db.select().from(nodeExecutions).where(eq(nodeExecutions.id, sentBack.id)))[0]?.status).toBe("passed");
 });
 
+test("a run's graph comes with the newest version saved since, for a repair to offer", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: planReview });
+  const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Build it" });
+  expect((await getRunDetail(db, run.id))!.graph).toMatchObject({ name: "g", version: 1, latestVersion: 1 });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: planReview });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: planReview });
+  expect((await getRunDetail(db, run.id))!.graph).toMatchObject({ version: 1, latestVersion: 3 });
+});
+
 /** An executor that completes with each output in turn, the last one repeating. */
 function scripted(...outputs: unknown[]): NodeExecutor {
   let calls = 0;

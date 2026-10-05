@@ -71,7 +71,17 @@ function RunAlerts({ detail, stuck, permissions }: { detail: Detail; stuck: Stuc
       {run.status === "failed" && failed && !stuck && (
         <FailedRunCard
           compact
-          item={{ runId: run.id, projectId: project.id, task: run.task, projectName: project.name, executionId: failed.id, nodeKey: failed.nodeKey, attempt: failed.attempt, error: failed.error ?? null }}
+          item={{
+            runId: run.id,
+            projectId: project.id,
+            task: run.task,
+            projectName: project.name,
+            executionId: failed.id,
+            nodeKey: failed.nodeKey,
+            attempt: failed.attempt,
+            error: failed.error ?? null,
+            latestGraphVersion: graph && graph.latestVersion > graph.version ? graph.latestVersion : null,
+          }}
         />
       )}
     </>
