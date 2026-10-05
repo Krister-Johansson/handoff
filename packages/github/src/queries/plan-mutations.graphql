@@ -44,8 +44,8 @@ mutation LinkPlanRepository($projectId: ID!, $repositoryId: ID!) {
   }
 }
 
-mutation CreatePlanIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $parentIssueId: ID) {
-  createIssue(input: { repositoryId: $repositoryId, title: $title, body: $body, labelIds: $labelIds, parentIssueId: $parentIssueId }) {
+mutation CreatePlanIssue($repositoryId: ID!, $title: String!, $body: String!, $labelIds: [ID!], $parentIssueId: ID, $milestoneId: ID) {
+  createIssue(input: { repositoryId: $repositoryId, title: $title, body: $body, labelIds: $labelIds, parentIssueId: $parentIssueId, milestoneId: $milestoneId }) {
     issue {
       id
       number

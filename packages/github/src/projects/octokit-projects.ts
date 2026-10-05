@@ -303,10 +303,12 @@ export class OctokitProjects implements ProjectsPort {
       name: repo.name,
       parent: input.parent ?? 0,
       withParent: input.parent !== undefined,
+      ...(input.milestone !== undefined ? { milestone: input.milestone, withMilestone: true } : {}),
     });
     if (!refs.repository) throw new Error(`repository ${repo.owner}/${repo.name} not found`);
     const labelIds = labelIdsOf(present(refs.repository.labels?.nodes), input.labels, repo);
     if (input.parent !== undefined && !refs.repository.parent) throw new Error(`parent issue #${input.parent} not found`);
+    if (input.milestone !== undefined && !refs.repository.milestone) throw new Error(`${repo.owner}/${repo.name} has no milestone #${input.milestone}`);
     // Look the blockers up before creating, so a wrong number creates nothing.
     const blockerIds = [];
     for (const blocker of input.blockedBy ?? []) blockerIds.push(await this.issueNodeId(repo, blocker));
@@ -317,6 +319,7 @@ export class OctokitProjects implements ProjectsPort {
       body: input.body,
       labelIds,
       parentIssueId: refs.repository.parent?.id,
+      milestoneId: refs.repository.milestone?.id,
     });
     const issue = created.createIssue?.issue;
     if (!issue) throw new Error(`creating the issue "${input.title}" returned nothing`);
@@ -760,6 +763,7 @@ function toPlanItem(item: NonNullable<GqlItem>, repo: RepoRef, position: number,
       itemId: item.id,
       prNumbers: present(issue.closedByPullRequestsReferences?.nodes).map((pr) => pr.number),
       updatedAt: issue.updatedAt,
+      milestone: issue.milestone ? { number: issue.milestone.number, title: issue.milestone.title } : undefined,
       // A single select value of the Project's field wins; with a field of its own and no value, the issue field does not stand in.
       priority: projectPriorityOf(item) ?? (ownPriority ? undefined : issuePriorityOf(issue)),
       start: dateOf(item.start),

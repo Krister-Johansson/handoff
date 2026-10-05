@@ -99,3 +99,37 @@ test("with closesOnMerge, a merge closes the open issues the pull request's body
   // GitHub closed it, not handoff: no closeIssue call is recorded.
   expect(fake.closedIssues).toEqual([]);
 });
+
+test("listMilestones lists the milestones a test set, dated ones by due date first, with counts of the issues in each", async () => {
+  const fake = github({ 12: "Slugify drops digits", 14: "Add the column", 16: "Drag and drop" });
+  fake.milestones.set(1, { number: 1, title: "Someday" });
+  fake.milestones.set(2, { number: 2, title: "0.9", dueOn: "2026-10-20", description: "The first release." });
+  fake.milestones.set(3, { number: 3, title: "0.8", dueOn: "2026-09-01", state: "closed" });
+  Object.assign(fake.issues.get(12)!, { milestone: 2 });
+  Object.assign(fake.issues.get(14)!, { milestone: 2, state: "closed" });
+  Object.assign(fake.issues.get(16)!, { milestone: 3, state: "closed" });
+
+  expect(await fake.listMilestones(repo)).toEqual([
+    { number: 3, title: "0.8", description: "", dueOn: "2026-09-01", state: "closed", openIssues: 0, closedIssues: 1, url: "https://github.com/octo/sample/milestone/3" },
+    { number: 2, title: "0.9", description: "The first release.", dueOn: "2026-10-20", state: "open", openIssues: 1, closedIssues: 1, url: "https://github.com/octo/sample/milestone/2" },
+    { number: 1, title: "Someday", description: "", dueOn: undefined, state: "open", openIssues: 0, closedIssues: 0, url: "https://github.com/octo/sample/milestone/1" },
+  ]);
+});
+
+test("setMilestone sets and clears an issue's milestone and records each write, and refuses a milestone or an issue the fake does not have", async () => {
+  const fake = github({ 12: "Slugify drops digits" });
+  fake.milestones.set(2, { number: 2, title: "0.9" });
+
+  expect(await fake.setMilestone(repo, 12, 2)).toEqual({ number: 2, title: "0.9" });
+  expect(fake.issues.get(12)!.milestone).toBe(2);
+  expect(await fake.setMilestone(repo, 12, null)).toBeNull();
+  expect(fake.issues.get(12)!.milestone).toBeUndefined();
+  expect(fake.milestoneWrites).toEqual([
+    { number: 12, milestone: 2 },
+    { number: 12, milestone: null },
+  ]);
+
+  await expect(fake.setMilestone(repo, 12, 7)).rejects.toThrow("octo/sample has no milestone #7");
+  await expect(fake.setMilestone(repo, 99, 2)).rejects.toThrow("issue octo/sample#99 not found");
+  expect(fake.milestoneWrites).toHaveLength(2);
+});

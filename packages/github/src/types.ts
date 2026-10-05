@@ -88,6 +88,27 @@ export type Assignee = { login: string; avatarUrl: string };
 /** A person who can be assigned issues in a repository. */
 export type Assignable = Assignee;
 
+/**
+ * A milestone of a repository: a title and an optional due date over its issues and pull requests.
+ * handoff reads milestones and sets an issue's milestone; it creates, edits and closes none.
+ */
+export type Milestone = {
+  number: number;
+  title: string;
+  /** "" when the milestone has no description. */
+  description: string;
+  /** YYYY-MM-DD, the day of GitHub's due date; undefined without one. */
+  dueOn: string | undefined;
+  state: "open" | "closed";
+  /** GitHub's counts of the open and closed issues in the milestone. */
+  openIssues: number;
+  closedIssues: number;
+  url: string;
+};
+
+/** The milestone an issue is in, by number and title. */
+export type MilestoneRef = Pick<Milestone, "number" | "title">;
+
 export interface GitHubPort {
   /** Open issues of a repository (not pull requests), most recently updated first, up to 100. */
   listIssues(repo: RepoRef): Promise<IssueSummary[]>;
@@ -111,6 +132,13 @@ export interface GitHubPort {
   addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void>;
   /** Comments on an issue, then closes it as completed. */
   closeIssue(repo: RepoRef, number: number, comment: string): Promise<void>;
+  /** The repository's milestones, open and closed: those with a due date first, by due date, then the others, each run by number. */
+  listMilestones(repo: RepoRef): Promise<Milestone[]>;
+  /**
+   * Sets an issue's milestone by the milestone's number, or clears it with null, through GraphQL updateIssue;
+   * returns the milestone GitHub kept. Throws, writing nothing, for a milestone or an issue the repository lacks.
+   */
+  setMilestone(repo: RepoRef, issue: number, milestone: number | null): Promise<MilestoneRef | null>;
   /** Opens an issue with a title and a body, outside any plan. */
   createIssue(repo: RepoRef, input: { title: string; body: string }): Promise<{ number: number; url: string }>;
   /** The login of the token's user ("you" on the dashboard); undefined with a GitHub App, which acts as no person. */

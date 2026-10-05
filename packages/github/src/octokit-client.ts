@@ -1,9 +1,20 @@
 import { App, Octokit } from "octokit";
 import { z } from "zod";
-import { IssueParentsDocument, PullRequestSnapshotDocument, type IssueParentsQuery, type PullRequestSnapshotQuery } from "./gql/graphql.ts";
+import {
+  IssueMilestoneRefsDocument,
+  IssueParentsDocument,
+  PullRequestSnapshotDocument,
+  RepositoryMilestonesDocument,
+  SetIssueMilestoneDocument,
+  type IssueMilestoneRefsQuery,
+  type IssueParentsQuery,
+  type PullRequestSnapshotQuery,
+  type RepositoryMilestonesQuery,
+  type SetIssueMilestoneMutation,
+} from "./gql/graphql.ts";
 import { readError } from "./errors.ts";
-import { ancestorsOf } from "./projects/lineage.ts";
-import type { Assignable, Assignee, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
+import { ancestorsOf, present } from "./projects/lineage.ts";
+import type { Assignable, Assignee, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -244,6 +255,59 @@ export class OctokitGitHub implements GitHubPort {
     const octokit = await this.clientFor(repo);
     await octokit.rest.issues.createComment({ owner: repo.owner, repo: repo.name, issue_number: number, body: comment });
     await octokit.rest.issues.update({ owner: repo.owner, repo: repo.name, issue_number: number, state: "closed", state_reason: "completed" });
+  }
+
+  async listMilestones(repo: RepoRef): Promise<Milestone[]> {
+    const octokit = await this.clientFor(repo);
+    const milestones: Milestone[] = [];
+    let cursor: string | null | undefined;
+    do {
+      const data = await octokit.graphql<RepositoryMilestonesQuery>(RepositoryMilestonesDocument.toString(), { owner: repo.owner, name: repo.name, ...(cursor ? { cursor } : {}) });
+      const page = data.repository?.milestones;
+      milestones.push(
+        ...present(page?.nodes).map((m) => ({
+          number: m.number,
+          title: m.title,
+          description: m.description ?? "",
+          // GitHub keeps a due date as a timestamp at the start of the day it names.
+          dueOn: m.dueOn?.slice(0, 10) ?? undefined,
+          state: m.state === "CLOSED" ? ("closed" as const) : ("open" as const),
+          openIssues: m.openIssueCount,
+          closedIssues: m.closedIssueCount,
+          url: m.url,
+        })),
+      );
+      cursor = page?.pageInfo.hasNextPage ? page.pageInfo.endCursor : undefined;
+    } while (cursor);
+    // GitHub's DUE_DATE order puts the milestones without a due date first; handoff wants them last.
+    return milestones.sort((a, b) => (a.dueOn ?? "9999").localeCompare(b.dueOn ?? "9999") || a.number - b.number);
+  }
+
+  async setMilestone(repo: RepoRef, issue: number, milestone: number | null): Promise<MilestoneRef | null> {
+    const octokit = await this.clientFor(repo);
+    const where = `${repo.owner}/${repo.name}`;
+    let refs: IssueMilestoneRefsQuery;
+    try {
+      refs = await octokit.graphql<IssueMilestoneRefsQuery>(IssueMilestoneRefsDocument.toString(), {
+        owner: repo.owner,
+        name: repo.name,
+        number: issue,
+        milestone: milestone ?? 0,
+        withMilestone: milestone !== null,
+      });
+    } catch (error) {
+      // An issue number the repository lacks answers NOT_FOUND next to the rest of the data.
+      const data = (error as { data?: IssueMilestoneRefsQuery | null }).data;
+      if (data?.repository && !data.repository.issue) throw new Error(`issue ${where}#${issue} not found`, { cause: error });
+      throw error;
+    }
+    const issueId = refs.repository?.issue?.id;
+    if (!issueId) throw new Error(`issue ${where}#${issue} not found`);
+    const milestoneId = milestone === null ? null : refs.repository?.milestone?.id;
+    if (milestoneId === undefined) throw new Error(`${where} has no milestone #${milestone}`);
+    const updated = await octokit.graphql<SetIssueMilestoneMutation>(SetIssueMilestoneDocument.toString(), { issueId, milestoneId });
+    const kept = updated.updateIssue?.issue?.milestone;
+    return kept ? { number: kept.number, title: kept.title } : null;
   }
 
   async createIssue(repo: RepoRef, input: { title: string; body: string }): Promise<{ number: number; url: string }> {

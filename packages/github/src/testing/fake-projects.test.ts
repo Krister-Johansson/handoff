@@ -216,3 +216,36 @@ test("moveItems reorders listItems", async () => {
   await expect(projects.moveItems("octo", project.number, [{ itemId: id(second), afterId: null }, { itemId: "PVTI_gone", afterId: null }])).rejects.toThrow(/moved 1 of 2/);
   expect((await read()).map(([n]) => n)).toEqual([second, fourth, third, first]);
 });
+
+test("a plan item's milestone is its issue's in the FakeGitHub, so setting it there shows in the plan", async () => {
+  const github = new FakeGitHub();
+  const projects = new FakeProjects(github);
+  const project = await projects.createProject("octo", repo, "sample plan");
+  github.milestones.set(3, { number: 3, title: "0.9", dueOn: "2026-10-20" });
+  const epic = await projects.createIssue(repo, { project: project.number, title: "Project management", body: "", labels: ["epic"], milestone: 3 });
+  const task = await projects.createIssue(repo, { project: project.number, title: "Add the column", body: "", labels: ["task"], parent: epic.number });
+
+  const milestones = async () => (await projects.listItems("octo", project.number, repo)).map((i) => [i.number, i.milestone]);
+  // The task inherits nothing here; the port reads only each issue's own milestone.
+  expect(await milestones()).toEqual([
+    [epic.number, { number: 3, title: "0.9" }],
+    [task.number, undefined],
+  ]);
+
+  await github.setMilestone(repo, task.number, 3);
+  await github.setMilestone(repo, epic.number, null);
+  expect(await milestones()).toEqual([
+    [epic.number, undefined],
+    [task.number, { number: 3, title: "0.9" }],
+  ]);
+  expect((await github.listMilestones(repo)).map((m) => [m.number, m.openIssues])).toEqual([[3, 1]]);
+});
+
+test("FakeProjects refuses to create an issue in a milestone the repository does not have, and creates nothing", async () => {
+  const github = new FakeGitHub();
+  const projects = new FakeProjects(github);
+  const project = await projects.createProject("octo", repo, "sample plan");
+
+  await expect(projects.createIssue(repo, { project: project.number, title: "T", body: "", labels: ["task"], milestone: 7 })).rejects.toThrow("octo/sample has no milestone #7");
+  expect(github.issues.size).toBe(0);
+});

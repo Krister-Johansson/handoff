@@ -2,17 +2,20 @@ import { execFileSync } from "node:child_process";
 import { kindOf } from "../projects/kinds.ts";
 import type { PlanAncestor } from "../projects/types.ts";
 import { GitHubReadError } from "../errors.ts";
-import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
+import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "../types.ts";
 
 type FakePr = PrSnapshot & { base: string; body: string; files?: string[] };
 
 /**
  * An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set.
- * Assignees are logins; the reads give each one an avatar.
+ * Assignees are logins; the reads give each one an avatar. `milestone` is a milestone's number.
  */
 export type FakeIssue = Pick<IssueDetail, "number" | "title" | "url" | "body" | "state"> &
   Partial<Omit<IssueDetail, "number" | "title" | "url" | "body" | "state" | "parents" | "assignees">> &
-  Partial<Pick<IssueSummary, "blockedBy">> & { assignees?: string[] };
+  Partial<Pick<IssueSummary, "blockedBy">> & { assignees?: string[]; milestone?: number | undefined };
+
+/** A milestone of the fake: its number and title, and any other fact a test sets. The counts come from the fake's issues. */
+export type FakeMilestone = MilestoneRef & Partial<Pick<Milestone, "description" | "dueOn" | "state" | "url">>;
 
 /** An issue as getIssue gives it, with GitHub's defaults for the facts a test left out. */
 function detailOf(issue: FakeIssue, person: (login: string) => Assignee): IssueDetail {
@@ -53,6 +56,10 @@ export class FakeGitHub implements GitHubPort {
   assignable: Assignable[] = [{ login: "octocat", avatarUrl: "https://avatars.githubusercontent.com/u/583231" }];
   /** Every setAssignees call, with the assignees it kept. */
   readonly assigned: { number: number; logins: string[] }[] = [];
+  /** The repository's milestones by number; an issue is in one through its `milestone`. */
+  readonly milestones = new Map<number, FakeMilestone>();
+  /** Every setMilestone write, with the milestone number it set or null for a clear. */
+  readonly milestoneWrites: { number: number; milestone: number | null }[] = [];
   /** While true, issue reads fail as though GitHub did not answer. */
   unreachable = false;
   private nextComment = 1;
@@ -171,6 +178,40 @@ export class FakeGitHub implements GitHubPort {
     if (!issue) throw new Error(`no issue ${number}`);
     issue.state = "closed";
     this.closedIssues.push({ number, comment });
+  }
+
+  /** Dated milestones by due date first, then the others, each run by number, as OctokitGitHub orders them. */
+  async listMilestones(repo: RepoRef): Promise<Milestone[]> {
+    const issues = [...this.issues.values()];
+    const count = (number: number, state: "open" | "closed") => issues.filter((i) => i.milestone === number && i.state === state).length;
+    return [...this.milestones.values()]
+      .map((m) => ({
+        number: m.number,
+        title: m.title,
+        description: m.description ?? "",
+        dueOn: m.dueOn,
+        state: m.state ?? "open",
+        openIssues: count(m.number, "open"),
+        closedIssues: count(m.number, "closed"),
+        url: m.url ?? `https://github.com/${repo.owner}/${repo.name}/milestone/${m.number}`,
+      }))
+      .sort((a, b) => (a.dueOn ?? "9999").localeCompare(b.dueOn ?? "9999") || a.number - b.number);
+  }
+
+  async setMilestone(repo: RepoRef, number: number, milestone: number | null): Promise<MilestoneRef | null> {
+    const issue = this.issues.get(number);
+    if (!issue) throw new Error(`issue ${repo.owner}/${repo.name}#${number} not found`);
+    const found = milestone === null ? undefined : this.milestones.get(milestone);
+    if (milestone !== null && !found) throw new Error(`${repo.owner}/${repo.name} has no milestone #${milestone}`);
+    issue.milestone = found?.number;
+    this.milestoneWrites.push({ number, milestone });
+    return found ? { number: found.number, title: found.title } : null;
+  }
+
+  /** The milestone an issue is in, by number and title; undefined for none or one the fake does not have. */
+  milestoneOf(number: number): MilestoneRef | undefined {
+    const found = this.milestones.get(this.issues.get(number)?.milestone ?? Number.NaN);
+    return found ? { number: found.number, title: found.title } : undefined;
   }
 
   async createIssue(repo: RepoRef, input: { title: string; body: string }) {

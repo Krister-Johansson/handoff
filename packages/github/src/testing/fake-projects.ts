@@ -154,6 +154,7 @@ export class FakeProjects implements ProjectsPort {
           priority: priorityOf(issueNumber, item),
           prNumbers: item.prNumbers ?? [],
           updatedAt: issue.updatedAt ?? "",
+          milestone: this.github.milestoneOf(issueNumber),
           start: item.start,
           target: item.target,
           iteration: item.iteration,
@@ -239,6 +240,7 @@ export class FakeProjects implements ProjectsPort {
     input: NewPlanIssue,
   ): Promise<{ number: number; url: string }> {
     if (input.parent !== undefined && !this.github.issues.has(input.parent)) throw new Error(`parent issue #${input.parent} not found`);
+    if (input.milestone !== undefined && !this.github.milestones.has(input.milestone)) throw new Error(`${repo.owner}/${repo.name} has no milestone #${input.milestone}`);
     const number = Math.max(0, ...this.github.issues.keys()) + 1;
     const url = `https://github.com/${repo.owner}/${repo.name}/issues/${number}`;
     this.github.issues.set(number, {
@@ -249,6 +251,7 @@ export class FakeProjects implements ProjectsPort {
       state: "open",
       labels: [...input.labels],
       blockedBy: [...(input.blockedBy ?? [])],
+      milestone: input.milestone,
       updatedAt: new Date().toISOString(),
     });
     if (input.parent !== undefined) this.parents.set(number, input.parent);

@@ -6,7 +6,8 @@ query IssueNodeId($owner: String!, $name: String!, $number: Int!) {
   }
 }
 
-query IssueCreateRefs($owner: String!, $name: String!, $parent: Int!, $withParent: Boolean!) {
+# A milestone number the repository lacks answers null without an error.
+query IssueCreateRefs($owner: String!, $name: String!, $parent: Int!, $withParent: Boolean!, $milestone: Int = 0, $withMilestone: Boolean = false) {
   repository(owner: $owner, name: $name) {
     id
     labels(first: 100) {
@@ -16,6 +17,9 @@ query IssueCreateRefs($owner: String!, $name: String!, $parent: Int!, $withParen
       }
     }
     parent: issue(number: $parent) @include(if: $withParent) {
+      id
+    }
+    milestone(number: $milestone) @include(if: $withMilestone) {
       id
     }
   }

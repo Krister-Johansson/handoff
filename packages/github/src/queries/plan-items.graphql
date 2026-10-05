@@ -100,6 +100,12 @@ query PlanItems($login: String!, $number: Int!, $cursor: String) {
                 issueType {
                   name
                 }
+                # The issue's own milestone, open or closed; the repository's milestones come from listMilestones.
+                # Measured live for issue #603: a page costs five points with it, as without it.
+                milestone {
+                  number
+                  title
+                }
                 # The organization's issue fields set on the issue; a user's repository answers an empty list.
                 # handoff reads the single select named Priority when the Project has no Priority field of its own.
                 issueFieldValues(first: 10) {

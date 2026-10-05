@@ -26,6 +26,7 @@ function issueItem(number: number, over: Record<string, unknown> = {}, status: s
       labels: { nodes: [] },
       assignees: { nodes: [] },
       issueType: null,
+      milestone: null,
       parent: null,
       subIssuesSummary: { total: 0, completed: 0 },
       blockedBy: { nodes: [] },
@@ -221,6 +222,20 @@ test("listItems reads Size as S, M or L and Estimate in hours, and another Size 
     [54, undefined, 3],
     [55, undefined, undefined],
   ]);
+});
+
+test("listItems reads each issue's milestone number and title, open or closed, and none as undefined", async () => {
+  const milestone = (number: number, title: string) => ({ milestone: { number, title } });
+  const { fetch, calls } = fakeGraphql({
+    PlanItems: () => page([issueItem(60, milestone(3, "0.9")), issueItem(61, { ...milestone(1, "0.8"), state: "CLOSED" }), issueItem(62)], null, false),
+  });
+
+  expect((await port(fetch).listItems("octo", 3, repo)).map((i) => [i.number, i.milestone])).toEqual([
+    [60, { number: 3, title: "0.9" }],
+    [61, { number: 1, title: "0.8" }],
+    [62, undefined],
+  ]);
+  expect(queryOf(calls[0]!)).toMatch(/milestone \{\s+number\s+title\s+\}/);
 });
 
 const statusField = {
@@ -431,6 +446,31 @@ test("createIssue sets Start and Target after adding the item", async () => {
   expect(operations.map((o) => o.operation).slice(-2)).toEqual(["IssuePlan", "SetPlanFields"]);
   expect(operations.at(-1)!.variables).toEqual({ projectId: "PVT_3", itemId: "PVTI_20", startField: "F_start", startValue: "2026-10-06", targetField: "F_target", targetValue: "2026-10-09" });
   expect(operations.findIndex((o) => o.operation === "SetPlanStatus")).toBeLessThan(operations.findIndex((o) => o.operation === "SetPlanFields"));
+});
+
+test("createIssue puts the new issue in a milestone, looked up by number with the labels and parent", async () => {
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: (v) => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] }, ...(v.withMilestone ? { milestone: { id: `MI_${v.milestone}` } } : {}) } }),
+    CreatePlanIssue: () => ({ createIssue: { issue: { id: "I_20", number: 20, url: "https://github.com/octo/sample/issues/20" } } }),
+    IssuePlan: () => issuePlan(20, [{ id: "PVTI_20", project: planProject(3), status: "Shaping" }]),
+    SetPlanStatus: () => ({ updateProjectV2ItemFieldValue: { projectV2Item: { id: "PVTI_20" } } }),
+  });
+
+  await port(fetch).createIssue(repo, { project: 3, title: "Add the migration", body: "A column.", labels: ["task"], milestone: 3 });
+
+  const sent = (name: string) => operations.filter((o) => o.operation === name).map((o) => o.variables);
+  expect(sent("IssueCreateRefs")).toEqual([{ owner: "octo", name: "sample", parent: 0, withParent: false, milestone: 3, withMilestone: true }]);
+  expect(sent("CreatePlanIssue")).toEqual([{ repositoryId: "R_sample", title: "Add the migration", body: "A column.", labelIds: ["L_task"], milestoneId: "MI_3" }]);
+});
+
+test("createIssue refuses a milestone the repository does not have, before creating anything", async () => {
+  // GitHub answers a milestone number the repository lacks with null and no error.
+  const { fetch, operations } = fakeGraphql({
+    IssueCreateRefs: () => ({ repository: { id: "R_sample", labels: { nodes: [{ id: "L_task", name: "task" }] }, milestone: null } }),
+  });
+
+  await expect(port(fetch).createIssue(repo, { project: 3, title: "T", body: "B", labels: ["task"], milestone: 7 })).rejects.toThrow("octo/sample has no milestone #7");
+  expect(operations.map((o) => o.operation)).toEqual(["IssueCreateRefs"]);
 });
 
 test("createIssue refuses a label the repository does not have, before creating anything", async () => {
@@ -1290,6 +1330,15 @@ test("listItems reads an organization's Project through repositoryOwner and retu
   expect(operations).toEqual([{ operation: "PlanItems", variables: { login: "acme", number: 4 } }]);
   expect(queryOf(calls[0]!)).toMatch(/repositoryOwner\(login: \$login\)/);
   expect(queryOf(calls[0]!)).not.toMatch(/\buser\(/);
+});
+
+test("listItems reads the milestone of an organization repository's issues", async () => {
+  const { fetch } = fakeGraphql({ PlanItems: () => page([orgIssueItem(1, { milestone: { number: 2, title: "Redesign beta" } }), orgIssueItem(2)], null, false, "Organization") });
+
+  expect((await port(fetch).listItems("acme", 4, orgRepo)).map((i) => [i.number, i.milestone])).toEqual([
+    [1, { number: 2, title: "Redesign beta" }],
+    [2, undefined],
+  ]);
 });
 
 test("a user's Project is still read in one request per page", async () => {
