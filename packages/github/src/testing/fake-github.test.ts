@@ -28,7 +28,19 @@ test("getIssue gives the facts a test set and GitHub's defaults for the rest", a
     createdAt: "2026-09-30T10:00:00Z",
     updatedAt: "2026-09-30T10:00:00Z",
     pullRequest: false,
+    milestone: null,
   });
+});
+
+test("getIssue gives an issue's milestone by number and title, and null for none", async () => {
+  const fake = github({ 12: "Slugify drops digits", 14: "Add the column" });
+  fake.milestones.set(2, { number: 2, title: "0.9" });
+  Object.assign(fake.issues.get(12)!, { milestone: 2 });
+
+  expect((await fake.getIssue(repo, 12)).milestone).toEqual({ number: 2, title: "0.9" });
+  expect((await fake.getIssue(repo, 14)).milestone).toBeNull();
+  await fake.setMilestone(repo, 14, 2);
+  expect((await fake.getIssue(repo, 14)).milestone).toEqual({ number: 2, title: "0.9" });
 });
 
 test("getIssue answers a pull request's number as a pull request, an unknown number as not found, and nothing while GitHub is unreachable", async () => {

@@ -241,6 +241,7 @@ export class OctokitGitHub implements GitHubPort {
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       pullRequest: data.pull_request != null,
+      milestone: data.milestone ? { number: data.milestone.number, title: data.milestone.title } : null,
     };
     return parents ? { ...issue, parents } : issue;
   }

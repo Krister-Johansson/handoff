@@ -142,6 +142,47 @@ test("Ready to start lists the Ready tasks no run works on, unblocked first, eac
   expect(overview.work.unplannedToDo).toBe(1);
 });
 
+test("Milestones are the open milestones with their tasks; in Flow mode each says where it ends in the order and why a task is skipped", async () => {
+  const { github, plan, project: ours, issue, status } = await planned();
+  github.milestones.set(1, { number: 1, title: "0.8", dueOn: "2026-09-12", state: "closed" });
+  github.milestones.set(2, { number: 2, title: "0.9", dueOn: "2026-10-20" });
+  github.milestones.set(3, { number: 3, title: "1.0", dueOn: "2026-11-30" });
+  const management = await issue("Project management", ["epic"]);
+  const first = await issue("Milestone cards", ["task"], management);
+  const second = await issue("Milestone filter", ["task"], management);
+  const human = await issue("Pick the colours", ["task", "human"], management);
+  const later = await issue("Release notes", ["task"]);
+  for (const n of [first, second, human, later]) status(n, "Ready");
+  await github.setMilestone(repo, management, 2);
+  await github.setMilestone(repo, later, 3);
+
+  const overview = await loadOverview(db, github, plan, ours.id, { now: NOW });
+  if (overview.work.kind !== "plan") throw new Error("expected the plan");
+  expect(overview.work.mode).toBe("flow");
+  expect(overview.work.milestones.map((m) => [m.title, m.dueOn, `${m.progress.done} of ${m.progress.total}`, m.progress.flow?.last, m.skipped])).toEqual([
+    ["0.9", "2026-10-20", "0 of 3", { issue: second, place: 2 }, [{ issue: human, why: "label human" }]],
+    ["1.0", "2026-11-30", "0 of 1", { issue: later, place: 3 }, []],
+  ]);
+  expect(overview.work.milestones[0]!.progress.timeline).toBeUndefined();
+});
+
+test("in Timeline mode a milestone on Home says when its dated tasks end", async () => {
+  const { github, plan, project: ours, issue, status } = await planned();
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, ours.id));
+  github.milestones.set(2, { number: 2, title: "0.9", dueOn: "2026-10-05" });
+  const task = await issue("Milestone cards", ["task"]);
+  const undated = await issue("Milestone filter", ["task"]);
+  status(task, "Ready");
+  status(undated, "Ready");
+  Object.assign(plan.itemsOf(repo).get(task)!, { start: "2026-10-05", target: "2026-10-07" });
+  for (const n of [task, undated]) await github.setMilestone(repo, n, 2);
+
+  const overview = await loadOverview(db, github, plan, ours.id, { now: NOW });
+  if (overview.work.kind !== "plan") throw new Error("expected the plan");
+  expect(overview.work.mode).toBe("timeline");
+  expect(overview.work.milestones.map((m) => [m.title, m.progress.timeline])).toEqual([["0.9", { ends: "2026-10-07", daysPastDue: 2, undated: [undated] }]]);
+});
+
 test("without a plan the work is the repository's open issues: those with runs, and those to do", async () => {
   const github = new FakeGitHub();
   const { project: ours, start } = await project();
