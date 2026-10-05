@@ -2,10 +2,40 @@ import { execFileSync } from "node:child_process";
 import { kindOf } from "../projects/kinds.ts";
 import type { PlanAncestor } from "../projects/types.ts";
 import { GitHubReadError } from "../errors.ts";
-import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary, ReviewThreadState } from "../types.ts";
+import type {
+  Assignable,
+  Assignee,
+  GitHubPort,
+  IssueComment,
+  IssueDependencies,
+  IssueDetail,
+  IssueRef,
+  IssueSummary,
+  Milestone,
+  MilestoneRef,
+  PrInfo,
+  PrSnapshot,
+  RepoRef,
+  RepoSummary,
+  ReviewThread,
+  ReviewThreadComment,
+  ReviewThreadState,
+} from "../types.ts";
+
+/** A comment in a review thread of the fake; the snapshot fills in the author's type and the time a test left out. */
+export type FakeThreadComment = Omit<ReviewThreadComment, "authorBot" | "createdAt"> & Partial<Pick<ReviewThreadComment, "authorBot" | "createdAt">>;
+
+/**
+ * A review thread of the fake with every comment in it, oldest first. A test may leave out what GitHub always
+ * has: the snapshot gives the thread an id and takes its place and the viewer's rights from GitHub's defaults.
+ */
+export type FakeThread = Partial<Omit<ReviewThread, "comments" | "latest">> & { isResolved: boolean; comments: FakeThreadComment[] };
 
 /** A pull request of the fake; `mergeState` is GitHub's mergeStateStatus when a test sets one, CLEAN otherwise. */
-type FakePr = PrSnapshot & { base: string; files?: string[]; mergeState?: string };
+type FakePr = Omit<PrSnapshot, "reviewThreads"> & { reviewThreads: FakeThread[]; base: string; files?: string[]; mergeState?: string };
+
+/** The login a GitHub App's installation writes as in the fake. */
+const APP_LOGIN = "handoff[bot]";
 
 /**
  * An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set.
@@ -62,6 +92,8 @@ export class FakeGitHub implements GitHubPort {
   readonly milestones = new Map<number, FakeMilestone>();
   /** Every setMilestone write, with the milestone number it set or null for a clear. */
   readonly milestoneWrites: { number: number; milestone: number | null }[] = [];
+  /** Logins of GitHub Apps; a login ending in [bot] is one too. */
+  readonly bots = new Set<string>(["coderabbitai"]);
   /** While true, issue reads fail as though GitHub did not answer. */
   unreachable = false;
   private nextComment = 1;
@@ -119,12 +151,41 @@ export class FakeGitHub implements GitHubPort {
     return structuredClone(this.comments.get(number) ?? []);
   }
 
-  /** Adds a comment to an issue, as a person would on GitHub. */
+  /** Adds a comment to an issue, as a person would on GitHub; returns its id. */
   comment(number: number, author: string, body: string, opts: { at?: string; association?: string } = {}) {
     const id = this.nextComment++;
     const at = opts.at ?? new Date().toISOString();
     const url = `${this.issues.get(number)?.url ?? `https://github.com/octo/sample/issues/${number}`}#issuecomment-${id}`;
     this.comments.set(number, [...(this.comments.get(number) ?? []), { id, author, authorAssociation: opts.association ?? "NONE", createdAt: at, updatedAt: at, body, url }]);
+    return id;
+  }
+
+  /**
+   * Creates a bot's summary comment on a pull request, or edits the one it has whose first line is the same,
+   * the way CodeRabbit keeps one summary per pull request. It shows in the snapshot and in listIssueComments.
+   * Returns the comment's id, which an edit keeps.
+   */
+  summaryComment(number: number, body: string, opts: { author?: string; at?: string } = {}) {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    const author = opts.author ?? "coderabbitai";
+    const at = opts.at ?? new Date().toISOString();
+    const firstLine = (text: string) => text.split("\n", 1)[0];
+    const existing = pr.comments.find((c) => c.author === author && firstLine(c.body) === firstLine(body));
+    if (existing?.id !== undefined) {
+      Object.assign(existing, { body, updatedAt: at });
+      const listed = this.comments.get(number)?.find((c) => c.id === existing.id);
+      if (listed) Object.assign(listed, { body, updatedAt: at });
+      return existing.id;
+    }
+    const id = this.comment(number, author, body, { at });
+    pr.comments.push({ id, author, body, url: `${pr.url}#issuecomment-${id}`, createdAt: at, updatedAt: at });
+    return id;
+  }
+
+  /** Whether a login is a GitHub App's, as GitHub's author type tells. */
+  isBot(login: string) {
+    return this.bots.has(login) || login.endsWith("[bot]");
   }
 
   async viewer(): Promise<string | undefined> {
@@ -291,7 +352,100 @@ export class FakeGitHub implements GitHubPort {
         // The branch is not in the origin (yet): keep the head the PR was opened with.
       }
     }
-    return structuredClone(pr);
+    const { reviewThreads, base: _base, files: _files, mergeState: _mergeState, ...rest } = structuredClone(pr);
+    return { ...rest, reviewThreads: reviewThreads.map((t, i) => this.threadOf(number, i, t)) };
+  }
+
+  /** A thread of the fake as GitHub's snapshot gives it: its first comment and its last ten, with GitHub's defaults. */
+  private threadOf(number: number, index: number, t: FakeThread): ReviewThread {
+    const comment = (c: FakeThreadComment): ReviewThreadComment => ({ ...c, authorBot: c.authorBot ?? this.isBot(c.author), createdAt: c.createdAt ?? "" });
+    const first = t.comments[0];
+    return {
+      id: this.threadId(number, index),
+      isResolved: t.isResolved,
+      isOutdated: t.isOutdated ?? false,
+      path: t.path ?? first?.path ?? "",
+      line: t.line !== undefined ? t.line : (first?.line ?? null),
+      originalLine: t.originalLine !== undefined ? t.originalLine : (first?.line ?? null),
+      viewerCanReply: t.viewerCanReply ?? true,
+      viewerCanResolve: t.viewerCanResolve ?? true,
+      resolvedBy: t.resolvedBy ?? null,
+      comments: t.comments.slice(0, 1).map(comment),
+      latest: t.comments.slice(-10).map(comment),
+    };
+  }
+
+  private nextThread = 1;
+
+  /** A thread's GraphQL node id; a thread a test pushed without one gets one the first time it is read. */
+  private threadId(number: number, index: number): string {
+    const thread = this.prs.get(number)!.reviewThreads[index]!;
+    thread.id ??= `PRRT_fake${this.nextThread++}`;
+    return thread.id;
+  }
+
+  /** The pull request and the thread with a GraphQL node id, or GitHub's NOT_FOUND error. */
+  private findThread(threadId: string): { pr: FakePr; thread: FakeThread } {
+    for (const pr of this.prs.values()) {
+      pr.reviewThreads.forEach((_, i) => this.threadId(pr.number, i));
+      const thread = pr.reviewThreads.find((t) => t.id === threadId);
+      if (thread) return { pr, thread };
+    }
+    throw new Error(`Could not resolve to a node with the global id of '${threadId}'`);
+  }
+
+  /** The login the credential writes as: the token's user, or the App's bot. */
+  private get writer() {
+    return this.login ?? APP_LOGIN;
+  }
+
+  async replyToThread(_repo: RepoRef, threadId: string, body: string): Promise<{ id: string; url: string }> {
+    const { pr, thread } = this.findThread(threadId);
+    if (thread.viewerCanReply === false) throw new Error(`${this.writer} may not reply in review thread ${threadId}`);
+    return this.addThreadComment(pr, thread, this.writer, body);
+  }
+
+  async resolveThread(_repo: RepoRef, threadId: string): Promise<{ resolved: boolean }> {
+    const { thread } = this.findThread(threadId);
+    if (thread.isResolved) return { resolved: true };
+    if (thread.viewerCanResolve === false) throw new Error(`${this.writer} may not resolve review thread ${threadId}`);
+    thread.isResolved = true;
+    thread.resolvedBy = this.writer;
+    return { resolved: true };
+  }
+
+  private addThreadComment(pr: FakePr, thread: FakeThread, author: string, body: string) {
+    const id = String(this.nextComment++);
+    const url = `${pr.url}#discussion_r${id}`;
+    const first = thread.comments[0];
+    thread.comments.push({ id, author, body, ...(first?.path ? { path: first.path } : {}), ...(first?.line ? { line: first.line } : {}), url, createdAt: new Date().toISOString() });
+    return { id, url };
+  }
+
+  /** The thread with this id on pull request `number`; a test helper's guard against a wrong number. */
+  private threadOn(number: number, threadId: string) {
+    const found = this.findThread(threadId);
+    if (found.pr.number !== number) throw new Error(`thread ${threadId} is not on PR ${number}`);
+    return found;
+  }
+
+  /** Someone other than handoff replies in a thread, as the reviewer or a person does on GitHub. */
+  replyInThread(number: number, threadId: string, author: string, body: string) {
+    const { pr, thread } = this.threadOn(number, threadId);
+    return this.addThreadComment(pr, thread, author, body);
+  }
+
+  /** Someone resolves one thread on GitHub, such as the reviewer after a fix. */
+  resolveThreadAs(number: number, threadId: string, login: string) {
+    const { thread } = this.threadOn(number, threadId);
+    thread.isResolved = true;
+    thread.resolvedBy = login;
+  }
+
+  /** A thread disappears from the pull request, as when its comments are deleted. */
+  deleteThread(number: number, threadId: string) {
+    const { pr } = this.threadOn(number, threadId);
+    pr.reviewThreads = pr.reviewThreads.filter((t) => t.id !== threadId);
   }
 
   async listPrFiles(_repo: RepoRef, number: number): Promise<string[]> {
@@ -334,14 +488,25 @@ export class FakeGitHub implements GitHubPort {
       .filter((t) => !t.isResolved)
       .map((t) => {
         const first = t.comments[0];
-        return { path: first?.path ?? "", line: first?.line ?? null, outdated: false, author: first?.author ?? "ghost", body: first?.body ?? "", url: first?.url ?? "" };
+        return {
+          path: t.path ?? first?.path ?? "",
+          line: t.line !== undefined ? t.line : (first?.line ?? null),
+          outdated: t.isOutdated ?? false,
+          author: first?.author ?? "ghost",
+          body: first?.body ?? "",
+          url: first?.url ?? "",
+        };
       });
     return { mergeState: this.mergeStateOf(pr), threads };
   }
 
-  /** Resolves every review thread of the pull request, as a person does on GitHub. */
-  resolveThreads(number: number) {
-    for (const thread of this.prs.get(number)!.reviewThreads) thread.isResolved = true;
+  /** Resolves every open review thread of the pull request, as a person does on GitHub. */
+  resolveThreads(number: number, by = "octocat") {
+    for (const thread of this.prs.get(number)!.reviewThreads) {
+      if (thread.isResolved) continue;
+      thread.isResolved = true;
+      thread.resolvedBy = by;
+    }
   }
 
   async mergePr(_repo: RepoRef, number: number) {
@@ -364,13 +529,15 @@ export class FakeGitHub implements GitHubPort {
   async upsertPrComment(_repo: RepoRef, number: number, marker: string, body: string) {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
-    const index = pr.comments.findIndex((c) => c.body.includes(marker));
-    if (index >= 0) {
-      pr.comments[index] = { ...pr.comments[index]!, body };
-      return { id: index + 1, created: false };
+    const at = new Date().toISOString();
+    const existing = pr.comments.find((c) => c.body.includes(marker));
+    if (existing) {
+      Object.assign(existing, { body, updatedAt: at });
+      return { id: existing.id ?? 0, created: false };
     }
-    pr.comments.push({ author: "handoff", body, url: `${pr.url}#issuecomment-${pr.comments.length + 1}` });
-    return { id: pr.comments.length, created: true };
+    const id = this.nextComment++;
+    pr.comments.push({ id, author: "handoff", body, url: `${pr.url}#issuecomment-${id}`, createdAt: at, updatedAt: at });
+    return { id, created: true };
   }
 
   async gitAuthEnv(): Promise<Record<string, string>> {
@@ -398,9 +565,13 @@ export class FakeGitHub implements GitHubPort {
   ) {
     const pr = this.prs.get(number)!;
     const id = String(this.next++ * 1000);
-    pr.reviews.push({ id, state: review.state ?? "COMMENTED", body: review.body ?? "", author, commitSha: pr.headSha, submittedAt: new Date().toISOString() });
+    const at = new Date().toISOString();
+    pr.reviews.push({ id, state: review.state ?? "COMMENTED", body: review.body ?? "", author, authorBot: this.isBot(author), commitSha: pr.headSha, submittedAt: at });
     pr.reviewThreads.push(
-      ...(review.threads ?? []).map((t, i) => ({ isResolved: false, comments: [{ id: `${id}-${i}`, author, body: t.body, path: t.path, ...(t.line ? { line: t.line } : {}), url: `https://review/${number}#${id}-${i}` }] })),
+      ...(review.threads ?? []).map((t, i) => ({
+        isResolved: false,
+        comments: [{ id: `${id}-${i}`, author, body: t.body, path: t.path, ...(t.line ? { line: t.line } : {}), url: `https://review/${number}#${id}-${i}`, createdAt: at }],
+      })),
     );
     return id;
   }

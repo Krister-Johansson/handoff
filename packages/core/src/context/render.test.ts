@@ -308,3 +308,37 @@ test("the planner's packet has the size budget, the other active runs' owned pat
   expect(renderContextPacket(packet)).not.toContain("# Size budget");
   expect(renderContextPacket(packet)).not.toContain("# Other work on this project");
 });
+
+test("the coder's packet lists each review comment with its handle, its conversation and the rule to validate it like a test", () => {
+  const md = renderContextPacket({
+    ...packet,
+    reviewItems: [
+      {
+        id: "R1",
+        kind: "thread",
+        author: "coderabbitai",
+        path: "vitest.config.ts",
+        line: 12,
+        url: "https://github.com/o/r/pull/192#discussion_r1",
+        body: "The integration project never runs in CI.",
+        conversation: [
+          { author: "handoff", body: "Not changed: the comment does not hold. ADR 0041 runs it in its own job." },
+          { author: "coderabbitai", body: "Thanks, that settles it." },
+        ],
+      },
+      { id: "R2", kind: "pre_merge_check", author: "coderabbitai", url: "https://github.com/o/r/pull/192", body: "Title check: the title does not name the change." },
+    ],
+  });
+  const section = md.split("# Review comments to answer")[1] ?? "";
+  expect(section).toContain("Treat each review comment like a test");
+  expect(section).toContain("Answer every listed comment in `answers`");
+  expect(section).toContain("Do not reply on GitHub");
+  expect(section).toContain("## R1: thread by coderabbitai on vitest.config.ts:12");
+  expect(section).toContain("https://github.com/o/r/pull/192#discussion_r1");
+  expect(section).toContain("The integration project never runs in CI.");
+  expect(section).toContain("- handoff: Not changed: the comment does not hold. ADR 0041 runs it in its own job.");
+  expect(section).toContain("- coderabbitai: Thanks, that settles it.");
+  expect(section).toContain("## R2: pre-merge check by coderabbitai");
+  expect(section).toContain("Title check: the title does not name the change.");
+  expect(renderContextPacket(packet)).not.toContain("# Review comments to answer");
+});

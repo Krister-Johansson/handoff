@@ -46,6 +46,7 @@ describe("migrations", () => {
       "project_schedulers",
       "projects",
       "questions",
+      "review_items",
       "review_views",
       "runs",
       "scheduler_events",

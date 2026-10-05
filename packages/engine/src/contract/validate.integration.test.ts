@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { initialRunState } from "@handoff/core";
+import { itemsToAnswer } from "../review-answers.ts";
 import { createOriginRepo, git } from "../testing/git.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { validateContract } from "./validate.ts";
@@ -107,6 +108,69 @@ test("tests_green runs the command in the workdir and passes on exit 0", async (
   expect(bad.passed).toBe(false);
   expect(bad.checks[0]).toMatchObject({ kind: "tests_green", passed: false });
   expect(bad.checks[0]?.logTail).toContain("failing-test");
+});
+
+/** Run state after a PR step sent the coder review items from the PR at `headSha`. */
+function sentItems(headSha: string, handles: string[]) {
+  const comments = handles.map((item, i) => ({ author: "coderabbitai", body: `Comment ${i + 1}.`, url: `https://github.com/o/r/pull/7#discussion_r${i}`, resolved: false, item, kind: "thread" as const }));
+  const feedback = { ci: { status: "success" as const, failedJobs: [] }, review: { decision: "changes_requested" as const, comments, unresolvedThreads: comments.length }, updatedAt: "2026-10-05T16:17:28Z" };
+  const output = { sync: "clean", prNumber: 7, prUrl: "https://github.com/o/r/pull/7", headSha, feedback };
+  return { ...initialRunState("t"), prNumber: 7, nodes: { pr: { output, executionId: "pr-2", attempt: 2 } } };
+}
+
+const declined = (id: string) => ({ id, verdict: "declined", evidence: "`pnpm test` passes with the integration project; see vitest.config.ts:12." });
+
+test("a coder sent three items that answers two fails review_items_answered naming the third", async () => {
+  const dir = await worktree();
+  const state = sentItems(git(dir, "rev-parse", "HEAD"), ["R1", "R2", "R3"]);
+  const output = { ...coderDone, answers: [declined("R1"), declined("R2")] };
+  const result = await validateContract({ output: "coder_output", checks: [] }, output, { state, baseBranch: "main", workdir: dir, reviewRound: itemsToAnswer(state, ["pr"]) });
+  expect(result.passed).toBe(false);
+  expect(result.reason).toContain("review_items_answered");
+  const check = result.checks.find((c) => c.kind === "review_items_answered");
+  expect(check?.passed).toBe(false);
+  expect(check?.detail).toContain("R3 has no answer");
+  expect(check?.detail).not.toContain("R1");
+
+  const all = { ...coderDone, answers: [declined("R1"), declined("R2"), declined("R3")] };
+  const passed = await validateContract({ output: "coder_output", checks: [] }, all, { state, baseBranch: "main", workdir: dir, reviewRound: itemsToAnswer(state, ["pr"]) });
+  expect(passed.passed).toBe(true);
+  expect(passed.checks.map((c) => c.kind)).toEqual(["review_items_answered"]);
+});
+
+test("a fixed answer whose commit was on the branch before the round fails", async () => {
+  const dir = await worktree();
+  writeFileSync(join(dir, "a.md"), "before the round");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "earlier work");
+  const earlier = git(dir, "rev-parse", "HEAD");
+  const state = sentItems(earlier, ["R1"]);
+  const reviewRound = itemsToAnswer(state, ["pr"]);
+  const stale = await validateContract({ output: "coder_output", checks: [] }, { ...coderDone, answers: [{ id: "R1", verdict: "fixed", evidence: "Renamed.", commit: earlier.slice(0, 7) }] }, { state, baseBranch: "main", workdir: dir, reviewRound });
+  expect(stale.passed).toBe(false);
+  expect(stale.checks[0]?.detail).toContain(`R1: commit ${earlier.slice(0, 7)} was on the branch before this round`);
+
+  writeFileSync(join(dir, "a.md"), "the fix");
+  git(dir, "commit", "-qam", "fix R1");
+  const fix = git(dir, "rev-parse", "--short", "HEAD");
+  const fixed = await validateContract({ output: "coder_output", checks: [] }, { ...coderDone, answers: [{ id: "R1", verdict: "fixed", evidence: "Renamed.", commit: fix }] }, { state, baseBranch: "main", workdir: dir, reviewRound });
+  expect(fixed.passed).toBe(true);
+});
+
+test("a coder attempt the tester sent back needs no answers", async () => {
+  const dir = await worktree();
+  const sent = sentItems(git(dir, "rev-parse", "HEAD"), ["R1", "R2"]);
+  // The coder answered both in its first attempt of the round, then the tester sent its fix back.
+  const state = {
+    ...sent,
+    reviewAnswers: { R1: { ...declined("R1"), round: "pr-2" }, R2: { ...declined("R2"), round: "pr-2" } },
+    nodes: { ...sent.nodes, tester: { output: { passed: false, command: "pnpm test", exitCode: 1, tail: "1 failed" }, executionId: "tester-2", attempt: 2 } },
+  };
+  const reviewRound = itemsToAnswer(state, ["pr"]);
+  expect(reviewRound).toBeUndefined();
+  const result = await validateContract({ output: "coder_output", checks: [] }, coderDone, { state, baseBranch: "main", workdir: dir, reviewRound });
+  expect(result.passed).toBe(true);
+  expect(result.checks).toEqual([]);
 });
 
 test("no_uncommitted_changes fails on a dirty worktree", async () => {

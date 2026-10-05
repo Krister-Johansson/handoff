@@ -1,5 +1,6 @@
 import { acceptanceOf, ALL_TOOLS, CoderOutputSchema, memoryOf, type CheckResult, type CompiledNode, type ContextPacket, nodeCatalog, PrConflictOutputSchema, type ReviewComment, type RunState } from "@handoff/core";
 import type { NodeExecutionRow } from "@handoff/db";
+import { itemsToAnswer } from "./review-answers.ts";
 
 export const DEFAULT_MAX_TURNS = 60;
 
@@ -57,7 +58,8 @@ export function feedbackFrom(output: unknown): { failedChecks: CheckResult[]; re
   const review = obj(feedback.review);
   if (Array.isArray(review.comments)) {
     for (const c of review.comments.map(obj)) {
-      if (c.resolved === true) continue;
+      // A comment with a handle is a review item: the packet lists it under Review comments to answer.
+      if (c.resolved === true || typeof c.item === "string") continue;
       reviewComments.push({
         author: String(c.author ?? "reviewer"),
         body: String(c.body ?? ""),
@@ -146,7 +148,12 @@ function autoTurns(state: RunState): number {
   return Math.min(150, 40 + 4 * (state.plan?.steps.length ?? 0));
 }
 
-export function selectContext(node: CompiledNode, state: RunState, execution: NodeExecutionRow, sentBackTo: string[] = []): ContextPacket {
+/**
+ * `reviewSources` are the PR steps that send work back to this node: a coder gets the review items of
+ * their latest round that no attempt has answered yet, whether a PR step, a question's answer or a
+ * retry started this attempt.
+ */
+export function selectContext(node: CompiledNode, state: RunState, execution: NodeExecutionRow, sentBackTo: string[] = [], reviewSources: string[] = []): ContextPacket {
   const selector = node.contextSelector;
   const defaultKeys = ["plan", "prNumber", ...(selector.includeFeedback ? ["feedback"] : [])];
   const stateSlice = pick(state, selector.stateKeys.length ? selector.stateKeys : defaultKeys);
@@ -174,6 +181,8 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
   };
   const previousReview = previousReviewOf(node, state, sentBackTo);
   if (previousReview) packet.previousReview = previousReview;
+  const toAnswer = node.type === "coder" ? itemsToAnswer(state, reviewSources) : undefined;
+  if (toAnswer) packet.reviewItems = toAnswer.items.map(({ replied: _, ...item }) => item);
 
   const trigger = execution.trigger;
   if (selector.includePriorAttempt && trigger?.kind === "edge" && trigger.from && trigger.from !== node.key) {
@@ -184,7 +193,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     // Sent back by a pull request that conflicts with the base branch: the work is the merge.
     const conflict = PrConflictOutputSchema.safeParse(from?.output);
     if (conflict.success) packet.conflict = conflict.data.conflict;
-    if (failedChecks.length || reviewComments.length || answer) {
+    if (failedChecks.length || reviewComments.length || answer || packet.reviewItems?.length) {
       packet.priorAttempt = { summary: `Sent back by ${trigger.from} via ${trigger.edgeKey}.`, failedChecks, reviewComments };
     }
   }

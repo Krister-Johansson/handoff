@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { FeedbackSchema } from "@handoff/core";
 import { toFeedback, withoutChecks } from "./feedback.ts";
-import type { CheckContext, PrSnapshot } from "./types.ts";
+import type { CheckContext, PrSnapshot, ReviewThread, ReviewThreadComment } from "./types.ts";
 
 const base: PrSnapshot = {
   number: 7,
@@ -24,6 +24,24 @@ const base: PrSnapshot = {
   reviewThreads: [],
   comments: [],
 };
+
+/** A review thread with one comment by a person, open or resolved. */
+const thread = (isResolved: boolean, comment: Omit<ReviewThreadComment, "authorBot" | "createdAt">): ReviewThread => ({
+  id: `PRRT_${comment.url}`,
+  isResolved,
+  isOutdated: false,
+  path: comment.path ?? "",
+  line: comment.line ?? null,
+  originalLine: comment.line ?? null,
+  viewerCanReply: true,
+  viewerCanResolve: !isResolved,
+  resolvedBy: isResolved ? "octocat" : null,
+  comments: [{ ...comment, authorBot: false, createdAt: "now" }],
+  latest: [{ ...comment, authorBot: false, createdAt: "now" }],
+});
+
+/** A PR comment by a person. */
+const prComment = (author: string, body: string, url: string) => ({ author, body, url, createdAt: "now", updatedAt: "now" });
 
 test("toFeedback maps a green rollup with no reviews to ci success and decision none", () => {
   const f = toFeedback(base, []);
@@ -64,10 +82,10 @@ test("toFeedback maps a changes-requested review to feedback with unresolved thr
       ...base,
       reviewDecision: "CHANGES_REQUESTED",
       reviewThreads: [
-        { isResolved: false, comments: [{ author: "ann", body: "rename this", path: "a.ts", line: 3, url: "u1" }] },
-        { isResolved: true, comments: [{ author: "bob", body: "fixed already", path: "b.ts", line: 1, url: "u2" }] },
+        thread(false, { author: "ann", body: "rename this", path: "a.ts", line: 3, url: "u1" }),
+        thread(true, { author: "bob", body: "fixed already", path: "b.ts", line: 1, url: "u2" }),
       ],
-      comments: [{ author: "cat", body: "please add tests", url: "u3" }],
+      comments: [prComment("cat", "please add tests", "u3")],
     },
     [],
   );
@@ -89,8 +107,8 @@ test("toFeedback leaves out handoff's own PR comments, so the Coder is not fed i
     {
       ...base,
       comments: [
-        { author: "octocat", body: "Please add a test.", url: "u1" },
-        { author: "handoff", body: "<!-- handoff:reviewer-notes -->\nNit.", url: "u2" },
+        prComment("octocat", "Please add a test.", "u1"),
+        prComment("handoff", "<!-- handoff:reviewer-notes -->\nNit.", "u2"),
       ],
     },
     [],

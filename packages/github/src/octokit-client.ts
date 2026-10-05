@@ -5,18 +5,23 @@ import {
   IssueParentsDocument,
   PullRequestReviewThreadsDocument,
   PullRequestSnapshotDocument,
+  ReplyToReviewThreadDocument,
   RepositoryMilestonesDocument,
+  ResolveReviewThreadDocument,
   SetIssueMilestoneDocument,
   type IssueMilestoneRefsQuery,
   type IssueParentsQuery,
   type PullRequestReviewThreadsQuery,
   type PullRequestSnapshotQuery,
+  type ReplyToReviewThreadMutation,
   type RepositoryMilestonesQuery,
+  type ResolveReviewThreadMutation,
   type SetIssueMilestoneMutation,
+  type ThreadCommentFragment,
 } from "./gql/graphql.ts";
 import { readError } from "./errors.ts";
 import { ancestorsOf, present } from "./projects/lineage.ts";
-import type { Assignable, Assignee, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary, ReviewThreadState } from "./types.ts";
+import type { Assignable, Assignee, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary, ReviewThreadComment, ReviewThreadState } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -397,21 +402,31 @@ export class OctokitGitHub implements GitHubPort {
         state: r.state,
         body: r.body,
         author: r.author?.login ?? "ghost",
+        authorBot: r.author?.__typename === "Bot",
         commitSha: r.commit?.oid ?? null,
         submittedAt: r.submittedAt ?? null,
       })),
       reviewThreads: present(pr.reviewThreads.nodes).map((t) => ({
+        id: t.id,
         isResolved: t.isResolved,
-        comments: present(t.comments.nodes).map((c) => ({
-          ...(c.databaseId ? { id: String(c.databaseId) } : {}),
-          author: c.author?.login ?? "ghost",
-          body: c.body,
-          ...(c.path ? { path: c.path } : {}),
-          ...(typeof c.line === "number" ? { line: c.line } : {}),
-          url: c.url,
-        })),
+        isOutdated: t.isOutdated,
+        path: t.path,
+        line: t.line ?? null,
+        originalLine: t.originalLine ?? null,
+        viewerCanReply: t.viewerCanReply,
+        viewerCanResolve: t.viewerCanResolve,
+        resolvedBy: t.resolvedBy?.login ?? null,
+        comments: present(t.comments.nodes).map(toThreadComment),
+        latest: present(t.latest.nodes).map(toThreadComment),
       })),
-      comments: present(pr.comments.nodes).map((c) => ({ author: c.author?.login ?? "ghost", body: c.body, url: c.url })),
+      comments: present(pr.comments.nodes).map((c) => ({
+        ...(c.databaseId ? { id: c.databaseId } : {}),
+        author: c.author?.login ?? "ghost",
+        body: c.body,
+        url: c.url,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      })),
     };
   }
 
@@ -431,6 +446,20 @@ export class OctokitGitHub implements GitHubPort {
         return { path: t.path, line: t.line ?? null, outdated: t.isOutdated, author: first?.author?.login ?? "ghost", body: first?.body ?? "", url: first?.url ?? "" };
       });
     return { mergeState: pr.mergeStateStatus, threads };
+  }
+
+  async replyToThread(repo: RepoRef, threadId: string, body: string): Promise<{ id: string; url: string }> {
+    const octokit = await this.clientFor(repo);
+    const data = await octokit.graphql<ReplyToReviewThreadMutation>(ReplyToReviewThreadDocument.toString(), { threadId, body });
+    const comment = data.addPullRequestReviewThreadReply?.comment;
+    if (!comment) throw new Error(`GitHub posted no reply in review thread ${threadId} of ${repo.owner}/${repo.name}`);
+    return { id: String(comment.databaseId ?? ""), url: comment.url };
+  }
+
+  async resolveThread(repo: RepoRef, threadId: string): Promise<{ resolved: boolean }> {
+    const octokit = await this.clientFor(repo);
+    const data = await octokit.graphql<ResolveReviewThreadMutation>(ResolveReviewThreadDocument.toString(), { threadId });
+    return { resolved: data.resolveReviewThread?.thread?.isResolved ?? false };
   }
 
   async getFile(repo: RepoRef, path: string, ref: string): Promise<string | undefined> {
@@ -494,6 +523,19 @@ export class OctokitGitHub implements GitHubPort {
 
 function toIssueRef(issue: { number: number; title: string; html_url: string; state: string }): IssueRef {
   return { number: issue.number, title: issue.title, url: issue.html_url, state: issue.state === "closed" ? "closed" : "open" };
+}
+
+function toThreadComment(c: ThreadCommentFragment): ReviewThreadComment {
+  return {
+    ...(c.databaseId ? { id: String(c.databaseId) } : {}),
+    author: c.author?.login ?? "ghost",
+    authorBot: c.author?.__typename === "Bot",
+    body: c.body,
+    ...(c.path ? { path: c.path } : {}),
+    ...(typeof c.line === "number" ? { line: c.line } : {}),
+    url: c.url,
+    createdAt: c.createdAt,
+  };
 }
 
 function toCheckContext(c: NonNullable<GqlContext>): CheckContext[] {
