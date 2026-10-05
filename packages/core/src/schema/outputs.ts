@@ -41,6 +41,24 @@ export const PlannerOutputSchema = z
     path: ["plan"],
   });
 
+/**
+ * The coder's answer to one review comment, after it checked the comment's claim. The contract check
+ * review_items_answered enforces what each verdict needs: a commit made in the round for fixed, and
+ * evidence for declined, unclear and duplicate.
+ */
+export const ReviewAnswerSchema = z.object({
+  id: z.string().min(1).describe("The comment's handle, such as R3."),
+  verdict: z
+    .enum(["fixed", "declined", "unclear", "duplicate", "settled"])
+    .describe(
+      "fixed: the claim holds and you fixed it. declined: the claim does not hold and you changed nothing for it. unclear: you cannot tell what is meant. duplicate: it repeats another listed comment. settled: the reviewer's reply accepts the earlier answer.",
+    ),
+  evidence: z.string().describe("What you checked and what it showed: the command and its output, the file and lines, or the test."),
+  commit: z.string().min(1).optional().describe("With fixed: the commit that fixes it."),
+  of: z.string().min(1).optional().describe("With duplicate: the handle of the comment it repeats, such as R2."),
+});
+export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
+
 export const CoderOutputSchema = z
   .object({
     status: z.enum(["done", "failed", "needs_input"]),
@@ -52,6 +70,10 @@ export const CoderOutputSchema = z
     extraPaths: z.array(z.object({ path: z.string().min(1), reason: z.string().min(1) })).optional(),
     /** The pull request's title and description, written for a reviewer of the change. */
     pr: z.object({ title: z.string().min(1).max(256), body: z.string().min(1) }).optional(),
+    /** One answer per review comment listed under Review comments to answer. */
+    answers: z.array(ReviewAnswerSchema).optional(),
+    /** Set by handoff, never the agent: every answer changes nothing, and the branch and the worktree are as the pull request step left them. */
+    answerOnly: z.literal(true).optional(),
   })
   .refine((o) => o.status !== "needs_input" || o.question !== undefined, {
     message: "needs_input requires a question",
@@ -157,6 +179,11 @@ export const FeedbackSchema = z.object({
         body: z.string(),
         url: z.string(),
         resolved: z.boolean(),
+        /** The review item's handle, such as R3, when the PR node manages the comment's answer. */
+        item: z.string().optional(),
+        kind: z.enum(["thread", "review_body", "summary_note", "pre_merge_check"]).optional(),
+        /** The thread after its first comment, oldest first, when the item came back with a reply. */
+        conversation: z.array(z.object({ author: z.string(), body: z.string() })).optional(),
       }),
     ),
     unresolvedThreads: z.number().int(),

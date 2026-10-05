@@ -1,6 +1,6 @@
 import { contractRegistry, isContractName, type CheckResult, type Contract } from "@handoff/core";
 import type { core } from "zod";
-import { runCheck, type CheckContext } from "./checks.ts";
+import { reviewItemsAnswered, runCheck, type CheckContext } from "./checks.ts";
 
 export type ContractResult = {
   passed: boolean;
@@ -32,6 +32,8 @@ export async function validateContract(contract: Contract, output: unknown, ctx:
       checks.push({ kind: check.kind, passed: false, detail: `check errored: ${(error as Error).message}` });
     }
   }
+  // Implicit: an attempt a PR step sent review comments to answers each of them, whatever the graph's contract lists.
+  if (ctx.reviewRound?.items.length) checks.push(await reviewItemsAnswered(ctx.reviewRound, parsed.data, ctx.workdir));
   const failed = checks.filter((c) => !c.passed);
   const pathsOnly = failed.length > 0 && failed.every((c) => c.kind === "diff_within_paths" && c.files?.length);
   return {

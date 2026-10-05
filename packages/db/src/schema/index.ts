@@ -20,3 +20,4 @@ export * from "./assistant.ts";
 export * from "./schedulers.ts";
 export * from "./plan-pins.ts";
 export * from "./launch-tests.ts";
+export * from "./review-items.ts";

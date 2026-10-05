@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
+import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { FakeCliExecutor, type FakeReply } from "@handoff/cli-adapter/testing";
 import { eq, projects, questions } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
@@ -495,4 +496,63 @@ test("a review that says request_changes with no blocking finding routes as appr
   ]);
   expect(executions[1]!.output).toEqual({ ...minor, verdict: "approve" });
   expect(approvalsOf(run.state).review).toBeDefined();
+});
+
+/**
+ * The loop graph on a real worktree: the coder's first attempt passes with `first`, the PR step sends
+ * back two review items from the commit it pushed, and the coder answers with `answers`. The PR step's
+ * next execution waits.
+ */
+async function answerRound(first: Record<string, unknown>, answers: unknown[]) {
+  const cli = new FakeCliExecutor([{ output: plannerOut }, { output: first }, { output: { status: "done", summary: "Checked both comments.", answers } }]);
+  let prRound: string | undefined;
+  const pr: NodeExecutor = {
+    needsWorkdir: true,
+    async execute(ctx) {
+      if (prRound) return { kind: "waiting", wait: { kind: "github_pr", key: "never" } };
+      prRound = ctx.execution.id;
+      const comments = [
+        { author: "coderabbitai", path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI.", url: "https://github.com/octo/sample/pull/1#discussion_r1", resolved: false, item: "R1", kind: "thread" },
+        { author: "coderabbitai", body: "Walkthrough: integration tests are skipped.", url: "https://github.com/octo/sample/pull/1", resolved: false, item: "R2", kind: "summary_note" },
+      ];
+      const feedback = { ci: { status: "success", failedJobs: [] }, review: { decision: "changes_requested", comments, unresolvedThreads: 1 }, updatedAt: "now" };
+      const output = { prNumber: 1, prUrl: "https://github.com/octo/sample/pull/1", headSha: git(ctx.workdir!.path, "rev-parse", "HEAD"), feedback };
+      return { kind: "completed", output, statePatch: { prNumber: 1, feedback } };
+    },
+  };
+  const node = cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 });
+  const executors = { planner: node, coder: node, tester: scripted(done({ passed: true, command: "true", exitCode: 0, tail: "" })), reviewer: scripted(done({ verdict: "approve", comments: [] })), pr } as unknown as ExecutorRegistry;
+  const { project, graphVersion } = await seedGraph(db, loop, { localClonePath: createOriginRepo() });
+  const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+  await drain(engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) }));
+  return { cli, prRound, ...(await inspect(db, run.id)) };
+}
+
+test("a coder whose answers are all declined and whose head did not move has answerOnly set by the engine", async () => {
+  // The coder's first round may claim answerOnly itself; only the engine sets it.
+  const { cli, prRound, executions, run: row } = await answerRound({ status: "done", summary: "wrote it", answerOnly: true }, [
+    { id: "R1", verdict: "declined", evidence: "ADR 0041 runs the integration project in its own CI job." },
+    { id: "R2", verdict: "duplicate", evidence: "The note repeats the thread on vitest.config.ts.", of: "R1" },
+  ]);
+  const coders = executions.filter((e) => e.nodeKey === "coder");
+  expect(coders.map((e) => [e.attempt, e.status])).toEqual([
+    [1, "passed"],
+    [2, "passed"],
+  ]);
+  expect(coders[0]!.output).not.toHaveProperty("answerOnly");
+  expect(coders[1]!.output).toMatchObject({ answerOnly: true });
+  expect(cli.requests[2]!.systemPrompt).toContain("# Review comments to answer");
+  expect(cli.requests[2]!.systemPrompt).toContain("## R1: thread by coderabbitai on vitest.config.ts:12");
+  expect((row.state as { reviewAnswers?: unknown }).reviewAnswers).toEqual({
+    R1: { id: "R1", verdict: "declined", evidence: "ADR 0041 runs the integration project in its own CI job.", round: prRound },
+    R2: { id: "R2", verdict: "duplicate", evidence: "The note repeats the thread on vitest.config.ts.", of: "R1", round: prRound },
+  });
+});
+
+test("a coder that leaves a review comment unanswered fails review_items_answered", async () => {
+  const { executions, run: row } = await answerRound({ status: "done", summary: "wrote it" }, [{ id: "R1", verdict: "declined", evidence: "ADR 0041 runs it in its own job." }]);
+  const coder = executions.filter((e) => e.nodeKey === "coder")[1]!;
+  expect(coder).toMatchObject({ status: "failed", error: { code: "contract_failed" } });
+  expect(coder.checks).toEqual([expect.objectContaining({ kind: "review_items_answered", passed: false, detail: "R2 has no answer" })]);
+  expect((row.state as { reviewAnswers?: unknown }).reviewAnswers).toBeUndefined();
 });

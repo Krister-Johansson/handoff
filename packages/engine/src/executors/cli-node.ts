@@ -7,6 +7,7 @@ import type { Caps, Db } from "@handoff/db";
 import { PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
 import { heldApproval, recordApproval } from "../approvals.ts";
+import { answersOf, changesNothing, itemsToAnswer, reviewRoundOf, reviewSourcesOf, withAnswers } from "../review-answers.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { runIdentity } from "../workdir/setup.ts";
 
@@ -101,6 +102,9 @@ function firstPrompt(ctx: ExecutorContext): string {
     ...(ctx.packet.priorAttempt || ctx.packet.humanAnswer
       ? ["An earlier attempt was sent back: address every point under Previous attempt in the system prompt, and keep what was not questioned."]
       : []),
+    ...(ctx.packet.reviewItems?.length
+      ? ["Treat each comment under Review comments to answer in the system prompt like a test: check its claim before you act, then answer every one of them in answers."]
+      : []),
     ...(ctx.packet.previousReview
       ? ["You reviewed this work before: follow Your previous review in the system prompt, checking your earlier comments and only what changed since."]
       : []),
@@ -173,6 +177,32 @@ function followFindings(ctx: ExecutorContext, review: ReviewerOutput): ReviewerO
   if (verdict === review.verdict) return review;
   ctx.emit("review.verdict_derived", { said: review.verdict, verdict, blocking: review.comments.filter((c) => c.severity === "blocking").length });
   return { ...review, verdict };
+}
+
+/** Whether the worktree is at `sha` with nothing uncommitted: the branch as the PR step pushed it. */
+async function untouchedSince(cwd: string, sha: string): Promise<boolean> {
+  try {
+    const head = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
+    const status = (await execFileAsync("git", ["status", "--porcelain=v1"], { cwd })).stdout.trim();
+    return head !== "" && (head.startsWith(sha) || sha.startsWith(head)) && status === "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A coder's output with its answers to review comments: the answers go to run state by handle, and
+ * `answerOnly` is set when the attempt answered the comments a PR step sent it, every answer changes
+ * nothing, and the branch is still the commit the PR step pushed. The agent's own answerOnly is dropped.
+ */
+async function withReviewAnswers(ctx: ExecutorContext, output: unknown): Promise<{ output: unknown; reviewAnswers?: Record<string, unknown> }> {
+  const { answerOnly: _, ...own } = output as Record<string, unknown>;
+  const sources = reviewSourcesOf(ctx.graph, ctx.node.key);
+  const answers = answersOf(own);
+  const reviewAnswers = withAnswers(ctx.state, reviewRoundOf(ctx.state, sources), answers);
+  const sent = itemsToAnswer(ctx.state, sources);
+  const answerOnly = sent !== undefined && own.status === "done" && changesNothing(answers) && ctx.workdir !== undefined && (await untouchedSince(ctx.workdir.path, sent.headSha));
+  return { output: answerOnly ? { ...own, answerOnly: true } : own, ...(reviewAnswers ? { reviewAnswers } : {}) };
 }
 
 const RESUME_PROMPT ="Continue the task from where you stopped. When finished, return the structured output required by the output contract.";
@@ -319,7 +349,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       }
       switch (result.outcome) {
         case "success": {
-          const output = isReview(ctx) ? followFindings(ctx, result.validated as ReviewerOutput) : result.validated;
+          const answered = ctx.node.type === "coder" ? await withReviewAnswers(ctx, result.validated) : undefined;
+          const output = isReview(ctx) ? followFindings(ctx, result.validated as ReviewerOutput) : (answered?.output ?? result.validated);
           // A split needs a person to accept it at a plan gate; without one, it would reach the next step as a plan.
           if (ctx.node.type === "planner" && (output as { status?: string }).status === "split" && !ctx.packet.budget?.canSplit) {
             return {
@@ -331,6 +362,8 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           const statePatch: Record<string, unknown> = {
             // A planner's question is not a plan: the run keeps no plan until the answer comes back.
             ...(ctx.node.type === "planner" && (output as { status?: string }).status !== "needs_input" ? { plan: output } : {}),
+            // A coder's answers to review comments, by handle, for the PR step to post.
+            ...(answered?.reviewAnswers ? { reviewAnswers: answered.reviewAnswers } : {}),
             // A review remembers the commit it looked at, so its next round can look only at what changed since.
             ...(reviewedAt ? { reviewedAt: { ...(ctx.state.reviewedAt as Record<string, string> | undefined), [ctx.node.key]: reviewedAt } } : {}),
             // A review of the code holds its approval until the run's own change changes.
