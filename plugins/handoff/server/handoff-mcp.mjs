@@ -7303,7 +7303,7 @@ var require_content_type = __commonJS({
   }
 });
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 import process2 from "node:process";
 
 // node_modules/.pnpm/zod@4.6.5/node_modules/zod/v4/core/util.js
@@ -13890,7 +13890,7 @@ function date3(params) {
   return _coercedDate(ZodDate, params);
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/types.js
 var LATEST_PROTOCOL_VERSION = "2025-11-25";
 var SUPPORTED_PROTOCOL_VERSIONS = [LATEST_PROTOCOL_VERSION, "2025-06-18", "2025-03-26", "2024-11-05", "2024-10-07"];
 var RELATED_TASK_META_KEY = "io.modelcontextprotocol/related-task";
@@ -15410,7 +15410,7 @@ var UrlElicitationRequiredError = class extends McpError {
   }
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/stdio.js
 var STDIO_DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 var ReadBuffer = class {
   constructor(options) {
@@ -15447,7 +15447,7 @@ function serializeMessage(message) {
   return JSON.stringify(message) + "\n";
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
 var StdioServerTransport = class {
   constructor(_stdin = process2.stdin, _stdout = process2.stdout, options) {
     this._stdin = _stdin;
@@ -15517,7 +15517,7 @@ var StdioServerTransport = class {
 // plugins/handoff/.claude-plugin/plugin.json
 var plugin_default = {
   name: "handoff",
-  version: "0.24.0",
+  version: "0.24.1",
   description: "Drive handoff from Claude Code: shape a plan of epics, stories and tasks, see the backlog, start runs for issues, follow them and hear when a run needs you.",
   author: { name: "Krister Johansson" },
   userConfig: {
@@ -15548,7 +15548,7 @@ var plugin_default = {
   channels: [{ server: "handoff" }]
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
   const schema = s;
   return !!schema._zod;
@@ -15611,7 +15611,7 @@ function getLiteralValue(schema) {
   return void 0;
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/interfaces.js
 function isTerminal(status) {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
@@ -15619,7 +15619,7 @@ function isTerminal(status) {
 // node_modules/.pnpm/zod-to-json-schema@3.25.2_zod@4.6.5/node_modules/zod-to-json-schema/dist/esm/parsers/string.js
 var ALPHA_NUMERIC = new Set("ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvxyz0123456789");
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-json-schema-compat.js
 function getMethodLiteral(schema) {
   const shape = getObjectShape(schema);
   const methodSchema = shape?.method;
@@ -15640,7 +15640,7 @@ function parseWithCompat(schema, data) {
   return result.data;
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/protocol.js
 var DEFAULT_REQUEST_TIMEOUT_MSEC = 6e4;
 var Protocol = class {
   constructor(_options) {
@@ -15681,6 +15681,9 @@ var Protocol = class {
       this.setRequestHandler(GetTaskPayloadRequestSchema, async (request, extra) => {
         const handleTaskResult = async () => {
           const taskId = request.params.taskId;
+          if (!await this._taskStore.getTask(taskId, extra.sessionId)) {
+            throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
+          }
           if (this._taskMessageQueue) {
             let queuedMessage;
             while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
@@ -15711,12 +15714,12 @@ var Protocol = class {
             throw new McpError(ErrorCode.InvalidParams, `Task not found: ${taskId}`);
           }
           if (!isTerminal(task.status)) {
-            await this._waitForTaskUpdate(taskId, extra.signal);
+            await this._waitForTaskUpdate(taskId, extra.signal, extra.sessionId);
             return await handleTaskResult();
           }
           if (isTerminal(task.status)) {
             const result = await this._taskStore.getTaskResult(taskId, extra.sessionId);
-            this._clearTaskQueue(taskId);
+            this._clearTaskQueue(taskId, extra.sessionId);
             return {
               ...result,
               _meta: {
@@ -15753,7 +15756,7 @@ var Protocol = class {
             throw new McpError(ErrorCode.InvalidParams, `Cannot cancel task in terminal status: ${task.status}`);
           }
           await this._taskStore.updateTaskStatus(request.params.taskId, "cancelled", "Client cancelled task execution.", extra.sessionId);
-          this._clearTaskQueue(request.params.taskId);
+          this._clearTaskQueue(request.params.taskId, extra.sessionId);
           const cancelledTask = await this._taskStore.getTask(request.params.taskId, extra.sessionId);
           if (!cancelledTask) {
             throw new McpError(ErrorCode.InvalidParams, `Task not found after cancellation: ${request.params.taskId}`);
@@ -15881,6 +15884,19 @@ var Protocol = class {
     const handler = this._requestHandlers.get(request.method) ?? this.fallbackRequestHandler;
     const capturedTransport = this._transport;
     const relatedTaskId = request.params?._meta?.[RELATED_TASK_META_KEY]?.taskId;
+    const sessionId = capturedTransport?.sessionId;
+    const store = this._taskStore;
+    let relatedTaskFound = true;
+    let relatedTaskLookup;
+    if (relatedTaskId && store && this._taskMessageQueue && sessionId !== void 0) {
+      relatedTaskFound = false;
+      relatedTaskLookup = (async () => {
+        if (!await store.getTask(relatedTaskId, sessionId)) {
+          throw new McpError(ErrorCode.InvalidParams, `Task not found: ${relatedTaskId}`);
+        }
+        relatedTaskFound = true;
+      })();
+    }
     if (handler === void 0) {
       const errorResponse = {
         jsonrpc: "2.0",
@@ -15890,7 +15906,10 @@ var Protocol = class {
           message: "Method not found"
         }
       };
-      if (relatedTaskId && this._taskMessageQueue) {
+      if (relatedTaskId && relatedTaskLookup) {
+        const queuedError = { type: "error", message: errorResponse, timestamp: Date.now() };
+        relatedTaskLookup.then(() => this._enqueueTaskMessage(relatedTaskId, queuedError, sessionId), () => capturedTransport?.send(errorResponse)).catch((error2) => this._onerror(new Error(`Failed to send an error response: ${error2}`)));
+      } else if (relatedTaskId && this._taskMessageQueue) {
         this._enqueueTaskMessage(relatedTaskId, {
           type: "error",
           message: errorResponse,
@@ -15941,7 +15960,10 @@ var Protocol = class {
       closeSSEStream: extra?.closeSSEStream,
       closeStandaloneSSEStream: extra?.closeStandaloneSSEStream
     };
-    Promise.resolve().then(() => {
+    (relatedTaskLookup ?? Promise.resolve()).then(() => {
+      if (relatedTaskLookup && abortController.signal.aborted) {
+        throw new McpError(ErrorCode.ConnectionClosed, "Request was cancelled");
+      }
       if (taskCreationParams) {
         this.assertTaskHandlerCapability(request.method);
       }
@@ -15976,7 +15998,7 @@ var Protocol = class {
           ...error2["data"] !== void 0 && { data: error2["data"] }
         }
       };
-      if (relatedTaskId && this._taskMessageQueue) {
+      if (relatedTaskId && this._taskMessageQueue && relatedTaskFound) {
         await this._enqueueTaskMessage(relatedTaskId, {
           type: "error",
           message: errorResponse,
@@ -16456,7 +16478,7 @@ var Protocol = class {
       throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
     }
     const maxQueueSize = this._options?.maxTaskQueueSize;
-    await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+    await this._taskMessageQueue.enqueue(taskId, message, sessionId ?? this._transport?.sessionId, maxQueueSize);
   }
   /**
    * Clears the message queue for a task and rejects any pending request resolvers.
@@ -16485,12 +16507,13 @@ var Protocol = class {
    * Uses polling to check for updates at the task's configured poll interval.
    * @param taskId The task ID to wait for
    * @param signal Abort signal to cancel the wait
+   * @param sessionId Session of the request that waits, passed to the task store
    * @returns Promise that resolves when an update occurs or rejects if aborted
    */
-  async _waitForTaskUpdate(taskId, signal) {
+  async _waitForTaskUpdate(taskId, signal, sessionId) {
     let interval = this._options?.defaultTaskPollInterval ?? 1e3;
     try {
-      const task = await this._taskStore?.getTask(taskId);
+      const task = await this._taskStore?.getTask(taskId, sessionId);
       if (task?.pollInterval) {
         interval = task.pollInterval;
       }
@@ -16594,7 +16617,7 @@ function mergeCapabilities(base, additional) {
   return result;
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/validation/ajv-provider.js
 var import_ajv = __toESM(require_ajv(), 1);
 var import_ajv_formats = __toESM(require_dist(), 1);
 function createDefaultAjvInstance() {
@@ -16662,7 +16685,7 @@ var AjvJsonSchemaValidator = class {
   }
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
 var ExperimentalClientTasks = class {
   constructor(_client) {
     this._client = _client;
@@ -16816,7 +16839,7 @@ var ExperimentalClientTasks = class {
   }
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/helpers.js
 function assertToolsCallTaskCapability(requests, method, entityName) {
   if (!requests) {
     throw new Error(`${entityName} does not support task creation (required for ${method})`);
@@ -16851,7 +16874,7 @@ function assertClientRequestTaskCapability(requests, method, entityName) {
   }
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js
 function applyElicitationDefaults(schema, data) {
   if (!schema || data === null || typeof data !== "object")
     return;
@@ -17362,7 +17385,7 @@ var Client = class extends Protocol {
   }
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/mediaType.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/mediaType.js
 var import_content_type = __toESM(require_content_type(), 1);
 function mediaTypeEssence(header) {
   if (!header) {
@@ -17379,7 +17402,7 @@ function mediaTypeEssence(header) {
   }
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/transport.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/transport.js
 function normalizeHeaders(headers) {
   if (!headers)
     return {};
@@ -17404,6 +17427,68 @@ function createFetchWithInit(baseFetch = fetch, baseInit) {
     };
     return baseFetch(url2, mergedInit);
   };
+}
+var MAX_REDIRECTS = 5;
+var REDIRECT_STATUSES = [301, 302, 303, 307, 308];
+function isWithinOrigin(from, to) {
+  if (from.protocol === to.protocol && from.hostname === to.hostname && from.port === to.port) {
+    return true;
+  }
+  return from.hostname === to.hostname && from.protocol === "http:" && from.port === "" && to.protocol === "https:" && to.port === "";
+}
+function redirectTarget(response, requestUrl) {
+  const location = REDIRECT_STATUSES.includes(response.status) ? response.headers.get("location") : null;
+  try {
+    return location ? new URL(location, requestUrl) : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function followWithinOrigin(baseFetch, url2, init, response, followed = 0) {
+  const target = redirectTarget(response, url2);
+  const keepsMethod = response.status === 307 || response.status === 308 || (init?.method ?? "GET").toUpperCase() === "GET";
+  if (!target || followed === MAX_REDIRECTS || !keepsMethod) {
+    return void 0;
+  }
+  const from = new URL(url2);
+  const addsUserinfo = (target.username || target.password) && (target.username !== from.username || target.password !== from.password);
+  if (addsUserinfo || !isWithinOrigin(from, target)) {
+    return void 0;
+  }
+  return Promise.resolve(response.body?.cancel()).then(() => baseFetch(target, { ...init, redirect: "manual" })).then((next) => followWithinOrigin(baseFetch, target, init, next, followed + 1) ?? next);
+}
+var followingFetches = /* @__PURE__ */ new WeakSet();
+function fetchLeavingRedirects(baseFetch) {
+  const following = (url2, init) => (baseFetch ?? fetch)(url2, init);
+  followingFetches.add(following);
+  return following;
+}
+function fetchWithinOrigin(baseFetch = fetch) {
+  if (followingFetches.has(baseFetch)) {
+    return baseFetch;
+  }
+  return (url2, init) => {
+    if (init?.redirect === "error" || init?.redirect === "manual") {
+      return baseFetch(url2, init);
+    }
+    return Promise.resolve(baseFetch(url2, { ...init, redirect: "manual" })).then((response) => followWithinOrigin(baseFetch, url2, init, response) ?? response);
+  };
+}
+function unfollowedRedirect(response, requestUrl) {
+  if (response.type === "opaqueredirect") {
+    return "Redirect not followed: this runtime does not expose the redirect target";
+  }
+  const from = response.url || requestUrl;
+  const target = redirectTarget(response, from);
+  if (!target) {
+    return void 0;
+  }
+  target.username = target.password = target.search = target.hash = "";
+  if (target.protocol === "http:" && new URL(from).protocol === "https:") {
+    target.protocol = "https:";
+    return `Redirect to plain http not followed; try ${target.href} instead`;
+  }
+  return `Redirect to ${target.href} not followed`;
 }
 
 // node_modules/.pnpm/pkce-challenge@5.0.1/node_modules/pkce-challenge/dist/index.node.js
@@ -17449,7 +17534,7 @@ async function pkceChallenge(length) {
   };
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/auth.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/auth.js
 var SafeUrlSchema = url().superRefine((val, ctx) => {
   if (!URL.canParse(val)) {
     ctx.addIssue({
@@ -17603,7 +17688,7 @@ var OAuthTokenRevocationRequestSchema = object({
   token_type_hint: string2().optional()
 }).strip();
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/auth-utils.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/shared/auth-utils.js
 function resourceUrlFromServerUrl(url2) {
   const resourceURL = typeof url2 === "string" ? new URL(url2) : new URL(url2.href);
   resourceURL.hash = "";
@@ -17623,7 +17708,7 @@ function checkResourceAllowed({ requestedResource, configuredResource }) {
   return requestedPath.startsWith(configuredPath);
 }
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/auth/errors.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/auth/errors.js
 var OAuthError = class extends Error {
   constructor(message, errorUri) {
     super(message);
@@ -17718,7 +17803,7 @@ var OAUTH_ERRORS = {
   [InvalidTargetError.errorCode]: InvalidTargetError
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/client/auth.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/client/auth.js
 var UnauthorizedError = class extends Error {
   constructor(message) {
     super(message ?? "Unauthorized");
@@ -17789,7 +17874,8 @@ async function parseErrorResponse(input) {
     const errorClass = OAUTH_ERRORS[error2] || ServerError;
     return new errorClass(error_description || "", error_uri);
   } catch (error2) {
-    const errorMessage = `${statusCode ? `HTTP ${statusCode}: ` : ""}Invalid OAuth error response: ${error2}. Raw body: ${body}`;
+    const redirect = input instanceof Response ? unfollowedRedirect(input, input.url) : void 0;
+    const errorMessage = `${statusCode ? `HTTP ${statusCode}: ` : ""}${redirect ?? `Invalid OAuth error response: ${error2}. Raw body: ${body}`}`;
     return new ServerError(errorMessage);
   }
 }
@@ -18037,7 +18123,7 @@ async function discoverOAuthProtectedResourceMetadata(serverUrl, opts, fetchFn =
 }
 async function fetchWithCorsRetry(url2, headers, fetchFn = fetch) {
   try {
-    return await fetchFn(url2, { headers });
+    return await fetchWithinOrigin(fetchFn)(url2, { headers });
   } catch (error2) {
     if (error2 instanceof TypeError) {
       if (headers) {
@@ -18062,7 +18148,7 @@ async function tryMetadataDiscovery(url2, protocolVersion, fetchFn = fetch) {
   return await fetchWithCorsRetry(url2, headers, fetchFn);
 }
 function shouldAttemptFallback(response, pathname) {
-  return !response || response.status >= 400 && response.status < 500 && pathname !== "/";
+  return !response || !response.ok && response.status < 500 && pathname !== "/";
 }
 async function discoverMetadataWithFallback(serverUrl, wellKnownType, fetchFn, opts) {
   const issuer = new URL(serverUrl);
@@ -18128,7 +18214,7 @@ async function discoverAuthorizationServerMetadata(authorizationServerUrl, { fet
     }
     if (!response.ok) {
       await response.body?.cancel();
-      if (response.status >= 400 && response.status < 500) {
+      if (response.status < 500) {
         continue;
       }
       throw new Error(`HTTP ${response.status} trying to load ${type === "oauth" ? "OAuth" : "OpenID provider"} metadata from ${endpointUrl}`);
@@ -18223,7 +18309,7 @@ async function executeTokenRequest(authorizationServerUrl, { metadata, tokenRequ
     const authMethod = selectClientAuthMethod(clientInformation, supportedMethods);
     applyClientAuthentication(authMethod, clientInformation, headers, tokenRequestParams);
   }
-  const response = await (fetchFn ?? fetch)(tokenUrl, {
+  const response = await fetchWithinOrigin(fetchFn ?? fetch)(tokenUrl, {
     method: "POST",
     headers,
     body: tokenRequestParams
@@ -18293,7 +18379,7 @@ async function registerClient(authorizationServerUrl, { metadata, clientMetadata
   } else {
     registrationUrl = new URL("/register", authorizationServerUrl);
   }
-  const response = await (fetchFn ?? fetch)(registrationUrl, {
+  const response = await fetchWithinOrigin(fetchFn ?? fetch)(registrationUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -18510,7 +18596,7 @@ var EventSourceParserStream = class extends TransformStream {
   }
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/client/streamableHttp.js
 var DEFAULT_STREAMABLE_HTTP_RECONNECTION_OPTIONS = {
   initialReconnectionDelay: 1e3,
   maxReconnectionDelay: 3e4,
@@ -18533,8 +18619,18 @@ var StreamableHTTPClientTransport = class {
     this._authProvider = opts?.authProvider;
     this._fetch = opts?.fetch;
     this._fetchWithInit = createFetchWithInit(opts?.fetch, opts?.requestInit);
+    this._followRedirects = opts?.redirectPolicy === "follow";
+    if (this._followRedirects) {
+      this._fetch = fetchLeavingRedirects(this._fetch);
+      this._fetchWithInit = fetchLeavingRedirects(this._fetchWithInit);
+    }
     this._sessionId = opts?.sessionId;
     this._reconnectionOptions = opts?.reconnectionOptions ?? DEFAULT_STREAMABLE_HTTP_RECONNECTION_OPTIONS;
+  }
+  /** Error text for a redirect `response` that was not followed, or `undefined` for any other response. */
+  _unfollowedRedirect(response, url2) {
+    const text = unfollowedRedirect(response, url2);
+    return text && !this._followRedirects ? `${text} (redirectPolicy: 'same-origin')` : text;
   }
   async _authThenStart() {
     if (!this._authProvider) {
@@ -18585,11 +18681,13 @@ var StreamableHTTPClientTransport = class {
       if (resumptionToken) {
         headers.set("last-event-id", resumptionToken);
       }
-      const response = await (this._fetch ?? fetch)(this._url, {
-        method: "GET",
-        headers,
-        signal: this._abortController?.signal
-      });
+      const fetchFn = this._fetch ?? fetch;
+      const init = { method: "GET", headers, signal: this._abortController?.signal };
+      let response = await fetchFn(this._url, this._followRedirects ? init : { ...init, redirect: "manual" });
+      const followed = this._followRedirects ? void 0 : followWithinOrigin(fetchFn, this._url, init, response);
+      if (followed) {
+        response = await followed;
+      }
       if (!response.ok) {
         await response.body?.cancel();
         if (response.status === 401 && this._authProvider) {
@@ -18598,7 +18696,7 @@ var StreamableHTTPClientTransport = class {
         if (response.status === 405) {
           return;
         }
-        throw new StreamableHTTPError(response.status, `Failed to open SSE stream: ${response.statusText}`);
+        throw new StreamableHTTPError(response.status, `Failed to open SSE stream: ${this._unfollowedRedirect(response, this._url) ?? response.statusText}`);
       }
       this._handleSseStream(response.body, options, true);
     } catch (error2) {
@@ -18761,7 +18859,7 @@ var StreamableHTTPClientTransport = class {
         body: JSON.stringify(message),
         signal: this._abortController?.signal
       };
-      const response = await (this._fetch ?? fetch)(this._url, init);
+      const response = await fetchWithinOrigin(this._fetch ?? fetch)(this._url, init);
       const sessionId = response.headers.get("mcp-session-id");
       if (sessionId) {
         this._sessionId = sessionId;
@@ -18813,7 +18911,7 @@ var StreamableHTTPClientTransport = class {
             return this.send(message);
           }
         }
-        throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${text}`);
+        throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${this._unfollowedRedirect(response, this._url) ?? text}`);
       }
       this._hasCompletedAuthFlow = false;
       this._lastUpscopingHeader = void 0;
@@ -18875,10 +18973,10 @@ var StreamableHTTPClientTransport = class {
         headers,
         signal: this._abortController?.signal
       };
-      const response = await (this._fetch ?? fetch)(this._url, init);
+      const response = await fetchWithinOrigin(this._fetch ?? fetch)(this._url, init);
       await response.body?.cancel();
       if (!response.ok && response.status !== 405) {
-        throw new StreamableHTTPError(response.status, `Failed to terminate session: ${response.statusText}`);
+        throw new StreamableHTTPError(response.status, `Failed to terminate session: ${this._unfollowedRedirect(response, this._url) ?? response.statusText}`);
       }
       this._sessionId = void 0;
     } catch (error2) {
@@ -18907,7 +19005,7 @@ var StreamableHTTPClientTransport = class {
   }
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/server.js
 var ExperimentalServerTasks = class {
   constructor(_server) {
     this._server = _server;
@@ -19120,7 +19218,7 @@ var ExperimentalServerTasks = class {
   }
 };
 
-// node_modules/.pnpm/@modelcontextprotocol+sdk@1.31.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
+// node_modules/.pnpm/@modelcontextprotocol+sdk@1.32.0_supports-color@7.2.0_zod@4.6.5/node_modules/@modelcontextprotocol/sdk/dist/esm/server/index.js
 var Server = class extends Protocol {
   /**
    * Initializes this server with the given name and version information.
