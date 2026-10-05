@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import type { Overview } from "@/server/overview";
 import { ProjectOverview } from "./project-overview";
-import { EMPTY_INBOX, minutesAgo, NOW, progress, QUIET, run, task } from "./testing/overview-fixtures";
+import { EMPTY_INBOX, milestone, minutesAgo, NOW, progress, QUIET, run, task } from "./testing/overview-fixtures";
 
 vi.mock("@/app/inbox/actions", () => ({ answerAction: vi.fn(), repairAction: vi.fn(), cancelAction: vi.fn(), resolveLoopAction: vi.fn(), answerPermissionAction: vi.fn() }));
 vi.mock("@/app/projects/actions", () => ({ requestMergeAction: vi.fn(), startRunAction: vi.fn(), listIssuesAction: vi.fn(), listGitHubProjectsAction: vi.fn(), setupPlanAction: vi.fn() }));
@@ -186,6 +186,68 @@ test("Features in progress shows each epic's progress and counts by status, and 
   expect(within(rows[0]!).getByRole("link", { name: "PR #88" })).toBeInTheDocument();
   expect(within(rows[1]!).getByRole("link", { name: "running" })).toHaveAttribute("href", "/projects/p1/runs/r55");
   expect(within(rows[2]!).getByRole("link", { name: "Needs you" })).toHaveAttribute("href", "#needs-you");
+});
+
+test("Milestones sits above Features in progress and shows each open milestone's due date, its tasks by status and, in Flow mode, where it ends in the order", () => {
+  if (QUIET.work.kind !== "plan") throw new Error("expected the plan");
+  show({
+    ...QUIET,
+    work: {
+      ...QUIET.work,
+      mode: "flow",
+      milestones: [
+        milestone(2, "0.9", "2026-10-20", { Done: 2, "In review": 1, Running: 2, Ready: 6 }, { flow: { last: { issue: 62, place: 6 }, skipped: [63] }, skipped: [{ issue: 63, why: "label human" }] }),
+        milestone(3, "1.0", "2026-11-30", { Ready: 2, Shaping: 5 }, { flow: { last: { issue: 80, place: 13 }, skipped: [] } }),
+        milestone(4, "Someday", undefined, {}, { flow: { last: undefined, skipped: [] } }),
+      ],
+    },
+  });
+  const milestones = section("Milestones");
+  expect(within(milestones).getByRole("heading", { level: 2 })).toHaveTextContent("Milestones3");
+  expect(within(milestones).getByRole("link", { name: "Open the plan" })).toHaveAttribute("href", "/projects/p1/plan");
+  expect(milestones.compareDocumentPosition(section("Features in progress")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  const [first, second, third] = within(milestones).getAllByRole("listitem");
+  expect(within(first!).getByRole("link", { name: "0.9" })).toHaveAttribute("href", "/projects/p1/plan?milestone=2");
+  expect(first).toHaveTextContent("Due Oct 20, in 18 days");
+  expect(within(first!).getByRole("img", { name: "2 Done, 1 In review, 2 Running, 6 Ready" })).toBeInTheDocument();
+  expect(first).toHaveTextContent("Ends after Next 6");
+  expect(first).toHaveTextContent("#63 skipped: label human");
+  expect(second).toHaveTextContent("Due Nov 30, in 59 days");
+  expect(second).toHaveTextContent("Ends after Next 13");
+  expect(third).toHaveTextContent("No due date");
+  expect(third).toHaveTextContent("No tasks in it yet");
+  // Flow mode has no dates to forecast from: no end day, no late or early.
+  expect(milestones).not.toHaveTextContent(/late|early|Ends (Oct|Nov)/);
+});
+
+test("in Timeline mode a milestone says when its tasks end against the due date and names the tasks without dates", () => {
+  if (QUIET.work.kind !== "plan") throw new Error("expected the plan");
+  show({
+    ...QUIET,
+    work: {
+      ...QUIET.work,
+      mode: "timeline",
+      milestones: [
+        milestone(5, "Redesign beta", "2026-10-03", { Done: 1, Running: 1, Ready: 3 }, { timeline: { ends: "2026-10-04", daysPastDue: 1, undated: [152] } }),
+        milestone(6, "Redesign 1.0", "2026-10-30", { Ready: 2 }, { timeline: { ends: "2026-10-27", daysPastDue: -3, undated: [] } }),
+        milestone(7, "Docs", "2026-10-09", { Shaping: 2 }, { timeline: { ends: undefined, daysPastDue: undefined, undated: [160, 161] } }),
+      ],
+    },
+  });
+  const [late, early, undated] = within(section("Milestones")).getAllByRole("listitem");
+  expect(late).toHaveTextContent("Due Oct 3, tomorrow");
+  expect(late).toHaveTextContent("Ends Oct 4, 1 day late");
+  expect(late).toHaveTextContent("#152 has no dates");
+  expect(early).toHaveTextContent("Ends Oct 27, 3 days early");
+  expect(undated).toHaveTextContent("No task has dates yet");
+  expect(undated).toHaveTextContent("#160 and #161 have no dates");
+  expect(section("Milestones")).not.toHaveTextContent("Next");
+});
+
+test("without an open milestone Home has no Milestones section", () => {
+  show(QUIET);
+  expect(screen.queryByRole("region", { name: /^Milestones/ })).not.toBeInTheDocument();
 });
 
 test("with no epic moving, Features in progress says so in one line", () => {

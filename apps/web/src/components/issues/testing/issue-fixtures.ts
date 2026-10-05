@@ -1,4 +1,5 @@
 import type { IssueDetail } from "@handoff/github";
+import type { PlanMilestone } from "@/lib/plan/milestones";
 import type { FoundIssue, IssueRun, IssueTask } from "@/server/issue-page";
 import { epic, person, PROJECT, story, task } from "@/components/plan/testing/plan-fixtures";
 
@@ -22,8 +23,33 @@ export const issueDetail = (number: number, title: string, over: Partial<IssueDe
   createdAt: "2026-09-30T09:00:00Z",
   updatedAt: "2026-10-02T14:00:00Z",
   pullRequest: false,
+  milestone: null,
   ...over,
 });
+
+/** A milestone of todoOverKill with its tasks done of total, as the plan judges it. */
+export function planMilestone(number: number, title: string, dueOn: string | undefined, state: "open" | "closed", progress: Partial<PlanMilestone["progress"]> = {}): PlanMilestone {
+  const done = progress.done ?? 0;
+  const total = progress.total ?? 0;
+  return {
+    number,
+    title,
+    description: "",
+    dueOn,
+    state,
+    openIssues: 0,
+    closedIssues: 0,
+    url: `${REPO_URL}/milestone/${number}`,
+    progress: { done, total, byStatus: { Shaping: 0, Ready: total - done, Running: 0, "In review": 0, Done: done, Other: 0 }, ...progress },
+  };
+}
+
+/** todoOverKill's milestones in the port's order: 0.8 closed, 0.9 and 1.0 open. */
+export const MILESTONES = [
+  planMilestone(1, "0.8", "2026-09-12", "closed", { done: 4, total: 4 }),
+  planMilestone(2, "0.9", "2026-10-20", "open", { done: 2, total: 11, timeline: { ends: "2026-10-18", daysPastDue: -2, undated: [] } }),
+  planMilestone(3, "1.0", "2026-11-30", "open", { done: 0, total: 7 }),
+];
 
 /** Run 64fde8ef on #16, waiting at human_gate-1 for a review of the plan. */
 export function waitingRun(over: Partial<IssueRun> = {}): IssueRun {
@@ -115,6 +141,7 @@ export function taskPage(over: Partial<FoundIssue> = {}): FoundIssue {
     ],
     pulls: [],
     viewer: "Krister-Johansson",
+    milestones: [],
     ...over,
   };
 }

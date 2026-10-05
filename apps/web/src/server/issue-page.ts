@@ -7,6 +7,7 @@ import { inboxGroups } from "./inbox-groups";
 import { waitingRuns } from "./overview";
 import { loadPlan, type PlanEpic, type PlanProgress, type PlanStory, type PlanTask, type PlanUnavailable, type PlanView } from "./plan";
 import { runLines, type RunLine } from "./run-lines";
+import type { PlanMilestone } from "../lib/plan/milestones";
 import type { Timeline } from "../lib/plan/schedule";
 
 /** What a run waits on from a person: a review or a question, with the page that answers it. */
@@ -107,6 +108,11 @@ export type FoundIssue = {
   comments: IssueComment[];
   /** The issue's pull requests, or a story's or an epic's tasks', up to MAX_PULLS. */
   pulls: IssuePull[];
+  /**
+   * The repository's milestones, open and closed, with their tasks and the plan mode's judgement, for the
+   * Milestone section and its picker; none when the plan cannot be read.
+   */
+  milestones: PlanMilestone[];
   /** The token's user, "you" on the dashboard; undefined with a GitHub App. */
   viewer: string | undefined;
 };
@@ -177,6 +183,7 @@ export async function loadIssuePage(
     blocking: openFirst(dependencies.blocking).map(link),
     comments,
     viewer,
+    milestones: "reason" in planned ? [] : (planned.milestones ?? []),
   };
 }
 

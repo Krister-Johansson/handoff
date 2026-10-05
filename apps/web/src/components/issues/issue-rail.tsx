@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CircleCheckIcon, CircleDotIcon, GitMergeIcon, GitPullRequestDraftIcon, GitPullRequestIcon, ListTreeIcon } from "lucide-react";
+import { CircleCheckIcon, CircleDotIcon, GitMergeIcon, GitPullRequestDraftIcon, GitPullRequestIcon, ListTreeIcon, MilestoneIcon } from "lucide-react";
 import { KindBadge, ProgressBar, StatusPill } from "@/components/plan/plan-status";
 import { IssueTitle } from "@/components/plan/plan-task-parts";
 import { Card } from "@/components/ui/card";
@@ -12,6 +12,8 @@ import type { Timeline } from "@/lib/plan/schedule";
 import { cn } from "@/lib/utils";
 import type { FoundIssue, IssueLink, IssuePull, PlannedEpic, PlannedStory, PlannedTask, PlanParent, Unplanned } from "@/server/issue-page";
 import type { PlanColumn, PlanProgress } from "@/server/plan";
+import { MilestoneNote } from "./milestone-note";
+import { MilestonePicker } from "./milestone-picker";
 import { MiniTimeline } from "./mini-timeline";
 import { Quiet, RailSection } from "./issue-section";
 
@@ -274,11 +276,37 @@ function StoryTimeline({ place, timeline, projectId, epic }: { place: PlannedSto
   );
 }
 
+/** The Milestone section of an issue of the plan: its milestone, own or inherited, and the picker that sets it. */
+function MilestoneSection({ page, place, projectId }: { page: FoundIssue; place: PlannedTask | PlannedStory | PlannedEpic; projectId: string }) {
+  return (
+    <RailSection title="Milestone">
+      <MilestonePicker projectId={projectId} issue={page.issue.number} kind={place.kind} own={page.issue.milestone} inherited={place.item.milestone} milestones={page.milestones} />
+    </RailSection>
+  );
+}
+
+/** An issue outside the plan in a milestone: the milestone without a picker, which sets milestones on the plan's items only. */
+function OutsideMilestone({ page }: { page: FoundIssue }) {
+  const { milestone, number } = page.issue;
+  if (!milestone) return null;
+  return (
+    <RailSection title="Milestone">
+      <span className="inline-flex items-center gap-1.5 text-[13px] font-medium">
+        <MilestoneIcon aria-hidden className="size-3.5 text-muted-foreground" />
+        {milestone.title}
+      </span>
+      <MilestoneNote milestone={page.milestones.find((m) => m.number === milestone.number)} then={`Plan #${number} to change its milestone here.`} />
+    </RailSection>
+  );
+}
+
 /** The rail's sections for an issue of the plan, by kind. A Flow project's epic has no Dates, since it plans an order without dates. */
 function plannedSections(page: FoundIssue, place: PlannedTask | PlannedStory | PlannedEpic, projectId: string, today: string) {
+  const milestone = <MilestoneSection key="milestone" page={page} place={place} projectId={projectId} />;
   if (place.kind === "task") {
     return [
       <InThePlan key="plan" place={place} />,
+      milestone,
       <PartOf key="part" parents={place.parents} />,
       <BlockedBy key="blocked" page={page} />,
       <Blocks key="blocks" page={page} />,
@@ -288,6 +316,7 @@ function plannedSections(page: FoundIssue, place: PlannedTask | PlannedStory | P
   if (place.kind === "story") {
     return [
       <Progress key="progress" progress={place.item.progress} />,
+      milestone,
       <PartOf key="part" parents={place.parents} />,
       ...(place.timeline ? [<StoryTimeline key="timeline" place={place} timeline={place.timeline} projectId={projectId} epic={place.parents[0]?.number} />] : []),
       <Pulls key="pulls" pulls={page.pulls} title="Pull requests" empty="None of its tasks has a pull request yet." />,
@@ -295,6 +324,7 @@ function plannedSections(page: FoundIssue, place: PlannedTask | PlannedStory | P
   }
   return [
     <Progress key="progress" progress={place.item.progress} every />,
+    milestone,
     ...(page.planMode === "timeline" ? [<Dates key="dates" place={place} today={today} />] : []),
     <Waiting key="waiting" place={place} />,
   ];
@@ -305,7 +335,13 @@ export function IssueRail({ page, projectId, today }: { page: FoundIssue; projec
   const { place } = page;
   const sections = place.planned
     ? plannedSections(page, place, projectId, today)
-    : [<NotInThePlan key="plan" place={place} number={page.issue.number} />, <BlockedBy key="blocked" page={page} />, ...(page.blocking.length ? [<Blocks key="blocks" page={page} />] : []), <Pulls key="pulls" pulls={page.pulls} title="Pull request" empty="None yet." />];
+    : [
+        <NotInThePlan key="plan" place={place} number={page.issue.number} />,
+        ...(page.issue.milestone ? [<OutsideMilestone key="milestone" page={page} />] : []),
+        <BlockedBy key="blocked" page={page} />,
+        ...(page.blocking.length ? [<Blocks key="blocks" page={page} />] : []),
+        <Pulls key="pulls" pulls={page.pulls} title="Pull request" empty="None yet." />,
+      ];
   return (
     <aside aria-label={`Where #${page.issue.number} sits`} className="min-w-0 [grid-area:rail] lg:self-start">
       <Card className="gap-0 py-0">

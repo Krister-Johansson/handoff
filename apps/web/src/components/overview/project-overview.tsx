@@ -1,6 +1,7 @@
 import type { Overview } from "@/server/overview";
 import { FeaturesInProgress } from "./features";
 import { IssuesWork } from "./issues";
+import { Milestones } from "./milestones";
 import { NeedsYou } from "./needs-you";
 import { ReadyToStart } from "./ready";
 import { FinishedRuns, RunningNow } from "./overview-runs";
@@ -12,8 +13,8 @@ export type OverviewProject = { id: string; name: string; repo: string };
 export type OverviewStart = { graphs: string[]; graphName: string | undefined };
 
 /**
- * A project at a glance, in the order of the questions it answers: what needs you, what runs now, which
- * features move, what is ready to start, and what finished in the last day. From 1024 px the runs sit
+ * A project at a glance, in the order of the questions it answers: what needs you, what runs now, how the open
+ * milestones stand, which features move, what is ready to start, and what finished in the last day. From 1024 px the runs sit
  * in the left column and the plan's work in the right; narrower, the sections stack in that order.
  */
 export function ProjectOverview({ project, overview, start, now = new Date() }: { project: OverviewProject; overview: Overview; start: OverviewStart; now?: Date }) {
@@ -33,6 +34,7 @@ export function ProjectOverview({ project, overview, start, now = new Date() }: 
         <div className="contents lg:flex lg:flex-col lg:gap-7">
           {work.kind === "plan" ? (
             <>
+              <Milestones milestones={work.milestones} projectId={project.id} today={now.toISOString().slice(0, 10)} />
               <FeaturesInProgress features={work.features} projectId={project.id} repoUrl={repoUrl} />
               <ReadyToStart ready={work.ready} unplannedToDo={work.unplannedToDo} projectId={project.id} repoUrl={repoUrl} start={start} />
             </>

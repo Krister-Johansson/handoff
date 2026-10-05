@@ -133,6 +133,36 @@ test("a task of the plan reads under Plan with its Status, its story and epic wi
   expect(page.blocking.map((b) => [b.number, b.status])).toEqual([[second, "Ready"]]);
 });
 
+test("a task's page carries its own milestone, the one it inherits, and the repository's milestones with their progress for the picker", async () => {
+  const { project: p, github, plan, epic, task, second } = await planned();
+  github.milestones.set(1, { number: 1, title: "0.8", dueOn: "2026-09-12", state: "closed" });
+  github.milestones.set(2, { number: 2, title: "0.9", dueOn: "2026-10-20" });
+  github.milestones.set(3, { number: 3, title: "1.0", dueOn: "2026-11-30" });
+  await github.setMilestone(repo, epic, 2);
+  await github.setMilestone(repo, second, 3);
+
+  const inherits = await loadIssuePage(db, github, plan, p.id, task);
+  if (inherits.state !== "found" || !inherits.place.planned) throw new Error("not planned");
+  expect(inherits.issue.milestone).toBeNull();
+  expect(inherits.place.item.milestone).toEqual({ number: 2, title: "0.9", inherited: { kind: "epic", issue: epic } });
+  expect(inherits.milestones.map((m) => [m.title, m.state, `${m.progress.done} of ${m.progress.total}`])).toEqual([
+    ["0.8", "closed", "0 of 0"],
+    ["0.9", "open", "0 of 2"],
+    ["1.0", "open", "0 of 1"],
+  ]);
+
+  const own = await loadIssuePage(db, github, plan, p.id, second);
+  if (own.state !== "found") throw new Error(own.state);
+  expect(own.issue.milestone).toEqual({ number: 3, title: "1.0" });
+
+  github.issues.set(17, { number: 17, title: "Outside the plan", url: url(17), body: "", state: "open", milestone: 3 });
+  const outside = await loadIssuePage(db, github, plan, p.id, 17);
+  if (outside.state !== "found") throw new Error(outside.state);
+  expect(outside.place.planned).toBe(false);
+  expect(outside.issue.milestone).toEqual({ number: 3, title: "1.0" });
+  expect(outside.milestones.map((m) => m.title)).toEqual(["0.8", "0.9", "1.0"]);
+});
+
 test("a story lists its tasks in GitHub's sub-issue order, marks the one whose run needs you, and narrows the timeline to itself and its tasks", async () => {
   const { project: p, github, plan, epic, story, task, second, status } = await planned();
   status(task, "Ready");

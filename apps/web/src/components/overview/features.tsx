@@ -13,8 +13,8 @@ import { OverviewEmpty, OverviewList, OverviewSection } from "./overview-section
 /** Done first, then the work in flight, then what waits: the Plan tree's order. */
 const SEGMENTS: PlanColumn[] = ["Done", "In review", "Running", "Ready", "Shaping", "Other"];
 
-/** The epic's tasks as one bar coloured by status, with a legend that counts each status. */
-function FeatureProgress({ progress }: { progress: PlanProgress }) {
+/** An epic's or a milestone's tasks as one bar coloured by status, with a legend that counts each status. */
+export function FeatureProgress({ progress }: { progress: Pick<PlanProgress, "byStatus" | "total"> }) {
   const parts = SEGMENTS.filter((c) => progress.byStatus[c] > 0);
   return (
     <div className="flex flex-col gap-2">

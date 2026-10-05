@@ -69,6 +69,8 @@ export type IssueDetail = {
   updatedAt: string;
   /** True when the number is a pull request's: GitHub's issues API answers for pull requests too. */
   pullRequest: boolean;
+  /** The issue's own milestone, open or closed; null when it is in none. */
+  milestone: MilestoneRef | null;
   /** The parent and the grandparent, nearest first; read only when `getIssue` is asked for them. */
   parents?: PlanAncestor[];
 };
