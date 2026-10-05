@@ -360,7 +360,7 @@ One issue, one branch and one PR per step, CI green, `pnpm doctor:react` clean a
 
 ## Open questions
 
-Recommended answers in brackets; the plan uses them unless decided otherwise.
+Krister approved the plan on 2026-10-05 with every recommended answer below, in brackets.
 
 1. Should `reviewThreads.reply` default to on for PR nodes that already send review comments back? [No. It posts on GitHub, so it is opt-in; the inspector hint points at it.]
 2. When a bot does not review again within its limit after a declined answer, should handoff ask a person or resolve the thread with a note? [Ask a person, until PR 6's response times on northMES show how often CodeRabbit stays silent.]
