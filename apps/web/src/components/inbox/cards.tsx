@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { MergeButton } from "@/components/runs/merge-button";
 import { FailureDetail, type FailureError } from "@/components/runs/failure-detail";
 import { PathsQuestionCard } from "@/components/runs/paths-question-card";
+import { ReviewItemsQuestionCard } from "@/components/runs/review-items-question";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -192,6 +193,7 @@ export function QuestionCard({ item, compact = false }: { item: QuestionItem; co
   if (item.context?.review) return <ReviewLink item={item} compact={compact} />;
   if (item.reason === "try") return <TryItLink item={item} compact={compact} />;
   if (item.reason === "paths") return <PathsQuestionCard item={item} compact={compact} />;
+  if (item.reason === "review_items") return <ReviewItemsQuestionCard item={item} compact={compact} />;
   return <AnswerCard item={item} compact={compact} />;
 }
 

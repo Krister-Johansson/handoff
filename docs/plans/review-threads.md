@@ -150,7 +150,7 @@ The engine adds a deterministic check, `review_items_answered`, to a coder attem
 
 - an item sent has no answer, or has two;
 - an answer names an item that was not sent;
-- `fixed` has no commit, or the commit is not on the branch, or it was already on the branch when the round started;
+- `fixed` has no commit, or the commit is not on the branch, or it was already on the branch when the round started. A summary note or pre-merge check may be `fixed` without a commit when its evidence says what changed, such as the pull request's title; handoff then answers "Valid. Fixed." (approved with step 8);
 - `declined`, `unclear` or `duplicate` has empty evidence, or `duplicate` names an unknown item;
 - `settled` answers an item that came back without a reviewer reply.
 
@@ -213,7 +213,7 @@ While a reviewer's items await its review, a `CHANGES_REQUESTED` decision that G
 
 For a declined-only round, the PR node does not post `@coderabbitai review`. On #208 that command did nothing on a commit CodeRabbit had already reviewed, and on #192 the reply in the thread was enough to bring a new review. `reviewRequest` keeps working as it does for new commits.
 
-The wait has a limit per reviewer type, from the thread author's GraphQL type: 30 minutes for a bot, 24 hours for a person, both settable. At the limit, the items without a review go to a person (Decision 8).
+The wait has a limit per reviewer type, from the thread author's GraphQL type. A bot gets the PR node's review time limit, `reviewTimeoutMinutes` ("Stop waiting after (minutes)", 30 unless set), and a person `reviewThreads.personWaitHours`, 24 unless set (approved with step 8). At the limit, the items without a review go to a person (Decision 8).
 
 When `viewerCanResolve` is false, or `resolveReviewThread` fails, the item stays `awaiting_review` with the reason, the event `github.thread_resolve_failed` names the thread, and the PR node stops waiting on it. The merge node's existing wait on unresolved threads then names it, so a person resolves it on GitHub.
 
@@ -266,7 +266,6 @@ The PR node gets one setting:
   "reply": true,
   "resolveAfterReview": true,
   "summary": "coderabbitai",
-  "botWaitMinutes": 30,
   "personWaitHours": 24,
   "maxPerRound": 20,
   "returnOnAnswerOnly": true

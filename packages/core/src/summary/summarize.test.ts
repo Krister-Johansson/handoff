@@ -14,6 +14,15 @@ test("a Coder is summarized by its first sentence and the files it changed, or b
   expect(summarizeOutput({ status: "needs_input", summary: "", question: { text: "Which license?" } })).toBe("Asked: Which license?");
 });
 
+test("a Coder that answered review comments says how many and its verdicts, and an answer-only round says it made no commit", () => {
+  const answer = (id: string, verdict: string) => ({ id, verdict, evidence: "Checked." });
+  const answers = [answer("R1", "fixed"), answer("R2", "fixed"), answer("R3", "declined"), answer("R4", "unclear"), answer("R5", "duplicate")];
+  expect(summarizeOutput({ status: "done", summary: "Fixed two of the comments.", answers })).toBe("Answered 5 review comments: 2 fixed, 1 declined, 1 unclear, 1 duplicate");
+  expect(summarizeOutput({ status: "done", summary: "Nothing to change.", answers: [answer("R1", "declined"), answer("R2", "declined")], answerOnly: true })).toBe(
+    "Answered 2 review comments, no commit",
+  );
+});
+
 test("a test run, a review, a pull request, a merge and an answer each get one line", () => {
   expect(summarizeOutput({ passed: true, command: "npm test", exitCode: 0, tail: "" })).toBe("npm test passed");
   expect(summarizeOutput({ passed: false, command: "npm test", exitCode: 1, tail: "" })).toBe("npm test failed, exit 1");

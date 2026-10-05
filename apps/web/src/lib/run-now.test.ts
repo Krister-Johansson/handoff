@@ -51,6 +51,17 @@ test("a merge waiting on unresolved review threads says how many a person must r
   expect(describeNow({ ...blocked, unresolvedThreads: 1 }).text).toBe("PR #9 has 1 unresolved review thread; the merge goes on once it is resolved");
 });
 
+test("a PR step waiting for a reviewer's next review after handoff's answers says whose, in blue: nobody has to act yet", () => {
+  const waiting = { ...base, status: "waiting", prNumber: 88, executions: [exec("pr", "waiting")] };
+  const bot = { login: "coderabbitai", bot: true };
+  const person = { login: "Krister-Johansson", bot: false };
+  expect(describeNow({ ...waiting, reReview: { reviewers: [bot], items: 7 } })).toEqual({ tone: "active", text: "Waiting for CodeRabbit's next review, 7 comments answered" });
+  expect(describeNow({ ...waiting, reReview: { reviewers: [person], items: 1 } }).text).toBe("Waiting for Krister-Johansson's reply, 1 comment answered");
+  expect(describeNow({ ...waiting, reReview: { reviewers: [bot, person], items: 8 } }).text).toBe("Waiting for CodeRabbit and Krister-Johansson, 8 comments answered");
+  // A question the step asked about the comments comes first.
+  expect(describeNow({ ...waiting, questions: 1, reReview: { reviewers: [bot], items: 7 } }).tone).toBe("attention");
+});
+
 test("a run waiting on GitHub dependencies says which issues it waits for", () => {
   const blocked = { ...base, status: "waiting", executions: [exec("start", "waiting")] };
   expect(describeNow({ ...blocked, blockedBy: [3] })).toEqual({ tone: "attention", text: "Waiting for #3 to close" });

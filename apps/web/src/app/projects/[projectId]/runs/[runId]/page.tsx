@@ -17,6 +17,9 @@ import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
 import { projectCrumb, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { StuckLoopCard } from "@/components/runs/stuck-loop-card";
 import { ReviewThreadsCard, type ReviewThreadView } from "@/components/runs/review-threads-card";
+import { ReviewItemsCard } from "@/components/runs/review-items-card";
+import type { ReviewItemView } from "@/lib/review-items";
+import { reReviewWaits, runReviewItems, threadNotes } from "@/server/review-items";
 import { stuckLoop, type StuckLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
 import type { RunQueue } from "@/lib/run-now";
@@ -56,10 +59,24 @@ function questionItems({ run, project, openQuestions }: Detail): OpenQuestion[] 
 
 /**
  * What the run needs from a person: questions to answer here, review threads to resolve on GitHub, a decision for a loop that ran out, or a
- * repair. A review waiting on a person is opened from the status banner instead.
+ * repair. A review waiting on a person is opened from the status banner instead. The run's review comments follow the threads card, which
+ * then lists only the threads handoff does not manage.
  */
-function RunAlerts({ detail, stuck, permissions, threads }: { detail: Detail; stuck: StuckLoop | undefined; permissions: PermissionRequestView[]; threads: ReturnType<typeof unresolvedThreadsOf> }) {
+function RunAlerts({
+  detail,
+  stuck,
+  permissions,
+  threads,
+  items,
+}: {
+  detail: Detail;
+  stuck: StuckLoop | undefined;
+  permissions: PermissionRequestView[];
+  threads: ReturnType<typeof unresolvedThreadsOf>;
+  items: ReviewItemView[];
+}) {
   const { run, project, graph, failed } = detail;
+  const prUrl = run.prNumber !== null ? `https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}` : undefined;
   return (
     <>
       {permissions.map((p) => (
@@ -70,7 +87,8 @@ function RunAlerts({ detail, stuck, permissions, threads }: { detail: Detail; st
         .map((q) => (
           <QuestionCard key={q.id} compact item={q} />
         ))}
-      {threads && <ReviewThreadsCard number={threads.number} url={threads.url} threads={threads.threads} />}
+      {threads && <ReviewThreadsCard number={threads.number} url={threads.url} threads={threads.threads} notes={items.length ? threadNotes(items) : undefined} />}
+      {items.length > 0 && <ReviewItemsCard runId={run.id} pr={prUrl && run.prNumber !== null ? { number: run.prNumber, url: prUrl } : null} items={items} />}
       {stuck && <StuckLoopCard runId={run.id} node={nodeLabels(graph?.document)[stuck.nodeKey] ?? stuck.nodeKey} loop={stuck.edgeKey} attempts={stuck.attempts} />}
       {run.status === "failed" && failed && !stuck && (
         <FailedRunCard
@@ -167,6 +185,13 @@ function RunActions({ run, project, active, worktree }: { run: Detail["run"]; pr
   );
 }
 
+/** The run's review items, and its PR step's wait for a reviewer's next review while the run waits on one. */
+async function reviewItemsOf({ run, project }: Detail) {
+  const reReview = run.status === "waiting" ? (await reReviewWaits(getDb(), [run.id])).get(run.id) : undefined;
+  const items = await runReviewItems(getDb(), run.id, { owner: project.repoOwner, name: project.repoName }, reReview);
+  return { reReview, items };
+}
+
 export default async function RunPage({ params }: { params: Promise<{ projectId: string; runId: string }> }) {
   const { projectId, runId } = await params;
   const detail = await getRunDetail(getDb(), runId);
@@ -182,6 +207,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const wait = waits?.get(run.id);
   const blockedBy = blockersOf(detail);
   const threads = unresolvedThreadsOf(detail);
+  const { reReview, items } = await reviewItemsOf(detail);
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   const worktree = worktreeState(run, workerHome());
   const task = taskParts(run.task);
@@ -266,8 +292,9 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         initialEvents={events}
         graphDocument={graph?.document}
         waitingOn={wait && { kind: wait.kind, nodeKey: wait.nodeKey, since: wait.since, action: describePermission(wait.toolName, wait.input).action }}
+        reReview={reReview}
       >
-        <RunAlerts detail={detail} stuck={stuck} permissions={permissions} threads={threads} />
+        <RunAlerts detail={detail} stuck={stuck} permissions={permissions} threads={threads} items={items} />
       </RunLive>
     </main>
   );

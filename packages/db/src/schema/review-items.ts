@@ -35,6 +35,8 @@ export const reviewItems = pgTable(
     line: integer("line"),
     body: text("body").notNull(),
     url: text("url"),
+    /** Whether GitHub shows the item's thread as outdated: a later push changed its lines. It says nothing about whether the reviewer agrees. */
+    outdated: boolean("outdated").notNull().default(false),
     /** The round of the PR node that sent the item to the coder, from 1. */
     round: integer("round").notNull(),
     verdict: reviewItemVerdict("verdict"),

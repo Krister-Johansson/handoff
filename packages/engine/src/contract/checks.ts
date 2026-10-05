@@ -154,10 +154,14 @@ async function gitSucceeds(cwd: string, args: string[]): Promise<boolean> {
   }
 }
 
+/** Review items a coder may answer fixed without a commit, when its evidence says what changed: findings in a review bot's summary comment. */
+const WITHOUT_COMMIT = new Set(["summary_note", "pre_merge_check"]);
+
 /**
  * The implicit check on a coder attempt a PR step sent review items to: every item has exactly one
  * answer, no answer names an item that was not sent, a fix names a commit made on the branch in this
- * round, the other verdicts carry evidence, and only an item the reviewer replied to is settled.
+ * round (a summary note or pre-merge check may instead say what changed, such as the pull request's
+ * title), the other verdicts carry evidence, and only an item the reviewer replied to is settled.
  */
 export async function reviewItemsAnswered(round: ReviewRound, output: unknown, workdir: string | undefined): Promise<CheckResult> {
   const started = Date.now();
@@ -177,7 +181,10 @@ export async function reviewItemsAnswered(round: ReviewRound, output: unknown, w
     }
     if (answer.verdict === "fixed") {
       const commit = `${answer.commit ?? ""}^{commit}`;
-      if (!answer.commit) problems.push(`${answer.id}: fixed needs the commit that fixes it`);
+      if (!answer.commit && WITHOUT_COMMIT.has(item.kind ?? "thread")) {
+        // A summary note or pre-merge check, such as the title check, can be fixed through the pull request's title or description.
+        if (!answer.evidence.trim()) problems.push(`${answer.id}: fixed needs the commit that fixes it, or evidence that says what changed`);
+      } else if (!answer.commit) problems.push(`${answer.id}: fixed needs the commit that fixes it`);
       else if (!workdir || !(await gitSucceeds(workdir, ["merge-base", "--is-ancestor", commit, "HEAD"]))) problems.push(`${answer.id}: commit ${answer.commit} is not on the branch`);
       else if (await gitSucceeds(workdir, ["merge-base", "--is-ancestor", commit, round.headSha])) {
         problems.push(`${answer.id}: commit ${answer.commit} was on the branch before this round; commit the fix and give that commit`);

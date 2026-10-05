@@ -24,3 +24,12 @@ test("the card names each unresolved thread with a link to it, and links to the 
   expect(within(items[1]!).getByText("outdated")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Resolve on GitHub" })).toHaveAttribute("href", "https://github.com/octo/sample/pull/9");
 });
+
+test("with review items, the card says handoff does not manage these threads and names the item a thread belongs to", () => {
+  const left = thread("src/app.ts", 12);
+  render(<ReviewThreadsCard number={9} url="https://github.com/octo/sample/pull/9" threads={[left, thread("README.md", 3)]} notes={{ [left.url]: "R16, left to you" }} />);
+  expect(screen.getByText(/handoff does not manage these threads/)).toBeInTheDocument();
+  const items = screen.getAllByRole("listitem");
+  expect(within(items[0]!).getByText("R16, left to you")).toBeInTheDocument();
+  expect(within(items[1]!).queryByText(/R\d+/)).not.toBeInTheDocument();
+});

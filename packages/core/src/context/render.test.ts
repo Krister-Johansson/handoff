@@ -333,6 +333,9 @@ test("the coder's packet lists each review comment with its handle, its conversa
   expect(section).toContain("Treat each review comment like a test");
   expect(section).toContain("Answer every listed comment in `answers`");
   expect(section).toContain("Do not reply on GitHub");
+  expect(section).toContain(
+    "A summary note or pre-merge check fixed without a code change, such as through the pull request's title or description, needs no commit: say what changed in the evidence.",
+  );
   expect(section).toContain("## R1: thread by coderabbitai on vitest.config.ts:12");
   expect(section).toContain("https://github.com/o/r/pull/192#discussion_r1");
   expect(section).toContain("The integration project never runs in CI.");

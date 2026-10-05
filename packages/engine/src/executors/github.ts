@@ -37,7 +37,7 @@ import {
   type ReviewRequest,
   type SummaryRead,
 } from "./external-review.ts";
-import { applyDecisions, askAboutItems, awaitingReview, closeIfSettled, handleOf, hasUnsent, listItems, postAnswers, questionOf, recordAnswers, reReview, sendItems, sentBack, settleItems, syncItems, withItems } from "./review-items.ts";
+import { applyDecisions, askAboutItems, awaitingReview, closeIfSettled, handleOf, hasUnsent, listItems, postAnswers, questionOf, recordAnswers, recordOutdated, reReview, sendItems, sentBack, settleItems, syncItems, withItems } from "./review-items.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -326,12 +326,13 @@ export function prNodeExecutor(deps: {
       const summaryBot = itemsDb ? threads.summary : undefined;
       const summary = summaryBot ? { login: summaryBot, read: await readSummary(deps.github, repo, snapshot, summaryBot) } : undefined;
       // The answered thread items the step waits on until their reviewer reviews again.
-      let reReviewing: { items: { handle: number; reviewer: string }[]; until?: number | undefined } = { items: [] };
+      let reReviewing: { items: { handle: number; reviewer: string; dueAt: number }[]; until?: number | undefined } = { items: [] };
       // The question this step asked a person about items handoff cannot settle, if it asked one.
       let question = itemsDb ? await questionOf(itemsDb, ctx.execution.id) : undefined;
       if (itemsDb) {
         const items = { db: itemsDb, github: deps.github };
         await recordAnswers(itemsDb, ctx);
+        await recordOutdated(itemsDb, ctx.run.id, snapshot);
         // A person answered the step's question: their choice for each item comes first.
         if (question?.answer != null) await applyDecisions(items, ctx, { repo, snapshot, question });
         // What the reviewers made of the answers already on GitHub; before this step posts any, so none is resolved in the step that answered it.
@@ -415,7 +416,10 @@ export function prNodeExecutor(deps: {
         if (awaitingReReview) {
           // The last event of the look, so the step reports re_review until a later look waits on something else.
           const reviewers = [...new Set(reReviewing.items.map((i) => i.reviewer))];
-          ctx.emit("github.re_review", { number, reviewers, items: reReviewing.items.map(handleOf) });
+          // `until`: when the first answer reaches its reviewer's limit and a person is asked about it.
+          const until = reReviewing.until !== undefined ? new Date(reReviewing.until).toISOString() : null;
+          const due = Object.fromEntries(reReviewing.items.map((i) => [handleOf(i), new Date(i.dueAt).toISOString()]));
+          ctx.emit("github.re_review", { number, reviewers, items: reReviewing.items.map(handleOf), until, due });
         }
         return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt, reReviewAt)) } };
       }

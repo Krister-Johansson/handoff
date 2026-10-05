@@ -3,6 +3,7 @@ import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, nodeExecuti
 import type { RunWaitingOn } from "../components/runs/status-badge";
 import { reviewPath } from "../lib/paths";
 import { describeNow } from "../lib/run-now";
+import { reReviewWaits } from "./review-items";
 import type { StatusTone } from "../lib/status";
 
 /** What a run list shows under and beside a run: its graph version, its estimated cost and what it is doing now. */
@@ -47,7 +48,7 @@ function nodeLabels(document: unknown): Record<string, string> {
 export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<string, RunLine>> {
   const lines = new Map<string, RunLine>();
   if (runIds.length === 0) return lines;
-  const [rows, executions, open, waits] = await Promise.all([
+  const [rows, executions, open, waits, reReviews] = await Promise.all([
     db
       .select({
         id: runs.id,
@@ -64,6 +65,7 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
       .where(inArray(runs.id, runIds)),
     db
       .select({
+        id: nodeExecutions.id,
         runId: nodeExecutions.runId,
         nodeKey: nodeExecutions.nodeKey,
         attempt: nodeExecutions.attempt,
@@ -82,6 +84,7 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
       .where(and(inArray(questions.runId, runIds), isNull(questions.answer)))
       .orderBy(asc(questions.createdAt)),
     permissionWaits(db, runIds),
+    reReviewWaits(db, runIds),
   ]);
   const versionIds = [...new Set(rows.map((r) => r.versionId))];
   const documents = await db.select({ id: graphVersions.id, document: graphVersions.document }).from(graphVersions).where(inArray(graphVersions.id, versionIds));
@@ -92,6 +95,8 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
     const review = asked.find((q) => (q.context as { review?: unknown }).review);
     const current = IN_PROGRESS.has(run.status) ? steps.findLast((e) => IN_PROGRESS.has(e.status)) : undefined;
     const wait = waits.get(run.id);
+    const reReview = run.status === "waiting" ? reReviews.get(run.id) : undefined;
+    const reReviewStep = reReview && steps.find((e) => e.id === reReview.nodeExecutionId);
     lines.set(run.id, {
       steps: stepsSoFar(steps),
       stepSince: current ? (current.startedAt ?? current.createdAt) : null,
@@ -111,9 +116,11 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
         questions: asked.length,
         reviews: review ? 1 : 0,
         permissions: wait ? [{ nodeKey: wait.nodeKey, action: describePermission(wait.toolName, wait.input).action }] : [],
+        reReview,
       }),
       ...(review ? { reviewHref: reviewPath(run.projectId, run.id, review.id) } : {}),
       ...(wait ? { waitingOn: { kind: wait.kind, nodeKey: wait.nodeKey, since: wait.since } } : {}),
+      ...(!wait && reReviewStep && asked.length === 0 ? { waitingOn: { kind: "re_review" as const, nodeKey: reReviewStep.nodeKey, since: reReview.since } } : {}),
     });
   }
   return lines;

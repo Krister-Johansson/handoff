@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { z } from "zod";
 import { CATALOG } from "./catalog";
-import { PAGE_KINDS, PAGE_TOOLS } from "./page-tools";
+import { PAGE_KINDS, PAGE_TOOLS, parseNodePatch } from "./page-tools";
 
 const all = () => PAGE_KINDS.flatMap((kind) => PAGE_TOOLS[kind]);
 
@@ -47,4 +47,13 @@ test("confirm page tools are exactly the ones that submit, restart the app or sa
     "Send the app back to the coder: the list is empty after a reload",
   );
   expect(PAGE_TOOLS.code_review.find((t) => t.name === "page_submit_review")!.summarize({ option: "fix" })).toBe("Approve after fixes, sending the comments back");
+});
+
+test("page_update_node takes a PR node's review comment settings as the inspector shows them, with no wait of its own for bots", () => {
+  const settings = { reply: true, resolveAfterReview: false, summary: "coderabbitai", returnOnAnswerOnly: false, personWaitHours: 8, maxPerRound: 10 };
+  expect(parseNodePatch("pr", "pr", { sendReviewComments: true, reviewThreads: settings })).toEqual({ ok: true, patch: { sendReviewComments: true, reviewThreads: settings } });
+  expect(parseNodePatch("pr", "pr", { reviewThreads: null })).toEqual({ ok: true, patch: { reviewThreads: null } });
+  // A bot's next review is waited for as long as reviewTimeoutMinutes.
+  const bots = parseNodePatch("pr", "pr", { reviewThreads: { reply: true, botWaitMinutes: 30 } });
+  expect(bots).toMatchObject({ ok: false, message: expect.stringContaining("botWaitMinutes") });
 });

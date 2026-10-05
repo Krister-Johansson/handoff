@@ -124,6 +124,37 @@ export async function answerReviewAction(input: z.input<typeof ReviewAnswerSchem
   redirect((await runPathOf(getDb(), runId)) ?? "/inbox");
 }
 
+const ReviewItemsAnswerSchema = z.object({
+  questionId: z.string().uuid(),
+  runId: z.string().uuid(),
+  items: z
+    .array(z.object({ id: z.string().min(1).max(20), choice: z.enum(["resolve", "send_back", "leave"]), note: z.string().max(10_000).optional() }))
+    .min(1)
+    .max(200),
+});
+
+/**
+ * Answers a review items question with one choice per item: Resolve (Mark done for an item without a
+ * thread), Send back with a note for the coder, or Leave. The answer reads one line per item.
+ */
+export async function answerReviewItemsAction(input: z.input<typeof ReviewItemsAnswerSchema>): Promise<InboxActionState> {
+  const parsed = ReviewItemsAnswerSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Those choices cannot be sent." };
+  const items = parsed.data.items.map((i) => ({ id: i.id, choice: i.choice, ...(i.note?.trim() ? { note: i.note.trim() } : {}) }));
+  const answer = items.map((i) => `${i.id}: ${i.choice}.${i.note ? ` ${i.note}` : ""}`).join("\n");
+  try {
+    // A resolved thread says who decided ("Resolved by <login> in handoff."): the token's user, when there is one.
+    const viewer = await Promise.resolve()
+      .then(() => getGitHub()?.viewer())
+      .catch(() => undefined);
+    await answerQuestion(getDb(), parsed.data.questionId, { answer, items, answeredBy: viewer ?? "dashboard" });
+  } catch (error) {
+    return { ok: false, error: (error as Error).message };
+  }
+  refresh();
+  return { ok: true };
+}
+
 const ViewedSchema = z.object({ runId: z.string().uuid(), path: z.string().min(1).max(1_000), blobSha: z.string().min(1).max(100), viewed: z.boolean() });
 
 /** Marks a version of a file viewed, or not, in a run's code review. */

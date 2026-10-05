@@ -110,9 +110,11 @@ test("tests_green runs the command in the workdir and passes on exit 0", async (
   expect(bad.checks[0]?.logTail).toContain("failing-test");
 });
 
-/** Run state after a PR step sent the coder review items from the PR at `headSha`. */
-function sentItems(headSha: string, handles: string[]) {
-  const comments = handles.map((item, i) => ({ author: "coderabbitai", body: `Comment ${i + 1}.`, url: `https://github.com/o/r/pull/7#discussion_r${i}`, resolved: false, item, kind: "thread" as const }));
+type SentKind = "thread" | "review_body" | "summary_note" | "pre_merge_check";
+
+/** Run state after a PR step sent the coder review items from the PR at `headSha`, threads unless `kinds` says otherwise. */
+function sentItems(headSha: string, handles: string[], kinds: Record<string, SentKind> = {}) {
+  const comments = handles.map((item, i) => ({ author: "coderabbitai", body: `Comment ${i + 1}.`, url: `https://github.com/o/r/pull/7#discussion_r${i}`, resolved: false, item, kind: kinds[item] ?? "thread" }));
   const feedback = { ci: { status: "success" as const, failedJobs: [] }, review: { decision: "changes_requested" as const, comments, unresolvedThreads: comments.length }, updatedAt: "2026-10-05T16:17:28Z" };
   const output = { sync: "clean", prNumber: 7, prUrl: "https://github.com/o/r/pull/7", headSha, feedback };
   return { ...initialRunState("t"), prNumber: 7, nodes: { pr: { output, executionId: "pr-2", attempt: 2 } } };
@@ -155,6 +157,36 @@ test("a fixed answer whose commit was on the branch before the round fails", asy
   const fix = git(dir, "rev-parse", "--short", "HEAD");
   const fixed = await validateContract({ output: "coder_output", checks: [] }, { ...coderDone, answers: [{ id: "R1", verdict: "fixed", evidence: "Renamed.", commit: fix }] }, { state, baseBranch: "main", workdir: dir, reviewRound });
   expect(fixed.passed).toBe(true);
+});
+
+test("a summary note or pre-merge check is fixed without a commit when the evidence says what changed; a thread is not", async () => {
+  const dir = await worktree();
+  const state = sentItems(git(dir, "rev-parse", "HEAD"), ["R1", "R2", "R3", "R4"], { R2: "pre_merge_check", R3: "summary_note", R4: "review_body" });
+  const reviewRound = itemsToAnswer(state, ["pr"]);
+  const title = { verdict: "fixed", evidence: 'The PR title is now "Add create_task to the tool catalog".' };
+  const answers = [
+    { id: "R1", ...title },
+    { id: "R2", ...title },
+    { id: "R3", verdict: "fixed", evidence: "The PR description now names the three tools." },
+    { id: "R4", ...title },
+  ];
+  const result = await validateContract({ output: "coder_output", checks: [] }, { ...coderDone, answers }, { state, baseBranch: "main", workdir: dir, reviewRound });
+  expect(result.passed).toBe(false);
+  expect(result.checks[0]?.detail).toBe("R1: fixed needs the commit that fixes it; R4: fixed needs the commit that fixes it");
+
+  const blank = await validateContract(
+    { output: "coder_output", checks: [] },
+    { ...coderDone, answers: [declined("R1"), { id: "R2", verdict: "fixed", evidence: " " }, declined("R3"), declined("R4")] },
+    { state, baseBranch: "main", workdir: dir, reviewRound },
+  );
+  expect(blank.checks[0]?.detail).toBe("R2: fixed needs the commit that fixes it, or evidence that says what changed");
+
+  const fine = await validateContract(
+    { output: "coder_output", checks: [] },
+    { ...coderDone, answers: [declined("R1"), answers[1], answers[2], declined("R4")] },
+    { state, baseBranch: "main", workdir: dir, reviewRound },
+  );
+  expect(fine.passed).toBe(true);
 });
 
 test("a coder attempt the tester sent back needs no answers", async () => {

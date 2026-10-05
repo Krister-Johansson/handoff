@@ -453,6 +453,19 @@ const TYPE_FIELDS: Partial<Record<NodeType, z.ZodRawShape>> = {
     reviewTimeoutMinutes: clearable(minutes),
     sendReviewComments: z.boolean(),
     reviewRequest: clearable(z.strictObject({ reviewer: z.string().min(1), comment: z.string().min(1), afterMinutes: minutes.optional() })),
+    // Answer review comments. A bot's next review is waited for as long as reviewTimeoutMinutes; a person's for personWaitHours.
+    reviewThreads: clearable(
+      z
+        .strictObject({
+          reply: z.boolean(),
+          resolveAfterReview: z.boolean(),
+          summary: z.string().min(1),
+          returnOnAnswerOnly: z.boolean(),
+          personWaitHours: z.number().nonnegative(),
+          maxPerRound: z.number().int().positive(),
+        })
+        .partial(),
+    ),
   },
   merge: { mode: z.enum(["manual", "auto"]), method: z.enum(["squash", "merge", "rebase"]) },
   human_gate: { mode: z.enum(["approval", "question", "try"]), question: clearable(z.string().min(1)), exhaustedGate: z.boolean() },

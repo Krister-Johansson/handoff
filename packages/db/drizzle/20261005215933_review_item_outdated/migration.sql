@@ -1,0 +1,1 @@
+ALTER TABLE "review_items" ADD COLUMN "outdated" boolean DEFAULT false NOT NULL;

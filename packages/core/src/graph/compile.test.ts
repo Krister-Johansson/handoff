@@ -96,6 +96,23 @@ describe("compileGraph", () => {
     expect(codes(compileGraph(doc))).not.toContain("invalid_review_level");
   });
 
+  test("reply without send back is refused", () => {
+    const doc = clone();
+    attributesOf(doc, "pr").config = { sendReviewComments: false, reviewThreads: { reply: true } };
+    const result = compileGraph(doc);
+    expect(codes(result)).toEqual(["review_threads_need_send_back"]);
+    expect(result.ok ? undefined : result.errors[0]).toMatchObject({ nodeKey: "pr", message: "Pull request replies to review comments only when it sends them back: turn on Send review comments back to the coder" });
+    // Without reviewers to wait for, comments go back only when the node says so.
+    attributesOf(doc, "pr").config = { reviewThreads: { reply: true } };
+    expect(codes(compileGraph(doc))).toEqual(["review_threads_need_send_back"]);
+    attributesOf(doc, "pr").config = { waitForReviewers: ["coderabbitai[bot]"], reviewThreads: { reply: true } };
+    expect(compileGraph(doc).ok).toBe(true);
+    attributesOf(doc, "pr").config = { sendReviewComments: true, reviewThreads: { reply: true } };
+    expect(compileGraph(doc).ok).toBe(true);
+    attributesOf(doc, "pr").config = { sendReviewComments: false, reviewThreads: { reply: false } };
+    expect(compileGraph(doc).ok).toBe(true);
+  });
+
   test("compileGraph rejects a node unreachable from the start node", () => {
     const doc = clone();
     doc.nodes.push({ key: "orphan", attributes: { type: "tester", label: "Orphan", x: 0, y: 200 } });

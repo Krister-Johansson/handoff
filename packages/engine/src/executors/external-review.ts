@@ -21,7 +21,8 @@ export function reviewSettings(config: Record<string, unknown>): ReviewSettings 
  * needs review comments sent back. `resolveAfterReview` defaults to `reply`. `summary` names the bot
  * whose summary comment is read for notes and pre-merge checks. `maxPerRound` caps the items one round sends.
  * `botWaitMs` and `personWaitMs` are how long the PR node waits for a reviewer's next review after an
- * answer, by the reviewer's type: 30 minutes for a bot and 24 hours for a person unless set.
+ * answer, by the reviewer's type: a bot as long as the node waits for a review at all (its review time
+ * limit, `reviewTimeoutMinutes`, 30 minutes unless set), and a person `personWaitHours`, 24 unless set.
  */
 export type ReviewThreadsSettings = {
   reply: boolean;
@@ -44,7 +45,7 @@ export function reviewThreadsSettings(config: Record<string, unknown>): ReviewTh
     resolveAfterReview: reply && raw.resolveAfterReview !== false,
     summary,
     maxPerRound,
-    botWaitMs: atLeastZero(raw.botWaitMinutes, 30) * 60_000,
+    botWaitMs: reviewSettings(config).timeoutMs,
     personWaitMs: atLeastZero(raw.personWaitHours, 24) * 3_600_000,
   };
 }

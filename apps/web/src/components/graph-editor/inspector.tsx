@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, type Dispatch } from "react";
-import { PlusIcon, TrashIcon, XIcon } from "lucide-react";
+import { InfoIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
 import { ALL_TOOLS, ConditionSchema, DEFAULT_REVIEW_LEVEL, EFFORT_LEVELS, REVIEW_LEVELS, gateMode, isJoinMode, MODEL_ALIASES, nodeCatalog, notifies, notifyKindsOf, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType, type NotifyKind } from "@handoff/core";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -610,6 +611,9 @@ function ReviewerFields({ config, setConfig, clearConfig }: { config: Record<str
     if (trimmed && !waiting.has(trimmed)) write([...reviewers, trimmed]);
   };
   const sendBack = typeof config.sendReviewComments === "boolean" ? config.sendReviewComments : reviewers.length > 0;
+  const replies = reviewThreadsOf(config).reply === true;
+  // Replying needs the comments sent back, since the coder writes the answers.
+  const turnOnReplies = () => setConfig({ sendReviewComments: true, reviewThreads: { ...reviewThreadsOf(config), reply: true } });
   return (
     <FieldSet>
       <FieldLegend variant="label">Reviewers to wait for</FieldLegend>
@@ -649,7 +653,7 @@ function ReviewerFields({ config, setConfig, clearConfig }: { config: Record<str
           setLogin("");
         }}
       />
-      {reviewers.length > 0 && (
+      {(reviewers.length > 0 || replies) && (
         <Field>
           <FieldLabel htmlFor="pr-review-timeout">Stop waiting after (minutes)</FieldLabel>
           <Input
@@ -663,16 +667,131 @@ function ReviewerFields({ config, setConfig, clearConfig }: { config: Record<str
         </Field>
       )}
       {reviewers.length > 0 && <ReviewRequestFields reviewers={reviewers} config={config} setConfig={setConfig} clearConfig={clearConfig} />}
-      <Field orientation="horizontal">
-        <Switch id="pr-send-back" checked={sendBack} onCheckedChange={(on) => setConfig({ sendReviewComments: on })} />
+      <Field orientation="horizontal" data-disabled={replies ? true : undefined}>
+        <Switch id="pr-send-back" checked={sendBack || replies} disabled={replies} onCheckedChange={(on) => setConfig({ sendReviewComments: on })} />
         <FieldContent>
           <FieldLabel htmlFor="pr-send-back" className="font-normal">
             Send review comments back to the coder
           </FieldLabel>
           <FieldDescription>New unresolved threads and review summaries from anyone leave through fix, once each.</FieldDescription>
+          {replies && <FieldDescription>Stays on while Reply to review comments is on.</FieldDescription>}
         </FieldContent>
       </Field>
+      {sendBack && !replies && (
+        <Alert className="border-attention-dot/40 bg-attention-bg">
+          <InfoIcon className="text-attention" />
+          <AlertDescription className="text-foreground">
+            <p>Review comments go to the coder, but nobody answers them on GitHub. On a branch that requires resolved conversations, the merge then waits for a person.</p>
+            <div className="mt-2">
+              <Button type="button" size="xs" variant="outline" onClick={turnOnReplies}>
+                Turn on replies
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
+      <ReviewThreadsFields config={config} setConfig={setConfig} turnOnReplies={turnOnReplies} />
     </FieldSet>
+  );
+}
+
+/** The PR node's `reviewThreads` setting, or an empty one. */
+function reviewThreadsOf(config: Record<string, unknown>): Record<string, unknown> {
+  return typeof config.reviewThreads === "object" && config.reviewThreads !== null ? (config.reviewThreads as Record<string, unknown>) : {};
+}
+
+/** The review bot whose summary comment the node reads when that is turned on. */
+const SUMMARY_BOT = "coderabbitai";
+
+/**
+ * Answer review comments: handoff posts the coder's answer to each comment it sends back and resolves the
+ * thread after the reviewer's next review. Reply turns Send back on; the rest shows only while Reply is on.
+ * A bot's next review is waited for as long as the review time limit above; a person's for hours.
+ */
+function ReviewThreadsFields({ config, setConfig, turnOnReplies }: { config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void; turnOnReplies: () => void }) {
+  const threads = reviewThreadsOf(config);
+  const replies = threads.reply === true;
+  const write = (patch: Record<string, unknown>) => {
+    const next = { ...threads, ...patch };
+    for (const [key, value] of Object.entries(patch)) if (value === undefined) delete next[key];
+    setConfig({ reviewThreads: next });
+  };
+  const summary = typeof threads.summary === "string" && threads.summary ? threads.summary : undefined;
+  return (
+    // The border wraps the fieldset, so its legend sits inside the box rather than on its edge.
+    <div className="rounded-lg border bg-muted/50 p-3">
+      <FieldSet className="gap-3">
+        <FieldLegend variant="label">Answer review comments</FieldLegend>
+        <FieldDescription>{"handoff posts the coder's answer to each comment it sends back, and resolves the thread after the reviewer's next review."}</FieldDescription>
+        <Field orientation="horizontal">
+          <Switch id="pr-reply" checked={replies} onCheckedChange={(on) => (on ? turnOnReplies() : write({ reply: false }))} />
+          <FieldContent>
+            <FieldLabel htmlFor="pr-reply" className="font-normal">
+              Reply to review comments
+            </FieldLabel>
+            <FieldDescription>Posts the verdict, the evidence and the fixing commit in each thread, or in one PR comment for findings without a thread. Turns on Send review comments back.</FieldDescription>
+          </FieldContent>
+        </Field>
+        {replies && (
+          <>
+            <Field orientation="horizontal" className="pl-11">
+              <Switch id="pr-resolve" checked={threads.resolveAfterReview !== false} onCheckedChange={(on) => write({ resolveAfterReview: on ? undefined : false })} />
+              <FieldContent>
+                <FieldLabel htmlFor="pr-resolve" className="font-normal">
+                  {"Resolve after the reviewer's next review"}
+                </FieldLabel>
+                <FieldDescription>Never right after a push. A comment the reviewer raises again, or one it does not review again in time, comes to you.</FieldDescription>
+              </FieldContent>
+            </Field>
+            <Field orientation="horizontal">
+              <Switch id="pr-summary" checked={summary !== undefined} onCheckedChange={(on) => write({ summary: on ? SUMMARY_BOT : undefined })} />
+              <FieldContent>
+                <FieldLabel htmlFor="pr-summary" className="font-normal">
+                  Read {summary && summary !== SUMMARY_BOT ? `${summary}'s` : "CodeRabbit's"} summary comment
+                </FieldLabel>
+                <FieldDescription>{`Walkthrough notes and failed or warning pre-merge checks in ${summary ?? SUMMARY_BOT}'s summary become review comments too.`}</FieldDescription>
+              </FieldContent>
+            </Field>
+            <Field orientation="horizontal">
+              <Switch id="pr-return" checked={threads.returnOnAnswerOnly !== false} onCheckedChange={(on) => write({ returnOnAnswerOnly: on ? undefined : false })} />
+              <FieldContent>
+                <FieldLabel htmlFor="pr-return" className="font-normal">
+                  Return without tests when only answers changed
+                </FieldLabel>
+                <FieldDescription>A round where the coder only declines or asks, and commits nothing, comes straight back here. The tester, code review, gates and demo do not run again.</FieldDescription>
+              </FieldContent>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="pr-person-wait">People (hours)</FieldLabel>
+              <Input
+                id="pr-person-wait"
+                type="number"
+                min={0}
+                placeholder="24"
+                value={num(threads.personWaitHours)}
+                onChange={(e) => write({ personWaitHours: e.target.value ? Number(e.target.value) : undefined })}
+              />
+              <FieldDescription>
+                {"How long to wait for a person's next review after an answer. Bots: as long as Stop waiting after (minutes) above. Then the comments that still wait come to you in the Inbox."}
+              </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="pr-per-round">Comments per round</FieldLabel>
+              <Input
+                id="pr-per-round"
+                type="number"
+                min={1}
+                placeholder="20"
+                className="w-24"
+                value={num(threads.maxPerRound)}
+                onChange={(e) => write({ maxPerRound: e.target.value ? Number(e.target.value) : undefined })}
+              />
+              <FieldDescription>Oldest first. The rest go in the next round.</FieldDescription>
+            </Field>
+          </>
+        )}
+      </FieldSet>
+    </div>
   );
 }
 

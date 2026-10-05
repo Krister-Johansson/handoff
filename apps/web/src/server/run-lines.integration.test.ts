@@ -1,6 +1,6 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { eq, nodeExecutions, permissionRequests, questions, runs } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, permissionRequests, questions, reviewItems, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { createProject, saveGraphVersion, startRunFromGraph } from "./graphs.ts";
 import { latestRuns, runLines } from "./run-lines.ts";
@@ -61,6 +61,25 @@ test("a run whose step waits on a permission request says what the step asks to 
   const line = (await runLines(db, [run.id])).get(run.id);
   expect(line?.now).toEqual({ tone: "attention", text: "Plan asks to run a command" });
   expect(line?.waitingOn).toEqual({ kind: "permission", nodeKey: "planner", since: asked });
+});
+
+test("a run whose PR step waits for a reviewer's next review after handoff's answers says whose, in blue, waiting on review", async () => {
+  const { run } = await projectWithRun();
+  await setPlanner(run.id, { status: "passed" });
+  const pr = await seedExecution(db, run.id, { nodeKey: "pr", nodeType: "pr", executorKind: "github", status: "waiting", waitKind: "github_pr" });
+  const answered = new Date("2026-10-05T14:31:00Z");
+  await db.insert(reviewItems).values({ runId: run.id, handle: 1, key: "thread:PRRT_1", kind: "thread", reviewer: "coderabbitai", reviewerBot: true, body: "Handle the empty list.", round: 1, state: "awaiting_review", repliedAt: answered });
+  await db.transaction((tx) =>
+    appendEvents(tx, run.id, [
+      { type: "github.pr", payload: { number: 9 }, nodeExecutionId: pr.id },
+      { type: "github.re_review", payload: { number: 9, reviewers: ["coderabbitai"], items: ["R1"], until: null, due: {} }, nodeExecutionId: pr.id },
+    ]),
+  );
+  await db.update(runs).set({ status: "waiting", prNumber: 9 }).where(eq(runs.id, run.id));
+
+  const line = (await runLines(db, [run.id])).get(run.id);
+  expect(line?.now).toEqual({ tone: "active", text: "Waiting for CodeRabbit's next review, 1 comment answered" });
+  expect(line?.waitingOn).toEqual({ kind: "re_review", nodeKey: "pr", since: answered });
 });
 
 test("a run with no open permission request has no wait on its line", async () => {

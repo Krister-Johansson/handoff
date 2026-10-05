@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { Clock } from "@/components/clock";
 import { ChevronRightIcon } from "lucide-react";
 import { formatCost, formatDuration } from "@/lib/format";
 import { statusTone, type StatusTone } from "@/lib/status";
@@ -16,6 +18,8 @@ export type StepView = {
   error?: string | undefined;
   /** The edge that started this execution, when an edge did. */
   via?: string | null | undefined;
+  /** While a PR step waits for a reviewer's next review after handoff's answers: whose, on how many comments, since when, and when it asks a person. */
+  reReview?: { whose: string; items: number; since: string; until: string | null } | undefined;
 };
 
 const DOT: Record<StatusTone, string> = {
@@ -28,8 +32,23 @@ const DOT: Record<StatusTone, string> = {
   neutral: "bg-muted-foreground/50",
 };
 
-function outcome(step: StepView): { text: string; danger?: boolean } | undefined {
+function outcome(step: StepView): { text: ReactNode; danger?: boolean } | undefined {
   if (step.error) return { text: step.error, danger: true };
+  if (step.status === "waiting" && step.reReview) {
+    const { whose, items, since, until } = step.reReview;
+    return {
+      text: (
+        <>
+          Waiting for {whose} on {items} {items === 1 ? "comment" : "comments"} since <Clock at={since} />
+          {until && (
+            <>
+              ; asks you at <Clock at={until} />
+            </>
+          )}
+        </>
+      ),
+    };
+  }
   if (step.summary) return { text: step.summary };
   if (step.status === "running") return { text: "Working…" };
   if (step.status === "waiting") return { text: "Waiting…" };
@@ -63,12 +82,14 @@ export function Steps({
         const label = labels[step.nodeKey] ?? step.nodeKey;
         const meta = [formatDuration(step.durationMs), formatCost(step.costUsd)].filter(Boolean).join(" · ");
         const selected = step.id === selectedId;
+        // Waiting for a reviewer after handoff's answers needs nobody yet, so it reads as work in progress.
+        const reviewWait = step.status === "waiting" && step.reReview !== undefined;
         return (
           <li key={step.id} className="grid grid-cols-[16px_minmax(0,1fr)] gap-3">
             <span aria-hidden className="relative flex justify-center">
               {/* The rail down to the next step's dot */}
               {i < steps.length - 1 && <span className="absolute top-6 -bottom-1 w-px bg-border" />}
-              <span className={cn("relative top-[15px] size-[9px] rounded-full ring-3 ring-card", DOT[statusTone(step.status)])} />
+              <span className={cn("relative top-[15px] size-[9px] rounded-full ring-3 ring-card", DOT[reviewWait ? "active" : statusTone(step.status)])} />
             </span>
             <button
               type="button"
@@ -93,7 +114,7 @@ export function Steps({
                 {line && <span className={cn("mt-px truncate text-[12.5px]", line.danger ? "text-danger" : "text-muted-foreground")}>{line.text}</span>}
               </span>
               {meta && <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums">{meta}</span>}
-              <StatusBadge status={step.status} />
+              {reviewWait ? <StatusBadge status={step.status} label="waiting on review" tone="active" /> : <StatusBadge status={step.status} />}
               <ChevronRightIcon aria-hidden className={cn("hidden size-4 shrink-0 text-muted-foreground sm:block", selected ? "opacity-100" : "opacity-0 group-hover:opacity-100")} />
             </button>
           </li>

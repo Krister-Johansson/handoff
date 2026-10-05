@@ -88,6 +88,14 @@ export async function sendItems(db: Db, rows: ReviewItemRow[], findings: Finding
   return sent.map((r) => ({ ...r, round }));
 }
 
+/** Records, for each thread item, whether GitHub now shows its thread as outdated, for the run page to mark. */
+export async function recordOutdated(db: Db, runId: string, snapshot: PrSnapshot) {
+  for (const item of await listItems(db, runId)) {
+    const thread = item.kind === "thread" ? snapshot.reviewThreads.find((t) => t.id === item.githubId) : undefined;
+    if (thread && thread.isOutdated !== item.outdated) await change(db, item, { outdated: thread.isOutdated });
+  }
+}
+
 /** Whether any finding is new, or an item still open, or one a person sent back (`also`): something a round would send to the coder. */
 export async function hasUnsent(db: Db, runId: string, findings: Finding[], also: ReadonlySet<string> = new Set()): Promise<boolean> {
   const rows = await listItems(db, runId);
@@ -123,7 +131,7 @@ export function withItems(feedback: Feedback, items: ReviewItemRow[], snapshot?:
     const thread = r.kind === "thread" && r.verdict !== null ? snapshot?.reviewThreads.find((t) => t.id === r.githubId) : undefined;
     // A summary item has no thread: handoff says why it came back.
     const relisted: ThreadEntry[] =
-      r.stateReason === SUMMARY_STILL_LISTS ? [{ author: "handoff", body: `Fixed in ${(r.fixCommit ?? "").slice(0, 7)}. ${r.reviewer}'s summary of the fix still lists this.` }] : [];
+      r.stateReason === SUMMARY_STILL_LISTS ? [{ author: "handoff", body: `${r.fixCommit ? `Fixed in ${r.fixCommit.slice(0, 7)}.` : "Fixed."} ${r.reviewer}'s summary of the fix still lists this.` }] : [];
     return [...(thread ? conversationOf(thread) : []), ...relisted, ...(notes.get(handleOf(r)) ?? [])];
   };
   return {
@@ -219,7 +227,7 @@ function itemLink(item: ReviewItemRow): string {
 
 /**
  * An item's answer as handoff posts it: its first line says what the coder found ("Valid. Fixed in
- * <commit>.", "Not changed: the comment does not hold.", "Unclear: <question>", or "Same point as <link>."),
+ * <commit>.", or "Valid. Fixed." for a summary item fixed without one, "Not changed: the comment does not hold.", "Unclear: <question>", or "Same point as <link>."),
  * and the evidence follows as the coder wrote it, cut at `limit`.
  */
 export function answerText(item: ReviewItemRow, items: ReviewItemRow[], repo: RepoRef, limit = EVIDENCE_LIMIT): string {
@@ -227,8 +235,9 @@ export function answerText(item: ReviewItemRow, items: ReviewItemRow[], repo: Re
   const withEvidence = (first: string) => (evidence ? `${first}\n\n${evidence}` : first);
   switch (item.verdict) {
     case "fixed": {
-      const commit = item.fixCommit ?? "";
-      return withEvidence(`Valid. Fixed in [${commit.slice(0, 7)}](https://github.com/${repo.owner}/${repo.name}/commit/${commit}).`);
+      // A summary note or pre-merge check can be fixed without a commit, such as through the title; the evidence says how.
+      const commit = item.fixCommit;
+      return withEvidence(commit ? `Valid. Fixed in [${commit.slice(0, 7)}](https://github.com/${repo.owner}/${repo.name}/commit/${commit}).` : "Valid. Fixed.");
     }
     case "unclear":
       return `Unclear: ${evidence}`;
@@ -564,7 +573,7 @@ export async function settleItems(deps: Deps, ctx: Ctx, input: { repo: RepoRef; 
 export async function awaitingReview(deps: Deps, ctx: Ctx, input: { snapshot: PrSnapshot; settings: ReviewThreadsSettings; now: number }) {
   const { snapshot, settings, now } = input;
   const items = (await listItems(deps.db, ctx.run.id)).filter((i) => i.state === "awaiting_review" && i.kind === "thread" && i.stateReason === null);
-  const held: ReviewItemRow[] = [];
+  const held: (ReviewItemRow & { dueAt: number })[] = [];
   const overdue: { item: ReviewItemRow; limitMinutes: number }[] = [];
   let until: number | undefined;
   for (const item of items) {
@@ -580,7 +589,7 @@ export async function awaitingReview(deps: Deps, ctx: Ctx, input: { snapshot: Pr
       overdue.push({ item, limitMinutes: Math.round(limit / 60_000) });
       continue;
     }
-    held.push(item);
+    held.push({ ...item, dueAt: due });
     until = Math.min(until ?? Infinity, due);
   }
   // A person decides about an item its reviewer left alone: handoff asks rather than resolving it on its own.

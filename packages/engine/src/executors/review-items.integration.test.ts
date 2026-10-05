@@ -285,6 +285,24 @@ test("review summaries, summary notes and pre-merge checks are answered in one P
   expect(github.merged).toEqual([1]);
 });
 
+test("a pre-merge check fixed through the title without a commit is answered as fixed, with what changed", async () => {
+  const title = { name: "Title check", explanation: "The title names the branch, not the change it makes.", resolution: "Use a title that says what the change does for users." };
+  const answer: Answer = (item) => (item.kind === "pre_merge_check" ? { verdict: "fixed", evidence: 'The PR title is now "Add a CHANGELOG.md with the release date".' } : decline(item, undefined as never));
+  const github = new FakeGitHub();
+  const { run, wake, pr } = await opened(withSummary, answeringCoder(answer), github);
+  const head = pr().headSha;
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+  github.summaryComment(1, summaryOf(head, { note: "The changelog omits the date of the release.", failed: [title] }));
+  await wake();
+
+  const said = pr().comments.find((c) => c.body.includes("<!-- handoff:item-answers"))!.body;
+  expect(said).toContain('**Pre-merge check by coderabbitai:** Title check (warning)');
+  expect(said).toMatch(/^Valid\. Fixed\.$/m);
+  expect(said).toContain('The PR title is now "Add a CHANGELOG.md with the release date".');
+  expect(said).not.toContain("Fixed in");
+  expect((await itemsOf(run.id)).R2).toMatchObject({ verdict: "fixed", fixCommit: null });
+});
+
 test("a summary note that finds no merge-blocking issue under a Minimal risk is not sent to the coder", async () => {
   const { github, run, wake, pr } = await opened(withSummary, answeringCoder(decline));
   github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
@@ -398,6 +416,15 @@ test("a review from the same reviewer after the reply that opens no thread on th
   expect(github.merged).toEqual([1]);
   // The declined round asked for no review: the request goes out once per new commit, and this one had it already.
   expect(pr().comments.filter((c) => c.body.includes("<!-- handoff:review-request"))).toHaveLength(1);
+});
+
+test("an item records whether GitHub shows its thread as outdated, and nothing else follows from it", async () => {
+  const { run, wake, thread } = await declined();
+  expect((await itemsOf(run.id)).R1?.outdated).toBe(false);
+  thread().isOutdated = true;
+  await wake();
+  expect((await itemsOf(run.id)).R1).toMatchObject({ outdated: true, state: "awaiting_review" });
+  expect(thread().isResolved).toBe(false);
 });
 
 /** A FakeGitHub whose reviewer reviews the pushed commit just before handoff's reply reaches the thread. */
@@ -536,6 +563,12 @@ test("the step reports waiting_on re_review while items wait", async () => {
   // The step's last word on GitHub in its latest look, which the dashboard and get_run read as waiting_on re_review.
   const mine = events.filter((e) => e.nodeExecutionId === step.id && e.type.startsWith("github."));
   expect(mine.at(-1)).toMatchObject({ type: "github.re_review", payload: { reviewers: ["coderabbitai"], items: ["R1"] } });
+  // When the wait ends and a person is asked: the review time limit, 30 minutes, after handoff's answer.
+  const answered = (await itemsOf(run.id)).R1!.repliedAt!;
+  const until = Date.parse((mine.at(-1)!.payload as { until: string }).until);
+  expect(Math.abs(until - (answered.getTime() + 30 * 60_000))).toBeLessThan(5_000);
+  // And when each item's wait ends.
+  expect((mine.at(-1)!.payload as { due: Record<string, string> }).due).toEqual({ R1: new Date(until).toISOString() });
 });
 
 /** The coder's answer to a review comment that came back with the reviewer's reply: settled when the reply accepts the answer. */
@@ -698,11 +731,11 @@ test("send back gives the coder the item with the person's note as a decision", 
   expect((await inspect(db, run.id)).events.find((e) => e.type === "github.item_sent_back")?.payload).toMatchObject({ item: "R1", by: "krister" });
 });
 
-test("a fixed summary note that the next summary still lists goes back to the coder once, then a person decides", async () => {
+test("a fixed summary note that the next summary still lists goes back to the coder once, then a person decides, and Mark done posts nothing", async () => {
   const note = "The changelog omits the date of the release, which the release workflow reads.";
   let fixes = 0;
   const fixing: Answer = (_item, ctx) => ({ verdict: "fixed", evidence: "CHANGELOG.md has the date now.", commit: commitChange(ctx, `Date the release ${++fixes}`) });
-  const { github, run, wake, pr } = await opened(withSummary, answeringCoder(fixing));
+  const { github, run, wake, pr, answer } = await opened(withSummary, answeringCoder(fixing));
   const reviewed = () => {
     github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
     github.summaryComment(1, summaryOf(pr().headSha, { note }));
@@ -727,6 +760,13 @@ test("a fixed summary note that the next summary still lists goes back to the co
   expect(question?.context).toMatchObject({ items: [expect.objectContaining({ id: "R1", kind: "summary_note", why: "disputed", verdict: "fixed" })] });
   expect((await itemsOf(run.id)).R1).toMatchObject({ state: "disputed", questionId: question!.id });
   expect(github.merged).toEqual([]);
+
+  // Mark done: the note has no thread, so handoff posts nothing on GitHub and only records the person's choice.
+  const comments = pr().comments.length;
+  await answer({ answer: "Done.", items: [{ id: "R1", choice: "resolve", note: "The release workflow reads the date from the tag." }] });
+  expect(pr().comments).toHaveLength(comments);
+  expect(pr().reviewThreads).toEqual([]);
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "resolved", resolvedBy: "krister" });
 });
 
 test("an unclear answer is posted to the reviewer first, and a second unclear goes to a person", async () => {
