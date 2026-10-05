@@ -3,6 +3,7 @@ export * from "./errors.ts";
 export * from "./verify-signature.ts";
 export * from "./webhook-events.ts";
 export * from "./feedback.ts";
+export * from "./coderabbit-summary.ts";
 export * from "./octokit-client.ts";
 export * from "./from-env.ts";
 export * from "./projects/types.ts";
