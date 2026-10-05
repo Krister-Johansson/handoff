@@ -106,6 +106,43 @@ test("a step gives up the Claude slot while its prompt waits, and takes it back 
   expect(planner).toMatchObject({ status: "passed", waitingOn: null });
 });
 
+/** A planner that records how long its permission server waits for a person, then finishes. */
+function timeoutRecorder() {
+  const waits: string[] = [];
+  const cli = new FakeCliExecutor([
+    async (request: CliRunRequest, options: CliRunOptions): Promise<CliRunResult> => {
+      waits.push((JSON.parse(readFileSync(request.mcpConfigPath!, "utf8")) as McpConfig).mcpServers.handoff!.args[2]!);
+      await options.onSessionId?.(request.session.id);
+      return { outcome: "success", exitCode: 0, stderrTail: "", sessionId: request.session.id, structuredOutput: outputs.planner, validated: outputs.planner };
+    },
+  ]);
+  return { cli, waits };
+}
+
+test("a step's permission server waits 10 minutes for a person in a project that keeps the default", async () => {
+  const { cli, waits } = timeoutRecorder();
+  await runPlanner(cli);
+  expect(waits).toEqual(["600000"]);
+});
+
+test("a step's permission server waits as long as its project's permission timeout says", async () => {
+  const { cli, waits } = timeoutRecorder();
+  const { project } = await startRun(db, linear);
+  await db.update(projects).set({ permissionTimeoutMinutes: 3 }).where(eq(projects.id, project.id));
+  await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 10, timeoutMs: 60_000, permissions: { db } }), coder: scripted({ kind: "waiting", wait: { kind: "human", token: crypto.randomUUID() } }) }));
+  expect(waits).toEqual(["180000"]);
+});
+
+test("a project's permission timeout is a whole number of minutes from 1 to 120", async () => {
+  const { project } = await startRun(db, linear);
+  for (const minutes of [0, 121]) {
+    await expect(db.update(projects).set({ permissionTimeoutMinutes: minutes }).where(eq(projects.id, project.id))).rejects.toThrow();
+  }
+  await db.update(projects).set({ permissionTimeoutMinutes: 120 }).where(eq(projects.id, project.id));
+  const [row] = await db.select({ minutes: projects.permissionTimeoutMinutes }).from(projects).where(eq(projects.id, project.id));
+  expect(row!.minutes).toBe(120);
+});
+
 test("a request nobody answered expires when the step ends", async () => {
   const { cli } = asking();
   const run = await runPlanner(cli);

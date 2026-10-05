@@ -1,3 +1,9 @@
+/**
+ * A project's permission timeout in minutes: how long a step waits for an answer to a permission request
+ * before it is denied and the step goes on. The projects column's default and check match it.
+ */
+export const PERMISSION_TIMEOUT_MINUTES = { min: 1, max: 120, default: 10 } as const;
+
 /** What a permission request asks, in words. */
 export type PermissionDescription = {
   /** The action, for a title: "asks to run a command". */

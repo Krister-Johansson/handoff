@@ -1,5 +1,5 @@
 import { and, edgeTraversals, eq, events, graphs, graphVersions, inArray, isNull, nodeExecutions, notifications, projects, questions, runs, sql, type Db } from "@handoff/db";
-import { planBudgetOf } from "@handoff/core";
+import { PERMISSION_TIMEOUT_MINUTES, planBudgetOf } from "@handoff/core";
 import { moveProject, type MoveProjectDeps } from "@handoff/engine/move-project";
 import type { ProjectsPort } from "@handoff/github";
 import { planFieldsOf, type PlanFieldsPresent } from "../lib/plan/plan-fields.ts";
@@ -17,7 +17,20 @@ type ProjectEdit = {
   demoSeedCommand?: string;
   /** Globs, one a line. */
   uiPaths?: string;
+  /** Minutes as typed; empty takes the default. */
+  permissionTimeoutMinutes?: string;
 };
+
+/** The permission timeout as typed: the default when empty, refused unless a whole number of minutes in range; undefined leaves the column as it is. */
+function permissionTimeout(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const { min, max, default: fallback } = PERMISSION_TIMEOUT_MINUTES;
+  const text = value.trim();
+  if (!text) return fallback;
+  const minutes = Number(text);
+  if (!Number.isInteger(minutes) || minutes < min || minutes > max) throw new Error(`The permission timeout is a whole number of minutes from ${min} to ${max}.`);
+  return minutes;
+}
 
 const MAX_BUDGET = 500;
 
@@ -82,7 +95,7 @@ function optionalText(value: string | undefined, max: number, what: string): str
 
 /**
  * Renames a project and changes its default branch, setup and teardown commands, agent notes, demo
- * seed command and UI paths. Agent notes are free text every agent step reads, so they must never hold secrets.
+ * seed command, UI paths and permission timeout. Agent notes are free text every agent step reads, so they must never hold secrets.
  */
 export async function updateProject(db: Db, projectId: string, input: ProjectEdit) {
   const name = input.name.trim();
@@ -97,6 +110,7 @@ export async function updateProject(db: Db, projectId: string, input: ProjectEdi
     agentNotes: optionalText(input.agentNotes, 4_000, "agent notes"),
     demoSeedCommand: optionalText(input.demoSeedCommand, 2_000, "demo seed command"),
     uiPaths: globLines(input.uiPaths),
+    permissionTimeoutMinutes: permissionTimeout(input.permissionTimeoutMinutes),
   };
   const changed = Object.fromEntries(Object.entries(optional).filter(([, value]) => value !== undefined));
   await db.update(projects).set({ name, defaultBranch, ...changed, updatedAt: new Date() }).where(eq(projects.id, projectId));
@@ -109,7 +123,7 @@ export type PlanLink = { number: number; title?: string; url?: string; fields?: 
 
 /**
  * Every project as Settings, Projects lists it, by name: repository, default branch, setup and
- * teardown commands, agent notes, demo seed command, UI paths, plan mode, run count and the plan's GitHub Project. The Project's title, url and fields are read from GitHub; without
+ * teardown commands, agent notes, demo seed command, UI paths, permission timeout, plan mode, run count and the plan's GitHub Project. The Project's title, url and fields are read from GitHub; without
  * access, or when GitHub does not answer, the link keeps only its number.
  */
 export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined) {
@@ -125,6 +139,7 @@ export async function projectsForSettings(db: Db, plan: ProjectsPort | undefined
       agentNotes: projects.agentNotes,
       demoSeedCommand: projects.demoSeedCommand,
       uiPaths: projects.uiPaths,
+      permissionTimeoutMinutes: projects.permissionTimeoutMinutes,
       isDemo: projects.isDemo,
       planMode: projects.planMode,
       planProjectNumber: projects.planProjectNumber,

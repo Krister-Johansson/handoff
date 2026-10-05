@@ -59,6 +59,7 @@ export async function updateProjectAction(_: ActionState, form: FormData): Promi
     agentNotes: field(form, "agentNotes"),
     demoSeedCommand: field(form, "demoSeedCommand"),
     uiPaths: field(form, "uiPaths"),
+    permissionTimeoutMinutes: field(form, "permissionTimeoutMinutes"),
   };
   try {
     await updateProject(getDb(), projectId, values);

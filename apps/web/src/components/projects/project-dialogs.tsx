@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useEffect } from "react";
-import { DEFAULT_UI_PATHS } from "@handoff/core";
+import { DEFAULT_UI_PATHS, PERMISSION_TIMEOUT_MINUTES } from "@handoff/core";
 import { deleteProjectAction, updateProjectAction, type ActionState } from "@/app/projects/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,9 +31,14 @@ export type ProjectSummary = {
   agentNotes?: string | null;
   demoSeedCommand?: string | null;
   uiPaths?: string[] | null;
+  /** Minutes a step waits for an answer to a permission request; the default when missing. */
+  permissionTimeoutMinutes?: number;
 };
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** What a field of the edit form shows: what was typed when the save was refused, else what is stored. */
+const shown = (state: ActionState, key: string, stored: string | number | null | undefined) => state.values?.[key] ?? stored ?? "";
 
 /** Closes a dialog once its action reports success. */
 function useCloseOnSuccess(state: ActionState, onOpenChange: (open: boolean) => void) {
@@ -62,11 +67,11 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
           <FieldGroup>
             <Field data-invalid={state.error ? true : undefined}>
               <FieldLabel htmlFor={`edit-name-${project.id}`}>Name</FieldLabel>
-              <Input id={`edit-name-${project.id}`} name="name" defaultValue={state.values?.name ?? project.name} />
+              <Input id={`edit-name-${project.id}`} name="name" defaultValue={shown(state, "name", project.name)} />
             </Field>
             <Field>
               <FieldLabel htmlFor={`edit-branch-${project.id}`}>Default branch</FieldLabel>
-              <Input id={`edit-branch-${project.id}`} name="defaultBranch" defaultValue={state.values?.defaultBranch ?? project.defaultBranch} />
+              <Input id={`edit-branch-${project.id}`} name="defaultBranch" defaultValue={shown(state, "defaultBranch", project.defaultBranch)} />
             </Field>
             <Field>
               <FieldLabel htmlFor={`edit-setup-${project.id}`}>Setup command</FieldLabel>
@@ -75,7 +80,7 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 name="setupCommand"
                 className="font-mono"
                 placeholder="pnpm install --frozen-lockfile"
-                defaultValue={state.values?.setupCommand ?? project.setupCommand ?? ""}
+                defaultValue={shown(state, "setupCommand", project.setupCommand)}
               />
               <FieldDescription>
                 Runs once in each run&apos;s worktree before its first step there, for example to install dependencies. It sees HANDOFF_RUN_ID, HANDOFF_RUN_SHORT and
@@ -89,7 +94,7 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 name="teardownCommand"
                 className="font-mono"
                 placeholder="dropdb --if-exists app_test_$HANDOFF_RUN_SHORT"
-                defaultValue={state.values?.teardownCommand ?? project.teardownCommand ?? ""}
+                defaultValue={shown(state, "teardownCommand", project.teardownCommand)}
               />
               <FieldDescription>Runs in the worktree just before handoff removes it, to drop what the setup command made for the run.</FieldDescription>
             </Field>
@@ -100,7 +105,7 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 name="agentNotes"
                 rows={3}
                 placeholder="The database container is shared and already running."
-                defaultValue={state.values?.agentNotes ?? project.agentNotes ?? ""}
+                defaultValue={shown(state, "agentNotes", project.agentNotes)}
               />
               <FieldDescription>Every agent step reads these facts about the project&apos;s environment. Do not put secrets here: the notes are stored as plain text.</FieldDescription>
             </Field>
@@ -111,7 +116,7 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 name="demoSeedCommand"
                 className="font-mono"
                 placeholder="pnpm db:seed"
-                defaultValue={state.values?.demoSeedCommand ?? project.demoSeedCommand ?? ""}
+                defaultValue={shown(state, "demoSeedCommand", project.demoSeedCommand)}
               />
               <FieldDescription>Runs in the worktree before a demo starts the app, after the services in the compose file are up, so the demo has data to show.</FieldDescription>
             </Field>
@@ -123,12 +128,26 @@ export function EditProjectDialog({ project, open, onOpenChange }: { project: Pr
                 rows={3}
                 className="font-mono"
                 placeholder="apps/web/**"
-                defaultValue={state.values?.uiPaths ?? project.uiPaths?.join("\n") ?? ""}
+                defaultValue={shown(state, "uiPaths", project.uiPaths?.join("\n"))}
               />
               <FieldDescription>
                 Globs, one a line, of the files a person sees in the app. A demo set to UI changes skips a change that touches none of them. Empty means{" "}
                 <span className="font-mono">{DEFAULT_UI_PATHS.join(" ")}</span>.
               </FieldDescription>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`edit-permission-timeout-${project.id}`}>Permission timeout</FieldLabel>
+              <Input
+                id={`edit-permission-timeout-${project.id}`}
+                name="permissionTimeoutMinutes"
+                type="number"
+                inputMode="numeric"
+                min={PERMISSION_TIMEOUT_MINUTES.min}
+                max={PERMISSION_TIMEOUT_MINUTES.max}
+                className="w-28"
+                defaultValue={shown(state, "permissionTimeoutMinutes", project.permissionTimeoutMinutes ?? PERMISSION_TIMEOUT_MINUTES.default)}
+              />
+              <FieldDescription>How long a step waits for an answer to a permission request before it is denied and the step goes on.</FieldDescription>
             </Field>
             {state.error && <FieldError>{state.error}</FieldError>}
           </FieldGroup>

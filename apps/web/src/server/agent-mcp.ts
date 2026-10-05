@@ -479,6 +479,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         graphs: detail.graphs.map((g) => ({ name: g.name, latest_version: g.latestVersion })),
         default_graph: detail.defaultGraph ?? null,
         plan_mode: detail.project.planMode,
+        permission_timeout_minutes: detail.project.permissionTimeoutMinutes,
         recent_runs: recent.map((r) => ({
           id: r.id,
           task: r.task,

@@ -167,7 +167,7 @@ export const CATALOG: ToolSpec[] = [
     name: "get_project",
     title: "Show a project",
     description:
-      "A project's graphs with their latest versions, the graph new runs use by default, its plan mode (flow: an order of tasks and their blockers, no dates; timeline: dates and estimates), and its latest runs with the graph version each runs on.",
+      "A project's graphs with their latest versions, the graph new runs use by default, its plan mode (flow: an order of tasks and their blockers, no dates; timeline: dates and estimates), its permission timeout in minutes (how long a step waits for an answer to a permission request before it is denied and the step goes on; a person changes it in Settings, Projects), and its latest runs with the graph version each runs on.",
     input: z.object({ project }),
     kind: "data",
     confirm: false,
