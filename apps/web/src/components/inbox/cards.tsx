@@ -23,6 +23,7 @@ const REASONS: Record<string, string> = {
   loop_exhausted: "A retry loop ran out of attempts",
   approval: "Approval requested",
   try: "Try the app",
+  review_items: "Review comments need a decision",
 };
 
 type Tone = "neutral" | "active" | "attention" | "danger" | "success";

@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
-import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, permissionWaits, planPins, projects, questions, type Db, type PermissionWait, type QuestionComment } from "@handoff/db";
+import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, permissionWaits, planPins, projects, questions, reviewItems, type Db, type PermissionWait, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop, unlinkIssue } from "@handoff/engine/operations";
 import type { GitHubPort, PlanSize, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlannedItem, type PlanProgress, type PlanTask, type PlanView } from "./plan";
@@ -220,12 +220,36 @@ async function answeredGates(db: Db, runId: string) {
     .orderBy(asc(questions.answeredAt));
 }
 
+/**
+ * The run's review items, by handle: what each reviewer said, the coder's verdict and evidence, the
+ * fixing commit, handoff's reply on GitHub, and where the item stands.
+ */
+async function reviewItemsOf(db: Db, runId: string) {
+  const rows = await db.select().from(reviewItems).where(eq(reviewItems.runId, runId)).orderBy(asc(reviewItems.handle));
+  return rows.map((r) => ({
+    id: `R${r.handle}`,
+    kind: r.kind,
+    reviewer: r.reviewer,
+    path: r.path,
+    line: r.line,
+    url: r.url,
+    verdict: r.verdict,
+    evidence: r.evidence,
+    commit: r.fixCommit,
+    reply_url: r.replyUrl,
+    state: r.state,
+    state_reason: r.stateReason,
+    resolved_by: r.resolvedBy,
+    question_id: r.questionId,
+  }));
+}
+
 /** A run as the agent needs it: where it stands, its steps, PR, issues, open questions and failure. */
 async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const [stuck, prompts, demoSummary, answered, states, findings, waits] = await Promise.all([
+  const [stuck, prompts, demoSummary, answered, states, findings, waits, items] = await Promise.all([
     stuckLoop(deps.db, run.id),
     pendingPermissions(deps.db, run.id),
     latestDemoSummary(deps.db, run.id),
@@ -233,6 +257,7 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     stepStates(deps.db, executions.map((e) => e.id)),
     Promise.all(openQuestions.map((q) => reviewFindingsOf(deps.db, { ...q, runId: run.id }))),
     permissionWaits(deps.db, [run.id]),
+    reviewItemsOf(deps.db, run.id),
   ]);
   const costs = executions.map((e) => (e.costUsd === null ? null : Number(e.costUsd)));
   return {
@@ -277,6 +302,8 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
         // A code review's findings, by index from 1: answer_question sends the Fix now ones back with changes or fix.
         ...(found?.length ? { findings: found.map((f, n) => ({ index: n + 1, severity: f.severity, path: f.path, ...(f.line !== undefined ? { line: f.line } : {}), body: f.body, fix_now: fixNowByDefault(f) })) } : {}),
         ...((q.context as { reason?: string }).reason === "try" ? { try: tryItOf(deps, run, q, demoSummary) } : {}),
+        // Review comments handoff cannot settle: both sides of each, and answer_question takes a choice per item by its id.
+        ...((q.context as { reason?: string }).reason === "review_items" ? { items: (q.context as { items?: unknown[] }).items ?? [] } : {}),
       };
     }),
     // Each with its whole command, which notifications cut short; answer_permission answers it.
@@ -296,6 +323,8 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
       answered_by: q.answeredBy,
       answered_at: q.answeredAt?.toISOString() ?? null,
     })),
+    // What external reviewers said on the pull request, the coder's answers, and where each stands.
+    review_items: items,
     // A loop that used all its attempts stops the run without a failed step; resolve_loop decides what next.
     stuck: stuck ? { node: stuck.nodeKey, loop: stuck.edgeKey, attempts: stuck.attempts, ...lastReviewOf(executions.find((e) => e.id === stuck.executionId)?.output) } : null,
   };
@@ -643,10 +672,26 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { dismissed: true };
     },
 
-    answer_question: async ({ question_id, findings, ...input }: { question_id: string; answer?: string; option?: string; comments?: QuestionComment[]; criteria?: CriterionVerdict[]; findings?: number[] }) => {
+    answer_question: async ({
+      question_id,
+      findings,
+      items,
+      ...input
+    }: {
+      question_id: string;
+      answer?: string;
+      option?: string;
+      comments?: QuestionComment[];
+      criteria?: CriterionVerdict[];
+      findings?: number[];
+      items?: { id: string; choice: string; note?: string }[];
+    }) => {
       const [question] = await db.select({ options: questions.options, context: questions.context }).from(questions).where(eq(questions.id, question_id));
       if (!question) throw new Error(`question ${question_id} not found`);
-      const { answer, option, comments } = input.criteria ? tryItAnswer(question.context, input.criteria, input.answer) : input;
+      const given = input.criteria ? tryItAnswer(question.context, input.criteria, input.answer) : input;
+      const { option, comments } = given;
+      // Choices per item say it all; the answer then lists them, as the run's answered questions show it.
+      const answer = given.answer?.trim() ? given.answer : items?.length ? items.map((i) => `${i.id}: ${i.choice}.${i.note?.trim() ? ` ${i.note.trim()}` : ""}`).join("\n") : given.answer;
       if (!answer?.trim()) throw new Error("Give the answer.");
       if (option !== undefined && !(question.options ?? []).includes(option)) {
         throw new Error(question.options?.length ? `The question takes one of ${question.options.join(", ")}; "${option}" is not one of them.` : `The question has no options; answer it in words without "${option}".`);
@@ -658,7 +703,14 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         return { answered: true, run_id: asked!.runId, url: await urlOf(asked!.runId) };
       }
       // The tool numbers findings from 1, as get_run lists them.
-      const row = await answerQuestion(db, question_id, { answer, ...(option ? { option } : {}), ...(comments?.length ? { comments } : {}), ...(findings ? { findings: findings.map((n) => n - 1) } : {}), answeredBy: actor });
+      const row = await answerQuestion(db, question_id, {
+        answer,
+        ...(option ? { option } : {}),
+        ...(comments?.length ? { comments } : {}),
+        ...(findings ? { findings: findings.map((n) => n - 1) } : {}),
+        ...(items?.length ? { items } : {}),
+        answeredBy: actor,
+      });
       return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
     },
 

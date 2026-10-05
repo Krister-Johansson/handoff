@@ -44,6 +44,11 @@ export const reviewItems = pgTable(
     duplicateOf: integer("duplicate_of"),
     /** When re-raised: the handle of the item for the reviewer's new thread on the same lines, which this one follows. */
     reraisedAs: integer("reraised_as"),
+    /**
+     * How often the item went back to the coder after an answer: the reviewer replied, a person sent it back,
+     * or the next summary still listed a fixed summary item, which goes back once and then to a person.
+     */
+    returns: integer("returns").notNull().default(0),
     replyCommentId: text("reply_comment_id"),
     replyUrl: text("reply_url"),
     replyHeadSha: text("reply_head_sha"),
