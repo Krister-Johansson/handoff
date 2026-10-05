@@ -42,7 +42,7 @@ pnpm dev:web
 pnpm dev:webhooks owner/repo   # relays that repo's webhooks to localhost (gh extension cli/gh-webhook)
 pnpm dev:worker     # needs CLAUDE_CODE_OAUTH_TOKEN and GITHUB_TOKEN (or a GitHub App) in .env
 pnpm demo           # seeds a demo run with simulated Claude events
-pnpm handoff <cmd>  # project add, graph import, run, runs, answer, run repair|cancel, library, gc
+pnpm handoff <cmd>  # project add, graph import, run, runs, answer, run repair|cancel|unlink, library, gc
 pnpm docker:runner  # builds the runner image for HANDOFF_WORKSPACE=docker
 pnpm --filter @handoff/github codegen   # after editing packages/github/src/queries/*.graphql
 pnpm build:mcp-apps # after editing apps/web/src/mcp-apps; writes the views' HTML (one shared script) that /api/mcp and the assistant panel serve, and the sandbox proxy

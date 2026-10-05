@@ -5,7 +5,7 @@ import { parseSkillMarkdown, suggestProjectName, validateGraphForSave, type Link
 import { importSkillRepository } from "@handoff/engine/library-import";
 import { moveProject } from "@handoff/engine/move-project";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, permissionWaits, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
-import { answerQuestion, cancelRun, createRun, GitWorktreeProvider, repairNodeExecution } from "@handoff/engine";
+import { answerQuestion, cancelRun, createRun, GitWorktreeProvider, repairNodeExecution, unlinkIssue } from "@handoff/engine";
 import { gitHubFromEnv, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
 import { dashboardAssistantHome, gcAssistantConversations, gcClaudeSessions, gcFailedWorktrees } from "./gc.ts";
 
@@ -20,6 +20,7 @@ const USAGE = `usage:
   handoff runs
   handoff run cancel <runId>
   handoff run repair <runId> --node <key> [--note "<text>"] [--latest-graph]
+  handoff run unlink <runId> <issue>
   handoff answer <questionId> "<answer>" [--option <option>]
   handoff library import-skill <dir-with-SKILL.md>
   handoff library import-repo <owner/name> [--group <name>]
@@ -126,6 +127,19 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     const projects = io.projects === undefined ? projectsFromEnv() : (io.projects ?? undefined);
     await cancelRun(db, runId, { reason: "cancelled from the CLI", projects });
     out(`run ${runId} cancelled`);
+    return;
+  }
+
+  if (command === "run" && sub === "unlink") {
+    const [runId, ref] = rest;
+    const issue = Number(ref?.replace(/^#/, ""));
+    if (!runId || !Number.isInteger(issue) || issue <= 0) throw new Error(USAGE);
+    // Its pull request stops closing the issue, and a task the run moved goes back on the plan.
+    const github = io.github === undefined ? gitHubFromEnv() : (io.github ?? undefined);
+    const projects = io.projects === undefined ? projectsFromEnv() : (io.projects ?? undefined);
+    const unlinked = await unlinkIssue(db, runId, issue, { by: "cli", github, projects });
+    const parts = [`run ${runId} no longer links #${issue}`, ...(unlinked.pr !== null ? [`pull request #${unlinked.pr} no longer closes it`] : []), ...(unlinked.status ? [`its Status is ${unlinked.status} again`] : [])];
+    out(parts.join("; "));
     return;
   }
 

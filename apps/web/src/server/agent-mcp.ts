@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
 import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, permissionWaits, planPins, projects, questions, type Db, type PermissionWait, type QuestionComment } from "@handoff/db";
-import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop } from "@handoff/engine/operations";
+import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop, unlinkIssue } from "@handoff/engine/operations";
 import type { GitHubPort, PlanSize, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlannedItem, type PlanProgress, type PlanTask, type PlanView } from "./plan";
 import { writeOrder } from "./flow-order";
@@ -708,6 +708,11 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     cancel_run: async ({ run_id, reason }: { run_id: string; reason?: string }) => {
       await cancelRun(db, run_id, { ...(reason ? { reason } : {}), projects: plan });
       return { cancelled: true, url: await urlOf(run_id) };
+    },
+
+    unlink_issue: async ({ run_id, issue }: { run_id: string; issue: number }) => {
+      const unlinked = await unlinkIssue(db, run_id, issue, { by: actor, github, projects: plan });
+      return { unlinked: unlinked.issue, pr: unlinked.pr, status: unlinked.status, url: await urlOf(run_id) };
     },
 
     run_again: async ({ run_id, from }: { run_id: string; from?: RunAgainFrom }) => {

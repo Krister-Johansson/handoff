@@ -38,16 +38,18 @@ test("tools that change state are marked confirm and never read only", () => {
     "setup_plan",
     "start_run",
     "start_scheduler",
+    "unlink_issue",
   ]);
   for (const spec of CATALOG) if (spec.confirm) expect(spec.readOnly).toBe(false);
   expect(toolSpec("dismiss_attention")).toMatchObject({ confirm: false, readOnly: false });
   expect(toolSpec("list_runs")).toMatchObject({ confirm: false, readOnly: true });
 });
 
-test("summarize names the run and the project for request_merge and cancel_run", () => {
+test("summarize names the run and the project for request_merge, cancel_run and unlink_issue", () => {
   expect(toolSpec("request_merge").summarize({ run_id: "7f3a1b2c-0000-4000-8000-000000000000" })).toBe("Merge the pull request of run 7f3a1b2c");
   expect(toolSpec("request_merge").summarize({ project: "sandbox", all: true })).toBe("Merge every ready pull request in sandbox, in queue order");
   expect(toolSpec("cancel_run").summarize({ run_id: "7f3a1b2c-0000-4000-8000-000000000000", reason: "wrong issue" })).toBe("Cancel run 7f3a1b2c: wrong issue");
+  expect(toolSpec("unlink_issue").summarize({ run_id: "7f3a1b2c-0000-4000-8000-000000000000", issue: 4 })).toBe("Unlink #4 from run 7f3a1b2c, so its pull request no longer closes it");
   expect(toolSpec("start_run").summarize({ project: "sandbox", issues: [10, 12] })).toBe("Start a run in sandbox on #10, #12");
   expect(toolSpec("answer_permission").summarize({ request_id: "x", decision: "deny", message: "use Read" })).toBe("Deny the permission request: use Read");
 });

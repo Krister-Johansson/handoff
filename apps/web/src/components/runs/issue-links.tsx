@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CircleDotIcon, LayersIcon } from "lucide-react";
 import { issuePath } from "@/lib/paths";
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export type IssueLink = { number: number; title: string; url: string };
@@ -11,46 +12,61 @@ export type LinkedIssueWithLineage = IssueLink & { lineage?: { kind?: string | u
 /**
  * Linked GitHub issues as small links: the number, and the title too when `showTitles`. As `meta`, they
  * sit in a page header's line of facts: an icon and "Issue #3", without a border. With `projectId` each
- * opens its issue page in handoff, else the issue on GitHub.
+ * opens its issue page in handoff, else the issue on GitHub. `after` renders a control after each issue,
+ * such as the run page's Unlink button.
  */
 export function IssueLinks({
   issues,
   showTitles = false,
   variant = "chip",
   projectId,
+  after,
   className,
 }: {
   issues: IssueLink[];
   showTitles?: boolean;
   variant?: "chip" | "meta";
   projectId?: string;
+  after?: ((issue: IssueLink) => ReactNode) | undefined;
   className?: string;
 }) {
   if (issues.length === 0) return null;
   const meta = variant === "meta";
   return (
     <span className={cn("inline-flex flex-wrap items-center", meta ? "gap-x-3.5 gap-y-1" : "gap-1", className)}>
-      {issues.map((issue) => (
-        <Link
-          key={issue.number}
-          href={projectId ? issuePath(projectId, issue.number) : issue.url}
-          aria-label={`#${issue.number} ${issue.title}`}
-          title={issue.title}
-          className={cn(
-            "inline-flex max-w-full items-center",
-            meta
-              ? "gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3"
-              : "gap-1 rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground",
-          )}
-        >
-          <CircleDotIcon aria-hidden className={cn("shrink-0", meta ? "size-[13px]" : "size-3 text-success")} />
-          <span className="truncate">
-            {meta && "Issue "}
-            {showTitles ? `#${issue.number} ${issue.title}` : `#${issue.number}`}
+      {issues.map((issue) =>
+        after ? (
+          <span key={issue.number} className="inline-flex max-w-full items-center gap-0.5">
+            <IssueLinkItem issue={issue} meta={meta} showTitles={showTitles} projectId={projectId} />
+            {after(issue)}
           </span>
-        </Link>
-      ))}
+        ) : (
+          <IssueLinkItem key={issue.number} issue={issue} meta={meta} showTitles={showTitles} projectId={projectId} />
+        ),
+      )}
     </span>
+  );
+}
+
+function IssueLinkItem({ issue, meta, showTitles, projectId }: { issue: IssueLink; meta: boolean; showTitles: boolean; projectId: string | undefined }) {
+  return (
+    <Link
+      href={projectId ? issuePath(projectId, issue.number) : issue.url}
+      aria-label={`#${issue.number} ${issue.title}`}
+      title={issue.title}
+      className={cn(
+        "inline-flex max-w-full items-center",
+        meta
+          ? "gap-[5px] hover:text-foreground hover:underline hover:underline-offset-3"
+          : "gap-1 rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground",
+      )}
+    >
+      <CircleDotIcon aria-hidden className={cn("shrink-0", meta ? "size-[13px]" : "size-3 text-success")} />
+      <span className="truncate">
+        {meta && "Issue "}
+        {showTitles ? `#${issue.number} ${issue.title}` : `#${issue.number}`}
+      </span>
+    </Link>
   );
 }
 

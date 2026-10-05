@@ -44,6 +44,7 @@ export function summarizeEvent(event: EventLike): string {
   if (event.type === "run.scheduled" && typeof p.place === "number") return `Started by the scheduler, ${ordinal(p.place)} in order: ${settingsText(obj(p.settings))}`;
   if (event.type === "run.overlap_held" && Array.isArray(p.paths)) return `Waiting: shares ${p.paths.join(", ")} with run ${String(p.runId).slice(0, 8)}`;
   if (event.type === "approval.held" && typeof p.message === "string") return p.message;
+  if (event.type === "run.issue_unlinked") return `#${String(p.issue)} unlinked by ${String(p.by)}${typeof p.pr === "number" ? `; PR #${p.pr} no longer closes it` : ""}`;
   if (event.type === "plan.status")return `#${String(p.issue)} to ${String(p.status)}`;
   if (event.type === "plan.skipped") return `#${String(p.issue)} not moved to ${String(p.status)}: ${SKIP_REASONS[String(p.reason)] ?? String(p.reason)}`;
   if (event.type === "issue.assigned") return `#${String(p.issue)} assigned to ${String(p.login)}`;

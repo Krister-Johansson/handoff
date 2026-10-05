@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { appendEvents, edgeTraversals, events, graphs, graphVersions, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type DbTx, type QuestionComment } from "@handoff/db";
 import { compileGraph, PlanPartSchema, remember, ReviewerOutputSchema, RunStateSchema, type PlanPart, type ReviewerOutput, type RunState } from "@handoff/core";
-import type { PlanStatus, ProjectsPort } from "@handoff/github";
+import type { GitHubPort, PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { recordPlanStatus } from "./plan-status.ts";
@@ -337,6 +337,86 @@ export async function splitRun(db: Db, questionId: string, input: { note?: strin
     ].join("\n\n");
     return answerIn(tx, questionId, { answer, option: "split", answeredBy: input.answeredBy }, [{ type: "run.split", payload: { questionId, task, issues: input.issues, dropped } }]);
   });
+}
+
+/** What unlinking an issue did: the pull request whose description it edited, and the Status it put back on the plan. */
+export type UnlinkedIssue = { issue: number; pr: number | null; status: PlanStatus | null };
+
+/**
+ * Takes an issue off a run until its pull request merges, so the pull request does not close it and the
+ * merge does not set it Done. Under the run's lock it removes the issue from the run's issues and its
+ * state, records `run.issue_unlinked` with who did it, and drops the issue's closing line ("Closes #4")
+ * from the open pull request's description. With the Projects port, a task the run moved on the plan
+ * goes back to the Status it had before the run, unless the run was cancelled or a newer run links it.
+ * Refused once the pull request merged, and for a run with a pull request without GitHub.
+ */
+export async function unlinkIssue(
+  db: Db,
+  runId: string,
+  issue: number,
+  opts: { by: string; github?: GitHubPort | undefined; projects?: ProjectsPort | undefined },
+): Promise<UnlinkedIssue> {
+  const { run, project, pr } = await db.transaction(async (tx) => {
+    const [run] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
+    if (!run) throw new Error(`run ${runId} not found`);
+    if (!run.issues.some((i) => i.number === issue)) throw new Error(`Run ${runId} does not link #${issue}.`);
+    const kept = (i: { number: number }) => i.number !== issue;
+    const state = RunStateSchema.parse(run.state);
+    const prNumber = run.prNumber ?? state.prNumber;
+    const merged = () => new Error(`Pull request #${prNumber} of run ${runId} merged, so #${issue} stays linked.`);
+    if (prNumber !== undefined && (await recordedMerge(tx, runId))) throw merged();
+    if (prNumber !== undefined && !opts.github) throw new Error(`Unlinking #${issue} edits pull request #${prNumber}, which needs GitHub access (GITHUB_TOKEN or a GitHub App).`);
+    const [project] = await tx.select().from(projectRows).where(eq(projectRows.id, run.projectId));
+    const repo = { owner: project!.repoOwner, name: project!.repoName };
+    const pr = prNumber !== undefined ? await opts.github!.getPrSnapshot(repo, prNumber) : undefined;
+    // Merged by hand on GitHub, or by a merge step the run has not recorded yet.
+    if (pr?.merged) throw merged();
+    const body = pr?.state === "open" ? withoutClosing(pr.body, issue) : undefined;
+    const edits = pr !== undefined && body !== undefined && body !== pr.body;
+    await tx
+      .update(runs)
+      .set({ issues: run.issues.filter(kept), state: { ...state, ...(state.issues ? { issues: state.issues.filter(kept) } : {}) }, stateVersion: sql`${runs.stateVersion} + 1` })
+      .where(eq(runs.id, runId));
+    await appendEvents(tx, runId, [{ type: "run.issue_unlinked", payload: { issue, by: opts.by, ...(edits ? { pr: pr.number } : {}) } }]);
+    // Last, so a refusal from GitHub leaves the run as it was.
+    if (edits) await opts.github!.updatePr(repo, pr.number, { title: pr.title, body });
+    return { run, project: project!, pr: edits ? pr.number : null };
+  });
+  const status = await restoreStatus(db, run, project, issue, opts.projects);
+  // The run no longer holds the issue, so the scheduler may start it.
+  await nudgeScheduler(db, run.projectId);
+  return { issue, pr, status };
+}
+
+/**
+ * Puts an issue the run moved on the plan back to the Status it had before the run. A cancelled run put
+ * it back already, and a newer run that links the issue owns its Status. Returns the Status it wrote.
+ */
+async function restoreStatus(db: Db, run: typeof runs.$inferSelect, project: typeof projectRows.$inferSelect, issue: number, projects: ProjectsPort | undefined): Promise<PlanStatus | null> {
+  if (project.planProjectNumber === null || run.status === "cancelled") return null;
+  if (!(await issuesItOwns(db, run)).includes(issue)) return null;
+  const before = (await statusesBeforeRun(db, run.id)).get(issue);
+  if (!before) return null;
+  const written = await recordPlanStatus(db, run.id, projects, project, [issue], before);
+  return written.some((e) => e.type === "plan.status") ? before : null;
+}
+
+/** Whether the run's merge step merged its pull request, or found it merged. */
+async function recordedMerge(tx: Tx, runId: string): Promise<boolean> {
+  const [event] = await tx.select({ seq: events.seq }).from(events).where(and(eq(events.runId, runId), eq(events.type, "github.merged"))).limit(1);
+  if (event) return true;
+  const [step] = await tx
+    .select({ id: nodeExecutions.id })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.status, "passed"), sql`${nodeExecutions.output}->>'merged' = 'true'`))
+    .limit(1);
+  return step !== undefined;
+}
+
+/** A pull request description without its lines that close the issue, such as "Closes #4" or "Fixes #4". */
+function withoutClosing(body: string, issue: number): string {
+  const closing = new RegExp(`^[ \\t]*(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \\t]+#${issue}[ \\t]*\\.?[ \\t]*(\\r?\\n|$)`, "gim");
+  return body.replace(closing, "");
 }
 
 export type StuckLoop = { nodeKey: string; edgeKey: string; attempts: number; executionId: string };

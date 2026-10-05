@@ -444,6 +444,19 @@ export const CATALOG: ToolSpec[] = [
     summarize: (a) => `Cancel run ${short(a.run_id)}${a.reason ? `: ${a.reason}` : ""}`,
   }),
   spec({
+    name: "unlink_issue",
+    title: "Unlink an issue",
+    description:
+      "Takes an issue off a run until its pull request merges, so the pull request no longer closes it and the merge does not set it Done. The open pull request's Closes line for it is removed, a task the run moved on the plan goes back to the Status it had before the run, and the issue returns to the backlog. Refused once the pull request merged. Ask the user first.",
+    input: z.object({ run_id: runId, issue: z.number().int().positive().describe("The linked issue's number") }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    destructive: true,
+    openWorld: true,
+    summarize: (a) => `Unlink #${a.issue} from run ${short(a.run_id)}, so its pull request no longer closes it`,
+  }),
+  spec({
     name: "run_again",
     title: "Run again",
     description:

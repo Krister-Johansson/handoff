@@ -85,6 +85,15 @@ test("the handoff skill says run_again starts from the branch or from scratch an
   expect(skill).toMatch(/`run_again`[^\n]*supersedes[^\n]*`from: "branch"`[^\n]*`from: "scratch"`/);
 });
 
+test("the handoff skill says unlink_issue takes an issue off a run until its pull request merges, after asking", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const line = skill.split("\n").find((l) => l.includes("`unlink_issue`"));
+  expect(line).toMatch(/until (its|the) pull request merges/);
+  expect(line).toMatch(/Closes #N/);
+  expect(line).toMatch(/Ask the user first/);
+  expect(skill).not.toMatch(/cannot drop one of its issues/);
+});
+
 test("the handoff skill says a code review sends its Fix now findings with answer_question", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   expect(skill).toMatch(/`answer_question`[^\n]*`fix_now`[^\n]*`findings`/);
@@ -115,8 +124,8 @@ test("the handoff skill says repair_run keeps the run's graph version unless lat
   expect(line).toMatch(/refuses/);
 });
 
-test("the plugin is 0.25.0, whose bundled bridge is built with @modelcontextprotocol/sdk 1.32.0", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.25.0");
+test("the plugin is 0.26.0, whose bundled bridge is built with @modelcontextprotocol/sdk 1.32.0", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.26.0");
   expect(json("packages/connector/package.json").dependencies["@modelcontextprotocol/sdk"]).toBe("1.32.0");
 });
 

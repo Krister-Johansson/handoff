@@ -6,6 +6,7 @@ import type { PrSnapshot } from "./types.ts";
 const base: PrSnapshot = {
   number: 7,
   title: "t",
+  body: "",
   draft: false,
   additions: 1,
   deletions: 0,

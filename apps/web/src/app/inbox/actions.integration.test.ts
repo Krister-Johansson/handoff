@@ -13,7 +13,7 @@ vi.mock("next/cache", () => ({ revalidatePath: env.revalidatePath }));
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { answerAction, cancelAction, repairAction, resolveLoopAction } = await import("./actions");
+const { answerAction, cancelAction, repairAction, resolveLoopAction, unlinkIssueAction } = await import("./actions");
 
 beforeEach(async () => {
   env.revalidatePath.mockClear();
@@ -50,6 +50,17 @@ test("cancelling a run from the inbox sets its task back to Ready", async () => 
   expect(await statusOf()).toBe("Running");
   expect(await cancelAction({}, form({ runId: run.id }))).toEqual({ ok: true });
   expect(await statusOf()).toBe("Ready");
+});
+
+test("unlinking a run's only issue from the run page sets its task back to Ready and leaves the run without issues", async () => {
+  const { run, statusOf } = await runOnReadyTask();
+  const [issue] = run.issues;
+  expect(await unlinkIssueAction({ runId: run.id, issue: issue!.number })).toEqual({ ok: true });
+  expect(await statusOf()).toBe("Ready");
+  const [row] = await db.select().from(runs).where(eq(runs.id, run.id));
+  expect(row!.issues).toEqual([]);
+  expect(env.revalidatePath).toHaveBeenCalledWith("/", "layout");
+  expect(await unlinkIssueAction({ runId: run.id, issue: issue!.number })).toEqual({ ok: false, error: `Run ${run.id} does not link #${issue!.number}.` });
 });
 
 test("stopping a run whose loop ran out from the inbox sets its task back to Ready", async () => {

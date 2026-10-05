@@ -5,7 +5,7 @@ import { GitHubReadError } from "../errors.ts";
 import type { Assignable, Assignee, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary, ReviewThreadState } from "../types.ts";
 
 /** A pull request of the fake; `mergeState` is GitHub's mergeStateStatus when a test sets one, CLEAN otherwise. */
-type FakePr = PrSnapshot & { base: string; body: string; files?: string[]; mergeState?: string };
+type FakePr = PrSnapshot & { base: string; files?: string[]; mergeState?: string };
 
 /**
  * An issue of the fake: what every issue has, and any of GitHub's other facts a test wants to set.
