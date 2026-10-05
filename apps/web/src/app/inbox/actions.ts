@@ -43,7 +43,8 @@ export async function repairAction(_: InboxActionState, form: FormData): Promise
   try {
     const note = field(form, "note");
     const allowPaths = allowPathsOf(field(form, "allowPaths"));
-    await repairNodeExecution(getDb(), field(form, "executionId"), { ...(note ? { note } : {}), ...(allowPaths.length ? { allowPaths } : {}) });
+    const latestGraph = form.get("latestGraph") === "on";
+    await repairNodeExecution(getDb(), field(form, "executionId"), { ...(note ? { note } : {}), ...(allowPaths.length ? { allowPaths } : {}), ...(latestGraph ? { latestGraph } : {}) });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }

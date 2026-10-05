@@ -204,6 +204,19 @@ test("repair_run allows the files it is given outside the plan for the repaired 
   expect(row!.state).toMatchObject({ memory: { planner: { extraPaths: [expect.objectContaining({ path: "pnpm-lock.yaml", by: "person" })] } } });
 });
 
+test("repair_run with latest_graph moves the run to the graph's newest version first, and says when there is none", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  await db.update(nodeExecutions).set({ status: "failed", error: { code: "x", message: "boom" } }).where(eq(nodeExecutions.runId, run_id));
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
+  expect(await call("repair_run", { run_id, latest_graph: true })).toEqual({ error: "the run is already on version 1 of graph linear, its latest" });
+
+  await saveGraphVersion(db, { projectId, name: "linear", document: linear });
+  expect(await call("repair_run", { run_id, latest_graph: true })).toMatchObject({ node: "planner", attempt: 2, graph_version: 2 });
+  const [row] = await db.select({ graphVersionId: runs.graphVersionId }).from(runs).where(eq(runs.id, run_id));
+  const [upgraded] = await db.select().from(events).where(and(eq(events.runId, run_id), eq(events.type, "run.graph_upgraded")));
+  expect(upgraded?.payload).toMatchObject({ from: { version: 1 }, to: { version: 2, graphVersionId: row!.graphVersionId } });
+});
+
 test("what needs attention comes with links to the dashboard", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run_id));

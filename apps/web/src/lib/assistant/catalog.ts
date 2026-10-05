@@ -394,18 +394,19 @@ export const CATALOG: ToolSpec[] = [
     name: "repair_run",
     title: "Repair a run",
     description:
-      "Re-runs the failed step of a failed run in place, keeping what earlier steps did. A note is passed to the step's agent; allow_paths lets the step change those files outside the plan for the rest of the run.",
+      "Re-runs the failed step of a failed run in place, keeping what earlier steps did. A note is passed to the step's agent; allow_paths lets the step change those files outside the plan for the rest of the run. A run keeps the graph version it started on; latest_graph moves it to the newest version of its graph first, so a fix saved to the graph applies to the repair. It refuses, changing nothing, when the run is already on the newest version, when that version does not compile, or when it has no node with the failed step's key.",
     input: z.object({
       run_id: runId,
       node: z.string().optional().describe("The failed step; defaults to the one that failed last"),
       note: z.string().optional(),
       allow_paths: z.array(z.string()).optional().describe("Files outside the plan the step may change, with the user's agreement"),
+      latest_graph: z.boolean().optional().describe("Move the run to the newest version of its graph before repairing"),
     }),
     kind: "data",
     confirm: true,
     readOnly: false,
     summarize: (a) =>
-      `Repair run ${short(a.run_id)}${a.node ? ` at ${a.node}` : ""}${a.allow_paths?.length ? `, allowing ${a.allow_paths.join(", ")}` : ""}${a.note ? `: ${a.note}` : ""}`,
+      `Repair run ${short(a.run_id)}${a.node ? ` at ${a.node}` : ""}${a.latest_graph ? " on the latest graph version" : ""}${a.allow_paths?.length ? `, allowing ${a.allow_paths.join(", ")}` : ""}${a.note ? `: ${a.note}` : ""}`,
   }),
   spec({
     name: "list_merge_queue",

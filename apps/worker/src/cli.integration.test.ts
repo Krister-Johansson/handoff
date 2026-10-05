@@ -188,6 +188,21 @@ test("handoff run repair requires a failed node", async () => {
   await expect(runCli(["run", "repair", run.id, "--node", "planner"], { db, out, github: null })).rejects.toThrow(/no failed execution/);
 });
 
+test("handoff run repair --latest-graph moves the run to the graph's newest version and says so", async () => {
+  const { out, lines } = capture();
+  const run = await queuedRun(out);
+  await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run.id));
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run.id));
+  await expect(runCli(["run", "repair", run.id, "--node", "planner", "--latest-graph"], { db, out, github: null })).rejects.toThrow("the run is already on version 1 of graph linear, its latest");
+
+  await runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(linear)], { db, out, github: null });
+  await runCli(["run", "repair", run.id, "--node", "planner", "--latest-graph"], { db, out, github: null });
+  expect(lines.at(-1)).toBe("repair queued: planner attempt 2 on graph version 2");
+  const [row] = await db.select({ graphVersionId: runs.graphVersionId }).from(runs).where(eq(runs.id, run.id));
+  const [latest] = await db.select().from(graphVersions).where(eq(graphVersions.version, 2));
+  expect(row!.graphVersionId).toBe(latest!.id);
+});
+
 test("handoff answer records the answer for an open question", async () => {
   const { out, lines } = capture();
   const run = await queuedRun(out);
