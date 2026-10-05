@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
-import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type PlanStatus, type ProjectsPort, type RepoRef } from "@handoff/github";
+import { prKey, REVIEWER_NOTES_MARKER, reviewRequestMarker, toFeedback, type GitHubPort, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, sql, webhookDeliveries, type Db } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
@@ -11,7 +11,7 @@ import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
-import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
+import { externalReview, reviewerStarted, reviewRequest, reviewSettings, withFindings, type ReviewRequest } from "./external-review.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -179,6 +179,23 @@ async function webhooksSince(db: Db | undefined, repoId: number, executionId: st
 }
 
 /**
+ * Posts the review request comment for the PR's head commit, unless one is there already. The comment
+ * ends with a marker naming the commit, so it is posted once per commit, also across worker restarts.
+ * A comment that cannot be posted is an event, not a failure: the PR keeps waiting.
+ */
+async function requestReview(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, snapshot: PrSnapshot, ask: ReviewRequest) {
+  const marker = reviewRequestMarker(snapshot.headSha);
+  if (snapshot.comments.some((c) => c.body.includes(marker))) return;
+  try {
+    // Finds the marker among all the PR's comments, not only the latest the snapshot has, before it creates one.
+    const { created } = await github.upsertPrComment(repo, snapshot.number, marker, `${ask.comment}\n\n${marker}`);
+    if (created) ctx.emit("github.review_requested", { number: snapshot.number, reviewer: ask.reviewer, comment: ask.comment, headSha: snapshot.headSha });
+  } catch (error) {
+    ctx.emit("github.review_request_failed", { number: snapshot.number, reviewer: ask.reviewer, message: (error as Error).message });
+  }
+}
+
+/**
  * Pushes the run branch, opens or reuses its pull request, then reports CI and review state as
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
@@ -291,6 +308,11 @@ export function prNodeExecutor(deps: {
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
 
+      // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit.
+      const ask = reviewRequest(ctx.node.config);
+      const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer);
+      if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
+
       if (checksPending || awaitingApproval || awaitingReviewers) {
         // Also wake when a PR without checks reaches its limit, so a repository without CI does not wait for the reconcile.
         // Without webhooks (the relay is not running, or the repository has none) the reconcile is the only wake: look sooner.
@@ -300,7 +322,9 @@ export function prNodeExecutor(deps: {
         const reconcile = Math.min(Date.now() + reconcileMs, noChecks ? Date.now() + Math.max(0, noChecksMs - sincePush) + 1_000 : Infinity);
         // Wake at the review time limit even without a webhook, so a reviewer who never comes cannot hold the run.
         const limit = awaitingReviewers ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
-        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit)) } };
+        // Also wake when it is time to ask a reviewer that has not started.
+        const askAt = unstarted && sincePush < ask.afterMs ? Date.now() + (ask.afterMs - sincePush) + 1_000 : Infinity;
+        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt)) } };
       }
 
       const sendBack = settings.sendBack && external.findings.length > 0;
