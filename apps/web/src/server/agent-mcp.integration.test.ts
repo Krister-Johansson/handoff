@@ -688,7 +688,7 @@ test("a PR step that waits for a reviewer's next review after handoff answered i
   const pr = await seedExecution(db, runId, { nodeKey: "pr", nodeType: "pr", executorKind: "github", status: "waiting", waitKind: "github_pr" });
   const look = (reReview: boolean) => [
     { type: "github.pr", payload: { number: 9, ci: "success" }, nodeExecutionId: pr.id },
-    ...(reReview ? [{ type: "github.re_review", payload: { number: 9, reviewers: ["coderabbitai"], items: ["R1"] }, nodeExecutionId: pr.id }] : []),
+    ...(reReview ? [{ type: "github.rereview", payload: { number: 9, waitingFor: ["coderabbitai"], items: ["R1"] }, nodeExecutionId: pr.id }] : []),
   ];
   await db.transaction((tx) => appendEvents(tx, runId, look(true)));
   await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, runId));

@@ -9,11 +9,12 @@ import type { RepoRef } from "@handoff/github";
 import { FakeGitHub } from "@handoff/github/testing";
 import { answerQuestion } from "../operations.ts";
 import { createRun } from "../runs.ts";
-import { reviewRoundOf, withAnswers } from "../review-answers.ts";
 import { createOriginRepo, git } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
+import { done, outputs, scripted } from "../testing/scripted.ts";
 import type { ExecutorContext, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
+import { withReviewAnswers } from "./cli-node.ts";
 import { mergeNodeExecutor, prNodeExecutor } from "./github.ts";
 import { handleOf, listItems } from "./review-items.ts";
 
@@ -40,6 +41,50 @@ const graph = (prConfig: Record<string, unknown>) => ({
   ],
 });
 
+/** The steps between the coder and the PR node in a guided graph, each passing. */
+const checkers = {
+  tester: scripted(done(outputs.testsPass)),
+  code_review: scripted(done(outputs.approve)),
+  human_gate: scripted(done({ option: "approve", answer: "Approve", answeredBy: "dashboard", answeredAt: "2026-10-05T00:00:00Z" })),
+  demo: scripted(done({ summary: "Skipped", skipped: true, reason: "the change touches no UI path", shots: [] })),
+};
+
+/**
+ * A graph like northMES's guided one: the coder's work goes through the tester, code review, a code gate
+ * and a demo that is skipped without UI changes, then to the PR node, which joins the demo's skipped port
+ * and the Try it gate's approve. Each of them can send the work back to the coder.
+ */
+const guided = (prConfig: Record<string, unknown>) => ({
+  attributes: { startNode: "planner" },
+  nodes: [
+    { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+    { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+    { key: "tester", attributes: { type: "tester", config: { command: "pnpm test" }, x: 0, y: 0 } },
+    { key: "code-review", attributes: { type: "code_review", x: 0, y: 0 } },
+    { key: "code-gate", attributes: { type: "human_gate", x: 0, y: 0 } },
+    { key: "demo", attributes: { type: "demo", config: { when: "ui_changes" }, x: 0, y: 0 } },
+    { key: "try", attributes: { type: "human_gate", config: { mode: "try" }, x: 0, y: 0 } },
+    { key: "pr", attributes: { type: "pr", config: { join: "any", ...prConfig }, x: 0, y: 0 } },
+    { key: "merge", attributes: { type: "merge", x: 0, y: 0 } },
+  ],
+  edges: [
+    { key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done" } },
+    { key: "coder->tester", source: "coder", target: "tester", attributes: { port: "done" } },
+    { key: "tester->code-review", source: "tester", target: "code-review", attributes: { port: "pass" } },
+    { key: "tester->coder", source: "tester", target: "coder", attributes: { port: "fail", input: "feedback" } },
+    { key: "code-review->code-gate", source: "code-review", target: "code-gate", attributes: { port: "approve" } },
+    { key: "code-review->coder", source: "code-review", target: "coder", attributes: { port: "changes", input: "feedback" } },
+    { key: "code-gate->demo", source: "code-gate", target: "demo", attributes: { port: "approve" } },
+    { key: "code-gate->coder", source: "code-gate", target: "coder", attributes: { port: "changes", input: "feedback" } },
+    { key: "demo->pr", source: "demo", target: "pr", attributes: { port: "skipped" } },
+    { key: "demo->try", source: "demo", target: "try", attributes: { port: "done" } },
+    { key: "try->pr", source: "try", target: "pr", attributes: { port: "approve" } },
+    { key: "try->coder", source: "try", target: "coder", attributes: { port: "changes", input: "feedback" } },
+    { key: "pr->merge", source: "pr", target: "merge", attributes: { port: "ready" } },
+    { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix", input: "feedback" } },
+  ],
+});
+
 /** Answers threads and reviews with replies on: the PR node waits for CodeRabbit and answers on GitHub. */
 const replies = { waitForReviewers: ["coderabbitai"], reviewThreads: { reply: true } };
 
@@ -58,7 +103,7 @@ const decline: Answer = () => ({ verdict: "declined", evidence: "`pnpm test` pas
 
 /**
  * A coder that writes the change on its first attempt and later answers every review comment in its
- * packet with `answer`, keeping its answers in run state as the coder executor does.
+ * packet with `answer`. Its answers go to run state, and `answerOnly` is set, as the coder executor does.
  */
 function answeringCoder(answer: Answer, onCall?: (call: number) => void): NodeExecutor {
   let call = 0;
@@ -72,21 +117,21 @@ function answeringCoder(answer: Answer, onCall?: (call: number) => void): NodeEx
         return { kind: "completed", output: { status: "done", summary: "Added CHANGELOG.md" } };
       }
       const answers = items.map((item) => ({ id: item.id, ...answer(item, ctx) }));
-      const reviewAnswers = withAnswers(ctx.state, reviewRoundOf(ctx.state, ["pr"]), answers);
-      return { kind: "completed", output: { status: "done", summary: "Answered the review comments", answers }, ...(reviewAnswers ? { statePatch: { reviewAnswers } } : {}) };
+      const { output, reviewAnswers } = await withReviewAnswers(ctx, { status: "done", summary: "Answered the review comments", answers });
+      return { kind: "completed", output, ...(reviewAnswers ? { statePatch: { reviewAnswers } } : {}) };
     },
   };
 }
 
 /** A run whose PR node waits for CI; CI then passes, and `wake` lets the PR node look again. */
-async function opened(prConfig: Record<string, unknown>, coder: NodeExecutor, github = new FakeGitHub(), prExecutor?: NodeExecutor) {
+async function opened(prConfig: Record<string, unknown>, coder: NodeExecutor, github = new FakeGitHub(), prExecutor?: NodeExecutor, document = graph) {
   const origin = createOriginRepo();
   github.origin = origin;
-  const { project, graphVersion } = await seedGraph(db, graph(prConfig), { localClonePath: origin });
+  const { project, graphVersion } = await seedGraph(db, document(prConfig), { localClonePath: origin });
   const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
   const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
   // A fresh PR executor for each pass, as a restarted worker would have.
-  const deps = () => engineDeps(db, { planner, coder, pr: prExecutor ?? prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github }) }, { workdirs });
+  const deps = () => engineDeps(db, { planner, coder, pr: prExecutor ?? prNodeExecutor({ github, db }), merge: mergeNodeExecutor({ github }), ...checkers }, { workdirs });
   await drain(deps());
   github.setChecks(1, "SUCCESS");
   const wake = async () => {
@@ -409,7 +454,6 @@ class QuickReviewer extends FakeGitHub {
 }
 
 test("a thread is not resolved in the execution that pushed its fix, and not before a review submitted after the reply", async () => {
-  const fixing: Answer = (_item, ctx) => ({ verdict: "fixed", evidence: "The integration project was left out; it runs now.", commit: commitChange(ctx, "Run the integration project in CI") });
   const github = new QuickReviewer();
   const { run, wake, thread } = await declined(replies, github, answeringCoder(fixing));
   expect(repliesIn(github)).toHaveLength(1);
@@ -535,7 +579,7 @@ test("the step reports waiting_on re_review while items wait", async () => {
   expect(step).toMatchObject({ status: "waiting", waitKind: "github_pr" });
   // The step's last word on GitHub in its latest look, which the dashboard and get_run read as waiting_on re_review.
   const mine = events.filter((e) => e.nodeExecutionId === step.id && e.type.startsWith("github."));
-  expect(mine.at(-1)).toMatchObject({ type: "github.re_review", payload: { reviewers: ["coderabbitai"], items: ["R1"] } });
+  expect(mine.at(-1)).toMatchObject({ type: "github.rereview", payload: { waitingFor: ["coderabbitai"], items: ["R1"] } });
 });
 
 /** The coder's answer to a review comment that came back with the reviewer's reply: settled when the reply accepts the answer. */
@@ -780,4 +824,144 @@ test("leave stops handoff from touching the thread", async () => {
   await wake();
   expect(github.merged).toEqual([1]);
   expect((await itemsOf(run.id)).R1?.state).toBe("left");
+});
+
+/** How many times each step between the coder and the PR node ran. */
+async function checkerRuns(runId: string) {
+  const { executions } = await inspect(db, runId);
+  return Object.fromEntries(["tester", "code-review", "code-gate", "demo"].map((key) => [key, executions.filter((e) => e.nodeKey === key).length]));
+}
+
+const once = { tester: 1, "code-review": 1, "code-gate": 1, demo: 1 };
+const twice = { tester: 2, "code-review": 2, "code-gate": 2, demo: 2 };
+
+test("a round where the coder declines every comment and commits nothing goes back to the PR node with no tester, code review, gate or demo execution", async () => {
+  const { github, run, wake } = await opened(replies, answeringCoder(decline), new FakeGitHub(), undefined, guided);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  await wake();
+
+  const { executions, events, run: row } = await inspect(db, run.id);
+  expect(executions.filter((e) => e.nodeKey === "coder").map((e) => e.attempt)).toEqual([1, 2]);
+  expect(await checkerRuns(run.id)).toEqual(once);
+  const coder = executions.find((e) => e.nodeKey === "coder" && e.attempt === 2)!;
+  const back = executions.find((e) => e.nodeKey === "pr" && e.attempt === 2);
+  expect(back?.trigger).toEqual({ kind: "returned", from: "coder", fromExecutionId: coder.id });
+  expect(events.find((e) => e.type === "edge.returned")).toMatchObject({
+    nodeExecutionId: coder.id,
+    payload: { from: "coder", to: "pr", edgeKey: "pr->coder", message: "answered review comments only; back to pr" },
+  });
+  // The fix edge counted the round once, when it sent the work to the coder; the return adds nothing, and no join was reached.
+  expect(row.state).toMatchObject({ loops: { "pr->coder": { attempts: 1 } } });
+  expect(events.filter((e) => e.type === "join.arrived")).toHaveLength(1);
+  expect(repliesIn(github)).toHaveLength(1);
+});
+
+/** A fixed answer with the commit the coder made for it. */
+const fixing: Answer = (_item, ctx) => ({
+  verdict: "fixed",
+  evidence: "vitest.config.ts:12 left the integration project out of the CI run; it is in now.",
+  commit: commitChange(ctx, "Run the integration project in CI"),
+});
+
+test("a round with a fix goes through the tester and code review", async () => {
+  const { github, run, wake } = await opened(replies, answeringCoder(fixing), new FakeGitHub(), undefined, guided);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  await wake();
+
+  const { executions, types } = await inspect(db, run.id);
+  expect(await checkerRuns(run.id)).toEqual(twice);
+  expect(types).not.toContain("edge.returned");
+  const back = executions.find((e) => e.nodeKey === "pr" && e.attempt === 2);
+  expect(back?.trigger).toMatchObject({ kind: "edge", edgeKey: "demo->pr", from: "demo" });
+  expect(repliesIn(github)[0]?.body.split("\n")[0]).toMatch(/^Valid\. Fixed in /);
+});
+
+test("a mixed round takes the normal path and posts both answers", async () => {
+  const answer: Answer = (item, ctx) => (item.path === "vitest.config.ts" ? fixing(item, ctx) : decline(item, ctx));
+  const { github, run, wake } = await opened(replies, answeringCoder(answer), new FakeGitHub(), undefined, guided);
+  github.reviewOnHead(1, "coderabbitai", {
+    state: "COMMENTED",
+    threads: [
+      { path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." },
+      { path: "CHANGELOG.md", line: 1, body: "The heading level is inconsistent." },
+    ],
+  });
+  await wake();
+
+  expect(await checkerRuns(run.id)).toEqual(twice);
+  expect((await inspect(db, run.id)).types).not.toContain("edge.returned");
+  const firstLines = github.prs.get(1)!.reviewThreads.map((t) => t.comments.slice(1).map((c) => c.body.split("\n")[0]));
+  expect(firstLines).toEqual([[expect.stringMatching(/^Valid\. Fixed in /)], ["Not changed: the comment does not hold."]]);
+});
+
+test("the 33311b09 case: a declined CodeRabbit comment reaches the coder once, and the PR step then waits for CodeRabbit instead of going round again", async () => {
+  const { github, run, wake, pr } = await opened(replies, answeringCoder(decline), new FakeGitHub(), undefined, guided);
+  // As on northMES/northmes#192: CodeRabbit asks for changes on the head with one thread, and GitHub reports
+  // its decision (whether a bot's review sets reviewDecision is unverified; this takes the case where it does).
+  github.reviewOnHead(1, "coderabbitai", { state: "CHANGES_REQUESTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  pr().reviewDecision = "CHANGES_REQUESTED";
+  await wake();
+
+  // The coder declined it once and committed nothing: straight back to the PR step, which answered in the thread.
+  let seen = await inspect(db, run.id);
+  expect(seen.executions.filter((e) => e.nodeKey === "coder").map((e) => e.attempt)).toEqual([1, 2]);
+  expect(await checkerRuns(run.id)).toEqual(once);
+  expect(repliesIn(github)).toHaveLength(1);
+  // GitHub still reports the old decision, and the step waits for CodeRabbit's next review instead of routing it to fix.
+  const back = () => seen.executions.find((e) => e.nodeKey === "pr" && e.attempt === 2);
+  expect(back()?.status).toBe("waiting");
+  expect(seen.events.filter((e) => e.type === "github.rereview").at(-1)?.payload).toMatchObject({ waitingFor: ["coderabbitai"], items: ["R1"] });
+
+  // The reply's own webhook wakes the step; CodeRabbit has not reviewed since, so it keeps waiting.
+  await wake();
+  seen = await inspect(db, run.id);
+  expect(back()?.status).toBe("waiting");
+  expect(seen.executions.filter((e) => e.nodeKey === "coder")).toHaveLength(2);
+
+  // Eight seconds after the reply CodeRabbit approves the same commit, and the run goes on to merge.
+  github.reviewOnHead(1, "coderabbitai", { state: "APPROVED" });
+  pr().reviewDecision = "APPROVED";
+  await wake();
+  seen = await inspect(db, run.id);
+  expect(seen.executions.filter((e) => e.nodeKey === "coder")).toHaveLength(2);
+  expect(seen.executions.filter((e) => e.nodeKey === "pr").map((e) => e.status)).toEqual(["passed", "passed"]);
+  expect(seen.events.filter((e) => e.type === "github.review_findings").map((e) => e.payload)).toEqual([expect.objectContaining({ items: ["R1"] })]);
+  expect(github.merged).toEqual([1]);
+  // CodeRabbit's review after the reply resolved the thread, so a ruleset that requires resolved conversations does not hold the merge.
+  expect(pr().reviewThreads[0]!.isResolved).toBe(true);
+});
+
+test("with returnOnAnswerOnly false the round takes the normal path", async () => {
+  const settings = { ...replies, reviewThreads: { reply: true, returnOnAnswerOnly: false } };
+  const { github, run, wake } = await opened(settings, answeringCoder(decline), new FakeGitHub(), undefined, guided);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  await wake();
+
+  const { executions, types } = await inspect(db, run.id);
+  // The coder still only answered; the setting alone sends the round through the steps in between.
+  expect(executions.find((e) => e.nodeKey === "coder" && e.attempt === 2)?.output).toMatchObject({ answerOnly: true });
+  expect(await checkerRuns(run.id)).toEqual(twice);
+  expect(types).not.toContain("edge.returned");
+  expect(executions.find((e) => e.nodeKey === "pr" && e.attempt === 2)?.trigger).toMatchObject({ kind: "edge", edgeKey: "demo->pr" });
+  expect(repliesIn(github)).toHaveLength(1);
+});
+
+test("on a guided graph a second decline returns to the PR node without the checks in between, and the PR step asks", async () => {
+  const { github, run, wake, pr } = await opened(replies, answeringCoder(decline), new FakeGitHub(), undefined, guided);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  await wake();
+  github.replyInThread(1, pr().reviewThreads[0]!.id!, "coderabbitai", "CI runs `pnpm test:unit` only, so the integration project is skipped.");
+  await wake();
+
+  const { executions } = await inspect(db, run.id);
+  const coder = executions.find((e) => e.nodeKey === "coder" && e.attempt === 3)!;
+  expect(coder.contextPacket).toMatchObject({ reviewItems: [expect.objectContaining({ id: "R1", conversation: expect.any(Array) })] });
+  // Both answer-only rounds went straight back to the PR node.
+  expect(await checkerRuns(run.id)).toEqual(once);
+  const step = executions.find((e) => e.nodeKey === "pr" && e.attempt === 3);
+  expect(step?.trigger).toEqual({ kind: "returned", from: "coder", fromExecutionId: coder.id });
+  const [question] = await questionsOf(run.id);
+  expect(step).toMatchObject({ status: "waiting", waitKind: "human", waitToken: question!.id });
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "disputed", questionId: question!.id });
+  expect(repliesIn(github).map((c) => c.author)).toEqual(["octocat", "coderabbitai"]);
 });

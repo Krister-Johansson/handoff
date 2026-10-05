@@ -36,12 +36,12 @@ export async function stepStates(db: DbExecutor, executionIds: string[]): Promis
     where e.node_execution_id = "node_executions"."id" and e.type = 'merge.threads_unresolved'
     order by e.seq desc limit 1
   )`;
-  // A PR step waits for a reviewer's next review when its latest look ended on github.re_review: each look
-  // starts its word on GitHub with github.pr, and says github.re_review last when answers hold it.
+  // A PR step waits for a reviewer's next review when its latest look ended on github.rereview: each look
+  // starts its word on GitHub with github.pr, and says github.rereview last when answers hold it.
   const latestOf = (type: string) => sql`(
     select max(e.seq) from events e where e.node_execution_id = "node_executions"."id" and e.type = ${type}
   )`;
-  const reReview = sql<boolean | null>`(${latestOf("github.re_review")} > coalesce(${latestOf("github.pr")}, 0))`;
+  const reReview = sql<boolean | null>`(${latestOf("github.rereview")} > coalesce(${latestOf("github.pr")}, 0))`;
   const [rows, places, workers] = await Promise.all([
     db
       .select({ id: nodeExecutions.id, status: nodeExecutions.status, waitingOn: nodeExecutions.waitingOn, waitKind: nodeExecutions.waitKind, threads: latestThreads, reReview })

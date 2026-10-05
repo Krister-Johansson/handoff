@@ -1,7 +1,9 @@
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeMemory, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, questions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
+import { reviewThreadsSettings } from "../executors/external-review.ts";
+import { reviewRoundOf, reviewSourcesOf } from "../review-answers.ts";
 import { notifyFrom } from "../notify.ts";
 import type { ExecutionError } from "../types.ts";
 
@@ -58,6 +60,36 @@ export async function createExecution(tx: DbTx, graph: CompiledGraph, runId: str
 }
 
 /**
+ * The execution of a join in any mode that absorbs an arrival: the join's latest execution that did not
+ * fail, while it has not finished or no loop edge was taken since it was created. A loop sends work back
+ * for another round, and the first arrival of that round runs the join again.
+ */
+async function anyJoinConsumer(tx: DbTx, graph: CompiledGraph, runId: string, target: string): Promise<string | undefined> {
+  const [existing] = await tx
+    .select({ id: nodeExecutions.id, status: nodeExecutions.status })
+    .from(nodeExecutions)
+    .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.nodeKey, target), ne(nodeExecutions.status, "failed")))
+    .orderBy(desc(nodeExecutions.createdAt))
+    .limit(1);
+  if (!existing) return undefined;
+  const loops = graph.graph.filterEdges((_, e) => e.loop);
+  if (loops.length === 0 || existing.status === "pending" || existing.status === "running" || existing.status === "waiting") return existing.id;
+  // Compared in SQL: a JavaScript Date drops the microseconds Postgres keeps.
+  const [later] = await tx
+    .select({ id: edgeTraversals.id })
+    .from(edgeTraversals)
+    .where(
+      and(
+        eq(edgeTraversals.runId, runId),
+        inArray(edgeTraversals.edgeKey, loops),
+        sql`${edgeTraversals.createdAt} > (select created_at from node_executions where id = ${existing.id})`,
+      ),
+    )
+    .limit(1);
+  return later ? undefined : existing.id;
+}
+
+/**
  * Follows matching out-edges: loop guards (exhaustion routes to the gate), fan-in joins and loop edges
  * recorded in edge_traversals, and a new node execution per edge taken.
  */
@@ -110,11 +142,7 @@ async function route(
       const mode = graph.node(target).config.join === "any" ? "any" : "all";
       let consumer: string | undefined;
       if (mode === "any") {
-        const [existing] = await tx
-          .select({ id: nodeExecutions.id })
-          .from(nodeExecutions)
-          .where(and(eq(nodeExecutions.runId, row.runId), eq(nodeExecutions.nodeKey, target), ne(nodeExecutions.status, "failed")));
-        consumer = existing?.id;
+        consumer = await anyJoinConsumer(tx, graph, row.runId, target);
         if (!consumer) {
           const exec = await createExecution(tx, graph, row.runId, target, trigger);
           consumer = exec.id;
@@ -151,6 +179,38 @@ async function route(
     events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
   }
   return { events, created, arrived, exhausted, ended: mergedEnd(graph, row, outcome, output), state: next };
+}
+
+/**
+ * The PR node a coder attempt goes straight back to: the attempt only answered the review comments that
+ * PR node sent (the coder executor set `answerOnly`), and the node has not turned the return off.
+ * Undefined when the attempt takes its edges as usual.
+ */
+function answerOnlyReturn(graph: CompiledGraph, row: NodeExecutionRow, output: unknown, state: RunState): { target: string; edgeKey: string } | undefined {
+  if ((output as { answerOnly?: unknown } | undefined)?.answerOnly !== true || graph.node(row.nodeKey).type !== "coder") return undefined;
+  const round = reviewRoundOf(state, reviewSourcesOf(graph, row.nodeKey));
+  if (!round || !reviewThreadsSettings(graph.node(round.source).config).returnOnAnswerOnly) return undefined;
+  const edge = graph.inEdges(row.nodeKey).find((e) => e.source === round.source);
+  return edge ? { target: round.source, edgeKey: edge.key } : undefined;
+}
+
+/**
+ * Sends an answer-only round straight back to the PR node that sent the comments: its next execution,
+ * and none of the coder's edges, since the branch is the commit the steps in between already passed.
+ * The fix edge counted the round when it sent the work to the coder; the return counts nothing and
+ * reaches no join.
+ */
+async function returnTo(tx: DbTx, graph: CompiledGraph, row: NodeExecutionRow, back: { target: string; edgeKey: string }, state: RunState): Promise<RouteResult> {
+  const exec = await createExecution(tx, graph, row.runId, back.target, { kind: "returned", from: row.nodeKey, fromExecutionId: row.id });
+  const events: NewEvent[] = [
+    {
+      type: "edge.returned",
+      payload: { from: row.nodeKey, to: back.target, edgeKey: back.edgeKey, message: `answered review comments only; back to ${back.target}` },
+      nodeExecutionId: row.id,
+    },
+    { type: "node.created", payload: { nodeKey: back.target, attempt: exec.attempt, via: "returned" }, nodeExecutionId: exec.id },
+  ];
+  return { events, created: 1, arrived: 0, exhausted: false, ended: false, state };
 }
 
 /** Records what this attempt adds to its node's memory, so later attempts of the node are told it too. */
@@ -272,7 +332,8 @@ export async function completePassed(
     ...(updated.executorSessionId ? { sessionId: updated.executorSessionId } : {}),
   };
   const merged = addMemory(rememberAttempt(mergeState(state, row.nodeKey, result, input.statePatch), row, input.output), input.memory);
-  const routed = await route(tx, input.graph, row, "passed", input.output, merged);
+  const back = answerOnlyReturn(input.graph, row, input.output, merged);
+  const routed = back ? await returnTo(tx, input.graph, row, back, merged) : await route(tx, input.graph, row, "passed", input.output, merged);
   lead.push(
     ...input.checks.map((check) => ({ type: "contract.checked", payload: check, nodeExecutionId: row.id })),
     {
