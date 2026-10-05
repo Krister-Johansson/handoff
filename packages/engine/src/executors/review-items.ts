@@ -5,7 +5,7 @@ import { and, asc, eq, inArray, reviewItems, sql, type Db, type ReviewItemRow } 
 import { HANDOFF_COMMENT_PREFIX, type GitHubPort, type PrSnapshot, type RepoRef } from "@handoff/github";
 import { recordedAnswers } from "../review-answers.ts";
 import type { ExecutorContext } from "../types.ts";
-import type { Finding } from "./external-review.ts";
+import { sameLogin, type Finding } from "./external-review.ts";
 
 /**
  * Review items: the findings a PR node sends to the coder with a handle (`R1`), the coder's answers,
@@ -279,4 +279,24 @@ export async function postAnswers(
       ctx.emit("github.items_answer_failed", { round, items: these.map(handleOf), message: (error as Error).message });
     }
   }
+}
+
+/**
+ * The reviewers a PR step waits for after an answer-only round, each with its items: the authors of the
+ * threads it answered on the head commit who have not submitted a review since the reply. Their next
+ * review says whether they accept the answers. The reply's time is GitHub's, so only GitHub's clock is
+ * compared; a reply GitHub no longer lists among the thread's latest comments falls back to when
+ * handoff recorded it.
+ */
+export async function awaitingNextReview(db: Db, runId: string, snapshot: PrSnapshot): Promise<{ reviewer: string; items: string[] }[]> {
+  const answered = (await listItems(db, runId)).filter((i) => i.state === "awaiting_review" && i.kind === "thread" && i.replyHeadSha === snapshot.headSha);
+  const waiting = new Map<string, string[]>();
+  for (const item of answered) {
+    const reply = snapshot.reviewThreads.find((t) => t.id === item.githubId)?.latest.find((c) => c.id === item.replyCommentId);
+    const since = Date.parse(reply?.createdAt ?? "") || (item.repliedAt?.getTime() ?? 0);
+    // GitHub's times are to the second: a review in the same second as the reply counts as after it.
+    const reviewed = snapshot.reviews.some((r) => sameLogin(r.author, item.reviewer) && r.submittedAt !== null && Date.parse(r.submittedAt) >= since);
+    if (!reviewed) waiting.set(item.reviewer, [...(waiting.get(item.reviewer) ?? []), handleOf(item)]);
+  }
+  return [...waiting].map(([reviewer, items]) => ({ reviewer, items }));
 }

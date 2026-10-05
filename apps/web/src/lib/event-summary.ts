@@ -30,6 +30,7 @@ export function summarizeEvent(event: EventLike): string {
   }
   if (event.type === "permission.auto_allowed") return `Allowed by ${String(p.rule)}, chosen earlier in this run: ${describePermission(String(p.toolName), obj(p.input)).summary}`;
   if (event.type === "edge.taken") return `${String(p.from)} to ${String(p.to)}`;
+  if (event.type === "edge.returned") return `${String(p.from)} ${String(p.message)}`;
   if (event.type === "edge.exhausted") return `${String(p.edgeKey)} after ${String(p.attempts)} attempts`;
   if (event.type === "contract.checked") return `${String(p.kind)}: ${p.passed ? "passed" : "failed"}${p.detail ? `, ${String(p.detail)}` : ""}`;
   if (event.type === "cli.assistant") return assistantSummary(p);

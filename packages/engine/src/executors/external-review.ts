@@ -20,15 +20,16 @@ export function reviewSettings(config: Record<string, unknown>): ReviewSettings 
  * coder answers and handoff answers on GitHub; it is off by default, since it posts on GitHub, and it
  * needs review comments sent back. `resolveAfterReview` defaults to `reply`. `summary` names the bot
  * whose summary comment is read for notes and pre-merge checks. `maxPerRound` caps the items one round sends.
+ * `returnOnAnswerOnly`, on by default, sends a round in which the coder only answered straight back to the PR node.
  */
-export type ReviewThreadsSettings = { reply: boolean; resolveAfterReview: boolean; summary: string | undefined; maxPerRound: number };
+export type ReviewThreadsSettings = { reply: boolean; resolveAfterReview: boolean; summary: string | undefined; maxPerRound: number; returnOnAnswerOnly: boolean };
 
 export function reviewThreadsSettings(config: Record<string, unknown>): ReviewThreadsSettings {
   const raw = typeof config.reviewThreads === "object" && config.reviewThreads !== null ? (config.reviewThreads as Record<string, unknown>) : {};
   const reply = raw.reply === true;
   const summary = typeof raw.summary === "string" && raw.summary.trim() ? raw.summary.trim().replace(/\[bot\]$/i, "") : undefined;
   const maxPerRound = typeof raw.maxPerRound === "number" && raw.maxPerRound >= 1 ? Math.floor(raw.maxPerRound) : 20;
-  return { reply, resolveAfterReview: reply && raw.resolveAfterReview !== false, summary, maxPerRound };
+  return { reply, resolveAfterReview: reply && raw.resolveAfterReview !== false, summary, maxPerRound, returnOnAnswerOnly: raw.returnOnAnswerOnly !== false };
 }
 
 /** A review bot's summary comment as the PR node read it, parsed. */

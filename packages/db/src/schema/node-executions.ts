@@ -53,7 +53,7 @@ export const nodeExecutions = pgTable(
      * Why this execution exists: the edge that created it, or a repair, or a loop exhaustion. A repair the
      * engine started itself has a reason: files outside the plan sent back, or a continuation after running out of turns.
      */
-    trigger: jsonb("trigger").$type<{ kind: "start" | "edge" | "exhausted" | "repair"; edgeKey?: string; from?: string; fromExecutionId?: string; reason?: "paths" | "continue" }>(),
+    trigger: jsonb("trigger").$type<{ kind: "start" | "edge" | "exhausted" | "repair" | "returned"; edgeKey?: string; from?: string; fromExecutionId?: string; reason?: "paths" | "continue" }>(),
     /** Time this execution was ready and not running, summed over its claims: each claim adds the time since runnable_at. */
     queuedMs: integer("queued_ms").notNull().default(0),
     claimedAt: tstz("claimed_at"),
