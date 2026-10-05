@@ -16,6 +16,11 @@ test("summarizes an edge by its endpoints", () => {
   expect(summarizeEvent({ type: "edge.taken", payload: { from: "coder", to: "pr" } })).toBe("coder to pr");
 });
 
+test("summarizes an answer-only round's return by why it went back", () => {
+  const payload = { from: "coder", to: "pr", edgeKey: "pr->coder", message: "answered review comments only; back to pr" };
+  expect(summarizeEvent({ type: "edge.returned", payload })).toBe("coder answered review comments only; back to pr");
+});
+
 test("summarizes assistant text from the CLI stream", () => {
   expect(
     summarizeEvent({ type: "cli.assistant", payload: { message: { content: [{ type: "text", text: "Reading the repo" }] } } }),

@@ -35,7 +35,7 @@ import {
   type ReviewRequest,
   type SummaryRead,
 } from "./external-review.ts";
-import { handleOf, postAnswers, recordAnswers, sendItems, syncItems, withItems } from "./review-items.ts";
+import { awaitingNextReview, handleOf, postAnswers, recordAnswers, sendItems, syncItems, withItems } from "./review-items.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -363,13 +363,20 @@ export function prNodeExecutor(deps: {
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
+      // After an answer-only round the head is the commit the reviewers already reviewed: the step waits for the
+      // next review of each reviewer it answered in a thread, up to the review time limit, before it routes on
+      // what GitHub reports. Without that a decision from the review the coder answered would send it round again.
+      const rereview = itemsDb && ctx.execution.trigger?.kind === "returned" ? await awaitingNextReview(itemsDb, ctx.run.id, snapshot) : [];
+      const rereviewTimedOut = rereview.length > 0 && waitingForMs >= settings.timeoutMs;
+      if (rereview.length) ctx.emit("github.rereview", { number, waitingFor: rereview.map((r) => r.reviewer), items: rereview.flatMap((r) => r.items), timedOut: rereviewTimedOut });
+      const awaitingRereview = rereview.length > 0 && !rereviewTimedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
 
       // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit.
       const ask = reviewRequest(ctx.node.config);
       const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer);
       if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
 
-      if (checksPending || awaitingApproval || awaitingReviewers) {
+      if (checksPending || awaitingApproval || awaitingReviewers || awaitingRereview) {
         // Also wake when a PR without checks reaches its limit, so a repository without CI does not wait for the reconcile.
         // Without webhooks (the relay is not running, or the repository has none) the reconcile is the only wake: look sooner.
         const heard = await webhooksSince(deps.db, repoId, ctx.execution.id);
@@ -377,7 +384,7 @@ export function prNodeExecutor(deps: {
         if (!heard) ctx.emit("github.no_webhooks", { number, pollSeconds: Math.round(reconcileMs / 1000) });
         const reconcile = Math.min(Date.now() + reconcileMs, noChecks ? Date.now() + Math.max(0, noChecksMs - sincePush) + 1_000 : Infinity);
         // Wake at the review time limit even without a webhook, so a reviewer who never comes cannot hold the run.
-        const limit = awaitingReviewers ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
+        const limit = awaitingReviewers || awaitingRereview ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
         // Also wake when it is time to ask a reviewer that has not started.
         const askAt = unstarted && sincePush < ask.afterMs ? Date.now() + (ask.afterMs - sincePush) + 1_000 : Infinity;
         return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt)) } };
