@@ -93,7 +93,21 @@ test("getPrSnapshot maps the GraphQL pull request, its description, rollup and r
                 ],
               },
               reviewThreads: {
-                nodes: [{ isResolved: false, comments: { nodes: [{ author: { login: "ann" }, body: "rename", path: "a.ts", line: 3, url: "u1" }] } }],
+                nodes: [
+                  {
+                    id: "PRRT_1",
+                    isResolved: false,
+                    isOutdated: false,
+                    path: "a.ts",
+                    line: 3,
+                    originalLine: 3,
+                    viewerCanReply: true,
+                    viewerCanResolve: true,
+                    resolvedBy: null,
+                    comments: { nodes: [{ author: { __typename: "User", login: "ann" }, body: "rename", path: "a.ts", line: 3, url: "u1", createdAt: "2026-09-30T09:00:00Z" }] },
+                    latest: { nodes: [] },
+                  },
+                ],
               },
               comments: { nodes: [{ author: { login: "cat" }, body: "tests?", url: "u3" }] },
             },
@@ -112,7 +126,7 @@ test("getPrSnapshot maps the GraphQL pull request, its description, rollup and r
       { name: "ci/legacy", status: "COMPLETED", conclusion: "SUCCESS", url: "u" },
     ],
   });
-  expect(snap.reviewThreads[0]!.comments[0]).toEqual({ author: "ann", body: "rename", path: "a.ts", line: 3, url: "u1" });
+  expect(snap.reviewThreads[0]!.comments[0]).toEqual({ author: "ann", authorBot: false, body: "rename", path: "a.ts", line: 3, url: "u1", createdAt: "2026-09-30T09:00:00Z" });
 });
 
 test("getJobLogTail returns the last lines of an Actions job log and undefined when unavailable", async () => {
@@ -582,6 +596,197 @@ test("setMilestone refuses a milestone or an issue the repository does not have,
   await expect(OctokitGitHub.withToken("t", { fetch: missing.fetch }).setMilestone(repo, 99, 3)).rejects.toThrow("issue octo/sample#99 not found");
 
   expect([...operations, ...missing.operations].map((o) => o.operation)).not.toContain("SetIssueMilestone");
+});
+
+/** A pull request as the snapshot query answers it, with nothing in it but what a test sets. */
+const snapshotPr = (over: Record<string, unknown>) => ({
+  number: 7,
+  title: "Add a changelog",
+  body: "",
+  isDraft: false,
+  additions: 1,
+  deletions: 0,
+  changedFiles: 1,
+  updatedAt: "2026-10-05T16:00:00Z",
+  url: "https://github.com/octo/sample/pull/7",
+  headRefOid: "abc",
+  headRefName: "handoff/x",
+  state: "OPEN",
+  merged: false,
+  mergeable: "MERGEABLE",
+  reviewDecision: null,
+  commits: { nodes: [] },
+  reviews: { nodes: [] },
+  reviewThreads: { nodes: [] },
+  comments: { nodes: [] },
+  ...over,
+});
+
+/** A review comment node as the snapshot query answers it. */
+const threadComment = (databaseId: number, author: { __typename: string; login: string } | null, body: string, createdAt: string) => ({
+  databaseId,
+  author,
+  body,
+  path: "vitest.config.ts",
+  line: 12,
+  url: `https://github.com/octo/sample/pull/7#discussion_r${databaseId}`,
+  createdAt,
+});
+
+test("getPrSnapshot maps each thread's id, outdated flag, the viewer's rights, who resolved it and its latest comments with the author's type", async () => {
+  const rabbit = { __typename: "Bot", login: "coderabbitai" };
+  const krister = { __typename: "User", login: "Krister-Johansson" };
+  const first = threadComment(101, rabbit, "Exclude the e2e folder.", "2026-10-05T16:17:17Z");
+  const reply = threadComment(102, krister, "ADR 0041 keeps it in.", "2026-10-05T16:26:48Z");
+  const { fetch, operations, calls } = fakeGraphql({
+    PullRequestSnapshot: () => ({
+      repository: {
+        pullRequest: snapshotPr({
+          reviewThreads: {
+            nodes: [
+              {
+                id: "PRRT_kwDOA1",
+                isResolved: true,
+                isOutdated: true,
+                path: "vitest.config.ts",
+                line: null,
+                originalLine: 12,
+                viewerCanReply: true,
+                viewerCanResolve: false,
+                resolvedBy: { login: "Krister-Johansson" },
+                comments: { nodes: [first] },
+                latest: { nodes: [first, reply] },
+              },
+              {
+                id: "PRRT_kwDOA2",
+                isResolved: false,
+                isOutdated: false,
+                path: "README.md",
+                line: 3,
+                originalLine: 3,
+                viewerCanReply: false,
+                viewerCanResolve: true,
+                resolvedBy: null,
+                comments: { nodes: [{ ...threadComment(103, null, "Say how to run it.", "2026-10-05T16:30:00Z"), path: "README.md", line: 3 }] },
+                latest: { nodes: [{ ...threadComment(103, null, "Say how to run it.", "2026-10-05T16:30:00Z"), path: "README.md", line: 3 }] },
+              },
+            ],
+          },
+        }),
+      },
+    }),
+  });
+
+  const snap = await OctokitGitHub.withToken("t", { fetch }).getPrSnapshot(repo, 7);
+
+  const rabbitComment = { id: "101", author: "coderabbitai", authorBot: true, body: "Exclude the e2e folder.", path: "vitest.config.ts", line: 12, url: "https://github.com/octo/sample/pull/7#discussion_r101", createdAt: "2026-10-05T16:17:17Z" };
+  expect(snap.reviewThreads).toEqual([
+    {
+      id: "PRRT_kwDOA1",
+      isResolved: true,
+      isOutdated: true,
+      path: "vitest.config.ts",
+      line: null,
+      originalLine: 12,
+      viewerCanReply: true,
+      viewerCanResolve: false,
+      resolvedBy: "Krister-Johansson",
+      comments: [rabbitComment],
+      latest: [
+        rabbitComment,
+        { id: "102", author: "Krister-Johansson", authorBot: false, body: "ADR 0041 keeps it in.", path: "vitest.config.ts", line: 12, url: "https://github.com/octo/sample/pull/7#discussion_r102", createdAt: "2026-10-05T16:26:48Z" },
+      ],
+    },
+    {
+      id: "PRRT_kwDOA2",
+      isResolved: false,
+      isOutdated: false,
+      path: "README.md",
+      line: 3,
+      originalLine: 3,
+      viewerCanReply: false,
+      viewerCanResolve: true,
+      resolvedBy: null,
+      // A deleted account is GitHub's ghost, a person.
+      comments: [{ id: "103", author: "ghost", authorBot: false, body: "Say how to run it.", path: "README.md", line: 3, url: "https://github.com/octo/sample/pull/7#discussion_r103", createdAt: "2026-10-05T16:30:00Z" }],
+      latest: [{ id: "103", author: "ghost", authorBot: false, body: "Say how to run it.", path: "README.md", line: 3, url: "https://github.com/octo/sample/pull/7#discussion_r103", createdAt: "2026-10-05T16:30:00Z" }],
+    },
+  ]);
+  expect(operations).toEqual([{ operation: "PullRequestSnapshot", variables: { owner: "octo", name: "sample", number: 7 } }]);
+  expect(schemaErrors(calls)).toEqual([]);
+});
+
+test("getPrSnapshot tells a bot's review from a person's and gives each PR comment its id and times", async () => {
+  const review = (databaseId: number, author: { __typename: string; login: string } | null) => ({ databaseId, state: "COMMENTED", body: "Actionable comments posted: 1", submittedAt: "2026-10-05T16:17:17Z", author, commit: { oid: "abc" } });
+  const { fetch, calls } = fakeGraphql({
+    PullRequestSnapshot: () => ({
+      repository: {
+        pullRequest: snapshotPr({
+          reviews: { nodes: [review(1, { __typename: "Bot", login: "coderabbitai" }), review(2, { __typename: "User", login: "ann" }), review(3, null)] },
+          comments: {
+            nodes: [
+              {
+                databaseId: 9001,
+                author: { login: "coderabbitai" },
+                body: "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
+                url: "https://github.com/octo/sample/pull/7#issuecomment-9001",
+                createdAt: "2026-10-05T17:59:45Z",
+                updatedAt: "2026-10-05T18:12:37Z",
+              },
+            ],
+          },
+        }),
+      },
+    }),
+  });
+
+  const snap = await OctokitGitHub.withToken("t", { fetch }).getPrSnapshot(repo, 7);
+
+  expect(snap.reviews.map((r) => [r.author, r.authorBot])).toEqual([
+    ["coderabbitai", true],
+    ["ann", false],
+    ["ghost", false],
+  ]);
+  expect(snap.comments).toEqual([
+    {
+      id: 9001,
+      author: "coderabbitai",
+      body: "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
+      url: "https://github.com/octo/sample/pull/7#issuecomment-9001",
+      createdAt: "2026-10-05T17:59:45Z",
+      updatedAt: "2026-10-05T18:12:37Z",
+    },
+  ]);
+  expect(schemaErrors(calls)).toEqual([]);
+});
+
+test("replyToThread sends addPullRequestReviewThreadReply with the thread id and body and returns the comment's id and url", async () => {
+  const { fetch, operations, calls } = fakeGraphql({
+    ReplyToReviewThread: () => ({ addPullRequestReviewThreadReply: { comment: { databaseId: 2412345678, url: "https://github.com/octo/sample/pull/7#discussion_r2412345678" } } }),
+  });
+  const body = "Not changed: the comment does not hold.\n\n<!-- handoff:item-reply R1 abc -->";
+
+  expect(await OctokitGitHub.withToken("t", { fetch }).replyToThread(repo, "PRRT_kwDOA1", body)).toEqual({
+    id: "2412345678",
+    url: "https://github.com/octo/sample/pull/7#discussion_r2412345678",
+  });
+  expect(operations).toEqual([{ operation: "ReplyToReviewThread", variables: { threadId: "PRRT_kwDOA1", body } }]);
+  expect(schemaErrors(calls)).toEqual([]);
+});
+
+test("resolveThread sends resolveReviewThread and reports whether the thread is resolved", async () => {
+  const { fetch, operations, calls } = fakeGraphql({
+    ResolveReviewThread: (v) => ({ resolveReviewThread: { thread: { id: v.threadId, isResolved: v.threadId === "PRRT_kwDOA1" } } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+
+  expect(await gh.resolveThread(repo, "PRRT_kwDOA1")).toEqual({ resolved: true });
+  expect(await gh.resolveThread(repo, "PRRT_kwDOA2")).toEqual({ resolved: false });
+  expect(operations).toEqual([
+    { operation: "ResolveReviewThread", variables: { threadId: "PRRT_kwDOA1" } },
+    { operation: "ResolveReviewThread", variables: { threadId: "PRRT_kwDOA2" } },
+  ]);
+  expect(schemaErrors(calls)).toEqual([]);
 });
 
 test("unresolvedReviewThreads reads the merge state and each unresolved thread with its first comment", async () => {

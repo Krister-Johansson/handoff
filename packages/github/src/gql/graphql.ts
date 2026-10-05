@@ -1038,24 +1038,53 @@ export type PullRequestSnapshotQuery = { repository: { pullRequest: { number: nu
                   | { __typename: 'CheckRun', databaseId: number | null, name: string, status: CheckStatusState, conclusion: CheckConclusionState | null, detailsUrl: string | null }
                   | { __typename: 'StatusContext', context: string, state: StatusState, targetUrl: string | null }
                  | null> | null } } | null } } | null> | null }, reviews: { nodes: Array<{ databaseId: number | null, state: PullRequestReviewState, body: string, submittedAt: string | null, author:
-            | { login: string }
-            | { login: string }
-            | { login: string }
-            | { login: string }
-            | { login: string }
-           | null, commit: { oid: string } | null } | null> | null } | null, reviewThreads: { nodes: Array<{ isResolved: boolean, comments: { nodes: Array<{ databaseId: number | null, body: string, path: string, line: number | null, url: string, author:
-                | { login: string }
-                | { login: string }
-                | { login: string }
-                | { login: string }
-                | { login: string }
-               | null } | null> | null } } | null> | null }, comments: { nodes: Array<{ body: string, url: string, author:
+            | { __typename: 'Bot', login: string }
+            | { __typename: 'EnterpriseUserAccount', login: string }
+            | { __typename: 'Mannequin', login: string }
+            | { __typename: 'Organization', login: string }
+            | { __typename: 'User', login: string }
+           | null, commit: { oid: string } | null } | null> | null } | null, reviewThreads: { nodes: Array<{ id: string, isResolved: boolean, isOutdated: boolean, path: string, line: number | null, originalLine: number | null, viewerCanReply: boolean, viewerCanResolve: boolean, resolvedBy: { login: string } | null, comments: { nodes: Array<{ databaseId: number | null, body: string, path: string, line: number | null, url: string, createdAt: string, author:
+                | { __typename: 'Bot', login: string }
+                | { __typename: 'EnterpriseUserAccount', login: string }
+                | { __typename: 'Mannequin', login: string }
+                | { __typename: 'Organization', login: string }
+                | { __typename: 'User', login: string }
+               | null } | null> | null }, latest: { nodes: Array<{ databaseId: number | null, body: string, path: string, line: number | null, url: string, createdAt: string, author:
+                | { __typename: 'Bot', login: string }
+                | { __typename: 'EnterpriseUserAccount', login: string }
+                | { __typename: 'Mannequin', login: string }
+                | { __typename: 'Organization', login: string }
+                | { __typename: 'User', login: string }
+               | null } | null> | null } } | null> | null }, comments: { nodes: Array<{ databaseId: number | null, body: string, url: string, createdAt: string, updatedAt: string, author:
             | { login: string }
             | { login: string }
             | { login: string }
             | { login: string }
             | { login: string }
            | null } | null> | null } } | null } | null };
+
+export type ThreadCommentFragment = { databaseId: number | null, body: string, path: string, line: number | null, url: string, createdAt: string, author:
+    | { __typename: 'Bot', login: string }
+    | { __typename: 'EnterpriseUserAccount', login: string }
+    | { __typename: 'Mannequin', login: string }
+    | { __typename: 'Organization', login: string }
+    | { __typename: 'User', login: string }
+   | null };
+
+export type ReplyToReviewThreadMutationVariables = Exact<{
+  threadId: string | number;
+  body: string;
+}>;
+
+
+export type ReplyToReviewThreadMutation = { addPullRequestReviewThreadReply: { comment: { databaseId: number | null, url: string } | null } | null };
+
+export type ResolveReviewThreadMutationVariables = Exact<{
+  threadId: string | number;
+}>;
+
+
+export type ResolveReviewThreadMutation = { resolveReviewThread: { thread: { id: string, isResolved: boolean } | null } | null };
 
 export class TypedDocumentString<TResult, TVariables>
   extends String
@@ -1223,6 +1252,20 @@ fragment PlanEstimateFields on ProjectV2 {
     }
   }
 }`, {"fragmentName":"PlanProjectChoice"}) as unknown as TypedDocumentString<PlanProjectChoiceFragment, unknown>;
+export const ThreadCommentFragmentDoc = new TypedDocumentString(`
+    fragment ThreadComment on PullRequestReviewComment {
+  databaseId
+  author {
+    __typename
+    login
+  }
+  body
+  path
+  line
+  url
+  createdAt
+}
+    `, {"fragmentName":"ThreadComment"}) as unknown as TypedDocumentString<ThreadCommentFragment, unknown>;
 export const IssueParentsDocument = new TypedDocumentString(`
     query IssueParents($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
@@ -2176,6 +2219,7 @@ export const PullRequestSnapshotDocument = new TypedDocumentString(`
           body
           submittedAt
           author {
+            __typename
             login
           }
           commit {
@@ -2185,31 +2229,75 @@ export const PullRequestSnapshotDocument = new TypedDocumentString(`
       }
       reviewThreads(first: 100) {
         nodes {
+          id
           isResolved
+          isOutdated
+          path
+          line
+          originalLine
+          viewerCanReply
+          viewerCanResolve
+          resolvedBy {
+            login
+          }
           comments(first: 1) {
             nodes {
-              databaseId
-              author {
-                login
-              }
-              body
-              path
-              line
-              url
+              ...ThreadComment
+            }
+          }
+          latest: comments(last: 10) {
+            nodes {
+              ...ThreadComment
             }
           }
         }
       }
       comments(last: 50) {
         nodes {
+          databaseId
           author {
             login
           }
           body
           url
+          createdAt
+          updatedAt
         }
       }
     }
   }
 }
-    `) as unknown as TypedDocumentString<PullRequestSnapshotQuery, PullRequestSnapshotQueryVariables>;
+    fragment ThreadComment on PullRequestReviewComment {
+  databaseId
+  author {
+    __typename
+    login
+  }
+  body
+  path
+  line
+  url
+  createdAt
+}`) as unknown as TypedDocumentString<PullRequestSnapshotQuery, PullRequestSnapshotQueryVariables>;
+export const ReplyToReviewThreadDocument = new TypedDocumentString(`
+    mutation ReplyToReviewThread($threadId: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(
+    input: { pullRequestReviewThreadId: $threadId, body: $body }
+  ) {
+    comment {
+      databaseId
+      url
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<ReplyToReviewThreadMutation, ReplyToReviewThreadMutationVariables>;
+export const ResolveReviewThreadDocument = new TypedDocumentString(`
+    mutation ResolveReviewThread($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) {
+    thread {
+      id
+      isResolved
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<ResolveReviewThreadMutation, ResolveReviewThreadMutationVariables>;

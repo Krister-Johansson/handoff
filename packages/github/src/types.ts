@@ -32,9 +32,43 @@ export type PrSnapshot = {
   /** statusCheckRollup of the head commit; null when no checks have reported yet. */
   checks: { state: "SUCCESS" | "FAILURE" | "ERROR" | "PENDING" | "EXPECTED" | string; contexts: CheckContext[] } | null;
   /** Submitted reviews, newest last: who reviewed which commit, with what verdict and summary. */
-  reviews: { id: string; state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING" | string; body: string; author: string; commitSha: string | null; submittedAt: string | null }[];
-  reviewThreads: { isResolved: boolean; comments: { id?: string; author: string; body: string; path?: string; line?: number; url: string }[] }[];
-  comments: { author: string; body: string; url: string }[];
+  reviews: {
+    id: string;
+    state: "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED" | "PENDING" | string;
+    body: string;
+    author: string;
+    /** True for a GitHub App such as CodeRabbit, false for a person. */
+    authorBot: boolean;
+    commitSha: string | null;
+    submittedAt: string | null;
+  }[];
+  reviewThreads: ReviewThread[];
+  /** The last 50 issue comments, oldest first. `id` is GitHub's database id, the REST comment id. */
+  comments: { id?: number; author: string; body: string; url: string; createdAt: string; updatedAt: string }[];
+};
+
+/** A comment in a review thread. `id` is GitHub's database id; `authorBot` is true for a GitHub App such as CodeRabbit. */
+export type ReviewThreadComment = { id?: string; author: string; authorBot: boolean; body: string; path?: string; line?: number; url: string; createdAt: string };
+
+/**
+ * An inline review thread of a pull request. `id` is the GraphQL node id that replies and resolving take.
+ * `line` is null once a push moved the code away (`isOutdated`); `originalLine` is where it was written.
+ * `comments` holds the first comment only, `latest` the last ten, replies included.
+ */
+export type ReviewThread = {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  path: string;
+  line: number | null;
+  originalLine: number | null;
+  /** Whether the credential handoff runs with may reply in the thread, and resolve it. */
+  viewerCanReply: boolean;
+  viewerCanResolve: boolean;
+  /** The login of whoever resolved the thread; null while it is open. */
+  resolvedBy: string | null;
+  comments: ReviewThreadComment[];
+  latest: ReviewThreadComment[];
 };
 
 /** A review thread nobody resolved: where it is, whether a later push made it outdated, and its first comment. */
@@ -166,6 +200,18 @@ export interface GitHubPort {
   getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot>;
   /** The pull request's merge state and its unresolved review threads (the first 100 threads), for a merge a ruleset blocks. */
   unresolvedReviewThreads(repo: RepoRef, number: number): Promise<ReviewThreadState>;
+  /**
+   * Replies in a review thread by its GraphQL node id (`ReviewThread.id`); returns the new comment's
+   * database id, as `ReviewThreadComment.id` gives it, and its link. Throws when the thread is gone or the
+   * credential may not reply (`viewerCanReply`).
+   */
+  replyToThread(repo: RepoRef, threadId: string, body: string): Promise<{ id: string; url: string }>;
+  /**
+   * Resolves a review thread by its GraphQL node id and reports whether GitHub now has it resolved.
+   * Resolving a resolved thread is no error. Throws when the thread is gone or the credential may not
+   * resolve it (`viewerCanResolve`).
+   */
+  resolveThread(repo: RepoRef, threadId: string): Promise<{ resolved: boolean }>;
   /** The paths of the files a pull request changes, as GitHub lists them (at most 3,000). */
   listPrFiles(repo: RepoRef, number: number): Promise<string[]>;
   /** Whether checks will ever run on a pull request into `branch`: an active Actions workflow, or a branch rule that requires status checks. */
