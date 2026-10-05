@@ -57,7 +57,11 @@ test("Assign me assigns the token's user beside whoever has the issue, and Clear
   expect(screen.queryByRole("button", { name: "Assign me" })).not.toBeInTheDocument();
 
   const picker = await open("Assignees: ann, Krister-Johansson. Change assignees");
-  fireEvent.click(await within(picker).findByRole("option", { name: "Clear assignees" }, SLOW));
+  const clear = await within(picker).findByRole("option", { name: "Clear assignees" }, SLOW);
+  // The new assignees commit before the Assign me transition ends, so the options stay disabled until
+  // its pending flag drops in a later render, and a click on a disabled option does nothing.
+  await waitFor(() => expect(clear).toHaveAttribute("aria-disabled", "false"), SLOW);
+  fireEvent.click(clear);
   await waitFor(() => expect(actions.assignAction).toHaveBeenLastCalledWith({ projectId: "p1", issue: 66, logins: [] }), SLOW);
 });
 
