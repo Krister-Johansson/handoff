@@ -37,6 +37,15 @@ export type PrSnapshot = {
   comments: { author: string; body: string; url: string }[];
 };
 
+/** A review thread nobody resolved: where it is, whether a later push made it outdated, and its first comment. */
+export type UnresolvedThread = { path: string; line: number | null; outdated: boolean; author: string; body: string; url: string };
+
+/**
+ * GitHub's merge state of a pull request (mergeStateStatus: BLOCKED, CLEAN, BEHIND, DIRTY, UNSTABLE and
+ * so on) and its unresolved review threads, outdated or not.
+ */
+export type ReviewThreadState = { mergeState: string; threads: UnresolvedThread[] };
+
 /** Everything the engine needs from GitHub. OctokitGitHub in production, FakeGitHub in tests. */
 /** A repository the configured credential can reach, for picking a project's repository. */
 export type RepoSummary = {
@@ -155,6 +164,8 @@ export interface GitHubPort {
   /** Replaces a pull request's title and description. */
   updatePr(repo: RepoRef, number: number, input: { title: string; body: string }): Promise<void>;
   getPrSnapshot(repo: RepoRef, number: number): Promise<PrSnapshot>;
+  /** The pull request's merge state and its unresolved review threads (the first 100 threads), for a merge a ruleset blocks. */
+  unresolvedReviewThreads(repo: RepoRef, number: number): Promise<ReviewThreadState>;
   /** The paths of the files a pull request changes, as GitHub lists them (at most 3,000). */
   listPrFiles(repo: RepoRef, number: number): Promise<string[]>;
   /** Whether checks will ever run on a pull request into `branch`: an active Actions workflow, or a branch rule that requires status checks. */

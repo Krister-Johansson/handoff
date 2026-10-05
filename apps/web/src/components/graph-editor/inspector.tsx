@@ -506,7 +506,7 @@ const NOTIFY_COPY: Record<NotifyKind, { label: string; description: string }> = 
   started: { label: "Run started", description: "When a run starts here." },
   finished: { label: "Run finished", description: "When a run ends here." },
   failed: { label: "Failed", description: "When this step fails the run." },
-  input: { label: "Waiting for you", description: "When this gate asks a question or waits for a review." },
+  input: { label: "Waiting for you", description: "When this gate asks a question or waits for a review, or this merge waits for review threads to be resolved." },
   permission: { label: "Asks permission", description: "When Claude wants a tool call its allow rules do not cover, and waits for you to allow it." },
   ready: { label: "Ready to merge", description: "When the pull request is first in line and waits for you." },
   merged: { label: "Merged", description: "When the pull request merges." },
@@ -662,6 +662,7 @@ function ReviewerFields({ config, setConfig, clearConfig }: { config: Record<str
           />
         </Field>
       )}
+      {reviewers.length > 0 && <ReviewRequestFields reviewers={reviewers} config={config} setConfig={setConfig} clearConfig={clearConfig} />}
       <Field orientation="horizontal">
         <Switch id="pr-send-back" checked={sendBack} onCheckedChange={(on) => setConfig({ sendReviewComments: on })} />
         <FieldContent>
@@ -672,6 +673,75 @@ function ReviewerFields({ config, setConfig, clearConfig }: { config: Record<str
         </FieldContent>
       </Field>
     </FieldSet>
+  );
+}
+
+/** The command that asks a reviewer for a review: `@coderabbitai review` for CodeRabbit, the same form for anyone else. */
+const reviewCommand = (login: string) => `@${login.replace(/\[bot\]$/, "")} review`;
+
+type ReviewRequestConfig = { reviewer: string; comment: string; afterMinutes?: number };
+
+/** A comment the PR node posts once per commit when a reviewer it waits for has not started after some minutes. */
+function ReviewRequestFields({ reviewers, config, setConfig, clearConfig }: { reviewers: string[]; config: Record<string, unknown>; setConfig: (patch: Record<string, unknown>) => void; clearConfig: (key: string) => void }) {
+  const raw = config.reviewRequest;
+  const request = typeof raw === "object" && raw !== null ? (raw as Partial<ReviewRequestConfig>) : undefined;
+  const reviewer = str(request?.reviewer);
+  const comment = str(request?.comment);
+  const write = (next: ReviewRequestConfig) => setConfig({ reviewRequest: next });
+  const current: ReviewRequestConfig = { reviewer, comment, ...(typeof request?.afterMinutes === "number" ? { afterMinutes: request.afterMinutes } : {}) };
+  const turnOn = () => {
+    const first = reviewers.find((r) => r.toLowerCase().startsWith("coderabbitai")) ?? reviewers[0]!;
+    write({ reviewer: first, comment: reviewCommand(first), afterMinutes: 2 });
+  };
+  return (
+    <>
+      <Field orientation="horizontal">
+        <Switch id="pr-review-request" checked={request !== undefined} onCheckedChange={(on) => (on ? turnOn() : clearConfig("reviewRequest"))} />
+        <FieldContent>
+          <FieldLabel htmlFor="pr-review-request" className="font-normal">
+            Ask a reviewer that has not started
+          </FieldLabel>
+          <FieldDescription>Posts the comment once per commit. CodeRabbit on a public repository with fewer than 10 stars reviews only when asked.</FieldDescription>
+        </FieldContent>
+      </Field>
+      {request !== undefined && (
+        <div className="grid grid-cols-2 gap-2.5">
+          <Field>
+            <FieldLabel htmlFor="pr-review-request-reviewer">Reviewer to ask</FieldLabel>
+            <NativeSelect id="pr-review-request-reviewer" value={reviewer} onChange={(e) => write({ ...current, reviewer: e.target.value, comment: reviewCommand(e.target.value) })}>
+              {[...new Set([...reviewers, ...(reviewer ? [reviewer] : [])])].map((login) => (
+                <NativeSelectOption key={login} value={login}>
+                  {login}
+                </NativeSelectOption>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="pr-review-request-after">Ask after (minutes)</FieldLabel>
+            <Input
+              id="pr-review-request-after"
+              type="number"
+              min={0}
+              placeholder="2"
+              value={num(request.afterMinutes)}
+              onChange={(e) => write(e.target.value ? { ...current, afterMinutes: Number(e.target.value) } : { reviewer, comment })}
+            />
+          </Field>
+          <Field className="col-span-2">
+            <FieldLabel htmlFor="pr-review-request-comment">Comment</FieldLabel>
+            <Input
+              // Keyed by the stored text, so a change made elsewhere (a page tool, another reviewer) shows here too.
+              key={comment}
+              id="pr-review-request-comment"
+              className="font-mono text-xs"
+              placeholder={reviewer ? reviewCommand(reviewer) : undefined}
+              defaultValue={comment}
+              onBlur={(e) => write({ ...current, comment: e.target.value.trim() || reviewCommand(reviewer) })}
+            />
+          </Field>
+        </div>
+      )}
+    </>
   );
 }
 

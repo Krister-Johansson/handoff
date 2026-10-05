@@ -47,6 +47,25 @@ export type IssueState =
   /** An issue that is still open */
   | 'OPEN';
 
+/** Detailed status information about a pull request merge. */
+export type MergeStateStatus =
+  /** The head ref is out of date. */
+  | 'BEHIND'
+  /** The merge is blocked. */
+  | 'BLOCKED'
+  /** Mergeable and passing commit status. */
+  | 'CLEAN'
+  /** The merge commit cannot be cleanly created. */
+  | 'DIRTY'
+  /** The merge is blocked due to the pull request being a draft. */
+  | 'DRAFT'
+  /** Mergeable with passing commit status and pre-receive hooks. */
+  | 'HAS_HOOKS'
+  /** The state cannot currently be determined. */
+  | 'UNKNOWN'
+  /** Mergeable with non-passing commit status. */
+  | 'UNSTABLE';
+
 /** Whether or not a PullRequest can be merged. */
 export type MergeableState =
   /** The pull request cannot be merged due to merge conflicts. */
@@ -992,6 +1011,21 @@ export type PlanProjectQuery = { repositoryOwner:
           | { __typename: 'ProjectV2SingleSelectField' }
          | null } | null }
    | null };
+
+export type PullRequestReviewThreadsQueryVariables = Exact<{
+  owner: string;
+  name: string;
+  number: number;
+}>;
+
+
+export type PullRequestReviewThreadsQuery = { repository: { pullRequest: { mergeStateStatus: MergeStateStatus, reviewThreads: { nodes: Array<{ isResolved: boolean, isOutdated: boolean, path: string, line: number | null, comments: { nodes: Array<{ body: string, url: string, author:
+                | { login: string }
+                | { login: string }
+                | { login: string }
+                | { login: string }
+                | { login: string }
+               | null } | null> | null } } | null> | null } } | null } | null };
 
 export type PullRequestSnapshotQueryVariables = Exact<{
   owner: string;
@@ -2064,6 +2098,32 @@ fragment PlanEstimateFields on ProjectV2 {
     }
   }
 }`) as unknown as TypedDocumentString<PlanProjectQuery, PlanProjectQueryVariables>;
+export const PullRequestReviewThreadsDocument = new TypedDocumentString(`
+    query PullRequestReviewThreads($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      mergeStateStatus
+      reviewThreads(first: 100) {
+        nodes {
+          isResolved
+          isOutdated
+          path
+          line
+          comments(first: 1) {
+            nodes {
+              author {
+                login
+              }
+              body
+              url
+            }
+          }
+        }
+      }
+    }
+  }
+}
+    `) as unknown as TypedDocumentString<PullRequestReviewThreadsQuery, PullRequestReviewThreadsQueryVariables>;
 export const PullRequestSnapshotDocument = new TypedDocumentString(`
     query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {

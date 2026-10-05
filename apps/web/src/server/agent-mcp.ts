@@ -437,7 +437,8 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
   const actor = deps.actor ?? "claude-code";
   // The dashboard address of a run known only by id, under its project.
   const urlOf = async (runId: string) => `${baseUrl}${(await runPathOf(db, runId)) ?? `/runs/${runId}`}`;
-  const url = (href: string) => `${baseUrl}${href}`;
+  // Dashboard paths get the base URL; a link elsewhere, such as a pull request on GitHub, stays as it is.
+  const url = (href: string) => (/^https?:\/\//.test(href) ? href : `${baseUrl}${href}`);
   const shaping = { db, github, projects: plan };
   /** The project's plan as the Plan page loads it, or the sentence that says why it cannot be read. */
   const planView = async (projectId: string) => {
@@ -613,7 +614,17 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         ready_to_merge: mine(groups.readyToMerge).map((r) => ({ run_id: r.runId, project: r.projectName, run: r.task, pr: r.prNumber, url: url(runPath(r.projectId, r.runId)) })),
         failed_runs: mine(groups.failedRuns).map((f) => ({ run_id: f.runId, project: f.projectName, run: f.task, node: f.nodeKey, url: url(runPath(f.projectId, f.runId)) })),
         stuck_runs: mine(groups.stuckRuns).map((s) => ({ run_id: s.runId, project: s.projectName, run: s.task, node: s.nodeKey, loop: s.loop, attempts: s.attempts, url: url(runPath(s.projectId, s.runId)) })),
-        pull_requests: mine(groups.pullRequests).map((p) => ({ run_id: p.runId, project: p.projectName, run: p.task, pr: p.number, pr_url: p.url, ci: p.ci, url: url(runPath(p.projectId, p.runId)) })),
+        pull_requests: mine(groups.pullRequests).map((p) => ({
+          run_id: p.runId,
+          project: p.projectName,
+          run: p.task,
+          pr: p.number,
+          pr_url: p.url,
+          ci: p.ci,
+          // How many review threads its merge waits on someone to resolve, when that is what it waits on.
+          ...(p.threads !== undefined ? { unresolved_threads: p.threads } : {}),
+          url: url(runPath(p.projectId, p.runId)),
+        })),
       };
     },
 
@@ -656,7 +667,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       return { decision: row.status, url: await urlOf(row.runId) };
     },
 
-    repair_run: async ({ run_id, node, note, allow_paths }: { run_id: string; node?: string; note?: string; allow_paths?: string[] }) => {
+    repair_run: async ({ run_id, node, note, allow_paths, latest_graph }: { run_id: string; node?: string; note?: string; allow_paths?: string[]; latest_graph?: boolean }) => {
       const [failed] = await db
         .select({ id: nodeExecutions.id, nodeKey: nodeExecutions.nodeKey })
         .from(nodeExecutions)
@@ -664,8 +675,8 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
         .limit(1);
       if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
-      const retry = await repairNodeExecution(db, failed.id, { ...(note ? { note } : {}), ...(allow_paths?.length ? { allowPaths: allow_paths } : {}) });
-      return { node: retry.nodeKey, attempt: retry.attempt, url: await urlOf(run_id) };
+      const retry = await repairNodeExecution(db, failed.id, { ...(note ? { note } : {}), ...(allow_paths?.length ? { allowPaths: allow_paths } : {}), ...(latest_graph ? { latestGraph: true } : {}) });
+      return { node: retry.nodeKey, attempt: retry.attempt, ...(retry.upgrade ? { graph_version: retry.upgrade.to.version } : {}), url: await urlOf(run_id) };
     },
 
     list_merge_queue: async ({ project }: { project: string }) => {

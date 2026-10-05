@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
-import { prKey, REVIEWER_NOTES_MARKER, toFeedback, type GitHubPort, type PlanStatus, type ProjectsPort, type RepoRef } from "@handoff/github";
+import { prKey, REVIEWER_NOTES_MARKER, reviewRequestMarker, toFeedback, type GitHubPort, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, sql, webhookDeliveries, type Db } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
@@ -11,7 +11,7 @@ import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
-import { externalReview, reviewSettings, withFindings } from "./external-review.ts";
+import { externalReview, reviewerStarted, reviewRequest, reviewSettings, withFindings, type ReviewRequest } from "./external-review.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -179,6 +179,23 @@ async function webhooksSince(db: Db | undefined, repoId: number, executionId: st
 }
 
 /**
+ * Posts the review request comment for the PR's head commit, unless one is there already. The comment
+ * ends with a marker naming the commit, so it is posted once per commit, also across worker restarts.
+ * A comment that cannot be posted is an event, not a failure: the PR keeps waiting.
+ */
+async function requestReview(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, snapshot: PrSnapshot, ask: ReviewRequest) {
+  const marker = reviewRequestMarker(snapshot.headSha);
+  if (snapshot.comments.some((c) => c.body.includes(marker))) return;
+  try {
+    // Finds the marker among all the PR's comments, not only the latest the snapshot has, before it creates one.
+    const { created } = await github.upsertPrComment(repo, snapshot.number, marker, `${ask.comment}\n\n${marker}`);
+    if (created) ctx.emit("github.review_requested", { number: snapshot.number, reviewer: ask.reviewer, comment: ask.comment, headSha: snapshot.headSha });
+  } catch (error) {
+    ctx.emit("github.review_request_failed", { number: snapshot.number, reviewer: ask.reviewer, message: (error as Error).message });
+  }
+}
+
+/**
  * Pushes the run branch, opens or reuses its pull request, then reports CI and review state as
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
@@ -291,6 +308,11 @@ export function prNodeExecutor(deps: {
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
 
+      // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit.
+      const ask = reviewRequest(ctx.node.config);
+      const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer);
+      if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
+
       if (checksPending || awaitingApproval || awaitingReviewers) {
         // Also wake when a PR without checks reaches its limit, so a repository without CI does not wait for the reconcile.
         // Without webhooks (the relay is not running, or the repository has none) the reconcile is the only wake: look sooner.
@@ -300,7 +322,9 @@ export function prNodeExecutor(deps: {
         const reconcile = Math.min(Date.now() + reconcileMs, noChecks ? Date.now() + Math.max(0, noChecksMs - sincePush) + 1_000 : Infinity);
         // Wake at the review time limit even without a webhook, so a reviewer who never comes cannot hold the run.
         const limit = awaitingReviewers ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
-        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit)) } };
+        // Also wake when it is time to ask a reviewer that has not started.
+        const askAt = unstarted && sincePush < ask.afterMs ? Date.now() + (ask.afterMs - sincePush) + 1_000 : Infinity;
+        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt)) } };
       }
 
       const sendBack = settings.sendBack && external.findings.length > 0;
@@ -392,6 +416,17 @@ async function emittedBefore(db: Db, executionId: string, type: string) {
   return row !== undefined;
 }
 
+/** The payload of this execution's latest event of this type, across its waits. */
+async function lastPayload(db: Db, executionId: string, type: string) {
+  const [row] = await db
+    .select({ payload: events.payload })
+    .from(events)
+    .where(and(eq(events.nodeExecutionId, executionId), eq(events.type, type)))
+    .orderBy(desc(events.seq))
+    .limit(1);
+  return row?.payload as { threads?: { url: string }[] } | undefined;
+}
+
 /** The run's issues that GitHub records as blocked by open issues, with their blockers. */
 async function blockedIssues(github: GitHubPort, repo: RepoRef, issues: { number: number }[]) {
   const all = await Promise.all(issues.map(async (i) => ({ issue: i.number, blockedBy: await github.openBlockers(repo, i.number) })));
@@ -408,7 +443,9 @@ const QUEUE_RECHECK_MS = 60_000;
  * Merges the run's pull request (squash by default). With the database, it first takes its place in
  * the project's merge queue and waits for its turn: first in line, and, unless the node's mode is
  * auto, asked to merge by a person. At its turn a pull request that conflicts with the base branch or
- * is behind it goes back on the update edge to catch up, keeping its place. Merging wakes the queue.
+ * is behind it goes back on the update edge to catch up, keeping its place. One that GitHub reports as
+ * blocked while it has unresolved review threads waits, keeping its place, until a person resolves them:
+ * the step names the threads and notifies once. Merging wakes the queue.
  */
 export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?: ProjectsPort | undefined }): NodeExecutor {
   return {
@@ -461,6 +498,28 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
       if (routes(ctx, "update") && (await deps.github.behindBy(repo, ctx.run.baseBranch, snapshot.headSha)) > 0) {
         ctx.emit("merge.behind", { number, base: ctx.run.baseBranch });
         return catchUp("is behind");
+      }
+      // A ruleset that requires resolved conversations blocks the merge while a review thread is open. Resolving
+      // one is a person's call, so the step names the threads and waits for a webhook or the next look.
+      const review = await deps.github.unresolvedReviewThreads(repo, number);
+      if (review.mergeState === "BLOCKED" && review.threads.length > 0) {
+        let repoId = ctx.project.repoId;
+        if (repoId === null) {
+          repoId = await deps.github.getRepoId(repo);
+          await ctx.recordRepoId(repoId);
+        }
+        const key = prKey(repoId, number);
+        await ctx.registerWait(key);
+        const before = db ? await lastPayload(db, ctx.execution.id, "merge.threads_unresolved") : undefined;
+        const urls = (threads: { url: string }[]) => threads.map((t) => t.url).join("\n");
+        if (!before || urls(before.threads ?? []) !== urls(review.threads)) {
+          ctx.emit("merge.threads_unresolved", { number, url: snapshot.url, threads: review.threads });
+        }
+        if (!before) {
+          const count = review.threads.length;
+          await ctx.notify("input", { title: `${ctx.project.name}: PR #${number} has ${count} unresolved review ${count === 1 ? "thread" : "threads"}`, body: brief(ctx.run.task), href: snapshot.url });
+        }
+        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Date.now() + BLOCKED_RECHECK_MS) } };
       }
       const method = ctx.node.config.method === "merge" || ctx.node.config.method === "rebase" ? ctx.node.config.method : "squash";
       try {

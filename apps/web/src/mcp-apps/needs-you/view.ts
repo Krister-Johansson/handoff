@@ -57,14 +57,19 @@ function inboxGroups(inbox: Inbox, host: ViewHost): Group[] {
       cards: inbox.pull_requests.map((p) => {
         const title = `#${p.pr} ${p.run}`;
         const ci = p.ci ? CI[p.ci] : undefined;
+        const threads = p.unresolved_threads;
+        const note =
+          threads === undefined
+            ? "The run goes on once the PR is approved."
+            : `${threads} unresolved review ${threads === 1 ? "thread" : "threads"}. The merge goes on once they are resolved.`;
         return inboxCard(
           ICONS.pull,
           "success",
           title,
           cardContext("PR to review on GitHub", "neutral", p),
           cardTitle(title),
-          el("p", "note", ci && el("span", `ci ci-${p.ci}`, ci), "The run goes on once the PR is approved."),
-          cardActions(p.pr_url && link(p.pr_url, "btn btn-primary", host.open, "Review on GitHub"), openRun(p.url, host)),
+          el("p", "note", ci && el("span", `ci ci-${p.ci}`, ci), note),
+          cardActions(p.pr_url && link(p.pr_url, "btn btn-primary", host.open, threads === undefined ? "Review on GitHub" : "Resolve on GitHub"), openRun(p.url, host)),
         );
       }),
     },

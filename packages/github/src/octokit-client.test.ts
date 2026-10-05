@@ -583,3 +583,46 @@ test("setMilestone refuses a milestone or an issue the repository does not have,
 
   expect([...operations, ...missing.operations].map((o) => o.operation)).not.toContain("SetIssueMilestone");
 });
+
+test("unresolvedReviewThreads reads the merge state and each unresolved thread with its first comment", async () => {
+  const thread = (over: Record<string, unknown>) => ({
+    isResolved: false,
+    isOutdated: false,
+    path: "src/app.ts",
+    line: 12,
+    comments: { nodes: [{ author: { login: "coderabbitai" }, body: "Handle the empty list.", url: "https://github.com/octo/sample/pull/7#discussion_r1" }] },
+    ...over,
+  });
+  const { fetch, operations, calls } = fakeGraphql({
+    PullRequestReviewThreads: () => ({
+      repository: {
+        pullRequest: {
+          mergeStateStatus: "BLOCKED",
+          reviewThreads: {
+            nodes: [
+              thread({}),
+              thread({ isResolved: true, path: "src/done.ts" }),
+              thread({
+                isOutdated: true,
+                path: "README.md",
+                line: null,
+                comments: { nodes: [{ author: null, body: "Say how to run it.", url: "https://github.com/octo/sample/pull/7#discussion_r2" }] },
+              }),
+            ],
+          },
+        },
+      },
+    }),
+  });
+
+  expect(await OctokitGitHub.withToken("t", { fetch }).unresolvedReviewThreads(repo, 7)).toEqual({
+    mergeState: "BLOCKED",
+    threads: [
+      { path: "src/app.ts", line: 12, outdated: false, author: "coderabbitai", body: "Handle the empty list.", url: "https://github.com/octo/sample/pull/7#discussion_r1" },
+      // An outdated thread still counts: the ruleset asks for every conversation to be resolved.
+      { path: "README.md", line: null, outdated: true, author: "ghost", body: "Say how to run it.", url: "https://github.com/octo/sample/pull/7#discussion_r2" },
+    ],
+  });
+  expect(operations).toEqual([{ operation: "PullRequestReviewThreads", variables: { owner: "octo", name: "sample", number: 7 } }]);
+  expect(schemaErrors(calls)).toEqual([]);
+});

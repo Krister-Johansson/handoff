@@ -55,6 +55,8 @@ export async function inboxGroups(db: Db, opts: { projectId?: string } = {}) {
       number: r.pr!.number!,
       url: r.pr!.url ?? null,
       ci: r.pr!.ci ?? null,
+      // Set when the merge waits on review threads nobody resolved, rather than on an approving review.
+      ...(r.pr!.threads ? { threads: r.pr!.threads.length } : {}),
     })),
   };
   const withReady = { ...groups, readyToMerge: ready, permissions };

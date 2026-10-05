@@ -8,9 +8,11 @@ import { Button } from "@/components/ui/button";
 import { MergeButton } from "@/components/runs/merge-button";
 import { FailureDetail, type FailureError } from "@/components/runs/failure-detail";
 import { PathsQuestionCard } from "@/components/runs/paths-question-card";
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Field, FieldContent, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { unresolvedThreads } from "@/lib/attention";
 import { formatAgo } from "@/lib/format";
 import { reviewPath, runPath, tryPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
@@ -259,6 +261,8 @@ export type FailedRunItem = {
   attempt: number;
   error: FailureError | null;
   finishedAt?: Date | string | null;
+  /** The newest version of the run's graph, set only when it is newer than the version the run is on. */
+  latestGraphVersion?: number | null;
 };
 
 export function FailedRunCard({ item, compact = false }: { item: FailedRunItem; compact?: boolean }) {
@@ -287,6 +291,15 @@ export function FailedRunCard({ item, compact = false }: { item: FailedRunItem; 
             <Input id={`allow-${item.executionId}`} name="allowPaths" placeholder="pnpm-lock.yaml, docs/setup.md" />
             <FieldDescription>Separated by commas. The path check lets {item.nodeKey} change them for the rest of the run.</FieldDescription>
           </Field>
+          {item.latestGraphVersion && (
+            <Field orientation="horizontal">
+              <Checkbox id={`latest-${item.executionId}`} name="latestGraph" />
+              <FieldContent>
+                <FieldLabel htmlFor={`latest-${item.executionId}`}>Use the latest graph version (v{item.latestGraphVersion})</FieldLabel>
+                <FieldDescription>The run moves to it before {item.nodeKey} runs again, so a fix saved to the graph applies.</FieldDescription>
+              </FieldContent>
+            </Field>
+          )}
         </form>
         {error && <FieldError>{error}</FieldError>}
       </div>
@@ -363,16 +376,18 @@ export function ReadyToMergeCard({ item }: { item: ReadyToMergeItem }) {
   );
 }
 
-export type PullRequestItem = RunRef & { executionId: string; number: number; url: string | null; ci: string | null; branch: string };
+/** `threads` is set when the merge waits on review threads nobody resolved, rather than on an approving review. */
+export type PullRequestItem = RunRef & { executionId: string; number: number; url: string | null; ci: string | null; branch: string; threads?: number };
 
 const CI: Record<string, { label: string; dot: string }> = {
   success: { label: "CI passing", dot: "bg-success-dot" },
   failure: { label: "CI failing", dot: "bg-danger-dot" },
 };
 
-/** A pull request whose PR node waits for an approving review on GitHub. */
+/** A pull request whose PR node waits for an approving review on GitHub, or whose merge waits on unresolved review threads. */
 export function PullRequestCard({ item }: { item: PullRequestItem }) {
   const ci = item.ci ? CI[item.ci] : undefined;
+  const threads = item.threads !== undefined;
   return (
     <InboxCard icon={GitPullRequestIcon} tone="success">
       <CardContext tag="PR to review on GitHub" item={item} compact={false} />
@@ -386,15 +401,16 @@ export function PullRequestCard({ item }: { item: PullRequestItem }) {
             {ci.label}
           </span>
         )}
+        {threads && <span>{unresolvedThreads(item.threads!)}</span>}
         <span className="font-mono">{item.branch}</span>
-        <span>The run goes on once the PR is approved.</span>
+        <span>{threads ? "The merge goes on once they are resolved." : "The run goes on once the PR is approved."}</span>
       </div>
       <CardActions>
         {item.url && (
           <Button asChild>
             <a href={item.url} target="_blank" rel="noreferrer">
               <ExternalLinkIcon data-icon="inline-start" />
-              Review on GitHub
+              {threads ? "Resolve on GitHub" : "Review on GitHub"}
             </a>
           </Button>
         )}

@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, nodeExecutions, projects, questions, runs, sql, type Db } from "@handoff/db";
+import { and, desc, eq, graphVersions, inArray, isNull, nodeExecutions, projects, questions, runs, sql, type Db } from "@handoff/db";
 
 /** Everything waiting on a person: open questions from Human gates, and failed runs awaiting repair. */
 export async function listInbox(db: Db) {
@@ -33,9 +33,12 @@ export async function listInbox(db: Db) {
         attempt: nodeExecutions.attempt,
         error: nodeExecutions.error,
         finishedAt: nodeExecutions.finishedAt,
+        // Offered to a repair only when it is newer than the version the run is on.
+        latestGraphVersion: sql<number | null>`(select nullif(max(gv.version), ${graphVersions.version}) from graph_versions gv where gv.graph_id = ${graphVersions.graphId})`,
       })
       .from(runs)
       .innerJoin(projects, eq(projects.id, runs.projectId))
+      .innerJoin(graphVersions, eq(graphVersions.id, runs.graphVersionId))
       .innerJoin(nodeExecutions, eq(nodeExecutions.runId, runs.id))
       .where(
         and(

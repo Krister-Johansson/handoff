@@ -237,7 +237,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_runs",
     title: "List runs",
     description:
-      "Runs, newest first, each with the step it is on, for how long, and its state: queued with its place in line, running, or waiting with waiting_on (permission, question, ci, merge_queue, worker or overlap). status active means queued, running or waiting. A run whose step waits for a person to allow a tool call keeps status running and has waiting_on { kind: permission, step, since } on the run; otherwise waiting_on is null.",
+      "Runs, newest first, each with the step it is on, for how long, and its state: queued with its place in line, running, or waiting with waiting_on (permission, question, ci, merge_queue, worker, overlap or review_threads). status active means queued, running or waiting. A run whose step waits for a person to allow a tool call keeps status running and has waiting_on { kind: permission, step, since } on the run; otherwise waiting_on is null.",
     input: z.object({ project: z.string().optional().describe("Project name"), status: z.enum(["active", "succeeded", "failed", "cancelled"]).optional() }),
     kind: "data",
     confirm: false,
@@ -248,7 +248,7 @@ export const CATALOG: ToolSpec[] = [
     name: "get_run",
     title: "Show a run",
     description:
-      "Where a run stands: status, waiting_on { kind: permission, step, since } while a step waits for a person to allow a tool call (status stays running), cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue or the worker), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, and a stuck loop's last review.",
+      "Where a run stands: status, waiting_on { kind: permission, step, since } while a step waits for a person to allow a tool call (status stays running), cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue, the worker, or review threads a person must resolve before the merge, which the step lists as review_threads), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, and a stuck loop's last review.",
     input: z.object({ run_id: runId }),
     kind: "data",
     confirm: false,
@@ -285,7 +285,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_inbox",
     title: "Show the Inbox",
     description:
-      "The Inbox, grouped by what the person must do: permission requests, reviews to open, questions to answer, pull requests ready to merge, runs that stopped (failed or stuck) and pull requests waiting for review. Each item has its dashboard path.",
+      "The Inbox, grouped by what the person must do: permission requests, reviews to open, questions to answer, pull requests ready to merge, runs that stopped (failed or stuck) and pull requests waiting for review, or for their review threads to be resolved (unresolved_threads says how many). Each item has its dashboard path.",
     input: z.object({ project: z.string().optional().describe("Narrow to one project, by name or id") }),
     kind: "data",
     confirm: false,
@@ -394,18 +394,19 @@ export const CATALOG: ToolSpec[] = [
     name: "repair_run",
     title: "Repair a run",
     description:
-      "Re-runs the failed step of a failed run in place, keeping what earlier steps did. A note is passed to the step's agent; allow_paths lets the step change those files outside the plan for the rest of the run.",
+      "Re-runs the failed step of a failed run in place, keeping what earlier steps did. A note is passed to the step's agent; allow_paths lets the step change those files outside the plan for the rest of the run. A run keeps the graph version it started on; latest_graph moves it to the newest version of its graph first, so a fix saved to the graph applies to the repair. It refuses, changing nothing, when the run is already on the newest version, when that version does not compile, or when it has no node with the failed step's key.",
     input: z.object({
       run_id: runId,
       node: z.string().optional().describe("The failed step; defaults to the one that failed last"),
       note: z.string().optional(),
       allow_paths: z.array(z.string()).optional().describe("Files outside the plan the step may change, with the user's agreement"),
+      latest_graph: z.boolean().optional().describe("Move the run to the newest version of its graph before repairing"),
     }),
     kind: "data",
     confirm: true,
     readOnly: false,
     summarize: (a) =>
-      `Repair run ${short(a.run_id)}${a.node ? ` at ${a.node}` : ""}${a.allow_paths?.length ? `, allowing ${a.allow_paths.join(", ")}` : ""}${a.note ? `: ${a.note}` : ""}`,
+      `Repair run ${short(a.run_id)}${a.node ? ` at ${a.node}` : ""}${a.latest_graph ? " on the latest graph version" : ""}${a.allow_paths?.length ? `, allowing ${a.allow_paths.join(", ")}` : ""}${a.note ? `: ${a.note}` : ""}`,
   }),
   spec({
     name: "list_merge_queue",

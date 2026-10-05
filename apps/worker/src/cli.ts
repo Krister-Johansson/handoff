@@ -19,7 +19,7 @@ const USAGE = `usage:
   handoff run --project <name> --graph <graph> [--task "<task>"] [--issue <number> ...] [--follow]
   handoff runs
   handoff run cancel <runId>
-  handoff run repair <runId> --node <key> [--note "<text>"]
+  handoff run repair <runId> --node <key> [--note "<text>"] [--latest-graph]
   handoff run unlink <runId> <issue>
   handoff answer <questionId> "<answer>" [--option <option>]
   handoff library import-skill <dir-with-SKILL.md>
@@ -144,7 +144,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
   }
 
   if (command === "run" && sub === "repair") {
-    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { node: { type: "string" }, note: { type: "string" } } });
+    const { values, positionals } = parseArgs({ args: rest, allowPositionals: true, options: { node: { type: "string" }, note: { type: "string" }, "latest-graph": { type: "boolean" } } });
     const runId = positionals[0];
     if (!runId) throw new Error(USAGE);
     const [failed] = await db
@@ -154,8 +154,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
       .orderBy(desc(nodeExecutions.attempt))
       .limit(1);
     if (!failed) throw new Error(`no failed execution of ${values.node} in run ${runId}`);
-    const created = await repairNodeExecution(db, failed.id, values.note ? { note: values.note } : {});
-    out(`repair queued: ${created.nodeKey} attempt ${created.attempt}`);
+    const created = await repairNodeExecution(db, failed.id, { ...(values.note ? { note: values.note } : {}), ...(values["latest-graph"] ? { latestGraph: true } : {}) });
+    out(`repair queued: ${created.nodeKey} attempt ${created.attempt}${created.upgrade ? ` on graph version ${created.upgrade.to.version}` : ""}`);
     return;
   }
 

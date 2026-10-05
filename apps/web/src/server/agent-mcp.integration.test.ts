@@ -221,6 +221,19 @@ test("repair_run allows the files it is given outside the plan for the repaired 
   expect(row!.state).toMatchObject({ memory: { planner: { extraPaths: [expect.objectContaining({ path: "pnpm-lock.yaml", by: "person" })] } } });
 });
 
+test("repair_run with latest_graph moves the run to the graph's newest version first, and says when there is none", async () => {
+  const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
+  await db.update(nodeExecutions).set({ status: "failed", error: { code: "x", message: "boom" } }).where(eq(nodeExecutions.runId, run_id));
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, run_id));
+  expect(await call("repair_run", { run_id, latest_graph: true })).toEqual({ error: "the run is already on version 1 of graph linear, its latest" });
+
+  await saveGraphVersion(db, { projectId, name: "linear", document: linear });
+  expect(await call("repair_run", { run_id, latest_graph: true })).toMatchObject({ node: "planner", attempt: 2, graph_version: 2 });
+  const [row] = await db.select({ graphVersionId: runs.graphVersionId }).from(runs).where(eq(runs.id, run_id));
+  const [upgraded] = await db.select().from(events).where(and(eq(events.runId, run_id), eq(events.type, "run.graph_upgraded")));
+  expect(upgraded?.payload).toMatchObject({ from: { version: 1 }, to: { version: 2, graphVersionId: row!.graphVersionId } });
+});
+
 test("what needs attention comes with links to the dashboard", async () => {
   const { run_id } = await call("start_run", { project: "sandbox", task: "Add a CHANGELOG.md" });
   await db.update(nodeExecutions).set({ status: "failed" }).where(eq(nodeExecutions.runId, run_id));
@@ -240,6 +253,11 @@ test("list_notifications gives the feed as its senders wrote it, with each item'
     ],
   });
   expect((await call("list_notifications", { filter: "attention" })).items.map((n: { title: string }) => n.title)).toEqual(["sandbox: gate asks a question"]);
+});
+
+test("list_notifications keeps a link to GitHub as it is", async () => {
+  await createNotification(db, { tone: "attention", title: "sandbox: PR #9 has 1 unresolved review thread", body: "Add usage docs", href: "https://github.com/octo/sample/pull/9" });
+  expect((await call("list_notifications")).items).toEqual([expect.objectContaining({ url: "https://github.com/octo/sample/pull/9" })]);
 });
 
 test("add_project adds a repository the credential can reach, on its default branch, and refuses one twice", async () => {
@@ -648,6 +666,20 @@ test("a pending step reports queued with its place", async () => {
   // With no worker running, a pending step waits on the worker.
   await db.update(workers).set({ stoppedAt: new Date() });
   expect((await call("get_run", { run_id: first })).steps[0]).toMatchObject({ state: "waiting", waiting_on: "worker", place: 1 });
+});
+
+test("a merge step that waits on unresolved review threads says so and names them in get_run and list_inbox", async () => {
+  const runId = (await call("start_run", { project: "sandbox", task: "Add usage docs" })).run_id as string;
+  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.runId, runId));
+  const merge = await seedExecution(db, runId, { nodeKey: "merge", nodeType: "merge", executorKind: "github", status: "waiting", waitKind: "github_pr" });
+  const thread = { path: "src/app.ts", line: 12, outdated: false, author: "coderabbitai", body: "Handle the empty list.", url: "https://github.com/octo/sample/pull/9#discussion_r1" };
+  await db.transaction((tx) => appendEvents(tx, runId, [{ type: "merge.threads_unresolved", payload: { number: 9, url: "https://github.com/octo/sample/pull/9", threads: [thread] }, nodeExecutionId: merge.id }]));
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, runId));
+
+  const steps = (await call("get_run", { run_id: runId })).steps;
+  expect(steps.at(-1)).toMatchObject({ node: "merge", state: "waiting", waiting_on: "review_threads", review_threads: [thread] });
+  expect(steps[0]).not.toHaveProperty("review_threads");
+  expect((await call("list_inbox", { project: "sandbox" })).pull_requests).toEqual([expect.objectContaining({ run_id: runId, pr: 9, unresolved_threads: 1 })]);
 });
 
 test("answer_permission cannot always allow", async () => {

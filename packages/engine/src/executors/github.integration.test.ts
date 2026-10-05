@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
-import { eq, projects, screenshots, wakeByKey, webhookDeliveries } from "@handoff/db";
+import { and, eq, nodeExecutions, projects, screenshots, wakeByKey, webhookDeliveries } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import type { PlanStatus } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
@@ -659,6 +659,134 @@ describe("external reviewers", () => {
     const { github, run } = await reviewed({ waitForReviewers: ["copilot-pull-request-reviewer[bot]"], reviewTimeoutMinutes: 0 });
     expect(github.merged).toEqual([1]);
     expect((await inspect(db, run.id)).types).toContain("github.reviewers_timeout");
+  });
+});
+
+describe("asking a reviewer to start", () => {
+  const coderabbit = { waitForReviewers: ["coderabbitai[bot]"] };
+  const request = (afterMinutes: number) => ({ reviewRequest: { reviewer: "coderabbitai[bot]", comment: "@coderabbitai review", afterMinutes } });
+  const graph = (prConfig: Record<string, unknown>) => ({
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "pr", attributes: { type: "pr", config: prConfig, x: 0, y: 0 } },
+      { key: "merge", attributes: { type: "merge", x: 0, y: 0 } },
+    ],
+    edges: [
+      { key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done" } },
+      { key: "coder->pr", source: "coder", target: "pr", attributes: { port: "done" } },
+      { key: "pr->merge", source: "pr", target: "merge", attributes: { port: "ready" } },
+      { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix", input: "feedback" } },
+    ],
+  });
+
+  /** A run whose PR node waits on GitHub. Each push starts CI again, as a real repository does. */
+  async function opened(prConfig: Record<string, unknown>) {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    github.origin = origin;
+    const { project, graphVersion } = await seedGraph(db, graph(prConfig), { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const pushing: NodeExecutor = {
+      needsWorkdir: true,
+      execute: async (ctx) => {
+        const outcome = await coder.execute(ctx);
+        if (github.prs.has(1)) github.setChecks(1, "PENDING");
+        return outcome;
+      },
+    };
+    const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
+    // A fresh executor for each pass, as a restarted worker would have.
+    const deps = () => engineDeps(db, { planner, coder: pushing, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) }, { workdirs });
+    await drain(deps());
+    const wake = async () => {
+      await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+      await drain(deps());
+    };
+    /** Moves the PR node's push back in time, as though it had been waiting that long. */
+    const pushedAgo = async (minutes: number) => {
+      await db
+        .update(nodeExecutions)
+        .set({ startedAt: new Date(Date.now() - minutes * 60_000) })
+        .where(and(eq(nodeExecutions.runId, run.id), eq(nodeExecutions.nodeKey, "pr"), eq(nodeExecutions.status, "waiting")));
+    };
+    const requests = () => github.prs.get(1)!.comments.filter((c) => c.body.startsWith("@coderabbitai review"));
+    return { github, run, wake, pushedAgo, requests };
+  }
+
+  test("the PR node comments once to ask a reviewer that has not started, after the delay, and keeps waiting", async () => {
+    const { github, run, wake, pushedAgo, requests } = await opened({ ...coderabbit, ...request(2) });
+    github.setChecks(1, "SUCCESS");
+    await wake();
+    expect(requests()).toHaveLength(0);
+    // It wakes when the delay is up, not at the ten-minute reconcile.
+    const deadline = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "pr")!.waitDeadlineAt!.getTime() - Date.now();
+    expect(deadline).toBeGreaterThan(60_000);
+    expect(deadline).toBeLessThanOrEqual(2 * 60_000 + 1_000);
+
+    await pushedAgo(3);
+    await wake();
+    expect(requests()).toHaveLength(1);
+    const { executions, events } = await inspect(db, run.id);
+    expect(executions.find((e) => e.nodeKey === "pr")?.status).toBe("waiting");
+    expect(events.find((e) => e.type === "github.review_requested")?.payload).toMatchObject({ number: 1, reviewer: "coderabbitai[bot]", headSha: github.prs.get(1)!.headSha });
+
+    // Later wakes, by a fresh executor as after a worker restart, do not ask again for the same commit.
+    await wake();
+    await wake();
+    expect(requests()).toHaveLength(1);
+    expect((await inspect(db, run.id)).types.filter((t) => t === "github.review_requested")).toHaveLength(1);
+
+    github.reviewOnHead(1, "coderabbitai[bot]", { state: "COMMENTED" });
+    await wake();
+    expect(github.merged).toEqual([1]);
+  });
+
+  test("a reviewer that already reviewed the commit is not asked", async () => {
+    const { github, run, wake, pushedAgo, requests } = await opened({ ...coderabbit, ...request(2) });
+    github.setChecks(1, "SUCCESS");
+    github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+    await pushedAgo(3);
+    await wake();
+    expect(requests()).toHaveLength(0);
+    expect((await inspect(db, run.id)).types).not.toContain("github.review_requested");
+    expect(github.merged).toEqual([1]);
+  });
+
+  test("a reviewer whose status shows a review in progress is not asked", async () => {
+    const { github, wake, pushedAgo, requests } = await opened({ ...coderabbit, ...request(2) });
+    github.prs.get(1)!.checks = { state: "PENDING", contexts: [{ name: "CodeRabbit", status: "COMPLETED", conclusion: null, url: "https://coderabbit.ai" }] };
+    await pushedAgo(3);
+    await wake();
+    expect(requests()).toHaveLength(0);
+  });
+
+  test("without the setting the PR node never asks", async () => {
+    const { github, run, wake, pushedAgo } = await opened(coderabbit);
+    github.setChecks(1, "SUCCESS");
+    await pushedAgo(3);
+    await wake();
+    expect(github.prs.get(1)!.comments).toHaveLength(0);
+    expect((await inspect(db, run.id)).types).not.toContain("github.review_requested");
+  });
+
+  test("after a new push the reviewer is asked again for the new commit, and the request is not sent to the coder as feedback", async () => {
+    const { github, run, wake, requests } = await opened({ ...coderabbit, ...request(0) });
+    expect(requests()).toHaveLength(1);
+    const first = github.prs.get(1)!.headSha;
+
+    // CI fails, so the coder fixes it and pushes a new commit while the reviewer still has not started.
+    github.setChecks(1, "FAILURE", [{ name: "test", jobId: 7, log: "1 failing" }]);
+    await wake();
+    const second = github.prs.get(1)!.headSha;
+    expect(second).not.toBe(first);
+    expect(requests().map((c) => c.body)).toEqual([expect.stringContaining(first), expect.stringContaining(second)]);
+
+    const { executions } = await inspect(db, run.id);
+    const retry = executions.find((e) => e.nodeKey === "coder" && e.attempt === 2)!;
+    const comments = (retry.contextPacket as { priorAttempt?: { reviewComments?: { body: string }[] } }).priorAttempt?.reviewComments ?? [];
+    expect(comments.map((c) => c.body)).not.toContainEqual(expect.stringContaining("@coderabbitai review"));
   });
 });
 

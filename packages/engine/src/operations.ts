@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
-import { appendEvents, events, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type QuestionComment } from "@handoff/db";
-import { PlanPartSchema, remember, ReviewerOutputSchema, RunStateSchema, type PlanPart, type ReviewerOutput, type RunState } from "@handoff/core";
+import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { appendEvents, edgeTraversals, events, graphs, graphVersions, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type DbTx, type QuestionComment } from "@handoff/db";
+import { compileGraph, PlanPartSchema, remember, ReviewerOutputSchema, RunStateSchema, type PlanPart, type ReviewerOutput, type RunState } from "@handoff/core";
 import type { GitHubPort, PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
@@ -11,14 +11,17 @@ import { createExecution } from "./scheduler/complete.ts";
 /**
  * Re-runs a failed node execution as a new attempt, keeping every upstream result in run state.
  * `allowPaths` are files outside the plan a person allows for the node's later attempts in this run.
+ * `latestGraph` first moves the run to the newest version of its graph, so the new attempt runs that
+ * version's node; `graphUpgrade` says when it refuses.
  */
-export async function repairNodeExecution(db: Db, executionId: string, opts: { note?: string; allowPaths?: string[] }) {
+export async function repairNodeExecution(db: Db, executionId: string, opts: { note?: string; allowPaths?: string[]; latestGraph?: boolean }) {
   return db.transaction(async (tx) => {
     const [failed] = await tx.select().from(nodeExecutions).where(eq(nodeExecutions.id, executionId)).for("update");
     if (!failed) throw new Error(`execution ${executionId} not found`);
     if (failed.status !== "failed") throw new Error(`only failed executions can be repaired; ${failed.nodeKey} is ${failed.status}`);
     const [run] = await tx.select().from(runs).where(eq(runs.id, failed.runId)).for("update");
     if (run?.status === "cancelled") throw new Error("the run was cancelled");
+    const upgrade = opts.latestGraph ? await graphUpgrade(tx, run!, failed.nodeKey) : undefined;
     const [{ attempt } = { attempt: 0 }] = await tx
       .select({ attempt: sql<number>`coalesce(max(${nodeExecutions.attempt}), 0)::int` })
       .from(nodeExecutions)
@@ -28,8 +31,9 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
       .values({
         runId: failed.runId,
         nodeKey: failed.nodeKey,
-        nodeType: failed.nodeType,
-        executorKind: failed.executorKind,
+        // The new version may give the key another type.
+        nodeType: upgrade ? upgrade.graph.node(failed.nodeKey).type : failed.nodeType,
+        executorKind: upgrade ? upgrade.graph.executorKind(failed.nodeKey) : failed.executorKind,
         attempt: attempt + 1,
         repairedFromExecutionId: failed.id,
         repairNote: opts.note ?? null,
@@ -42,15 +46,51 @@ export async function repairNodeExecution(db: Db, executionId: string, opts: { n
     const state = allowPaths.length
       ? { state: remember(RunStateSchema.parse(run!.state), failed.nodeKey, { extraPaths: allowPaths.map((path) => ({ path, reason, attempt: attempt + 1, by: "person" as const })) }), stateVersion: sql`${runs.stateVersion} + 1` }
       : {};
-    await tx.update(runs).set({ status: "running", finishedAt: null, ...state }).where(eq(runs.id, failed.runId));
+    const moved = upgrade && { from: upgrade.from, to: upgrade.to };
+    await tx
+      .update(runs)
+      .set({ status: "running", finishedAt: null, ...state, ...(moved ? { graphVersionId: moved.to.graphVersionId } : {}) })
+      .where(eq(runs.id, failed.runId));
     // A failed run held the project's scheduler; repaired, it no longer does.
     await nudgeScheduler(tx, run!.projectId);
     await appendEvents(tx, failed.runId, [
+      ...(moved ? [{ type: "run.graph_upgraded", payload: moved }] : []),
       { type: "node.repair_requested", payload: { nodeKey: failed.nodeKey, note: opts.note ?? null, ...(allowPaths.length ? { allowPaths } : {}) }, nodeExecutionId: failed.id },
       { type: "node.created", payload: { nodeKey: failed.nodeKey, attempt: attempt + 1, via: "repair" }, nodeExecutionId: created!.id },
     ]);
-    return created!;
+    return { ...created!, ...(moved ? { upgrade: moved } : {}) };
   });
+}
+
+/**
+ * The move from the run's graph version to the newest version of the same graph, checked before a
+ * repair writes anything. Run state stays as it is: results are keyed by node key and loop counters
+ * by edge key, and a key the new version no longer has is never read again.
+ */
+async function graphUpgrade(tx: DbTx, run: typeof runs.$inferSelect, nodeKey: string) {
+  const [current] = await tx
+    .select({ graphId: graphVersions.graphId, version: graphVersions.version, name: graphs.name })
+    .from(graphVersions)
+    .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
+    .where(eq(graphVersions.id, run.graphVersionId));
+  const [latest] = await tx.select().from(graphVersions).where(eq(graphVersions.graphId, current!.graphId)).orderBy(desc(graphVersions.version)).limit(1);
+  const graph = `graph ${current!.name}`;
+  if (latest!.version <= current!.version) throw new Error(`the run is already on version ${current!.version} of ${graph}, its latest`);
+  const compiled = compileGraph(latest!.document);
+  if (!compiled.ok) throw new Error(`version ${latest!.version} of ${graph} does not compile: ${compiled.errors.map((e) => e.message).join("; ")}`);
+  if (!compiled.graph.graph.hasNode(nodeKey)) throw new Error(`version ${latest!.version} of ${graph} has no node ${nodeKey}`);
+  // A join fires once every inbound edge arrived; an arrival over an edge the new version lacks never counts.
+  const arrivals = await tx
+    .select({ edgeKey: edgeTraversals.edgeKey, toNodeKey: edgeTraversals.toNodeKey })
+    .from(edgeTraversals)
+    .where(and(eq(edgeTraversals.runId, run.id), isNull(edgeTraversals.consumedByExecutionId)));
+  const lost = arrivals.find((a) => !compiled.graph.graph.hasEdge(a.edgeKey));
+  if (lost) throw new Error(`version ${latest!.version} of ${graph} has no edge ${lost.edgeKey}, which ${lost.toNodeKey} waits on`);
+  return {
+    from: { version: current!.version, graphVersionId: run.graphVersionId },
+    to: { version: latest!.version, graphVersionId: latest!.id },
+    graph: compiled.graph,
+  };
 }
 
 /**
