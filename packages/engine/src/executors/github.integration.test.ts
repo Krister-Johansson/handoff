@@ -6,7 +6,9 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { eq, projects, screenshots, wakeByKey, webhookDeliveries } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import type { PlanStatus } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
+import { cancelRun } from "../operations.ts";
 import { createRun } from "../runs.ts";
 import { createOriginRepo, flakyFetches, git, landOnMain } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
@@ -242,6 +244,198 @@ describe("status on the plan", () => {
     const done = events.filter((e) => e.type === "plan.status" && (e.payload as { status: string }).status === "Done");
     expect(done.map((e) => (e.payload as { issue: number }).issue)).toEqual(tasks);
     expect(types.indexOf("github.issues_closed")).toBeLessThan(types.indexOf("plan.status", types.indexOf("github.merged")));
+  });
+});
+
+describe("closing a finished story and epic", () => {
+  type Setup = { owner?: string; organization?: boolean; planMode?: "flow" | "timeline"; withPlan?: boolean };
+
+  /**
+   * A project with a plan Project, a repository owned by a user or an organization, and a way to build an
+   * epic, stories and tasks in it. GitHub closes the issues a merged pull request names with Closes.
+   */
+  async function planned(setup: Setup = {}) {
+    const owner = setup.owner ?? "octo";
+    const repo = { owner, name: "sample" };
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    github.closesOnMerge = true;
+    const plan = new FakeProjects(github);
+    if (setup.organization) plan.owners.set(owner, "Organization");
+    const { number } = await plan.createProject(owner, repo, "sample plan");
+    const { project, graphVersion } = await seedGraph(db, linear, { localClonePath: origin });
+    await db
+      .update(projects)
+      .set({ repoOwner: owner, planProjectNumber: setup.withPlan === false ? null : number, planMode: setup.planMode ?? "flow" })
+      .where(eq(projects.id, project.id));
+    /** An open issue of the plan with its kind label, under `parent`, in `status`. */
+    const issue = async (kind: "epic" | "story" | "task", parent?: number, status: PlanStatus = "Ready") => {
+      const created = await plan.createIssue(repo, { project: number, title: `A ${kind}`, body: "", labels: [kind], ...(parent ? { parent } : {}) });
+      plan.itemsOf(repo).get(created.number)!.status = status;
+      return created.number;
+    };
+    const close = (n: number) => void (github.issues.get(n)!.state = "closed");
+    const state = (n: number) => github.issues.get(n)!.state;
+    const statusOf = (n: number) => plan.getStatus(repo, number, n);
+    /** Starts a run on `task`, which is Running, and drains it to its pull request waiting on CI. */
+    const start = async (task: number) => {
+      plan.itemsOf(repo).get(task)!.status = "Running";
+      const { title, url } = github.issues.get(task)!;
+      const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: title, issues: [{ number: task, title, url, body: "" }] });
+      const executors: ExecutorRegistry = { planner, coder, pr: prNodeExecutor({ github, projects: plan }), merge: mergeNodeExecutor({ github, projects: plan }) };
+      const deps = engineDeps(db, executors, { workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }) });
+      await drain(deps);
+      /** CI passes and the merge node merges the pull request. */
+      const merge = async () => {
+        github.setChecks(1, "SUCCESS");
+        await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+        await drain(deps);
+      };
+      const events = async (type: string) => (await inspect(db, run.id)).events.filter((e) => e.type === type).map((e) => e.payload);
+      return { run, merge, events };
+    };
+    return { github, plan, issue, close, state, statusOf, start };
+  }
+
+  const finished = (child: number, runId: string) => `Finished by #1, merged by handoff run \`${runId}\`, which closed #${child}, its last open sub-issue.`;
+
+  test.each(["flow", "timeline"] as const)("in a %s project, the merge that closes a story's last open task closes the story, then the epic, and sets both to Done", async (planMode) => {
+    const { github, issue, close, state, statusOf, start } = await planned({ planMode });
+    const epic = await issue("epic");
+    const story = await issue("story", epic);
+    const earlier = await issue("task", story, "Done");
+    close(earlier);
+    const task = await issue("task", story);
+    const otherStory = await issue("story", epic, "Done");
+    close(otherStory);
+    const direct = await issue("task", epic, "Done");
+    close(direct);
+    const { run, merge, events } = await start(task);
+    await merge();
+
+    expect([task, story, epic].map(state)).toEqual(["closed", "closed", "closed"]);
+    // GitHub closed the task from the pull request's Closes; handoff closed the story, then the epic.
+    expect(github.closedIssues).toEqual([
+      { number: story, comment: finished(task, run.id) },
+      { number: epic, comment: finished(story, run.id) },
+    ]);
+    expect(await events("github.parents_closed")).toEqual([{ numbers: [story, epic] }]);
+    expect(await Promise.all([task, story, epic].map(statusOf))).toEqual(["Done", "Done", "Done"]);
+    expect(await events("plan.status")).toEqual(
+      expect.arrayContaining([
+        { issue: story, status: "Done", from: "Ready" },
+        { issue: epic, status: "Done", from: "Ready" },
+      ]),
+    );
+  });
+
+  test("an epic whose last open child is a task directly under it closes with that task", async () => {
+    const { github, issue, state, statusOf, start } = await planned();
+    const epic = await issue("epic", undefined, "Running");
+    const task = await issue("task", epic);
+    const { run, merge, events } = await start(task);
+    await merge();
+    expect(state(epic)).toBe("closed");
+    expect(github.closedIssues).toEqual([{ number: epic, comment: finished(task, run.id) }]);
+    expect(await statusOf(epic)).toBe("Done");
+    expect(await events("plan.status")).toContainEqual({ issue: epic, status: "Done", from: "Running" });
+  });
+
+  test("a story with another open task stays open, and so does its epic", async () => {
+    const { github, issue, state, statusOf, start } = await planned();
+    const epic = await issue("epic");
+    const story = await issue("story", epic);
+    const task = await issue("task", story);
+    await issue("task", story);
+    const { merge, events } = await start(task);
+    await merge();
+    expect([task, story, epic].map(state)).toEqual(["closed", "open", "open"]);
+    expect(github.closedIssues).toEqual([]);
+    expect(await events("github.parents_closed")).toEqual([]);
+    expect(await statusOf(story)).toBe("Ready");
+  });
+
+  test("a task closed by hand before the merge closes no story", async () => {
+    const { github, issue, close, state, start } = await planned();
+    const epic = await issue("epic");
+    const story = await issue("story", epic);
+    const task = await issue("task", story);
+    const { merge, events } = await start(task);
+    // A person closes the task on GitHub while its pull request waits for CI.
+    close(task);
+    await merge();
+    expect(github.merged).toEqual([1]);
+    expect([story, epic].map(state)).toEqual(["open", "open"]);
+    expect(github.closedIssues).toEqual([]);
+    expect(await events("github.parents_closed")).toEqual([]);
+  });
+
+  test("a cancelled run closes no story", async () => {
+    const { github, plan, issue, close, state, statusOf, start } = await planned();
+    const epic = await issue("epic");
+    const story = await issue("story", epic);
+    const task = await issue("task", story);
+    const { run, events } = await start(task);
+    await cancelRun(db, run.id, { projects: plan });
+    // Closing the task by hand afterwards is no merge of handoff's either.
+    close(task);
+    expect(github.merged).toEqual([]);
+    expect([story, epic].map(state)).toEqual(["open", "open"]);
+    expect(github.closedIssues).toEqual([]);
+    expect(await events("github.parents_closed")).toEqual([]);
+    expect(await statusOf(story)).toBe("Ready");
+  });
+
+  test("a story GitHub refuses to close is recorded as an event, and the merge still passes", async () => {
+    const { github, issue, state, statusOf, start } = await planned();
+    const epic = await issue("epic");
+    const story = await issue("story", epic);
+    const task = await issue("task", story);
+    const close = github.closeIssue.bind(github);
+    github.closeIssue = async (repo, number, comment) => {
+      if (number === story) throw new Error("Resource not accessible by integration");
+      return close(repo, number, comment);
+    };
+    const { run, merge, events } = await start(task);
+    await merge();
+    const { run: row, executions } = await inspect(db, run.id);
+    expect(executions.find((e) => e.nodeKey === "merge")?.status).toBe("passed");
+    expect(row.status).toBe("succeeded");
+    expect(await events("github.parent_close_failed")).toEqual([{ parent: story, child: task, message: "Resource not accessible by integration" }]);
+    expect([task, story, epic].map(state)).toEqual(["closed", "open", "open"]);
+    expect(await statusOf(task)).toBe("Done");
+    expect(await statusOf(story)).toBe("Ready");
+  });
+
+  test("in an organization's Project, the story and the epic get Done with the Status they had", async () => {
+    const { github, issue, state, statusOf, start } = await planned({ owner: "acme", organization: true });
+    const epic = await issue("epic", undefined, "Shaping");
+    const story = await issue("story", epic, "Running");
+    const task = await issue("task", story);
+    const { merge, events } = await start(task);
+    await merge();
+    expect([story, epic].map(state)).toEqual(["closed", "closed"]);
+    expect(github.closedIssues.map((c) => c.number)).toEqual([story, epic]);
+    expect(await Promise.all([story, epic].map(statusOf))).toEqual(["Done", "Done"]);
+    expect(await events("plan.status")).toEqual(
+      expect.arrayContaining([
+        { issue: story, status: "Done", from: "Running" },
+        { issue: epic, status: "Done", from: "Shaping" },
+      ]),
+    );
+  });
+
+  test("without a plan Project, the story and the epic still close on GitHub", async () => {
+    const { github, issue, state, start } = await planned({ withPlan: false });
+    const epic = await issue("epic");
+    const story = await issue("story", epic);
+    const task = await issue("task", story);
+    const { merge, events } = await start(task);
+    await merge();
+    expect([task, story, epic].map(state)).toEqual(["closed", "closed", "closed"]);
+    expect(github.closedIssues.map((c) => c.number)).toEqual([story, epic]);
+    expect(await events("plan.status")).toEqual([]);
+    expect(await events("plan.skipped")).toEqual([]);
   });
 });
 
