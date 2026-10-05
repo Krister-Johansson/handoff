@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CheckIcon, ClipboardCheckIcon, GitBranchIcon, HandIcon, InfoIcon, MessageCircleQuestionIcon } from "lucide-react";
 import { StepTrail } from "@/components/runs/step-trail";
 import { TONE_TEXT } from "@/lib/status";
-import { StatusBadge } from "@/components/runs/status-badge";
+import { RunStatusBadge } from "@/components/runs/status-badge";
 import { Button } from "@/components/ui/button";
 import { formatSince } from "@/lib/format";
 import { startedAt } from "@/lib/issue-dates";
@@ -54,7 +54,7 @@ function RunRow({ run, projectId, now }: { run: IssueRun; projectId: string; now
         <span className="text-muted-foreground">on</span> <span className="font-mono text-[13px]">{run.graph}</span>
       </span>
       <span className="flex justify-end">
-        <StatusBadge status={run.status} />
+        <RunStatusBadge status={run.status} waitingOn={line.waitingOn} />
       </span>
       <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px]", TONE_TEXT[line.now.tone])}>
         {line.now.tone === "success" && <CheckIcon aria-hidden className="size-3.5" />}

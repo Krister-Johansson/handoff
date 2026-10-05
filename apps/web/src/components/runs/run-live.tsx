@@ -26,7 +26,7 @@ import { usePageTools } from "@/lib/assistant/use-page-tools";
 import { QuestionCard, type QuestionItem } from "@/components/inbox/cards";
 import { EventStream, type RunEvent } from "./event-stream";
 import { ExecutionPanel } from "./execution-panel";
-import { StatusBadge } from "./status-badge";
+import { RunStatusBadge, StatusBadge, type RunWaitingOn } from "./status-badge";
 import { Steps, type StepView } from "./steps";
 import { Tag } from "@/components/tag";
 
@@ -95,16 +95,27 @@ type Props = {
   children?: ReactNode;
   /** The header's Open in VS Code waits for the run's worktree; the first event a step sends from it refreshes the page once. */
   awaitsWorktree?: boolean | undefined;
+  /** The step that waits on a person to allow a tool call, with what it asks to do, while the run runs. */
+  waitingOn?: (RunWaitingOn & { action: string }) | undefined;
 };
+
+/**
+ * The permission wait the run shows, with what the step asks for the line beside it. The page reads it on load
+ * and refreshes when a step asks; once the run or the step that asked ends, the run no longer waits.
+ */
+function liveWait(status: string, executions: { nodeKey: string; status: string }[], wait: Props["waitingOn"]) {
+  if (status !== "running" || !wait || executions.findLast((e) => e.nodeKey === wait.nodeKey)?.status !== "running") return { waitingOn: undefined, permissions: undefined };
+  return { waitingOn: wait, permissions: [{ nodeKey: wait.nodeKey, action: wait.action }] };
+}
 
 /** Events a step sends once it has its workdir: a fast-forward, the project's setup command, or the CLI. */
 const FROM_WORKDIR = /^(workdir|setup|cli)\./;
 
 /** What the run is doing now, on a strip in its tone. */
-function RunNow({ status, now }: { status: string; now: ReturnType<typeof describeNow> }) {
+function RunNow({ status, waitingOn, now }: { status: string; waitingOn: RunWaitingOn | undefined; now: ReturnType<typeof describeNow> }) {
   return (
     <div role="status" className={cn("flex h-8 min-w-0 items-center gap-2 rounded-md border pr-3 pl-1.5", BANNER[now.tone])}>
-      <StatusBadge size="sm" status={status} />
+      <RunStatusBadge size="sm" status={status} waitingOn={waitingOn} />
       <span className="min-w-0 truncate text-[13px] font-medium">{now.text}</span>
     </div>
   );
@@ -193,6 +204,7 @@ export function RunLive({
   header,
   children,
   awaitsWorktree = false,
+  waitingOn: initialWaitingOn,
 }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [prNumber, setPrNumber] = useState(initialPr);
@@ -278,7 +290,8 @@ export function RunLive({
 
   const review = questions.find((q) => q.context?.review);
   const tryIt = questions.find((q) => q.context?.reason === "try");
-  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy });
+  const { waitingOn, permissions } = liveWait(status, executions, initialWaitingOn);
+  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy, permissions });
   const selectedQuestion = questions.find((q) => q.nodeExecutionId === selected?.id);
   const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
   const filter = useMemo(
@@ -346,7 +359,7 @@ export function RunLive({
           description={header.meta}
           actions={
             <>
-              <RunNow status={status} now={now} />
+              <RunNow status={status} waitingOn={waitingOn} now={now} />
               <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} tryId={tryIt?.id} queue={queue} />
               {header.actions}
             </>
@@ -354,7 +367,7 @@ export function RunLive({
         />
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <RunNow status={status} now={now} />
+          <RunNow status={status} waitingOn={waitingOn} now={now} />
           <RunNowAction projectId={projectId} runId={runId} reviewId={review?.id} tryId={tryIt?.id} queue={queue} />
         </div>
       )}

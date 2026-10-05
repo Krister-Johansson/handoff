@@ -107,8 +107,16 @@ test("the handoff skill says Priority order reads the organization's Priority is
   expect(skill).toMatch(/Project's own Priority field[^\n]*organization's Priority issue field/);
 });
 
-test("the plugin is 0.23.0, whose skill says a task inherits its story's or epic's milestone and names set_milestone", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.23.0");
+test("the plugin is 0.24.0, whose skill says a run waiting on a permission request keeps status running and has waiting_on", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.24.0");
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const line = skill.split("\n").find((l) => l.includes("waiting_on") && l.includes("permission"));
+  expect(line).toMatch(/keeps `status` running/);
+  expect(line).toMatch(/`list_runs` and `get_run`[^\n]*`waiting_on`[^\n]*"kind": "permission", "step": "coder", "since"/);
+  expect(line).toMatch(/`null` otherwise/);
+});
+
+test("the handoff skill says a task inherits its story's or epic's milestone and names set_milestone", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   const shape = skill.indexOf("## Shape first");
   const section = skill.slice(shape, skill.indexOf("\n## ", shape + 1));

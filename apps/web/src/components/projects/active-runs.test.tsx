@@ -24,6 +24,25 @@ test("an active run shows its status, what it is doing, its project and how long
   expect(within(row).getByText("sandbox")).toBeInTheDocument();
 });
 
+test("a running run whose step waits on a permission request says so in its status", () => {
+  const lines = new Map([
+    [
+      "r1",
+      {
+        graph: "linear",
+        version: 3,
+        costUsd: 0,
+        now: { tone: "attention" as const, text: "Code asks to run a command" },
+        waitingOn: { kind: "permission" as const, nodeKey: "coder", since: new Date("2026-10-01T11:50:00Z") },
+      },
+    ],
+  ]);
+  render(<ActiveRunList runs={[run("r1", "running")]} lines={lines} now={now} />);
+  const row = screen.getByRole("listitem");
+  expect(within(row).getByText("waiting on permission")).toBeInTheDocument();
+  expect(within(row).queryByText("running")).not.toBeInTheDocument();
+});
+
 test("a run waiting on a review offers to open it, and a run with a pull request shows its number", () => {
   const lines = new Map([
     ["r1", { graph: "g", version: 1, costUsd: 0, now: { tone: "attention" as const, text: "Plan waits for your review" }, reviewHref: "/projects/p1/runs/r1/review/q1" }],

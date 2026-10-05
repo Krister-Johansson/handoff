@@ -49,13 +49,25 @@ test("a run waiting on a review links to the review", async () => {
   expect(line?.reviewHref).toBe(`/projects/${project.id}/runs/${run.id}/review/${question!.id}`);
 });
 
-test("a run whose step waits on a permission request says what the step asks to do", async () => {
+test("a run whose step waits on a permission request says what the step asks to do, and which step waits since when", async () => {
   const { run } = await projectWithRun();
   const coder = await setPlanner(run.id, { status: "running" });
-  await db.insert(permissionRequests).values({ id: crypto.randomUUID(), runId: run.id, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "npx playwright install chromium" } });
+  const asked = new Date("2026-10-05T09:00:00Z");
+  await db
+    .insert(permissionRequests)
+    .values({ id: crypto.randomUUID(), runId: run.id, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "npx playwright install chromium" }, createdAt: asked });
   await db.update(runs).set({ status: "running" }).where(eq(runs.id, run.id));
 
-  expect((await runLines(db, [run.id])).get(run.id)?.now).toEqual({ tone: "attention", text: "Plan asks to run a command" });
+  const line = (await runLines(db, [run.id])).get(run.id);
+  expect(line?.now).toEqual({ tone: "attention", text: "Plan asks to run a command" });
+  expect(line?.waitingOn).toEqual({ kind: "permission", nodeKey: "planner", since: asked });
+});
+
+test("a run with no open permission request has no wait on its line", async () => {
+  const { run } = await projectWithRun();
+  await setPlanner(run.id, { status: "running" });
+
+  expect((await runLines(db, [run.id])).get(run.id)).not.toHaveProperty("waitingOn");
 });
 
 test("a run's line lists its steps so far in order, each once with how often it ran, and when the current step began", async () => {
