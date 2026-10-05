@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { createOriginRepo, flakyFetches, git } from "../testing/git.ts";
+import { createOriginRepo, flakyFetches, git, landOnMain } from "../testing/git.ts";
 import { GitWorktreeProvider } from "./git-worktree.ts";
 
 const setup = () => {
@@ -18,6 +18,35 @@ test("GitWorktreeProvider creates a worktree on a new branch from the default br
   expect(existsSync(join(workdir.path, "README.md"))).toBe(true);
   expect(git(workdir.path, "branch", "--show-current")).toBe("handoff/run-1");
   expect(workdir.baseSha).toBe(git(workdir.path, "rev-parse", "origin/main"));
+});
+
+test("a run acquired after the remote's base moved has its local base branch at origin's", async () => {
+  const { origin, provider, spec } = setup();
+  await provider.acquire(spec);
+  landOnMain(origin, "later.txt", "x");
+  const workdir = await provider.acquire({ ...spec, runId: "run-2", branchName: "handoff/run-2" });
+  expect(workdir.baseSha).toBe(git(origin, "rev-parse", "main"));
+  expect(git(workdir.path, "rev-parse", "main")).toBe(workdir.baseSha);
+});
+
+test("fastForward moves the worktree's local base branch to origin's too", async () => {
+  const { origin, provider, spec } = setup();
+  const workdir = await provider.acquire(spec);
+  landOnMain(origin, "later.txt", "x");
+  const moved = await provider.fastForward(spec);
+  expect(moved?.to).toBe(git(origin, "rev-parse", "main"));
+  expect(git(workdir.path, "rev-parse", "main")).toBe(moved?.to);
+});
+
+test("a fetch leaves the local base branch alone while a worktree has it checked out", async () => {
+  const { origin, provider, spec } = setup();
+  git(origin, "branch", "release", "main");
+  const onRelease = await provider.acquire({ ...spec, baseBranch: "release", branchName: "release" });
+  const head = git(onRelease.path, "rev-parse", "HEAD");
+  landOnMain(origin, "later.txt", "x");
+  git(origin, "branch", "-f", "release", "main");
+  await provider.acquire({ ...spec, runId: "run-2", baseBranch: "release", branchName: "handoff/run-2" });
+  expect(git(onRelease.path, "rev-parse", "HEAD")).toBe(head);
 });
 
 test("acquiring the same run twice returns the same worktree with its changes", async () => {

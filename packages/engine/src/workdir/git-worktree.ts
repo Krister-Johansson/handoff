@@ -39,8 +39,10 @@ export class GitWorktreeProvider implements WorkdirProvider {
       if (!existsSync(mirror)) {
         mkdirSync(join(this.options.root, "repos"), { recursive: true });
         await this.network(() => this.git(this.options.root, ["clone", "-q", "--no-checkout", spec.remoteUrl, mirror], auth), () => rmSync(mirror, { recursive: true, force: true }));
+        await this.syncLocalBase(mirror, spec.baseBranch);
       } else if (!existsSync(path)) {
         await this.network(() => this.git(mirror, ["fetch", "-q", "--prune", "origin"], auth));
+        await this.syncLocalBase(mirror, spec.baseBranch);
       }
       const baseSha = await this.git(mirror, ["rev-parse", `origin/${spec.baseBranch}`]);
       if (existsSync(path)) return { path, baseSha };
@@ -87,6 +89,7 @@ export class GitWorktreeProvider implements WorkdirProvider {
       if ((await this.git(path, ["rev-list", "--count", `${base}..HEAD`])) !== "0") return undefined;
       const auth = (await this.options.gitEnv?.(spec.remoteUrl)) ?? {};
       await this.network(() => this.git(mirror, ["fetch", "-q", "--prune", "origin"], auth));
+      await this.syncLocalBase(mirror, spec.baseBranch);
       const [from, to] = [await this.git(path, ["rev-parse", "HEAD"]), await this.git(path, ["rev-parse", base])];
       if (from === to || (await this.git(path, ["rev-list", "--count", `${base}..HEAD`])) !== "0") return undefined;
       await this.git(path, ["merge", "-q", "--ff-only", base]);
@@ -103,6 +106,19 @@ export class GitWorktreeProvider implements WorkdirProvider {
       if (existsSync(path)) await this.git(mirror, ["worktree", "remove", "--force", path]);
       await this.git(mirror, ["worktree", "prune"]);
     });
+  }
+
+  /**
+   * Moves the clone's local base branch to origin's after a clone or fetch. Worktrees share the clone's
+   * refs, so without this an agent's `main` stays at the commit of the first clone. A run's worktree
+   * that has the base branch checked out keeps it where it is; the clone itself, listed first, has no
+   * checkout to disturb.
+   */
+  private async syncLocalBase(mirror: string, baseBranch: string): Promise<void> {
+    const ref = `refs/heads/${baseBranch}`;
+    const worktrees = (await this.git(mirror, ["worktree", "list", "--porcelain"])).split("\n\n").slice(1);
+    if (worktrees.some((entry) => entry.split("\n").includes(`branch ${ref}`))) return;
+    await this.git(mirror, ["update-ref", ref, `refs/remotes/origin/${baseBranch}`]);
   }
 
   /** A clone or fetch, tried again when it fails; `cleanUp` removes what a failed try left behind first. */

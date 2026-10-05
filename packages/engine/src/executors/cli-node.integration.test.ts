@@ -182,6 +182,7 @@ test("a code review node asks for Claude Code's code-review skill on the run's b
   await drain(engineDeps(db, { planner: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), code_review: cliNodeExecutor({ cli, maxTurns: 30, timeoutMs: 60_000 }), pr: stopAfterCoder } as unknown as ExecutorRegistry));
   const request = cli.requests[1]!;
   expect(request.prompt).toContain(`skill code-review, args "medium ${run.branchName}"`);
+  expect(request.prompt).toContain(`Review this branch's changes against origin/${run.baseBranch} `);
   expect(request.allowedTools).toEqual(expect.arrayContaining(["Skill", "Bash(git diff *)"]));
   expect((await inspect(db, run.id)).executions.find((e) => e.nodeKey === "coder")?.status).toBe("passed");
 });

@@ -246,16 +246,17 @@ test("Earlier in this run lists allowed paths, notes and answers", () => {
 test("the packet names the run's branch, whether setup ran, and the project's agent notes", () => {
   const md = renderContextPacket({
     ...packet,
-    environment: { branch: "handoff/add-changelog-5a998648", setupCommand: "pnpm install --frozen-lockfile", agentNotes: "The database container is shared and already running." },
+    environment: { branch: "handoff/add-changelog-5a998648", base: "main", setupCommand: "pnpm install --frozen-lockfile", agentNotes: "The database container is shared and already running." },
   });
   const repository = md.split("# Repository context")[1]!.split("\n# ")[0]!;
   expect(repository).toContain("on this run's branch, `handoff/add-changelog-5a998648`");
   expect(repository).toContain("Do not create or switch to another branch.");
+  expect(repository).toContain("The run's changes are what differs from `origin/main`");
   expect(repository).toContain("The project's setup command, `pnpm install --frozen-lockfile`, ran in this worktree before this step.");
   expect(repository).toContain("HANDOFF_RUN_SHORT");
   expect(md).toContain("# About this project's environment\n\nThe database container is shared and already running.");
 
-  const bare = renderContextPacket({ ...packet, environment: { branch: "handoff/x", setupCommand: null } });
+  const bare = renderContextPacket({ ...packet, environment: { branch: "handoff/x", base: "main", setupCommand: null } });
   expect(bare).toContain("The project has no setup command, so nothing was installed in this worktree");
   expect(bare).not.toContain("# About this project's environment");
 });
