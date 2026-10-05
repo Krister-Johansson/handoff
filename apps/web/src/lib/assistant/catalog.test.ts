@@ -32,6 +32,7 @@ test("tools that change state are marked confirm and never read only", () => {
     "resolve_loop",
     "run_again",
     "schedule",
+    "set_milestone",
     "set_order",
     "set_size",
     "setup_plan",
@@ -73,7 +74,7 @@ test("results that carry text from runs or GitHub are marked untrusted", () => {
 });
 
 test("shaping writes are confirm and openWorld and their summaries name the kind, the title and the parent", () => {
-  for (const name of ["setup_plan", "create_epic", "create_story", "create_task", "move_to_ready", "move_to_shaping", "plan_issue"]) {
+  for (const name of ["setup_plan", "create_epic", "create_story", "create_task", "move_to_ready", "move_to_shaping", "plan_issue", "set_milestone"]) {
     expect(toolSpec(name)).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true });
   }
   expect(toolSpec("create_epic").summarize({ project: "handoff", title: "Project management", goal: "A plan." })).toBe("Create epic 'Project management' in handoff");
@@ -89,6 +90,37 @@ test("shaping writes are confirm and openWorld and their summaries name the kind
   expect(toolSpec("move_to_shaping").summarize({ project: "handoff", issues: [57] })).toBe("Move task #57 back to Shaping in handoff");
   expect(toolSpec("setup_plan").summarize({ project: "handoff", use: 3 })).toMatch(/^Use GitHub Project #3 as the plan of handoff/);
   expect(toolSpec("list_plan")).toMatchObject({ confirm: false, readOnly: true, untrusted: true });
+});
+
+test("set_milestone is confirm and its summary names the issues and the milestone, or says it clears it", () => {
+  expect(toolSpec("set_milestone")).toMatchObject({ kind: "data", confirm: true, readOnly: false, openWorld: true, idempotent: true });
+  const summary = toolSpec("set_milestone").summarize;
+  expect(summary({ project: "handoff", issues: [57, 58], milestone: "0.9" })).toBe("Set the milestone of #57, #58 in handoff to 0.9");
+  expect(summary({ project: "handoff", issues: [12], milestone: 3 })).toBe("Set the milestone of #12 in handoff to milestone #3");
+  expect(summary({ project: "handoff", issues: [57], milestone: null })).toBe("Clear the milestone of #57 in handoff");
+  // A milestone is a number, a title or null, and must be given.
+  const parses = (args: Record<string, unknown>) => toolSpec("set_milestone").input.safeParse({ project: "handoff", issues: [57], ...args }).success;
+  expect(parses({ milestone: null })).toBe(true);
+  expect(parses({ milestone: "Redesign beta" })).toBe(true);
+  expect(parses({})).toBe(false);
+  expect(parses({ milestone: 0 })).toBe(false);
+  expect(parses({ milestone: "" })).toBe(false);
+  expect(toolSpec("set_milestone").input.safeParse({ project: "handoff", issues: [], milestone: 1 }).success).toBe(false);
+  expect(toolSpec("set_milestone").description).toMatch(/epic[^.]*only[^.]*inherit/);
+  expect(toolSpec("set_milestone").description).toMatch(/closed/);
+});
+
+test("create_epic, create_story and create_task take a milestone and their summaries name it", () => {
+  expect(toolSpec("create_epic").summarize({ project: "handoff", title: "Project management", goal: "A plan.", milestone: "0.9" })).toBe("Create epic 'Project management' in handoff, in milestone 0.9");
+  expect(toolSpec("create_story").summarize({ project: "handoff", epic: 12, title: "Shaping", acceptance: ["x"], milestone: 3 })).toBe("Create story 'Shaping' under epic #12 in handoff, in milestone #3");
+  expect(toolSpec("create_task").summarize({ project: "handoff", story: 41, title: "Add the migration", brief: "b", size: "S", milestone: "1.0" })).toBe(
+    "Create task 'Add the migration' under story #41 in handoff, size S, in milestone 1.0",
+  );
+  for (const name of ["create_epic", "create_story", "create_task"]) {
+    expect(toolSpec(name).input.shape).toHaveProperty("milestone");
+    expect(toolSpec(name).input.safeParse({ project: "handoff", title: "Add", goal: "g", epic: 1, story: 2, brief: "b", acceptance: ["x"], milestone: null }).success).toBe(false);
+  }
+  expect(toolSpec("list_plan").description).toMatch(/milestones/);
 });
 
 test("assign is confirm and its summary names who gets the issue, or says it clears them", () => {

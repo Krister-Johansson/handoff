@@ -107,8 +107,23 @@ test("the handoff skill says Priority order reads the organization's Priority is
   expect(skill).toMatch(/Project's own Priority field[^\n]*organization's Priority issue field/);
 });
 
-test("the plugin is 0.22.0, whose skill says how the Timeline tools name the fields a Project lacks", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.22.0");
+test("the plugin is 0.23.0, whose skill says a task inherits its story's or epic's milestone and names set_milestone", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.23.0");
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const shape = skill.indexOf("## Shape first");
+  const section = skill.slice(shape, skill.indexOf("\n## ", shape + 1));
+  const line = section.split("\n").find((l) => l.includes("Milestones:"));
+  expect(line).toMatch(/task without (one|a milestone) of its own[^\n]*story's, else its epic's/);
+  expect(line).toMatch(/`set_milestone`[^\n]*number or title[^\n]*`null`/);
+  expect(line).toMatch(/epic[^\n]*only/);
+  expect(line).toMatch(/`create_epic`, `create_story` and `create_task`[^\n]*`milestone`/);
+  expect(line).toMatch(/closed/);
+  expect(line).toMatch(/created on GitHub/);
+  expect(line).toMatch(/Flow[^\n]*`last_in_order`/);
+  expect(line).toMatch(/Timeline[^\n]*`against_due`/);
+});
+
+test("the handoff skill says how the Timeline tools name the fields a Project lacks", () => {
   const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
   const dates = skill.split("\n").find((line) => line.startsWith("8. Dates, only in Timeline mode"));
   expect(dates).toMatch(/`list_plan` names them in `missing_fields`[^\n]*`arrange_plan`[^\n]*Start or Target[^\n]*`schedule` and `set_size`[^\n]*ask the user before `setup_plan`/);

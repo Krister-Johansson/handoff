@@ -2,8 +2,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
 import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, planPins, projects, questions, type Db, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop } from "@handoff/engine/operations";
-import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
-import { loadPlan, type PlanProgress, type PlanTask, type PlanView } from "./plan";
+import type { GitHubPort, PlanSize, ProjectsPort } from "@handoff/github";
+import { loadPlan, type PlannedItem, type PlanProgress, type PlanTask, type PlanView } from "./plan";
 import { writeOrder } from "./flow-order";
 import { MODE_REFUSALS, refuseInMode } from "./plan-mode";
 import { layoutFlow, reorderFlow, type FlowInput } from "../lib/plan/flow";
@@ -18,11 +18,28 @@ import { currentSteps, getRunDetail, listRuns } from "./queries";
 import { stepStates } from "./step-states";
 import { projectMergeQueue } from "./merge-queue";
 import { runPathOf } from "./run-path";
-import { createEpic, createStory, createTask, listGitHubProjects, moveToReady, moveToShaping, planIssue, schedule, setSizes, setupPlan, type CopyFrom, type ScheduleItem, type SizesInput } from "./shaping";
+import {
+  createEpic,
+  createStory,
+  createTask,
+  listGitHubProjects,
+  moveToReady,
+  moveToShaping,
+  planIssue,
+  schedule,
+  setMilestone,
+  setSizes,
+  setupPlan,
+  type CopyFrom,
+  type MilestoneInput,
+  type ScheduleItem,
+  type SizesInput,
+} from "./shaping";
 import { annotationsOf, CATALOG, forChatProject, withChatProject, type ChatProject, type ToolSpec } from "../lib/assistant/catalog";
 import { summarizeEvent } from "../lib/event-summary";
 import { arrangeTimeline } from "../lib/plan/arrange";
 import type { Forecast } from "../lib/plan/forecast";
+import type { ItemMilestone, PlanMilestone } from "../lib/plan/milestones";
 import { missingFields, missingFieldsSentence, planFieldsOf } from "../lib/plan/plan-fields";
 import { canMove } from "../lib/plan/task";
 import type { NotificationFilter } from "../lib/notifications";
@@ -46,7 +63,7 @@ const INSTRUCTIONS = `handoff runs graphs of coding agents on GitHub repositorie
 
 To work on issues: list_backlog, then start_run with the issue numbers (the task can stay empty), then get_run to follow the run. Every result links to the dashboard.
 
-A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. Size tasks with set_size when the person sizes them (S, M or L). A project plans in Flow mode or Timeline mode: get_project and list_plan say which, and only a person switches it in Project settings. In Flow mode the plan is an order of tasks and their blockers and never dates or hours: set the blockers with create_task's blocked_by, preview the order with arrange_plan, and write it with one set_order call, pinning a task only when the person asks for its place to stay. In Timeline mode a task can also take an estimate like 3h or 2d. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order; with sized tasks, arrange_plan previews where the unscheduled ones fit from today, then one schedule call proposes those dates. Each of these writes asks the person first.
+A project can keep a plan on a GitHub Project: epics, stories and tasks, each in Shaping, Ready, Running, In review or Done, and only tasks in Ready reach the backlog. To shape work, list_plan first (setup_plan once, after list_github_projects and asking whether to use an existing Project), then create_epic, create_story and create_task with the person, and move_to_ready when they agree a story is shaped. Size tasks with set_size when the person sizes them (S, M or L). A milestone of the repository gives a release a due date across epics: list_plan lists the milestones and each item's milestone, a task without one inherits its story's, else its epic's, set_milestone sets or clears it when the person asks, and create_epic, create_story and create_task take milestone; milestones are created on GitHub. A project plans in Flow mode or Timeline mode: get_project and list_plan say which, and only a person switches it in Project settings. In Flow mode the plan is an order of tasks and their blockers and never dates or hours: set the blockers with create_task's blocked_by, preview the order with arrange_plan, and write it with one set_order call, pinning a task only when the person asks for its place to stay. In Timeline mode a task can also take an estimate like 3h or 2d. When the person asks to plan the timeline, schedule sets Start and Target dates, one call per story with its tasks in blocked-by order; with sized tasks, arrange_plan previews where the unscheduled ones fit from today, then one schedule call proposes those dates. Each of these writes asks the person first.
 
 Once a person turns it on with start_scheduler, a project's scheduler starts runs on Ready tasks on its own; a person decides what is Ready. get_scheduler says what it waits for, pause_scheduler stops new starts and stop_scheduler turns it off.
 
@@ -341,6 +358,36 @@ function flowFieldsOf(input: FlowInput) {
     },
   };
 }
+
+const days = (n: number) => `${n} ${n === 1 ? "day" : "days"}`;
+
+/** How a milestone's end falls against its due date: "1 day late", "3 days early", "on the due date", or null without one. */
+const againstDue = (daysPastDue: number | undefined) =>
+  daysPastDue === undefined ? null : daysPastDue > 0 ? `${days(daysPastDue)} late` : daysPastDue < 0 ? `${days(-daysPastDue)} early` : "on the due date";
+
+/**
+ * A milestone as list_plan gives it: GitHub's facts, its tasks done of total, and the plan mode's judgement. Flow mode
+ * has no dates, so it gives the last task's place in the queue and the skipped tasks; Timeline mode gives the end,
+ * how it falls against the due date and the open tasks without dates.
+ */
+function milestoneFieldsOf(m: PlanMilestone, flow: boolean) {
+  const { timeline, flow: order } = m.progress;
+  return {
+    number: m.number,
+    title: m.title,
+    state: m.state,
+    due_on: m.dueOn ?? null,
+    url: m.url,
+    done: m.progress.done,
+    total: m.progress.total,
+    ...(flow
+      ? { last_in_order: order?.last ?? null, skipped: order?.skipped ?? [] }
+      : { ends: timeline?.ends ?? null, against_due: againstDue(timeline?.daysPastDue), undated_tasks: timeline?.undated ?? [] }),
+  };
+}
+
+/** An item's milestone as list_plan gives it: its own, or inherited_from the story or epic it takes it from. */
+const itemMilestoneOf = (m: ItemMilestone | undefined) => (m ? { number: m.number, title: m.title, inherited_from: m.inherited ?? null } : null);
 
 /**
  * arrange_plan in a Flow project: the Plan page's Optimize over the scope, as a preview that writes nothing and
@@ -655,13 +702,14 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       const view = await planView(projectId);
       // A Flow project has no dates or hours: its tasks have places in the queue and lanes instead.
       const flow = view.flow ? flowFieldsOf(view.flow) : undefined;
-      const item = (i: PlanItem) => ({
+      const item = (i: PlannedItem) => ({
         number: i.number,
         kind: i.kind ?? null,
         title: i.title,
         status: i.status ?? null,
         state: i.state,
         url: i.url,
+        milestone: itemMilestoneOf(i.milestone),
         ...(flow ? {} : { start: i.start ?? null, target: i.target ?? null }),
       });
       const task = (t: PlanTask) => ({
@@ -689,6 +737,8 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
               capacity_hours: view.capacity ?? null,
               forecasts: view.forecasts ? { S: forecast(view.forecasts.S), M: forecast(view.forecasts.M), L: forecast(view.forecasts.L) } : null,
             }),
+        milestones: (view.milestones ?? []).map((m) => milestoneFieldsOf(m, flow !== undefined)),
+        no_milestone: { done: view.noMilestone?.done ?? 0, total: view.noMilestone?.total ?? 0 },
         epics: view.epics
           .filter((e) => epic === undefined || e.number === epic)
           .map((e) => ({
@@ -707,9 +757,10 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
     setup_plan: async ({ project, use, copy_from }: { project: string; use?: number; copy_from?: CopyFrom }) =>
       setupPlan(shaping, (await findProject(db, project)).id, { ...(use !== undefined ? { use } : {}), ...(copy_from ? { copyFrom: copy_from } : {}) }),
 
-    create_epic: async ({ project, title, goal }: { project: string; title: string; goal: string }) => createEpic(shaping, (await findProject(db, project)).id, { title, goal }),
+    create_epic: async ({ project, title, goal, milestone }: { project: string; title: string; goal: string; milestone?: MilestoneInput }) =>
+      createEpic(shaping, (await findProject(db, project)).id, { title, goal, milestone }),
 
-    create_story: async ({ project, ...input }: { project: string; epic: number; title: string; acceptance: string[]; start?: string; target?: string }) =>
+    create_story: async ({ project, ...input }: { project: string; epic: number; title: string; acceptance: string[]; start?: string; target?: string; milestone?: MilestoneInput }) =>
       createStory(shaping, (await findProject(db, project)).id, input),
 
     create_task: async ({
@@ -726,6 +777,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       start?: string;
       target?: string;
       size?: PlanSize;
+      milestone?: MilestoneInput;
     }) =>
       createTask(shaping, (await findProject(db, project)).id, { ...input, ...(blocked_by ? { blockedBy: blocked_by } : {}) }),
 
@@ -737,6 +789,9 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
       planIssue(shaping, (await findProject(db, project)).id, { issue, ...(story !== undefined ? { story } : {}) }),
 
     schedule: async ({ project, items }: { project: string; items: ScheduleItem[] }) => schedule(shaping, (await findProject(db, project)).id, items),
+
+    set_milestone: async ({ project, issues, milestone }: { project: string; issues: number[]; milestone: MilestoneInput | null }) =>
+      setMilestone(shaping, (await findProject(db, project)).id, { issues, milestone }),
 
     set_size: async ({ project, items }: { project: string; items: SizesInput[] }) => {
       const changes = await setSizes(shaping, (await findProject(db, project)).id, items.map(({ issue, size, estimate }) => ({ issue, size, estimate })));

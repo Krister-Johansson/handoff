@@ -77,6 +77,13 @@ test("the system prompt sizes tasks with set_size and lays out dates from sizes 
   expect(shaping).toMatch(/arrange_plan[^.]*then[^.]*schedule/);
 });
 
+test("the system prompt says a task inherits its story's or epic's milestone and sets milestones with set_milestone when the person asks", () => {
+  const shaping = SYSTEM_PROMPT.split("\n\n").find((p) => p.includes("create_epic"));
+  expect(shaping).toMatch(/task without one inherits its story's, else its epic's/);
+  expect(shaping).toMatch(/set_milestone sets or clears it when the person asks/);
+  expect(shaping).toMatch(/milestones are created on GitHub/);
+});
+
 test("a turn in a chat on a project names the project, so tools that take a project use it without a list_projects detour", () => {
   const project = { id: "p1", name: "todooverkill" };
   const prompt = turnPrompt("what is the status for task #151?", "typed", undefined, project);
