@@ -18,6 +18,21 @@ export function landOnMain(origin: string, path: string, content: string) {
 }
 
 /**
+ * Pushes a commit by `author` onto a branch on origin from another clone, as a review bot that fixes
+ * its own findings would. Returns the commit's sha.
+ */
+export function commitOnBranch(origin: string, branch: string, author: string, message: string, path: string, content: string): string {
+  const work = mkdtempSync(join(tmpdir(), "handoff-bot-"));
+  git(work, "clone", "-q", "--branch", branch, origin, ".");
+  mkdirSync(dirname(join(work, path)), { recursive: true });
+  writeFileSync(join(work, path), content);
+  git(work, "add", "-A");
+  execFileSync("git", ["-c", `user.name=${author}`, "-c", "user.email=bot@example.com", "commit", "-qm", message], { cwd: work });
+  git(work, "push", "-q", "origin", branch);
+  return git(work, "rev-parse", "HEAD");
+}
+
+/**
  * Git config, as environment, whose transport drops the first `failures` fetches from origin as a
  * flaky network would, and a count of the fetches tried.
  */
