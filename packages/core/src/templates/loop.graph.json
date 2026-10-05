@@ -84,6 +84,9 @@
       "attributes": {
         "type": "pr",
         "label": "Pull request",
+        "config": {
+          "join": "any"
+        },
         "x": 2040,
         "y": 0
       }

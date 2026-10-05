@@ -2,7 +2,22 @@ import { expect, test } from "vitest";
 import linear from "./templates/linear.graph.json" with { type: "json" };
 import loop from "./templates/loop.graph.json" with { type: "json" };
 import planReview from "./templates/plan-review.graph.json" with { type: "json" };
-import { compileGraph } from "./graph/compile.ts";
+import { compileGraph, validateGraphForSave } from "./graph/compile.ts";
+
+test("every template can be saved: each node fed by several edges has a join mode", () => {
+  for (const template of [linear, loop, planReview]) {
+    const result = validateGraphForSave(template);
+    expect(result.ok ? [] : result.errors.map((e) => e.message)).toEqual([]);
+  }
+});
+
+test("in the loop and plan templates the PR node goes on at the first of the demo's skipped edge and the Try it gate's approve", () => {
+  for (const template of [loop, planReview]) {
+    const compiled = compileGraph(template);
+    if (!compiled.ok) throw new Error(compiled.errors.map((e) => e.message).join("; "));
+    expect(compiled.graph.node("pr").config.join).toBe("any");
+  }
+});
 
 test("every template wires the merge node's update port to the PR node", () => {
   for (const template of [linear, loop, planReview]) {

@@ -298,7 +298,7 @@ test("page_get_node returns the node's label, type, config and edges", async () 
       out: [{ id: "coder->reviewer", to: "reviewer", port: "done" }],
     },
     // What page_update_node takes for a coder.
-    fields: ["label", "notify", "instructions", "model", "effort", "maxTurns", "allTools", "allowedTools", "library", "checks"],
+    fields: ["label", "notify", "join", "instructions", "model", "effort", "maxTurns", "allTools", "allowedTools", "library", "checks"],
   });
   expect(await call("page_get_node", { key: "tester" })).toEqual({ text: "There is no node tester. The nodes are: planner, coder, reviewer.", isError: true });
 });
@@ -322,7 +322,7 @@ test("page_update_node changes a coder's instructions and marks the graph unsave
   expect(within(inspector()).getByLabelText("Max turns")).toHaveValue(null);
 
   expect(await call("page_update_node", { key: "coder", patch: { instructions: "Ship it.", temperature: 0.2 } })).toEqual({
-    text: "A coder has no temperature. Its fields are: label, notify, instructions, model, effort, maxTurns, allTools, allowedTools, library, checks.",
+    text: "A coder has no temperature. Its fields are: label, notify, join, instructions, model, effort, maxTurns, allTools, allowedTools, library, checks.",
     isError: true,
   });
   expect(await call("page_update_node", { key: "coder", patch: { effort: "huge" } })).toEqual({
@@ -332,7 +332,7 @@ test("page_update_node changes a coder's instructions and marks the graph unsave
   expect(within(inspector()).getByLabelText("Instructions")).toHaveValue("Keep commits small and focused.");
 
   // Each node type has its own fields: a reviewer has no tests to run.
-  expect(await call("page_update_node", { key: "reviewer", patch: { checks: [] } })).toMatchObject({ isError: true, text: expect.stringMatching(/^A reviewer has no checks\. Its fields are: label, notify, instructions/) });
+  expect(await call("page_update_node", { key: "reviewer", patch: { checks: [] } })).toMatchObject({ isError: true, text: expect.stringMatching(/^A reviewer has no checks\. Its fields are: label, notify, join, instructions/) });
 });
 
 /** A Planner that hands to a Coder, and a Reviewer and a Finish not connected yet. */
@@ -475,6 +475,35 @@ test("page_issues lists what keeps the graph from being saved, and page_tidy_lay
 
   fireEvent.click(screen.getByRole("button", { name: "Unlock editing" }));
   await call("page_remove", { ids: ["reviewer", "finish"] });
+  expect(await call("page_issues")).toEqual({ text: "The graph has no issues; it can be saved.", isError: false });
+});
+
+/** A Reviewer that both the Planner and the Coder lead to, with no join mode yet. */
+const fannedIn = {
+  attributes: { startNode: "planner" },
+  nodes: [
+    { key: "planner", attributes: { type: "planner", label: "Planner", x: 0, y: 0, config: {} } },
+    { key: "coder", attributes: { type: "coder", label: "Coder", x: 300, y: 0, config: {} } },
+    { key: "reviewer", attributes: { type: "reviewer", label: "Review", x: 600, y: 0, config: {} } },
+  ],
+  edges: [
+    { key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done", input: "in" } },
+    { key: "planner->reviewer", source: "planner", target: "reviewer", attributes: { port: "done", input: "in" } },
+    { key: "coder->reviewer", source: "coder", target: "reviewer", attributes: { port: "done", input: "in" } },
+  ],
+};
+
+test("a node two edges reach without a join mode is an issue on it, and setting the mode clears it", async () => {
+  const { call, container } = await withAssistant(fannedIn);
+  const message = 'reviewer has 2 incoming edges; set its join mode to "all" (wait for every edge) or "any" (go on at the first)';
+  expect(screen.getByRole("toolbar", { name: "Graph" })).toHaveTextContent("1 issue");
+  expect(within(inspector()).getByText(message)).toBeInTheDocument();
+  expect(within(canvasNode(container, "reviewer")).getByText("issue")).toHaveAttribute("title", message);
+
+  await call("page_select", { node: "reviewer" });
+  expect(within(inspector()).getByLabelText("Join")).toHaveValue("");
+  expect(await call("page_update_node", { key: "reviewer", patch: { join: "any" } })).toMatchObject({ isError: false });
+  expect(within(inspector()).getByLabelText("Join")).toHaveValue("any");
   expect(await call("page_issues")).toEqual({ text: "The graph has no issues; it can be saved.", isError: false });
 });
 

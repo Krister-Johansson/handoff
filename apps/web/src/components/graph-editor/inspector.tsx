@@ -3,7 +3,7 @@
 import { useState, type Dispatch } from "react";
 import { PlusIcon, TrashIcon, XIcon } from "lucide-react";
 import { CONDITION_PRESETS } from "@/lib/condition-presets";
-import { ALL_TOOLS, ConditionSchema, DEFAULT_REVIEW_LEVEL, EFFORT_LEVELS, REVIEW_LEVELS, gateMode, MODEL_ALIASES, nodeCatalog, notifies, notifyKindsOf, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType, type NotifyKind } from "@handoff/core";
+import { ALL_TOOLS, ConditionSchema, DEFAULT_REVIEW_LEVEL, EFFORT_LEVELS, REVIEW_LEVELS, gateMode, isJoinMode, MODEL_ALIASES, nodeCatalog, notifies, notifyKindsOf, type DeterministicCheck, type FlowEdge, type FlowGraph, type FlowNode, type NodeType, type NotifyKind } from "@handoff/core";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -291,7 +291,7 @@ function NodeInspector({
       )}
 
       <NotificationSettings node={node} dispatch={dispatch} />
-      <NodeEdges node={node} graph={graph} />
+      <NodeEdges node={node} graph={graph} setConfig={setConfig} />
       <InspectorSection>
         <Button variant="outline" size="sm" className="self-start text-danger hover:bg-danger-bg hover:text-danger" disabled={locked} onClick={() => dispatch({ type: "remove", ids: [node.id] })}>
           <TrashIcon data-icon="inline-start" />
@@ -390,8 +390,27 @@ function TypeSettings({
   );
 }
 
+/** How a node that several edges reach starts: once every edge has arrived, or at the first. Loop edges do not count. */
+function JoinField({ node, incoming, setConfig }: { node: FlowNode; incoming: FlowEdge[]; setConfig: (patch: Record<string, unknown>) => void }) {
+  const join = node.data.config.join;
+  if (incoming.filter((e) => !loops(e.data)).length < 2 && join === undefined) return null;
+  return (
+    <Field>
+      <FieldLabel htmlFor="node-join">Join</FieldLabel>
+      <NativeSelect id="node-join" value={isJoinMode(join) ? join : ""} onChange={(e) => setConfig({ join: e.target.value })}>
+        <NativeSelectOption value="" disabled>
+          Choose how the edges join
+        </NativeSelectOption>
+        <NativeSelectOption value="all">Wait for every edge</NativeSelectOption>
+        <NativeSelectOption value="any">Go on at the first edge</NativeSelectOption>
+      </NativeSelect>
+      <FieldDescription>Every edge for branches that all run. The first edge for branches of which only one is taken, such as a skipped demo and the Try it gate.</FieldDescription>
+    </Field>
+  );
+}
+
 /** The edges that reach a node, by input and source port, and those that leave it, by port and target. */
-function NodeEdges({ node, graph }: { node: FlowNode; graph: FlowGraph }) {
+function NodeEdges({ node, graph, setConfig }: { node: FlowNode; graph: FlowGraph; setConfig: (patch: Record<string, unknown>) => void }) {
   const incoming = graph.edges.filter((e) => e.target === node.id);
   const outgoing = graph.edges.filter((e) => e.source === node.id);
   if (incoming.length + outgoing.length === 0) return null;
@@ -411,6 +430,7 @@ function NodeEdges({ node, graph }: { node: FlowNode; graph: FlowGraph }) {
   };
   return (
     <InspectorSection title="Edges">
+      <JoinField node={node} incoming={incoming} setConfig={setConfig} />
       <ul aria-label="Edges" className="flex flex-col gap-1 text-xs">
         {incoming.map((e) => row(e, e.data.input ?? "in", "←", `${e.source}.${e.data.port ?? "custom"}`))}
         {outgoing.map((e) => row(e, e.data.port ?? "custom", "→", e.target))}
