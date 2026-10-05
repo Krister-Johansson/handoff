@@ -32,6 +32,7 @@ test("editing submits the new name, default branch and setup command", async () 
     agentNotes: "",
     demoSeedCommand: "",
     uiPaths: "",
+    permissionTimeoutMinutes: "10",
   });
   // The plan budget is set in project settings, Estimates.
   expect(screen.queryByLabelText(/Plan budget/)).not.toBeInTheDocument();
@@ -62,6 +63,22 @@ test("editing submits the demo seed command and the UI paths, one glob a line, a
   const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
   expect(form.get("demoSeedCommand")).toBe("pnpm db:seed");
   expect(form.get("uiPaths")).toBe("apps/web/**");
+});
+
+test("editing submits the permission timeout in minutes from 1 to 120 and says what it does", async () => {
+  render(<EditProjectDialog project={{ ...project, permissionTimeoutMinutes: 25 }} open onOpenChange={() => {}} />);
+  const timeout = screen.getByLabelText("Permission timeout");
+  expect(timeout).toHaveValue(25);
+  expect(screen.getByText("How long a step waits for an answer to a permission request before it is denied and the step goes on.")).toBeInTheDocument();
+  // The browser keeps a value out of range from the server.
+  fireEvent.change(timeout, { target: { value: "121" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(actions.updateProjectAction).not.toHaveBeenCalled();
+  fireEvent.change(timeout, { target: { value: "60" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(actions.updateProjectAction).toHaveBeenCalledTimes(1));
+  const form = (actions.updateProjectAction.mock.calls[0] as unknown[])[1] as FormData;
+  expect(form.get("permissionTimeoutMinutes")).toBe("60");
 });
 
 test("deleting asks first, says what goes, and shows a refusal", async () => {

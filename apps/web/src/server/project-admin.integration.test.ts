@@ -83,7 +83,7 @@ describe("Settings, Projects", () => {
     const { plan, project, number } = await planned();
     const rows = await projectsForSettings(db, plan);
     expect(rows).toEqual([
-      expect.objectContaining({ name: "quiet", repoOwner: "octo", repoName: "quiet", defaultBranch: "trunk", setupCommand: null, planMode: "flow", runCount: 0, plan: null }),
+      expect.objectContaining({ name: "quiet", repoOwner: "octo", repoName: "quiet", defaultBranch: "trunk", setupCommand: null, planMode: "flow", permissionTimeoutMinutes: 10, runCount: 0, plan: null }),
       expect.objectContaining({ id: project.id, name: "sandbox", setupCommand: "pnpm install", planMode: "timeline", runCount: 1, plan: {
           number,
           title: "sandbox plan",

@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ redirect: (path: string) => void env.redirec
 vi.mock("@/lib/db", () => ({ getDb: () => db }));
 vi.mock("@/lib/github", () => ({ getGitHub: () => env.github, getProjects: () => env.projects }));
 
-const { addDateFieldsAction, addEstimateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, setPlanModeAction, startRunAction, unpinAction, writeOrderAction } = await import("./actions");
+const { addDateFieldsAction, addEstimateFieldsAction, runAgainAction, scheduleAction, setCapacityAction, setPlanBudgetAction, setPlanModeAction, startRunAction, unpinAction, updateProjectAction, writeOrderAction } = await import("./actions");
 
 beforeEach(async () => {
   await truncateAll(db);
@@ -127,6 +127,27 @@ test("setCapacityAction stores hours a day for the project and refuses a value o
   }
   expect(await capacity()).toBe(1);
   expect(await setCapacityAction({ projectId: "not a project", hours: 6 })).toEqual({ ok: false, error: expect.any(String) });
+});
+
+test("updateProjectAction saves the permission timeout in minutes, takes 10 when it is empty and refuses one outside 1 to 120", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  const minutes = async () => (await db.select({ minutes: projects.permissionTimeoutMinutes }).from(projects).where(eq(projects.id, project.id)))[0]?.minutes;
+  const edit = (permissionTimeoutMinutes: string) => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries({ projectId: project.id, name: "sandbox", defaultBranch: "main", permissionTimeoutMinutes })) form.set(key, value);
+    return updateProjectAction({}, form);
+  };
+  expect(await minutes()).toBe(10);
+  expect(await edit(" 25 ")).toEqual({ ok: true });
+  expect(await minutes()).toBe(25);
+  expect(await edit("120")).toEqual({ ok: true });
+  expect(await edit("1")).toEqual({ ok: true });
+  for (const typed of ["0", "121", "2.5", "ten"]) {
+    expect(await edit(typed)).toMatchObject({ ok: false, error: "The permission timeout is a whole number of minutes from 1 to 120.", values: { permissionTimeoutMinutes: typed } });
+  }
+  expect(await minutes()).toBe(1);
+  expect(await edit("")).toEqual({ ok: true });
+  expect(await minutes()).toBe(10);
 });
 
 test("setPlanBudgetAction saves files and steps, keeps the default for one left empty, clears both when empty and refuses one out of range", async () => {

@@ -1,0 +1,2 @@
+ALTER TABLE "projects" ADD COLUMN "permission_timeout_minutes" integer DEFAULT 10 NOT NULL;--> statement-breakpoint
+ALTER TABLE "projects" ADD CONSTRAINT "projects_permission_timeout_minutes_check" CHECK ("permission_timeout_minutes" between 1 and 120);

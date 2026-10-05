@@ -596,6 +596,12 @@ test("get_project returns the plan mode", async () => {
   expect(await call("get_project", { project: "sandbox" })).toMatchObject({ plan_mode: "timeline" });
 });
 
+test("get_project returns the permission timeout in minutes", async () => {
+  expect(await call("get_project", { project: "sandbox" })).toMatchObject({ permission_timeout_minutes: 10 });
+  await db.update(projects).set({ permissionTimeoutMinutes: 45 }).where(eq(projects.id, projectId));
+  expect(await call("get_project", { project: "sandbox" })).toMatchObject({ permission_timeout_minutes: 45 });
+});
+
 test("a pending step reports queued with its place", async () => {
   await registerWorker(db, { id: "worker-1", hostname: "box", caps: { cli: 1 } });
   const start = async (task: string) => (await call("start_run", { project: "sandbox", task })).run_id as string;

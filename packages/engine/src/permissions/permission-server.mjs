@@ -15,7 +15,8 @@ if (!dir) {
   process.stderr.write("usage: permission-server.mjs <dir> [timeoutMs]\n");
   process.exit(2);
 }
-const timeoutMs = Number(timeoutArg) || 30 * 60_000;
+// The worker passes the project's permission timeout; without one, 10 minutes, as PERMISSION_TIMEOUT_MS.
+const timeoutMs = Number(timeoutArg) || 10 * 60_000;
 
 const reply = (decision) => ({ content: [{ type: "text", text: JSON.stringify(decision) }] });
 
