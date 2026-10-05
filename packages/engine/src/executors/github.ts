@@ -190,6 +190,30 @@ async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv, r
   }
 }
 
+/** A commit on the run's remote branch that handoff did not push, such as a review bot's autofix. */
+type ForeignCommit = { sha: string; author: string; message: string };
+
+/** Whether a git push failed because the remote branch is not where the lease expected it. */
+const pushRejected = (error: unknown) => /\[rejected\]/.test(String((error as { stderr?: unknown }).stderr ?? ""));
+
+/**
+ * The commits on the run's branch on origin that handoff did not push: those the worktree's branch
+ * never had, at its head or anywhere in its reflog. Fetched without moving the remote-tracking branch.
+ */
+async function foreignCommits(cwd: string, branch: string, env: NodeJS.ProcessEnv, retryMs?: number): Promise<ForeignCommit[]> {
+  const run = async (args: string[]) => (await execFileAsync("git", args, { cwd, env })).stdout.trim();
+  await withNetworkRetry(() => run(["fetch", "-q", "--refmap=", "origin", `refs/heads/${branch}`]), retryMs);
+  const ours = (await run(["reflog", "show", "--format=%H", `refs/heads/${branch}`]).catch(() => "")).split("\n").filter(Boolean);
+  const log = await run(["log", "--format=%H%x00%an%x00%s", "FETCH_HEAD", "--not", "HEAD", ...new Set(ours)]);
+  return log
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [sha = "", author = "", message = ""] = line.split("\0");
+      return { sha, author, message };
+    });
+}
+
 /** Sets the run's linked tasks to `status` on the plan and records what happened; never throws. */
 async function movePlan(projects: ProjectsPort | undefined, ctx: ExecutorContext, status: PlanStatus) {
   const written = await writePlanStatus(projects, ctx.project, (ctx.state.issues ?? []).map((i) => i.number), status);
@@ -274,7 +298,34 @@ export function prNodeExecutor(deps: {
         }
         ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged" });
         const cwd = ctx.workdir.path;
-        await withNetworkRetry(() => execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd, env }), deps.gitRetryMs);
+        // The lease refuses the push when origin's branch moved since handoff's last push. --force-if-includes also refuses it when a
+        // fetch in the shared clone (another run starting) moved the remote-tracking branch, which the lease alone would trust.
+        // A rejected push is not a network failure: it is not tried again, and is returned rather than thrown.
+        const rejected = await withNetworkRetry(
+          () =>
+            execFileAsync("git", ["push", "--force-with-lease", "--force-if-includes", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd, env }).then(
+              () => undefined,
+              (error: unknown) => {
+                if (pushRejected(error)) return error;
+                throw error;
+              },
+            ),
+          deps.gitRetryMs,
+        );
+        if (rejected) {
+          // Someone else committed on the run's branch, such as a review bot fixing its own findings. A person decides what to keep.
+          const commits = await foreignCommits(cwd, ctx.run.branchName, env, deps.gitRetryMs);
+          if (!commits.length) throw rejected;
+          const listed = commits.map((c) => `${c.sha.slice(0, 7)} by ${c.author}: ${c.message}`).join("; ");
+          return {
+            kind: "failed",
+            error: {
+              code: "foreign_commits",
+              message: `origin/${ctx.run.branchName} has commits handoff did not push, and handoff does not overwrite them: ${listed}. To keep them, pull them into the run's worktree, then repair the run. Turn off review bots that commit to the branch, such as CodeRabbit Autopilot.`,
+              detail: { commits },
+            },
+          };
+        }
         // A Demo step's screenshots go to the assets branch so the description can show them; failing that, the PR opens without them.
         const taken = deps.db ? await latestScreenshots(deps.db, ctx.run.id) : [];
         if (taken.length) {

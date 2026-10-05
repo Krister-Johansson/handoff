@@ -10,7 +10,7 @@ import type { CheckContext, PlanStatus, PrSnapshot } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { cancelRun } from "../operations.ts";
 import { createRun } from "../runs.ts";
-import { createOriginRepo, flakyFetches, git, landOnMain } from "../testing/git.ts";
+import { commitOnBranch, createOriginRepo, flakyFetches, git, landOnMain } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import type { ExecutorRegistry, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
@@ -513,6 +513,51 @@ describe("keeping up with main", () => {
     const { executions } = await inspect(db, run.id);
     expect(executions.find((e) => e.nodeKey === "merge")).toMatchObject({ status: "passed", output: { merged: false, needsUpdate: true } });
     expect(executions.some((e) => e.nodeKey === "pr" && e.attempt === 2)).toBe(true);
+  });
+});
+
+describe("commits handoff did not push", () => {
+  /** A run whose PR waits on CI, then a bot commits on its branch, and failing CI sends the work back to the coder. */
+  async function botCommitted(afterBotCommit: (worktree: string) => void = () => {}) {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    const { project, graphVersion } = await seedGraph(db, withSyncEdges(linear), { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const workdirs = new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) });
+    const deps = engineDeps(db, { planner, coder, pr: prNodeExecutor({ github, gitRetryMs: 10 }), merge: mergeNodeExecutor({ github }) }, { workdirs });
+    await drain(deps);
+    const { run: row } = await inspect(db, run.id);
+    const sha = commitOnBranch(origin, row.branchName, "coderabbitai[bot]", "Autofix: tidy the changelog", "NOTES.md", "tidied\n");
+    afterBotCommit(workdirs.worktreePath(run.id));
+    github.setChecks(1, "FAILURE", [{ name: "test", jobId: 9, log: "AssertionError: boom" }]);
+    await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+    await drain(deps);
+    return { origin, run: row, sha };
+  }
+
+  test("a push rejected because the remote branch has commits handoff did not push fails with foreign_commits naming them", async () => {
+    const { origin, run, sha } = await botCommitted();
+    const { executions } = await inspect(db, run.id);
+    // The coder fixed CI, and the PR step that pushes the fix is the one that fails.
+    expect(executions.some((e) => e.nodeKey === "coder" && e.attempt === 2)).toBe(true);
+    const pr = executions.find((e) => e.nodeKey === "pr" && e.attempt === 2)!;
+    expect(pr).toMatchObject({
+      status: "failed",
+      error: { code: "foreign_commits", detail: { commits: [{ sha, author: "coderabbitai[bot]", message: "Autofix: tidy the changelog" }] } },
+    });
+    expect(pr.error?.message).toContain(sha.slice(0, 7));
+    expect(pr.error?.message).toContain("coderabbitai[bot]");
+    expect(pr.error?.message).toContain("Autofix: tidy the changelog");
+    // The bot's commit is still on the branch: nothing was overwritten.
+    expect(git(origin, "rev-parse", run.branchName)).toBe(sha);
+  });
+
+  test("a bot's commit that a fetch in the shared clone brought in is not overwritten either", async () => {
+    // Another run of the project starting fetches every branch into the clone the worktrees share.
+    const { origin, run, sha } = await botCommitted((worktree) => git(worktree, "fetch", "-q", "--prune", "origin"));
+    const pr = (await inspect(db, run.id)).executions.find((e) => e.nodeKey === "pr" && e.attempt === 2)!;
+    expect(pr).toMatchObject({ status: "failed", error: { code: "foreign_commits", detail: { commits: [{ sha }] } } });
+    expect(git(origin, "rev-parse", run.branchName)).toBe(sha);
   });
 });
 
