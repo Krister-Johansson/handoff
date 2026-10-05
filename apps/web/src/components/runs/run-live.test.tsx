@@ -196,6 +196,24 @@ test("a gate that starts waiting while the page is open refreshes it, so its que
   expect(refresh).toHaveBeenCalled();
 });
 
+test("a page waiting for the run's worktree refreshes once on the first event a step sends from it", () => {
+  refresh.mockClear();
+  const cli = (seq: number) => ({ seq, type: "cli.assistant", payload: { text: "hi" }, nodeExecutionId: "e1", createdAt: "2026-10-05T14:06:00Z" });
+  render(<RunLive {...common} initialStatus="queued" initialExecutions={executions} awaitsWorktree />);
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 1, type: "node.claimed", payload: { nodeKey: "planner" }, nodeExecutionId: "e1", createdAt: "2026-10-05T14:05:00Z" }));
+  expect(refresh).not.toHaveBeenCalled();
+  act(() => FakeEventSource.instances[0]!.emit(cli(2)));
+  act(() => FakeEventSource.instances[0]!.emit(cli(3)));
+  expect(refresh).toHaveBeenCalledTimes(1);
+});
+
+test("a page that already has the run's worktree does not refresh for a step's events", () => {
+  refresh.mockClear();
+  render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 1, type: "cli.assistant", payload: { text: "hi" }, nodeExecutionId: "e1", createdAt: "2026-10-05T14:06:00Z" }));
+  expect(refresh).not.toHaveBeenCalled();
+});
+
 test("a step that asks permission while the page is open refreshes it, so the request shows", () => {
   render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
   refresh.mockClear();

@@ -18,6 +18,8 @@ import type { LineTokens } from "@/lib/highlight-types";
 import type { LineComment } from "@/lib/line-comments";
 import { highlightFiles } from "@/server/highlight";
 import { getReview } from "@/server/review";
+import { runWorktree } from "@/server/worktree";
+import { OpenInEditor } from "@/components/runs/open-in-editor";
 
 export const dynamic = "force-dynamic";
 
@@ -136,7 +138,8 @@ export default async function ReviewPage({ params }: { params: Promise<{ project
   const review = await getReview(getDb(), runId, questionId);
   if (!review) notFound();
   if (review.projectId !== projectId) redirect(reviewPath(review.projectId, runId, questionId));
-  const tokens = review.review.kind === "code" && review.review.files ? await highlightFiles(review.review.files) : undefined;
+  const files = review.review.kind === "code" ? review.review.files : undefined;
+  const [tokens, worktree] = files ? await Promise.all([highlightFiles(files), runWorktree(getDb(), runId)]) : [undefined, undefined];
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <PageHeader
@@ -148,7 +151,16 @@ export default async function ReviewPage({ params }: { params: Promise<{ project
         ]}
         title={review.question}
         titleExtra={!review.answered && <StatusBadge status="waiting" label="waiting for you" />}
-        actions={review.review.kind === "code" && review.review.files ? <ChangeSize files={review.review.files} round={review.earlier.length + 1} /> : <RunSteps href={runPath(review.projectId, runId)} />}
+        actions={
+          review.review.kind === "code" && review.review.files ? (
+            <>
+              <ChangeSize files={review.review.files} round={review.earlier.length + 1} />
+              {worktree && <OpenInEditor worktree={worktree} align="end" />}
+            </>
+          ) : (
+            <RunSteps href={runPath(review.projectId, runId)} />
+          )
+        }
         description={
           review.answered
             ? "This review has been answered."

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { RunGraph, type NodeStatus } from "@/components/graph-editor/run-graph";
@@ -93,7 +93,12 @@ type Props = {
   header?: { crumbs: Crumb[]; title: ReactNode; meta: ReactNode; actions: ReactNode };
   /** Cards between the header and the steps, such as a failed run's way to repair it. */
   children?: ReactNode;
+  /** The header's Open in VS Code waits for the run's worktree; the first event a step sends from it refreshes the page once. */
+  awaitsWorktree?: boolean | undefined;
 };
+
+/** Events a step sends once it has its workdir: a fast-forward, the project's setup command, or the CLI. */
+const FROM_WORKDIR = /^(workdir|setup|cli)\./;
 
 /** What the run is doing now, on a strip in its tone. */
 function RunNow({ status, now }: { status: string; now: ReturnType<typeof describeNow> }) {
@@ -187,6 +192,7 @@ export function RunLive({
   blockedBy,
   header,
   children,
+  awaitsWorktree = false,
 }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [prNumber, setPrNumber] = useState(initialPr);
@@ -197,6 +203,7 @@ export function RunLive({
   const [liveCli, setLiveCli] = useState<RunEvent[]>([]);
   const [eventCount, setEventCount] = useState(initialEvents.length);
   const router = useRouter();
+  const worktreeRefreshed = useRef(false);
   const loopEdges = useMemo(() => loopEdgeKeys(graphDocument), [graphDocument]);
 
   const onEvent = useCallback(
@@ -216,6 +223,10 @@ export function RunLive({
       }
       // A step's permission request is read on the server; refreshing shows it with its answers.
       if (event.type === "permission.requested") router.refresh();
+      if (awaitsWorktree && !worktreeRefreshed.current && FROM_WORKDIR.test(event.type)) {
+        worktreeRefreshed.current = true;
+        router.refresh();
+      }
       if (event.type === "node.claimed") setStatus("running");
       // A node that passed and then took a loop edge sent its work back.
       const edgeKey = (event.payload as { edgeKey?: unknown } | null)?.edgeKey;
@@ -242,7 +253,7 @@ export function RunLive({
         ];
       });
     },
-    [router, loopEdges],
+    [router, loopEdges, awaitsWorktree],
   );
 
   const [view, setView] = useState<RunView>("steps");

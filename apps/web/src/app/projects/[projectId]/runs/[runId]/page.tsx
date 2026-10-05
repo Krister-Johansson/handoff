@@ -21,6 +21,9 @@ import { graphPath, runPath } from "@/lib/paths";
 import { formatCost, formatDuration } from "@/lib/format";
 import { getRunDetail } from "@/server/queries";
 import { StartedByScheduler } from "@/components/scheduler/scheduler-tag";
+import { OpenInEditor } from "@/components/runs/open-in-editor";
+import type { WorktreeState } from "@/lib/worktree-state";
+import { workerHome, worktreeState } from "@/server/worktree";
 
 export const dynamic = "force-dynamic";
 
@@ -95,12 +98,13 @@ async function queuePlace(projectId: string, runId: string): Promise<RunQueue | 
 }
 
 /**
- * The run's pull request, and Cancel while it is active or Run again once it ended. A run another run
- * superseded links to that run instead of offering Run again.
+ * Open in VS Code, the run's pull request, and Cancel while it is active or Run again once it ended. A run
+ * another run superseded links to that run instead of offering Run again.
  */
-function RunActions({ run, project, active }: { run: Detail["run"]; project: Detail["project"]; active: boolean }) {
+function RunActions({ run, project, active, worktree }: { run: Detail["run"]; project: Detail["project"]; active: boolean; worktree: WorktreeState }) {
   return (
     <>
+      <OpenInEditor worktree={worktree} />
       {run.prNumber !== null ? (
         <Button size="sm" variant="outline" asChild>
           <a href={`https://github.com/${project.repoOwner}/${project.repoName}/pull/${run.prNumber}`}>
@@ -137,6 +141,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const [queue, permissions] = active ? await Promise.all([queuePlace(project.id, run.id), pendingPermissions(getDb(), run.id)]) : [undefined, []];
   const blockedBy = blockersOf(detail);
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
+  const worktree = worktreeState(run, workerHome());
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-6">
       <RunLive
@@ -183,8 +188,9 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
               </a>
             </div>
           ),
-          actions: <RunActions run={run} project={project} active={active} />,
+          actions: <RunActions run={run} project={project} active={active} worktree={worktree} />,
         }}
+        awaitsWorktree={active && worktree.state !== "open"}
         runId={run.id}
         projectId={project.id}
         initialStatus={run.status}
