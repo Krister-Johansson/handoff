@@ -28,7 +28,8 @@ export type RunCardData = {
   url: string;
   pr: { number: number; url: string } | null;
   issues: { number: number; title: string; url: string }[];
-  cost_usd: number;
+  /** Missing from results saved before get_run reported it (2026-10-02); chats keep their old results. */
+  cost_usd?: number;
   steps: Step[];
   questions?: { id: string; node?: string; question: string; options?: string[]; review_url?: string; try?: { url?: string } }[];
   permissions?: { id: string; node: string; asks: string; detail?: string | null; input?: unknown }[];
@@ -138,7 +139,7 @@ export function renderRunCard(root: HTMLElement, run: RunCardData, host: ViewHos
   const [issue, ...moreIssues] = run.issues;
   const elapsed = duration(run, now);
   const waits = waitsOn(run);
-  const cost = `$${run.cost_usd.toFixed(2)}${ACTIVE.has(run.status) ? " so far" : ""}`;
+  const cost = typeof run.cost_usd === "number" ? `$${run.cost_usd.toFixed(2)}${ACTIVE.has(run.status) ? " so far" : ""}` : undefined;
   const done = steps.filter((s) => s.status === "passed").length;
 
   const card = el(
@@ -155,7 +156,7 @@ export function renderRunCard(root: HTMLElement, run: RunCardData, host: ViewHos
       ? el("div", "rc-t", el("span", "n", `#${issue.number}`), link(issue.url, "ttl", open, issue.title), moreIssues.length > 0 && el("span", "more", `+${moreIssues.length} more`))
       : el("div", "rc-t", el("span", "ttl", run.task.trim() || "A run without a task")),
     issue && run.task.trim() && el("div", "rc-task", run.task.trim()),
-    meta([run.graph ? el("span", "mono", run.graph) : null, current ? el("span", undefined, `attempt ${current.attempt}`) : null, el("span", undefined, cost)]),
+    meta([run.graph ? el("span", "mono", run.graph) : null, current ? el("span", undefined, `attempt ${current.attempt}`) : null, cost ? el("span", undefined, cost) : null]),
   );
   card.setAttribute("aria-label", `Run ${shortId}`);
 
