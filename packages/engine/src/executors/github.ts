@@ -3,7 +3,20 @@ import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
-import { prKey, REVIEWER_NOTES_MARKER, reviewRequestMarker, toFeedback, withoutChecks, type GitHubPort, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
+import {
+  findCodeRabbitSummary,
+  parseCodeRabbitSummary,
+  prKey,
+  REVIEWER_NOTES_MARKER,
+  reviewRequestMarker,
+  toFeedback,
+  withoutChecks,
+  type GitHubPort,
+  type PlanStatus,
+  type PrSnapshot,
+  type ProjectsPort,
+  type RepoRef,
+} from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, sql, webhookDeliveries, type Db } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
@@ -11,9 +24,33 @@ import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
-import { externalReview, reviewerCheck, reviewerStarted, reviewRequest, reviewSettings, withFindings, type ReviewRequest } from "./external-review.ts";
+import {
+  externalReview,
+  reviewerCheck,
+  reviewerStarted,
+  reviewRequest,
+  reviewSettings,
+  reviewThreadsSettings,
+  withFindings,
+  type ReviewRequest,
+  type SummaryRead,
+} from "./external-review.ts";
+import { handleOf, postAnswers, recordAnswers, sendItems, syncItems, withItems } from "./review-items.ts";
 
 const execFileAsync = promisify(execFile);
+
+/** The commit checked out in a worktree: what the PR node pushed. */
+const headOf = async (cwd: string) => (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
+
+/**
+ * A review bot's summary comment on the pull request, parsed: found by its first line among the
+ * snapshot's latest comments, else among all the pull request's comments, since the bot may have
+ * written it first and kept editing it. Undefined when there is none or GitHub could not be read.
+ */
+async function readSummary(github: GitHubPort, repo: RepoRef, snapshot: PrSnapshot, login: string): Promise<SummaryRead | undefined> {
+  const found = findCodeRabbitSummary(snapshot.comments, { author: login }) ?? findCodeRabbitSummary(await github.listIssueComments(repo, snapshot.number).catch(() => []), { author: login });
+  return found ? { comment: { id: found.id, url: found.url, body: found.body }, summary: parseCodeRabbitSummary(found.body) } : undefined;
+}
 
 const repoOf = (ctx: ExecutorContext): RepoRef => ({ owner: ctx.project.repoOwner, name: ctx.project.repoName });
 
@@ -280,9 +317,22 @@ export function prNodeExecutor(deps: {
 
       // External reviewers (review bots such as CodeRabbit or Copilot, or people) the node waits for.
       const settings = reviewSettings(ctx.node.config);
-      // A check named after one of them (CodeRabbit's "CodeRabbit") is its review in progress, not CI: the
-      // review wait below covers it, up to the review time limit, and it never goes to the coder as a CI failure.
-      const ci = withoutChecks(snapshot, reviewerCheck(settings));
+      const threads = reviewThreadsSettings(ctx.node.config);
+      // With replies on, what reviewers say becomes review items, which the coder answers and handoff answers on GitHub.
+      const itemsDb = threads.reply && settings.sendBack ? deps.db : undefined;
+      // The bot whose summary comment the node reads; it waits for that summary like a listed reviewer.
+      const summaryBot = itemsDb ? threads.summary : undefined;
+      if (itemsDb) {
+        await recordAnswers(itemsDb, ctx);
+        // After the push, so a fixing commit is on GitHub when the reply names it. Threads and comments come from the whole snapshot.
+        const headSha = ctx.workdir ? await headOf(ctx.workdir.path).catch(() => snapshot.headSha) : snapshot.headSha;
+        await postAnswers({ db: itemsDb, github: deps.github }, ctx, { repo, snapshot, headSha, resolveAfterReview: threads.resolveAfterReview });
+      }
+
+      // A check named after one of them (CodeRabbit's "CodeRabbit"), or after the summary bot, is its review in
+      // progress, not CI: the review wait below covers it, up to the review time limit, and it never goes to the
+      // coder as a CI failure.
+      const ci = withoutChecks(snapshot, reviewerCheck({ ...settings, waitFor: summaryBot ? [...settings.waitFor, summaryBot] : settings.waitFor }));
       const failedJobs = (ci.checks?.contexts ?? []).filter((c) => c.checkRunId !== undefined && c.conclusion === "FAILURE");
       const logs = await Promise.all(
         failedJobs.map(async (c) => ({ jobId: c.checkRunId!, log: (await deps.github.getJobLogTail(repo, c.checkRunId!)) ?? "" })),
@@ -304,10 +354,12 @@ export function prNodeExecutor(deps: {
       const awaitingApproval =
         requireApproval && feedback.review.decision === "none" && feedback.ci.status !== "failure" && snapshot.state === "open";
 
-      // Where the external reviewers stand on the head commit.
-      const handled = new Set(Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
+      // Where the external reviewers stand on the head commit. Review items keep what was sent in their table;
+      // without them, run state lists the findings already sent.
+      const handled = new Set(!itemsDb && Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
       const waitingForMs = sincePush;
-      const external = externalReview(snapshot, settings, handled, waitingForMs);
+      const summary = summaryBot ? { login: summaryBot, read: await readSummary(deps.github, repo, snapshot, summaryBot) } : undefined;
+      const external = externalReview(snapshot, settings, handled, waitingForMs, summary ? { summary } : {});
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
@@ -331,14 +383,29 @@ export function prNodeExecutor(deps: {
         return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt)) } };
       }
 
-      const sendBack = settings.sendBack && external.findings.length > 0;
-      const routed = sendBack ? withFindings(feedback, external.findings) : feedback;
-      if (sendBack) ctx.emit("github.review_findings", { number, findings: external.findings.length });
+      if (summary?.read?.summary.problems.length) {
+        ctx.emit("github.summary_unparsed", { number, url: summary.read.comment.url, problems: summary.read.summary.problems });
+      }
+      let routed = feedback;
+      let sentFindings: string[] = [];
+      if (itemsDb) {
+        // Each finding is an item once; the open ones go to the coder by handle, up to the round's cap.
+        const rows = await syncItems(itemsDb, ctx.run.id, external.findings, ctx.execution.attempt);
+        const sent = await sendItems(itemsDb, rows, external.findings, ctx.execution.attempt, threads.maxPerRound);
+        if (sent.length) {
+          routed = withItems(feedback, sent);
+          ctx.emit("github.review_findings", { number, findings: sent.length, items: sent.map(handleOf) });
+        }
+      } else if (settings.sendBack && external.findings.length > 0) {
+        routed = withFindings(feedback, external.findings);
+        sentFindings = external.findings.map((f) => f.id);
+        ctx.emit("github.review_findings", { number, findings: external.findings.length });
+      }
       // Going back to fix CI or review: give up the place in the merge queue.
       if (deps.db && (routed.ci.status === "failure" || routed.review.decision === "changes_requested")) await leaveQueue(deps.db, ctx.run.id, ctx.project.id);
       const output = { sync: "clean", prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha, feedback: routed };
       const statePatch: Record<string, unknown> = { prNumber: number, feedback: routed };
-      if (sendBack) statePatch.prHandledReviews = [...handled, ...external.findings.map((f) => f.id)];
+      if (sentFindings.length) statePatch.prHandledReviews = [...handled, ...sentFindings];
       return { kind: "completed", output, statePatch };
     },
   };

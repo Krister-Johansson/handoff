@@ -1,5 +1,5 @@
 import type { Feedback } from "@handoff/core";
-import { HANDOFF_COMMENT_PREFIX, type CheckContext, type PrSnapshot } from "@handoff/github";
+import { HANDOFF_COMMENT_PREFIX, summaryCoversHead, type CheckContext, type CodeRabbitSummary, type PrSnapshot } from "@handoff/github";
 
 /** A login as GitHub shows it in GraphQL or REST: coderabbitai and coderabbitai[bot] are the same reviewer. */
 export const sameLogin = (a: string, b: string) => a.toLowerCase().replace(/\[bot\]$/, "") === b.toLowerCase().replace(/\[bot\]$/, "");
@@ -13,6 +13,50 @@ export function reviewSettings(config: Record<string, unknown>): ReviewSettings 
   // Sending comments back defaults on only when the node waits for reviewers, so older graphs keep routing as before.
   const sendBack = typeof config.sendReviewComments === "boolean" ? config.sendReviewComments : waitFor.length > 0;
   return { waitFor, timeoutMs: minutes * 60_000, sendBack };
+}
+
+/**
+ * The PR node's `reviewThreads` setting. `reply` makes each finding sent back a review item that the
+ * coder answers and handoff answers on GitHub; it is off by default, since it posts on GitHub, and it
+ * needs review comments sent back. `resolveAfterReview` defaults to `reply`. `summary` names the bot
+ * whose summary comment is read for notes and pre-merge checks. `maxPerRound` caps the items one round sends.
+ */
+export type ReviewThreadsSettings = { reply: boolean; resolveAfterReview: boolean; summary: string | undefined; maxPerRound: number };
+
+export function reviewThreadsSettings(config: Record<string, unknown>): ReviewThreadsSettings {
+  const raw = typeof config.reviewThreads === "object" && config.reviewThreads !== null ? (config.reviewThreads as Record<string, unknown>) : {};
+  const reply = raw.reply === true;
+  const summary = typeof raw.summary === "string" && raw.summary.trim() ? raw.summary.trim().replace(/\[bot\]$/i, "") : undefined;
+  const maxPerRound = typeof raw.maxPerRound === "number" && raw.maxPerRound >= 1 ? Math.floor(raw.maxPerRound) : 20;
+  return { reply, resolveAfterReview: reply && raw.resolveAfterReview !== false, summary, maxPerRound };
+}
+
+/** A review bot's summary comment as the PR node read it, parsed. */
+export type SummaryRead = { comment: { id?: number | undefined; url: string; body: string }; summary: CodeRabbitSummary };
+
+/** Merge risks under which a note that only says there is no merge-blocking issue asks nothing of the coder. */
+const QUIET_RISKS = new Set(["minimal", "low"]);
+const NO_BLOCKER = /\bno\b[^.]*\bmerge-blocking issues?\b/i;
+
+/**
+ * The findings of a summary comment: each walkthrough note and each failed or warning pre-merge check,
+ * and a section the parser could not read as one finding with its text. A note that says there is no
+ * merge-blocking issue, under a Minimal or Low merge risk, is not a finding.
+ */
+export function summaryFindings(read: SummaryRead, login: string): Finding[] {
+  const { comment, summary } = read;
+  const quiet = QUIET_RISKS.has((summary.mergeRisk ?? "").toLowerCase());
+  return summary.findings.flatMap((f): Finding[] => {
+    const base = { id: f.id, key: f.id, author: login, authorBot: true, url: comment.url, ...(comment.id !== undefined ? { githubId: String(comment.id) } : {}) };
+    switch (f.kind) {
+      case "summary_note":
+        return quiet && NO_BLOCKER.test(f.text) ? [] : [{ ...base, kind: "summary_note", body: f.text }];
+      case "pre_merge_check":
+        return [{ ...base, kind: "pre_merge_check", body: [`${f.name} (${f.status || "failed"}): ${f.explanation}`, ...(f.resolution ? [`Resolution: ${f.resolution}`] : [])].join("\n\n") }];
+      case "raw":
+        return [{ ...base, kind: f.section === "pre_merge_checks" ? "pre_merge_check" : "summary_note", body: f.text }];
+    }
+  });
 }
 
 /** A comment that asks a reviewer to review, posted when it has not started on a commit some minutes after the push. */
@@ -54,27 +98,74 @@ export function reviewerStarted(snapshot: PrSnapshot, login: string): boolean {
   return (snapshot.checks?.contexts ?? []).some((c) => c.conclusion === null && namedAfter(c, login));
 }
 
-export type Finding = { id: string; author: string; body: string; path?: string; line?: number; url: string };
+/** What a finding is on GitHub: an inline thread, a review summary, or a note or a pre-merge check in a review bot's summary comment. */
+export type FindingKind = "thread" | "review_body" | "summary_note" | "pre_merge_check";
+
+/**
+ * Something a reviewer said that has not been sent back yet. `id` is what `prHandledReviews` keeps
+ * (`thread:<first comment id>`, `review:<id>`); `key` names it for review items (`thread:<thread node id>`,
+ * `review:<id>`, `note:<hash>`, `check:<name>`). `githubId` is the thread's GraphQL node id, the
+ * review's id, or the summary comment's id.
+ */
+export type Finding = {
+  id: string;
+  key: string;
+  kind: FindingKind;
+  author: string;
+  authorBot: boolean;
+  body: string;
+  path?: string;
+  line?: number;
+  url: string;
+  githubId?: string;
+};
+
+/** Whether handoff wrote a comment: every comment it posts carries its marker. */
+export const byHandoff = (body: string) => body.includes(HANDOFF_COMMENT_PREFIX);
 
 /**
  * Where the reviews of the PR's head commit stand: which listed reviewers have not reviewed it yet,
  * whether the wait has run out, and what reviewers said that has not been sent back yet (unresolved
  * inline threads, and review summaries that are not approvals).
  */
-export function externalReview(snapshot: PrSnapshot, settings: ReviewSettings, handled: ReadonlySet<string>, waitingForMs: number) {
+export function externalReview(
+  snapshot: PrSnapshot,
+  settings: ReviewSettings,
+  handled: ReadonlySet<string>,
+  waitingForMs: number,
+  opts: { summary?: { login: string; read: SummaryRead | undefined } } = {},
+) {
   const onHead = snapshot.reviews.filter((r) => r.commitSha === snapshot.headSha);
   const missing = settings.waitFor.filter((login) => !onHead.some((r) => sameLogin(r.author, login)));
+  // A summary bot has finished with the head once its summary covers the head with no review in progress.
+  const summary = opts.summary;
+  const summaryDone = summary?.read !== undefined && summaryCoversHead(summary.read.summary, snapshot.headSha);
+  if (summary && !summaryDone) missing.push(`${summary.login} summary`);
   const timedOut = missing.length > 0 && waitingForMs >= settings.timeoutMs;
   const findings: Finding[] = [];
   for (const thread of snapshot.reviewThreads) {
     const first = thread.comments[0];
-    if (thread.isResolved || !first?.id || handled.has(`thread:${first.id}`) || first.body.startsWith(HANDOFF_COMMENT_PREFIX)) continue;
-    findings.push({ id: `thread:${first.id}`, author: first.author, body: first.body, ...(first.path ? { path: first.path } : {}), ...(first.line ? { line: first.line } : {}), url: first.url });
+    if (thread.isResolved || !first?.id || handled.has(`thread:${first.id}`) || byHandoff(first.body)) continue;
+    const line = first.line ?? thread.line ?? thread.originalLine ?? undefined;
+    findings.push({
+      id: `thread:${first.id}`,
+      key: `thread:${thread.id}`,
+      kind: "thread",
+      author: first.author,
+      authorBot: first.authorBot,
+      body: first.body,
+      ...(first.path || thread.path ? { path: first.path || thread.path } : {}),
+      ...(line ? { line } : {}),
+      url: first.url,
+      githubId: thread.id,
+    });
   }
   for (const review of onHead) {
-    if (review.state === "APPROVED" || review.state === "DISMISSED" || !review.body.trim() || handled.has(`review:${review.id}`)) continue;
-    findings.push({ id: `review:${review.id}`, author: review.author, body: review.body.trim(), url: snapshot.url });
+    if (review.state === "APPROVED" || review.state === "DISMISSED" || !review.body.trim() || byHandoff(review.body) || handled.has(`review:${review.id}`)) continue;
+    findings.push({ id: `review:${review.id}`, key: `review:${review.id}`, kind: "review_body", author: review.author, authorBot: review.authorBot, body: review.body.trim(), url: snapshot.url, githubId: review.id });
   }
+  // The summary of the head counts; at the time limit the latest summary does, whatever commit it covers.
+  if (summary?.read && (summaryDone || timedOut)) findings.push(...summaryFindings(summary.read, summary.login).filter((f) => !handled.has(f.key)));
   return { missing, timedOut, findings };
 }
 
