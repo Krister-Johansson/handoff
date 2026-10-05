@@ -127,6 +127,15 @@ test("a run on a task without issues shows the task as its title", async () => {
   expect(view.getByText("Add a CHANGELOG.md")).toBeInTheDocument();
 });
 
+test("a get_run result saved before the run's cost was in it still draws the card, without a cost", async () => {
+  // Chats keep the tool results they got; get_run gained cost_usd, failed.code, answered and stuck on 2026-10-02.
+  const { cost_usd: _cost, failed: _failed, answered: _answered, stuck: _stuck, ...older } = run;
+  await show(textResult({ ...older, status: "cancelled" }));
+  const view = within(await screen.findByRole("region", { name: "Run 7f3a2c1e" }));
+  expect(view.getByText("Shaping tools in the catalog")).toBeInTheDocument();
+  expect(view.queryByText(/^\$/)).not.toBeInTheDocument();
+});
+
 test("a tool error is shown as the error's text", async () => {
   await show({ content: [{ type: "text", text: "There is no run nope." }], isError: true });
   expect(await screen.findByRole("alert")).toHaveTextContent("There is no run nope.");
