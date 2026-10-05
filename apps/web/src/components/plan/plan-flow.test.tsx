@@ -1,15 +1,17 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { toast } from "sonner";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import type { FlowInput } from "@/lib/plan/flow";
+import { filterPlan, parsePlanFilters } from "@/lib/plan/filters";
+import { layoutFlow, type FlowInput } from "@/lib/plan/flow";
+import { milestoneProgress } from "@/lib/plan/milestones";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FlowControls } from "./flow-parts";
 import { FlowSelection, useFlowSelectionState } from "./plan-context";
 import { PlanFlow } from "./plan-flow";
 import { KEY_DELAY } from "./use-card-drag";
-import { epic, flowOf, flowRun, planView, REPO_URL, story, task } from "./testing/plan-fixtures";
+import { epic, flowOf, flowRun, milestone, planView, REPO_URL, story, task, withMilestones } from "./testing/plan-fixtures";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
@@ -737,4 +739,50 @@ test("under Priority order Optimize asks to switch to Project order before its p
   await waitFor(() => expect(schedulerActions.switchToProjectOrderAction).toHaveBeenCalledWith({ projectId: "p1" }));
   expect(await screen.findByRole("status", { name: "Optimize preview" })).toHaveTextContent("Optimize will move 3 tasks in the plan. 1 pinned stays.");
   expect(actions.writeOrderAction).not.toHaveBeenCalled();
+});
+
+/** The design's plan with epic #12 in milestone 0.9, due Oct 20, filtered to it: Voice's #70, #72 and #74 are not in it. */
+function renderNine(over: Partial<Props> = {}) {
+  const nine = withMilestones(
+    { ...view, epics: view.epics.map((e) => (e.number === 12 ? { ...e, milestone: { number: 4, title: "0.9" } } : e)) },
+    [milestone(4, "0.9", { dueOn: "2026-10-20" })],
+  );
+  const shown = filterPlan(nine, parsePlanFilters({ milestone: "4" }), []);
+  const flow = designFlow({ tasks: flowOf(nine).tasks });
+  return renderFlow({ epics: shown.epics, unparented: shown.unparented, flow, milestone: { ...nine.milestones![0]!, progress: milestoneProgress(nine.milestones!, flow.tasks, { flow: layoutFlow(flow) }).milestones[0]!.progress }, ...over });
+}
+
+test("filtered to a milestone, a dashed line follows its last card in the order and names its place, with no day", () => {
+  const { container } = renderNine();
+  const grid = screen.getByRole("grid", { name: "Flow" });
+  // #63 and #66 are skipped, so #60 at Next 5 is the last 0.9 card in the order.
+  const flag = within(grid).getByText("0.9 ends here, after Next 5");
+  expect(flag).toHaveAttribute("title", "0.9 is due Oct 20. Flow has no dates, so this is where its last task ends in the order, not a day.");
+  expect(within(rowOf("Task #60 Ready count in the sidebar")).getByText("Last of 0.9")).toBeInTheDocument();
+  expect(within(rowOf("Task #62 Size chip on board cards")).queryByText("Last of 0.9")).not.toBeInTheDocument();
+  const card60 = cardOf(60);
+  const lines = container.querySelectorAll<HTMLElement>("[data-milestone-end]");
+  expect(lines).toHaveLength(2);
+  for (const line of lines) expect(leftOf(line)).toBeCloseTo(leftOf(card60) + parseFloat(card60.style.width), 2);
+  expect(grid).not.toHaveTextContent(/\blate\b|\bearly\b|Oct 20/);
+  // The slot strips keep every run; the cards outside 0.9 fade.
+  const faded = (lane: number) =>
+    within(screen.getByRole("list", { name: `Slot ${lane}` }))
+      .getAllByRole("listitem")
+      .filter((li) => li.hasAttribute("data-outside"))
+      .map((li) => li.textContent);
+  expect([faded(1), faded(2), faded(3)]).toEqual([["#72"], ["#70"], ["#74"]]);
+});
+
+test("the milestone's line follows a local reorder before GitHub is read again", async () => {
+  renderDrag();
+  // Without the milestone there is no line.
+  expect(screen.queryByText(/ends here/)).not.toBeInTheDocument();
+  cleanup();
+
+  renderNine();
+  dragBy(cardOf(60), 1000);
+  expect(await screen.findByText("#60 moves to Next 7")).toBeInTheDocument();
+  expect(screen.getByText("0.9 ends here, after Next 7")).toBeInTheDocument();
+  expect(within(rowOf("Task #60 Ready count in the sidebar")).getByText("Last of 0.9")).toBeInTheDocument();
 });

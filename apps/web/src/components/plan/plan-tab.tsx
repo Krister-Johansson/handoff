@@ -139,8 +139,20 @@ function PlanBody(props: BodyProps) {
   const shared = { projectId: project.id, repoUrl: `https://github.com/${project.repoOwner}/${project.repoName}`, needsYou: signals.needsYou, skipped: signals.skipped, ...start };
   const shown = found.active ? found : narrowed;
   const searchOpen = found.active ? found.open : undefined;
+  // The milestone the filter names draws its line on the Timeline and in the Flow.
+  const milestone = typeof filters.milestone === "number" ? plan.milestones?.find((m) => m.number === filters.milestone) : undefined;
   if (view === "flow" && plan.flow) {
-    return <PlanFlow {...shared} epics={shown.epics} unparented={shown.unparented} flow={plan.flow} scheduler={props.scheduler} searchOpen={searchOpen} />;
+    return (
+      <PlanFlow
+        {...shared}
+        epics={shown.epics}
+        unparented={shown.unparented}
+        flow={plan.flow}
+        scheduler={props.scheduler}
+        searchOpen={searchOpen}
+        milestone={milestone}
+      />
+    );
   }
   switch (view) {
     case "board":
@@ -155,6 +167,7 @@ function PlanBody(props: BodyProps) {
           timeline={timeline}
           zoom={zoom}
           filters={filters}
+          milestone={milestone}
           readAt={readAt}
           todayRef={todayRef}
           searchOpen={searchOpen}

@@ -4,7 +4,7 @@ import { Fragment, startTransition, use, useEffect, useEffectEvent, useMemo, use
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, CalendarRangeIcon, ChevronRightIcon, GripVerticalIcon, KeyboardIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, CalendarIcon, CalendarRangeIcon, ChevronRightIcon, GripVerticalIcon, KeyboardIcon, MilestoneIcon, TriangleAlertIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
 import type { PlanColumn, PlanEpic, PlanTask } from "@/server/plan";
 import { moveItemAction, saveArrangeAction } from "@/app/projects/actions";
@@ -20,6 +20,8 @@ import type { Duration, Forecast } from "@/lib/plan/forecast";
 import { hoursByDay } from "@/lib/plan/load";
 import { arrangeTimeline } from "@/lib/plan/arrange";
 import { durationIn, moveBack, moveTip, planMove, type MoveContext, type MovePlan } from "@/lib/plan/move";
+import { endsText } from "@/lib/plan/milestone-text";
+import type { PlanMilestone } from "@/lib/plan/milestones";
 import type { DaySpan, PlannedSpan, Timeline, TimelineItem } from "@/lib/plan/schedule";
 import { durationInWords, hoursInWords, usually } from "@/lib/plan/size-text";
 import { BAR_TONE, canMove, prNumberOf, taskColumn } from "@/lib/plan/task";
@@ -503,9 +505,60 @@ function Strips({ row, entry, scale, projectId, under }: { row: TimelineRow; ent
   });
 }
 
+/**
+ * A milestone's due date on the chart (issue #602): the line at the end of the due day with its flag, and when the
+ * plan ends the milestone late, the days past the due date up to its end and the sentence that says so.
+ */
+type DueMark = { due: string; x: number; late: boolean; flag: string; title: string; past: { left: number; width: number } | undefined; ends: string | undefined };
+
+function dueMarkOf(milestone: PlanMilestone | undefined, scale: TimeScale): DueMark | undefined {
+  const due = milestone?.dueOn;
+  if (!milestone || !due) return undefined;
+  const judged = milestone.progress.timeline;
+  const late = (judged?.daysPastDue ?? 0) > 0;
+  const x = scale.x(addDays(due, 1));
+  return {
+    due,
+    x,
+    late,
+    flag: `${milestone.title}, due ${shortDay(due)}`,
+    title: `${milestone.title} is due ${shortDay(due)}.${judged?.ends ? ` Its last task ends ${shortDay(judged.ends)}.` : ""}`,
+    past: late && judged?.ends ? { left: x, width: scale.x(addDays(judged.ends, 1)) - x } : undefined,
+    ends: late && judged ? endsText(judged)?.text : undefined,
+  };
+}
+
+/** The dashed due-date line, red when the plan ends the milestone after it. */
+function DueLine({ mark }: { mark: DueMark }) {
+  return <span aria-hidden data-due-line className={cn("absolute inset-y-0 z-[4] border-l-2 border-dashed", mark.late ? "border-danger-dot" : "border-foreground/70")} style={{ left: mark.x }} />;
+}
+
+/** Under the rows: the days past the due date hatched, the line, and how late the plan ends the milestone. */
+function DueOverlay({ mark }: { mark: DueMark }) {
+  return (
+    <>
+      {mark.past && (
+        <span
+          data-past-due
+          className="absolute inset-y-0 z-[1] bg-[repeating-linear-gradient(135deg,color-mix(in_oklab,var(--danger-dot)_13%,transparent)_0_6px,transparent_6px_12px)]"
+          style={mark.past}
+        />
+      )}
+      <DueLine mark={mark} />
+      {mark.past && mark.ends && (
+        <span className="absolute top-1.5 z-[5] rounded-[3px] bg-card px-1 text-[10px] font-semibold whitespace-nowrap text-danger" style={{ left: mark.past.left + mark.past.width + 4 }}>
+          {mark.ends}
+        </span>
+      )}
+    </>
+  );
+}
+
 type RowLabelProps = {
   row: TimelineRow;
   entry: TimelineItem | undefined;
+  /** The milestone's due day when this task ends after it. */
+  endsAfter?: string | undefined;
   projectId: string;
   start: StartRunContext;
   flags: FlagContext;
@@ -526,7 +579,7 @@ function RowMenu({ row, projectId, start, onSchedule }: Pick<RowLabelProps, "row
 }
 
 /** A Timeline row's left cell: a task's warning icon beside its title, a sum on an epic or a story, and a task's size chip under it. */
-function TimelineRowLabel({ row, entry, projectId, start, flags, onToggle, onSchedule, sizeOpen, onSizeOpenChange, preview }: RowLabelProps) {
+function TimelineRowLabel({ row, entry, endsAfter, projectId, start, flags, onToggle, onSchedule, sizeOpen, onSizeOpenChange, preview }: RowLabelProps) {
   const { item, task } = row;
   const sizing = use(Sizing);
   return (
@@ -538,8 +591,14 @@ function TimelineRowLabel({ row, entry, projectId, start, flags, onToggle, onSch
       menu={<RowMenu row={row} projectId={projectId} start={start} onSchedule={onSchedule} />}
       below={
         task &&
-        sizing && (
+        (sizing || endsAfter) && (
           <div className="flex min-w-0 items-center justify-end gap-1.5 pr-7">
+            {endsAfter && (
+              <Tag tone="danger" className="mr-auto">
+                <MilestoneIcon aria-hidden />
+                Ends after {shortDay(endsAfter)}
+              </Tag>
+            )}
             {preview && (
               <Tag tone="active">
                 <CalendarRangeIcon aria-hidden />
@@ -889,11 +948,14 @@ function TimeAxis({
   scale,
   todayX,
   load,
+  due,
 }: {
   projectId: string;
   scale: TimeScale;
   todayX: number;
   load: (ReturnType<typeof loadOf> & { preview: Record<string, number> | undefined }) | undefined;
+  /** The filtered milestone's due date: its line and flag. */
+  due: DueMark | undefined;
 }) {
   return (
     <div role="row" aria-label="Time axis" className={cn("flex", load ? "h-[66px]" : "h-12")}>
@@ -926,6 +988,23 @@ function TimeAxis({
           Today
         </span>
         {load && <LoadRow scale={scale} hours={load.hours} capacity={load.capacity} preview={load.preview} />}
+        {due && (
+          <>
+            <DueLine mark={due} />
+            <span
+              data-late={due.late || undefined}
+              title={due.title}
+              className={cn(
+                "absolute top-[3px] z-[6] inline-flex h-[18px] -translate-x-1/2 items-center gap-1 rounded-[4px] px-[7px] text-[10px] font-semibold whitespace-nowrap [&_svg]:size-2.5",
+                due.late ? "bg-danger-dot text-white" : "bg-foreground text-background",
+              )}
+              style={{ left: due.x }}
+            >
+              <MilestoneIcon aria-hidden />
+              {due.flag}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1071,7 +1150,7 @@ function useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, 
  * scrolls sideways, with planned bars, run strips and dependency arrows. Hovering a row keeps its
  * arrows and the rows at their other ends strong and dims the rest.
  */
-function TimelineChart({ projectId, project, epics: planEpics, unparented: planUnparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen }: TimelineProps) {
+function TimelineChart({ projectId, project, epics: planEpics, unparented: planUnparented, timeline, zoom, readAt, graphs, graphName, needsYou, todayRef, searchOpen, milestone }: TimelineProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const grid = useRef<HTMLDivElement>(null);
   const rowsOpen = useRowsOpen(projectId, searchOpen);
@@ -1079,9 +1158,11 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   const sizing = use(Sizing);
   const [scheduling, setScheduling] = useState<PlanItem>();
   const [hovered, setHovered] = useState<number>();
-  const range = chartRange(timeline);
+  // The chart reaches the filtered milestone's due date, so its line is always on it.
+  const range = chartRange(timeline, milestone?.dueOn ? [milestone.dueOn] : []);
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
+  const due = dueMarkOf(milestone, scale);
 
   const { epics, unparented, items, saved, entries, listed, move, moveOf, placing, arrange, focused, sizeOpen, setSizeOpen } = useChartMoves({ projectId, timeline, planEpics, planUnparented, scale, grid });
   const ctx: CardContext = { items, entries, projectId, move };
@@ -1149,7 +1230,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
             style={{ width: LABEL_WIDTH + scale.width, minWidth: "100%" }}
           >
             <div role="rowgroup">
-              <TimeAxis projectId={projectId} scale={scale} todayX={todayX} load={load} />
+              <TimeAxis projectId={projectId} scale={scale} todayX={todayX} load={load} due={due} />
             </div>
             <div role="rowgroup" className="relative" style={{ height }} onPointerLeave={() => setHovered(undefined)}>
               {rows.map((row) => {
@@ -1170,6 +1251,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                     <TimelineRowLabel
                       row={row}
                       entry={entry}
+                      endsAfter={due && row.task && (entry?.planned?.end ?? "") > due.due ? due.due : undefined}
                       projectId={projectId}
                       start={{ graphs, graphName }}
                       flags={flags}
@@ -1195,6 +1277,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                 ))}
                 <ArrowLayer arrows={arrows} width={scale.width} height={height} hovered={hovered} />
                 <span className="absolute inset-y-0 z-[3] w-0.5 -translate-x-1/2 bg-foreground/85" style={{ left: todayX }} />
+                {due && <DueOverlay mark={due} />}
               </div>
             </div>
           </div>
