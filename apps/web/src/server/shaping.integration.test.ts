@@ -18,6 +18,7 @@ import {
   planIssue,
   saveArrange,
   schedule,
+  setMilestone,
   setSize,
   setupPlan,
   type ShapingDeps,
@@ -540,4 +541,45 @@ test("setup_plan with copy_from in a Flow project copies Status and Size only", 
   ]);
   // The new plan cannot copy from itself.
   await expect(setupPlan(deps, projectId, { copyFrom: { owner: "acme", number: result.project.number } })).rejects.toThrow(/the plan.s own Project/);
+});
+
+test("the create tools pass the milestone's number to createIssue after one milestone read, in Flow and in Timeline mode", async () => {
+  github.milestones.set(4, { number: 4, title: "Redesign beta", dueOn: "2026-10-03" });
+  const { number, epic } = await organizationPlan();
+  const creates = vi.spyOn(plan, "createIssue");
+  const reads = vi.spyOn(github, "listMilestones");
+
+  const story = await createStory(deps, projectId, { epic, title: "New board", acceptance: ["It draws"], milestone: "Redesign beta" });
+  expect(story).toMatchObject({ kind: "story", milestone: { number: 4, title: "Redesign beta" } });
+  expect(creates).toHaveBeenLastCalledWith(repo, expect.objectContaining({ milestone: 4, parent: epic }));
+  expect(reads).toHaveBeenCalledTimes(1);
+
+  await timeline();
+  await plan.ensureDateFields("octo", number);
+  const task = await createTask(deps, projectId, { story: story.number, title: "Draw it", brief: "Draw the board.", milestone: 4, start: "2026-10-01", target: "2026-10-02" });
+  expect(creates).toHaveBeenLastCalledWith(repo, expect.objectContaining({ milestone: 4, start: "2026-10-01" }));
+  expect(github.milestoneOf(task.number)).toEqual({ number: 4, title: "Redesign beta" });
+  // Without a milestone nothing is read.
+  await createEpic(deps, projectId, { title: "Plain", goal: "No milestone." });
+  expect(reads).toHaveBeenCalledTimes(2);
+  expect(creates).toHaveBeenLastCalledWith(repo, expect.not.objectContaining({ milestone: expect.anything() }));
+});
+
+test("setMilestone writes each issue's milestone through the GitHub port, and refuses without GitHub access", async () => {
+  github.milestones.set(4, { number: 4, title: "Redesign beta" });
+  const { epic, story } = await organizationPlan();
+
+  expect(await setMilestone(deps, projectId, { issues: [epic, story], milestone: 4 })).toMatchObject({ milestone: { number: 4, title: "Redesign beta" }, set: [{ issue: epic }, { issue: story }] });
+  expect(github.milestoneWrites).toEqual([
+    { number: epic, milestone: 4 },
+    { number: story, milestone: 4 },
+  ]);
+  await timeline();
+  expect(await setMilestone(deps, projectId, { issues: [story], milestone: null })).toMatchObject({ milestone: null, set: [{ issue: story, from: { number: 4, title: "Redesign beta" } }] });
+  expect(github.milestoneOf(story)).toBeUndefined();
+
+  await expect(setMilestone({ ...deps, github: undefined }, projectId, { issues: [epic], milestone: 4 })).rejects.toThrow(
+    "Setting a milestone needs GitHub access to the repository (GITHUB_TOKEN or a GitHub App).",
+  );
+  await expect(createEpic({ ...deps, github: undefined }, projectId, { title: "Lost", goal: "Lost.", milestone: 4 })).rejects.toThrow(/needs GitHub access/);
 });

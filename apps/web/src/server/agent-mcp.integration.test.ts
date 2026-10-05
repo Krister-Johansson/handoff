@@ -1479,6 +1479,138 @@ test("set_order moves a task in an organization's Project order", async () => {
   expect(plan.plans.get("octo/sample")?.project.owner).toBe("Organization");
 });
 
+/** The repository's milestones: 0.9 due Oct 20 and 1.0 without a due date, open, and 0.8, closed. */
+function milestones() {
+  github.milestones.set(1, { number: 1, title: "0.9", dueOn: "2026-10-20" });
+  github.milestones.set(2, { number: 2, title: "1.0" });
+  github.milestones.set(3, { number: 3, title: "0.8", state: "closed" });
+}
+
+test("list_plan returns the milestones, open and closed, with their tasks, and each item's milestone, own or inherited", async () => {
+  milestones();
+  const { epic, story } = await epicAndStory();
+  const create = async (title: string) => (await call("create_task", { project: "sandbox", story, title, brief: `${title}.` })).number as number;
+  const first = await create("First");
+  const second = await create("Second");
+  plan.itemsOf(repo).get(first)!.status = "Ready";
+  github.issues.get(epic)!.milestone = 1;
+  github.issues.get(second)!.milestone = 2;
+
+  const listed = await call("list_plan", { project: "sandbox" });
+  expect(listed.milestones).toEqual([
+    { number: 1, title: "0.9", state: "open", due_on: "2026-10-20", url: "https://github.com/octo/sample/milestone/1", done: 0, total: 1, last_in_order: { issue: first, place: 1 }, skipped: [] },
+    { number: 2, title: "1.0", state: "open", due_on: null, url: "https://github.com/octo/sample/milestone/2", done: 0, total: 1, last_in_order: { issue: second, place: 2 }, skipped: [] },
+    { number: 3, title: "0.8", state: "closed", due_on: null, url: "https://github.com/octo/sample/milestone/3", done: 0, total: 0, last_in_order: null, skipped: [] },
+  ]);
+  expect(listed.no_milestone).toEqual({ done: 0, total: 0 });
+  const [e] = listed.epics;
+  expect(e.milestone).toEqual({ number: 1, title: "0.9", inherited_from: null });
+  expect(e.stories[0].milestone).toEqual({ number: 1, title: "0.9", inherited_from: { kind: "epic", issue: epic } });
+  expect(e.stories[0].tasks.map((t: { number: number; milestone: unknown }) => [t.number, t.milestone])).toEqual([
+    [first, { number: 1, title: "0.9", inherited_from: { kind: "epic", issue: epic } }],
+    [second, { number: 2, title: "1.0", inherited_from: null }],
+  ]);
+  // A Flow project gives no forecast: no end day and no late or early.
+  expect(JSON.stringify(listed.milestones)).not.toMatch(/"ends"|against_due|undated/);
+});
+
+test("list_plan in a Timeline project says when each milestone ends against its due date and names its tasks without dates", async () => {
+  await timeline();
+  milestones();
+  const { epic, story } = await epicAndStory();
+  github.issues.get(epic)!.milestone = 1;
+  const dated = (await call("create_task", { project: "sandbox", story, title: "Dated", brief: "Dated.", start: "2026-10-19", target: "2026-10-22" })).number as number;
+  const undated = (await call("create_task", { project: "sandbox", story, title: "Undated", brief: "Undated." })).number as number;
+  const early = (await call("create_task", { project: "sandbox", story, title: "Early", brief: "Early.", milestone: "1.0", target: "2026-10-01" })).number as number;
+  github.milestones.get(2)!.dueOn = "2026-10-04";
+
+  const listed = await call("list_plan", { project: "sandbox" });
+  expect(listed.milestones.slice(0, 2)).toEqual([
+    expect.objectContaining({ number: 2, total: 1, ends: "2026-10-01", against_due: "3 days early", undated_tasks: [] }),
+    expect.objectContaining({ number: 1, total: 2, ends: "2026-10-22", against_due: "2 days late", undated_tasks: [undated] }),
+  ]);
+  expect(listed.milestones[2]).toMatchObject({ number: 3, ends: null, against_due: null, undated_tasks: [] });
+  expect(JSON.stringify(listed.milestones)).not.toMatch(/last_in_order|skipped/);
+  expect(dated).toBeGreaterThan(0);
+  expect(early).toBeGreaterThan(0);
+});
+
+test("set_milestone sets a milestone by number or title on epics, stories and tasks, clears it with null, and sets an epic only", async () => {
+  milestones();
+  const { epic, story } = await epicAndStory();
+  const task = (await call("create_task", { project: "sandbox", story, title: "Add the migration", brief: "Add it." })).number as number;
+
+  expect(await call("set_milestone", { project: "sandbox", issues: [epic], milestone: 1 })).toEqual({
+    milestone: { number: 1, title: "0.9" },
+    set: [{ issue: epic, kind: "epic", title: "Project management", from: null }],
+    summary: "#" + epic + " Project management: none to 0.9",
+  });
+  // The epic alone is written; its story and task inherit 0.9.
+  expect(github.milestoneWrites).toEqual([{ number: epic, milestone: 1 }]);
+  const listed = await call("list_plan", { project: "sandbox" });
+  expect(listed.epics[0].stories[0].tasks[0].milestone).toEqual({ number: 1, title: "0.9", inherited_from: { kind: "epic", issue: epic } });
+
+  expect(await call("set_milestone", { project: "sandbox", issues: [story, task], milestone: " 1.0" })).toMatchObject({
+    milestone: { number: 2, title: "1.0" },
+    set: [
+      { issue: story, kind: "story", from: null },
+      { issue: task, kind: "task", from: null },
+    ],
+  });
+  expect(github.milestoneOf(task)).toEqual({ number: 2, title: "1.0" });
+  expect(await call("set_milestone", { project: "sandbox", issues: [task], milestone: null })).toEqual({
+    milestone: null,
+    set: [{ issue: task, kind: "task", title: "Add the migration", from: { number: 2, title: "1.0" } }],
+    summary: `#${task} Add the migration: 1.0 to none`,
+  });
+  expect(github.milestoneOf(task)).toBeUndefined();
+});
+
+test("set_milestone refuses a closed or unknown milestone, an issue outside the plan and a repeated issue, and writes nothing", async () => {
+  milestones();
+  const { epic } = await epicAndStory();
+  const refusal = async (args: Record<string, unknown>) => (await call("set_milestone", { project: "sandbox", issues: [epic], ...args })).error as string;
+  expect(await refusal({ milestone: 3 })).toBe("Milestone 0.8 (#3) of octo/sample is closed. Reopen it on GitHub, or pick an open milestone: 0.9 (#1, due 2026-10-20), 1.0 (#2).");
+  expect(await refusal({ milestone: "2.0" })).toBe('octo/sample has no milestone "2.0". Its open milestones: 0.9 (#1, due 2026-10-20), 1.0 (#2).');
+  expect(await refusal({ milestone: 1, issues: [11] })).toBe("#11 is not in the plan of sandbox. Add it with plan_issue first.");
+  expect(await refusal({ milestone: 1, issues: [epic, epic] })).toBe(`#${epic} appears twice. Give each issue once.`);
+  expect(github.milestoneWrites).toEqual([]);
+  expect(toolSpec("set_milestone").input.safeParse({ project: "sandbox", issues: [epic] }).success).toBe(false);
+});
+
+test("create_epic, create_story and create_task take a milestone by number or title and refuse a closed or unknown one before creating anything", async () => {
+  milestones();
+  await withPlan();
+  const epic = await call("create_epic", { project: "sandbox", title: "Project management", goal: "A plan.", milestone: "0.9" });
+  expect(epic).toMatchObject({ kind: "epic", milestone: { number: 1, title: "0.9" } });
+  expect(github.milestoneOf(epic.number)).toEqual({ number: 1, title: "0.9" });
+  const story = await call("create_story", { project: "sandbox", epic: epic.number, title: "Shaping tools", acceptance: ["x"], milestone: 2 });
+  expect(story).toMatchObject({ kind: "story", milestone: { number: 2, title: "1.0" } });
+  const task = await call("create_task", { project: "sandbox", story: story.number, title: "Add the migration", brief: "Add it.", milestone: 1 });
+  expect(github.milestoneOf(task.number)).toEqual({ number: 1, title: "0.9" });
+  // Without one, the issue has none of its own and inherits its story's.
+  const plain = await call("create_task", { project: "sandbox", story: story.number, title: "Plain", brief: "Plain." });
+  expect(plain.milestone).toBeUndefined();
+  expect(github.milestoneOf(plain.number)).toBeUndefined();
+
+  const count = github.issues.size;
+  expect((await call("create_epic", { project: "sandbox", title: "Old", goal: "Old.", milestone: "0.8" })).error).toMatch(/^Milestone 0\.8 \(#3\) of octo\/sample is closed\./);
+  expect((await call("create_story", { project: "sandbox", epic: epic.number, title: "Lost", acceptance: ["x"], milestone: 9 })).error).toMatch(/^octo\/sample has no milestone #9\./);
+  expect((await call("create_task", { project: "sandbox", story: story.number, title: "Lost", brief: "Lost.", milestone: "nope" })).error).toMatch(/^octo\/sample has no milestone "nope"\./);
+  expect(github.issues.size).toBe(count);
+});
+
+test("set_milestone and create_task with a milestone work on an organization's plan", async () => {
+  organization();
+  milestones();
+  const { story } = await epicAndStory();
+  const task = await call("create_task", { project: "sandbox", story, title: "Org task", brief: "Org.", milestone: "1.0" });
+  expect(github.milestoneOf(task.number)).toEqual({ number: 2, title: "1.0" });
+  expect(await call("set_milestone", { project: "sandbox", issues: [task.number], milestone: 1 })).toMatchObject({ milestone: { number: 1, title: "0.9" } });
+  expect(github.milestoneOf(task.number)).toEqual({ number: 1, title: "0.9" });
+  expect(plan.plans.get("octo/sample")?.project.owner).toBe("Organization");
+});
+
 test("every shaping tool refuses with the scope sentence when the Projects port is missing", async () => {
   await withPlan();
   const server = createHandoffMcpServer({ db, github, projects: undefined, baseUrl: BASE });
@@ -1500,6 +1632,7 @@ test("every shaping tool refuses with the scope sentence when the Projects port 
     ["set_size", { items: [{ issue: 3, size: "M" }] }],
     ["arrange_plan", {}],
     ["set_order", { order: [3] }],
+    ["set_milestone", { issues: [3], milestone: 1 }],
   ];
   for (const [name, args] of calls) {
     const result = (await without.callTool({ name, arguments: { project: "sandbox", ...args } })) as { content: { text: string }[]; isError?: boolean };

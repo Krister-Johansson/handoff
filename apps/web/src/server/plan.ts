@@ -4,7 +4,8 @@ import { latestRuns, type BacklogIssue, type BacklogRun } from "./backlog.ts";
 import { deriveSpans, type Timeline, type TimelineRun } from "../lib/plan/schedule.ts";
 import { durationOf, type Duration, type Forecasts } from "../lib/plan/forecast.ts";
 import { latestProposals, loadForecasts, type Proposal } from "./forecasts.ts";
-import type { FlowInput } from "../lib/plan/flow.ts";
+import { layoutFlow, type FlowInput } from "../lib/plan/flow.ts";
+import { itemMilestones, milestoneProgress, type ItemMilestone, type MilestoneTasks, type PlanMilestone } from "../lib/plan/milestones.ts";
 import { loadFlow } from "./flow.ts";
 
 /** A board column: one per Status handoff knows, plus Other for an option it does not. */
@@ -18,13 +19,18 @@ export type PlanProgress = {
   subIssues: { total: number; completed: number };
 };
 /**
+ * A plan item with the milestone it is in: loadPlan gives an item without a milestone of its own the one it
+ * inherits (a task its story's, else its epic's; a story its epic's), marked `inherited`.
+ */
+export type PlannedItem = PlanItem & { milestone?: ItemMilestone | undefined };
+/**
  * A plan item with the latest run that links it; a closed item's status reads Done whatever its Status says.
  * loadPlan also sets the planner's latest proposed size and the task's duration; views built by hand may leave them out.
  */
-export type PlanTask = PlanItem & { run: BacklogRun | null; proposal?: Proposal | null; duration?: Duration | null };
-export type PlanStory = PlanItem & { tasks: PlanTask[]; progress: PlanProgress };
+export type PlanTask = PlannedItem & { run: BacklogRun | null; proposal?: Proposal | null; duration?: Duration | null };
+export type PlanStory = PlannedItem & { tasks: PlanTask[]; progress: PlanProgress };
 /** An epic with its stories, and the tasks whose parent is the epic itself. */
-export type PlanEpic = PlanItem & { stories: PlanStory[]; tasks: PlanTask[]; progress: PlanProgress };
+export type PlanEpic = PlannedItem & { stories: PlanStory[]; tasks: PlanTask[]; progress: PlanProgress };
 export type PlanView = {
   /** The GitHub Project that holds the plan. */
   project: PlanProject;
@@ -47,6 +53,14 @@ export type PlanView = {
   capacity?: number | undefined;
   /** What the Flow lays out with layoutFlow; loadPlan sets it for a project in Flow mode only. */
   flow?: FlowInput | undefined;
+  /**
+   * The repository's milestones, open and closed, those with a due date first by due date, each with its tasks
+   * (own or inherited) and the plan mode's judgement: the Timeline's end against the due date, or the Flow's place
+   * of its last task. Optional so views built by hand need not name it; loadPlan sets it.
+   */
+  milestones?: PlanMilestone[] | undefined;
+  /** The tasks in no milestone, own or inherited; loadPlan sets it. */
+  noMilestone?: MilestoneTasks | undefined;
 };
 
 /**
@@ -111,6 +125,7 @@ export async function loadPlan(
     plan.getProject(repo.owner, number),
     plan.listItems(repo.owner, number, repo),
     github.listIssues(repo),
+    github.listMilestones(repo),
     latestRuns(db, projectId),
     // A Flow project has no timeline, so its runs' strips are not read.
     flowMode ? [] : timelineRuns(db, projectId),
@@ -121,7 +136,7 @@ export async function loadPlan(
     throw error;
   });
   if (read instanceof ProjectsAccessError) return { reason: "no-scope", access: read.reason, error: read.message };
-  const [planProject, items, open, latest, projectRuns, proposals] = read;
+  const [planProject, items, open, repoMilestones, latest, projectRuns, proposals] = read;
   if (!planProject) return { reason: "unreachable", error: `GitHub Project #${number} of ${repo.owner} does not exist or GITHUB_TOKEN cannot see it.` };
   const byNumber = new Map(items.map((i) => [i.number, i]));
   const { forecasts, capacity } = await loadForecasts(db, projectId, (issue) => byNumber.get(issue)?.size);
@@ -133,8 +148,10 @@ export async function loadPlan(
       return duration ? [[item.number, duration] as const] : [];
     }),
   );
+  const milestoneOf = itemMilestones(items);
+  const withMilestone = <T extends PlanItem>(item: T): T & { milestone?: ItemMilestone | undefined } => ({ ...item, milestone: milestoneOf.get(item.number) });
   const task = (item: PlanItem): PlanTask => ({
-    ...item,
+    ...withMilestone(item),
     status: item.state === "closed" ? "Done" : item.status,
     run: latest.get(item.number) ?? null,
     proposal: proposals.get(item.number) ?? null,
@@ -169,10 +186,10 @@ export async function loadPlan(
     .map((epic) => {
       const stories = childrenOf(epic.number, isStory).map((story) => {
         const tasks = childrenOf(story.number, isTask).map(task);
-        return { ...story, tasks, progress: progressOf(story, tasks) };
+        return { ...withMilestone(story), tasks, progress: progressOf(story, tasks) };
       });
       const tasks = childrenOf(epic.number, isTask).map(task);
-      return { ...epic, stories, tasks, progress: progressOf(epic, [...stories.flatMap((s) => s.tasks), ...tasks]) };
+      return { ...withMilestone(epic), stories, tasks, progress: progressOf(epic, [...stories.flatMap((s) => s.tasks), ...tasks]) };
     });
   const board = columns<PlanTask[]>(() => []);
   for (const item of sorted) if (isTask(item.kind)) board[columnOf(item)].push(task(item));
@@ -181,15 +198,20 @@ export async function loadPlan(
     .map((issue) => ({ ...issue, run: latest.get(issue.number) ?? null, plan: { kind: undefined, status: undefined, planned: false } }));
   // A Flow project gets the flow's input and no timeline: it shows no dates anywhere.
   const flow = flowMode ? await loadFlow(db, projectId, { items, priorityOptions: planProject.priorityOptions, forecasts }) : undefined;
+  const timeline = flow ? undefined : deriveSpans(items, projectRuns, opts.now ?? new Date(), { durations, capacity });
+  // Each milestone is judged by the mode: where its last task sits in the Flow's order, or its end on the Timeline.
+  const progress = milestoneProgress(repoMilestones, items, flow ? { flow: layoutFlow(flow) } : { timeline });
   return {
     project: planProject,
     epics,
     unparented,
     board,
     unplanned,
-    ...(flow ? { flow } : { timeline: deriveSpans(items, projectRuns, opts.now ?? new Date(), { durations, capacity }) }),
+    ...(flow ? { flow } : { timeline }),
     forecasts,
     capacity,
+    milestones: progress.milestones,
+    noMilestone: progress.none,
   };
 }
 

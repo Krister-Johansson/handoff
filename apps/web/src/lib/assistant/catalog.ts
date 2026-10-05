@@ -50,6 +50,14 @@ const project = z.string().describe("Project name or id");
 const runId = z.string().describe("The run's id");
 /** A calendar day, YYYY-MM-DD, as the Project's Start and Target fields hold it. */
 const day = z.iso.date();
+/** A milestone of the project's repository, by its number or its title. */
+const milestone = z.union([z.number().int().positive(), z.string().min(1)]);
+const NEW_MILESTONE = "An open milestone of the repository to put it in, by number or title, when the person names one; a closed or unknown milestone is refused";
+
+/** A milestone for an approval card: "milestone 0.9" by title, "milestone #3" by number. */
+const milestoneText = (m: number | string) => (typeof m === "number" ? `milestone #${m}` : `milestone ${m.trim()}`);
+/** The end of a create tool's approval sentence for its milestone: ", in milestone 0.9", or nothing. */
+const inMilestone = (m: number | string | undefined) => (m === undefined ? "" : `, in ${milestoneText(m)}`);
 
 /** A schedule item's dates for an approval card: "Start 2026-10-06, Target 2026-10-09", "clear Start", or "no change". */
 function datesText(dates: { start?: string | null | undefined; target?: string | null | undefined }) {
@@ -467,7 +475,7 @@ export const CATALOG: ToolSpec[] = [
     name: "list_plan",
     title: "Show the plan",
     description:
-      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done), each task with its open blockers, latest run and pull request, its Size (S, M or L) and the size its planner proposed; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). mode says how the project plans. In Timeline mode each item has its Start and Target dates, each task its Estimate in hours and its duration in hours with where it comes from, with the project's capacity in hours a day and each size's forecast from its finished runs. When the GitHub Project lacks a field the mode reads, missing_fields names it and fields_note says how to add it. In Flow mode there are no dates or hours: queue is the order the scheduler starts tasks in (Ready tasks, then Shaping tasks), lanes is how many runs it holds at once, held says why it waits, and each task has its place in the queue, its lane, whether it is pinned, waits_for (blockers it is placed before or that are outside the order), after (the blocker its lane waits for), skipped (why the scheduler passes it over) and, while it runs, progress in graph steps and waits_on. With epic, only that epic.",
+      "The project's plan on GitHub Projects as a tree: epics with their stories with their tasks, each with its status (Shaping, Ready, Running, In review, Done) and its milestone (its own, or inherited_from the story or epic it takes it from: a task without one takes its story's, else its epic's), each task with its open blockers, latest run and pull request, its Size (S, M or L) and the size its planner proposed; plus issues the plan does not hold (unparented) and open issues outside it (unplanned). milestones lists the repository's milestones, open and closed, with the due date and the tasks in each done of total, and no_milestone the tasks in none. mode says how the project plans. In Timeline mode each milestone says when it ends (the latest Target of its tasks), against_due how many days late or early that is, and undated_tasks the open tasks without dates, which are not counted; each item has its Start and Target dates, each task its Estimate in hours and its duration in hours with where it comes from, with the project's capacity in hours a day and each size's forecast from its finished runs. When the GitHub Project lacks a field the mode reads, missing_fields names it and fields_note says how to add it. In Flow mode there are no dates or hours: queue is the order the scheduler starts tasks in (Ready tasks, then Shaping tasks), lanes is how many runs it holds at once, held says why it waits, and each task has its place in the queue, its lane, whether it is pinned, waits_for (blockers it is placed before or that are outside the order), after (the blocker its lane waits for), skipped (why the scheduler passes it over) and, while it runs, progress in graph steps and waits_on; each milestone has last_in_order, its last task in the queue with its place, and skipped, its tasks the scheduler passes over, and no forecast. With epic, only that epic.",
     input: z.object({ project, epic: z.number().int().positive().optional().describe("Only this epic, by issue number") }),
     kind: "data",
     confirm: false,
@@ -519,20 +527,26 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "create_epic",
     title: "Create an epic",
-    description: "Creates an epic on the project's plan: an issue labelled epic whose body is its goal, in Shaping on the GitHub Project. Stories go under it with create_story.",
-    input: z.object({ project, title: z.string().min(3).describe("The epic's title"), goal: z.string().min(1).describe("What the epic achieves, in a few sentences") }),
+    description:
+      "Creates an epic on the project's plan: an issue labelled epic whose body is its goal, in Shaping on the GitHub Project, in the milestone given. Stories go under it with create_story; those without a milestone of their own inherit the epic's.",
+    input: z.object({
+      project,
+      title: z.string().min(3).describe("The epic's title"),
+      goal: z.string().min(1).describe("What the epic achieves, in a few sentences"),
+      milestone: milestone.optional().describe(NEW_MILESTONE),
+    }),
     kind: "data",
     confirm: true,
     readOnly: false,
     openWorld: true,
     idempotent: false,
-    summarize: (a) => `Create epic '${a.title}' in ${a.project}`,
+    summarize: (a) => `Create epic '${a.title}' in ${a.project}${inMilestone(a.milestone)}`,
   }),
   spec({
     name: "create_story",
     title: "Create a story",
     description:
-      "Creates a story under an epic of the project's plan: a sub-issue of the epic labelled story whose body lists its acceptance criteria as checkboxes, in Shaping. Tasks go under it with create_task.",
+      "Creates a story under an epic of the project's plan: a sub-issue of the epic labelled story whose body lists its acceptance criteria as checkboxes, in Shaping, in the milestone given (without one it inherits the epic's). Tasks go under it with create_task.",
     input: z.object({
       project,
       epic: z.number().int().positive().describe("The epic's issue number"),
@@ -540,19 +554,20 @@ export const CATALOG: ToolSpec[] = [
       acceptance: z.array(z.string().min(1)).min(1).describe("Acceptance criteria, one sentence each"),
       start: day.optional().describe("Start, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
       target: day.optional().describe("Target, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
+      milestone: milestone.optional().describe(NEW_MILESTONE),
     }),
     kind: "data",
     confirm: true,
     readOnly: false,
     openWorld: true,
     idempotent: false,
-    summarize: (a) => `Create story '${a.title}' under epic #${a.epic} in ${a.project}${a.start || a.target ? `, ${datesText(a)}` : ""}`,
+    summarize: (a) => `Create story '${a.title}' under epic #${a.epic} in ${a.project}${a.start || a.target ? `, ${datesText(a)}` : ""}${inMilestone(a.milestone)}`,
   }),
   spec({
     name: "create_task",
     title: "Create a task",
     description:
-      "Creates a task under a story of the project's plan: a sub-issue of the story labelled task, in Shaping. The brief is the body the agents read: the goal, where in the code, and how to tell it is done. blocked_by links issues that must close first. A task reaches the backlog once move_to_ready moves it to Ready. A Flow project refuses start and target: set_order places the task in the order instead.",
+      "Creates a task under a story of the project's plan: a sub-issue of the story labelled task, in Shaping. The brief is the body the agents read: the goal, where in the code, and how to tell it is done. blocked_by links issues that must close first. Without a milestone it inherits its story's, else its epic's. A task reaches the backlog once move_to_ready moves it to Ready. A Flow project refuses start and target: set_order places the task in the order instead.",
     input: z.object({
       project,
       story: z.number().int().positive().describe("The story's issue number"),
@@ -563,6 +578,7 @@ export const CATALOG: ToolSpec[] = [
       start: day.optional().describe("Start, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
       target: day.optional().describe("Target, YYYY-MM-DD, only in a Timeline project when the person gave dates"),
       size: z.enum(["S", "M", "L"]).optional().describe("S, M or L, when the person sized the task"),
+      milestone: milestone.optional().describe(NEW_MILESTONE),
     }),
     kind: "data",
     confirm: true,
@@ -570,7 +586,7 @@ export const CATALOG: ToolSpec[] = [
     openWorld: true,
     idempotent: false,
     summarize: (a) =>
-      `Create task '${a.title}' under story #${a.story} in ${a.project}${a.blocked_by?.length ? `, blocked by ${a.blocked_by.map((n) => `#${n}`).join(", ")}` : ""}${a.start || a.target ? `, ${datesText(a)}` : ""}${a.size ? `, size ${a.size}` : ""}`,
+      `Create task '${a.title}' under story #${a.story} in ${a.project}${a.blocked_by?.length ? `, blocked by ${a.blocked_by.map((n) => `#${n}`).join(", ")}` : ""}${a.start || a.target ? `, ${datesText(a)}` : ""}${a.size ? `, size ${a.size}` : ""}${inMilestone(a.milestone)}`,
   }),
   spec({
     name: "move_to_ready",
@@ -651,6 +667,26 @@ export const CATALOG: ToolSpec[] = [
     openWorld: true,
     idempotent: true,
     summarize: (a) => `Size in ${a.project}: ${a.items.map(sizeText).join("; ")}`,
+  }),
+  spec({
+    name: "set_milestone",
+    title: "Set the milestone",
+    description:
+      "Sets the milestone of epics, stories and tasks of the project's plan, or clears it with null, on GitHub. milestone is an open milestone of the project's repository by number or title, as list_plan lists them; a closed or unknown milestone is refused with the open ones named, and milestones are created on GitHub, not here. On an epic or a story it sets that issue only: the stories and tasks under it without a milestone of their own inherit it. Refuses an issue outside the plan and an issue named twice, and then writes nothing. Works in Flow and Timeline mode. Set milestones when the person asks.",
+    input: z.object({
+      project,
+      issues: z.array(z.number().int().positive()).min(1).describe("Issue numbers of epics, stories and tasks"),
+      milestone: milestone.nullable().describe("The milestone by number or title; null clears it"),
+    }),
+    kind: "data",
+    confirm: true,
+    readOnly: false,
+    openWorld: true,
+    idempotent: true,
+    summarize: (a) => {
+      const issues = a.issues.map((n) => `#${n}`).join(", ");
+      return a.milestone === null ? `Clear the milestone of ${issues} in ${a.project}` : `Set the milestone of ${issues} in ${a.project} to ${typeof a.milestone === "number" ? milestoneText(a.milestone) : a.milestone.trim()}`;
+    },
   }),
   spec({
     name: "arrange_plan",

@@ -3,6 +3,7 @@ import {
   STATUS_OPTIONS,
   type CopyField,
   type GitHubPort,
+  type MilestoneRef,
   type PlanFields,
   type PlanItem,
   type PlanKind,
@@ -17,6 +18,7 @@ import { nudgeScheduler } from "@handoff/engine/backlog-scheduler";
 import { recordPlanStatus } from "@handoff/engine/plan-status";
 import { parseEstimate } from "../lib/plan/duration.ts";
 import { durationOf } from "../lib/plan/forecast.ts";
+import { resolveMilestone } from "../lib/plan/milestones.ts";
 import { missingFields, missingFieldsSentence, planFieldsOf } from "../lib/plan/plan-fields.ts";
 import { sizedBars, type PlannedSpan } from "../lib/plan/schedule.ts";
 import { latestRuns, type BacklogRun } from "./backlog.ts";
@@ -190,39 +192,79 @@ async function checkNewDates(planned: Planned, dates: NewDates) {
   await requireDateFields(planned);
 }
 
-/** An epic: an issue labelled epic with its goal, in Shaping on the plan. */
-export async function createEpic(deps: ShapingDeps, projectId: string, input: { title: string; goal: string }) {
-  const { plan, repo, number } = await plannedProject(deps, projectId);
-  const created = await plan.createIssue(repo, { project: number, title: input.title, body: `## Goal\n\n${input.goal.trim()}`, labels: ["epic"] });
-  return { ...created, kind: "epic" as const, status: "Shaping" as const };
+/** A milestone a tool names: its number, or its title. */
+export type MilestoneInput = number | string;
+
+/** The repository's GitHub port, or the sentence that says milestones need it. */
+function milestonesPort(deps: ShapingDeps) {
+  if (!deps.github) throw new Error("Setting a milestone needs GitHub access to the repository (GITHUB_TOKEN or a GitHub App).");
+  return deps.github;
 }
 
-/** A story: a sub-issue of an epic labelled story, its acceptance criteria as checkboxes, in Shaping. */
-export async function createStory(deps: ShapingDeps, projectId: string, input: { epic: number; title: string; acceptance: string[] } & NewDates) {
+/**
+ * The open milestone a new issue goes in, read from the repository once; undefined when none is asked for.
+ * Refuses a closed or unknown milestone before anything is created.
+ */
+async function newMilestone(deps: ShapingDeps, { repo }: Planned, milestone: MilestoneInput | undefined): Promise<MilestoneRef | undefined> {
+  if (milestone === undefined) return undefined;
+  return resolveMilestone(await milestonesPort(deps).listMilestones(repo), milestone, repo);
+}
+
+/** The milestone fields of a new issue and of what its tool returns: none when it goes in no milestone. */
+const milestoneOf = (milestone: MilestoneRef | undefined) => ({
+  input: milestone ? { milestone: milestone.number } : {},
+  result: milestone ? { milestone } : {},
+});
+
+/** An epic: an issue labelled epic with its goal, in Shaping on the plan, in the milestone given. */
+export async function createEpic(deps: ShapingDeps, projectId: string, input: { title: string; goal: string; milestone?: MilestoneInput | undefined }) {
+  const planned = await plannedProject(deps, projectId);
+  const { plan, repo, number } = planned;
+  const milestone = milestoneOf(await newMilestone(deps, planned, input.milestone));
+  const created = await plan.createIssue(repo, { project: number, title: input.title, body: `## Goal\n\n${input.goal.trim()}`, labels: ["epic"], ...milestone.input });
+  return { ...created, kind: "epic" as const, status: "Shaping" as const, ...milestone.result };
+}
+
+/** A story: a sub-issue of an epic labelled story, its acceptance criteria as checkboxes, in Shaping, in the milestone given. */
+export async function createStory(
+  deps: ShapingDeps,
+  projectId: string,
+  input: { epic: number; title: string; acceptance: string[]; milestone?: MilestoneInput | undefined } & NewDates,
+) {
   const planned = await plannedProject(deps, projectId);
   await checkNewDates(planned, input);
   await parentOf(planned, input.epic, "epic");
+  const milestone = milestoneOf(await newMilestone(deps, planned, input.milestone));
   const body = `## Acceptance criteria\n\n${checkboxes(input.acceptance)}`;
-  const created = await planned.plan.createIssue(planned.repo, { project: planned.number, title: input.title, body, labels: ["story"], parent: input.epic, ...datesOf(input) });
-  return { ...created, kind: "story" as const, status: "Shaping" as const, parent: input.epic, ...datesOf(input) };
+  const created = await planned.plan.createIssue(planned.repo, {
+    project: planned.number,
+    title: input.title,
+    body,
+    labels: ["story"],
+    parent: input.epic,
+    ...milestone.input,
+    ...datesOf(input),
+  });
+  return { ...created, kind: "story" as const, status: "Shaping" as const, parent: input.epic, ...milestone.result, ...datesOf(input) };
 }
 
 /**
  * A task: a sub-issue of a story labelled task, whose body is its brief and optional acceptance
- * criteria, blocked by the given issues, in Shaping, with its Size when given. Tasks are the third and
- * last level. A Project without the Size field refuses a size before the issue is created.
+ * criteria, blocked by the given issues, in Shaping, with its Size and milestone when given. Tasks are the third
+ * and last level. A Project without the Size field refuses a size before the issue is created.
  */
 export async function createTask(
   deps: ShapingDeps,
   projectId: string,
-  input: { story: number; title: string; brief: string; acceptance?: string[]; blockedBy?: number[]; size?: PlanSize | undefined } & NewDates,
+  input: { story: number; title: string; brief: string; acceptance?: string[]; blockedBy?: number[]; size?: PlanSize | undefined; milestone?: MilestoneInput | undefined } & NewDates,
 ) {
   const planned = await plannedProject(deps, projectId);
   const sizeFields = async () => {
     if (input.size) requireEstimateFields(await planned.plan.getProject(planned.repo.owner, planned.number), planned.number, planned.project.planMode, { size: true, estimate: false });
   };
   await checkNewDates(planned, input);
-  await Promise.all([parentOf(planned, input.story, "story"), sizeFields()]);
+  const [, , found] = await Promise.all([parentOf(planned, input.story, "story"), sizeFields(), newMilestone(deps, planned, input.milestone)]);
+  const milestone = milestoneOf(found);
   const criteria = input.acceptance?.length ? `\n\n## Acceptance criteria\n\n${checkboxes(input.acceptance)}` : "";
   const blockedBy = input.blockedBy ?? [];
   const created = await planned.plan.createIssue(planned.repo, {
@@ -232,13 +274,50 @@ export async function createTask(
     labels: ["task"],
     parent: input.story,
     blockedBy,
+    ...milestone.input,
     ...datesOf(input),
   });
   if (input.size) {
     const result = await planned.plan.setPlanFields(planned.repo, planned.number, created.number, { size: input.size });
     if (result !== "set") throw new Error(`Created #${created.number}, but could not set its size: ${UNSIZED[result]}.`);
   }
-  return { ...created, kind: "task" as const, status: "Shaping" as const, parent: input.story, blocked_by: blockedBy, ...datesOf(input), ...(input.size ? { size: input.size } : {}) };
+  return {
+    ...created,
+    kind: "task" as const,
+    status: "Shaping" as const,
+    parent: input.story,
+    blocked_by: blockedBy,
+    ...milestone.result,
+    ...datesOf(input),
+    ...(input.size ? { size: input.size } : {}),
+  };
+}
+
+/**
+ * Sets the milestone of epics, stories and tasks of the plan, or clears it with null, through the GitHub port's
+ * updateIssue. An epic's or a story's milestone is set on it alone: the items under it without one of their own
+ * inherit it. Every issue and the milestone are checked before anything is written: an issue outside the plan, an
+ * issue named twice, and a closed or unknown milestone are refused. Works in Flow and Timeline mode alike.
+ */
+export async function setMilestone(deps: ShapingDeps, projectId: string, input: { issues: number[]; milestone: MilestoneInput | null }) {
+  if (!input.issues.length) throw new Error("Give at least one issue to set the milestone of.");
+  const twice = input.issues.find((n, index) => input.issues.indexOf(n) !== index);
+  if (twice !== undefined) throw new Error(`#${twice} appears twice. Give each issue once.`);
+  const { plan, repo, number, project } = await plannedProject(deps, projectId);
+  const github = milestonesPort(deps);
+  const [items, milestones] = await Promise.all([plan.listItems(repo.owner, number, repo), input.milestone === null ? [] : github.listMilestones(repo)]);
+  const byNumber = new Map(items.map((i) => [i.number, i]));
+  const changes = input.issues.map((issue) => {
+    const item = byNumber.get(issue);
+    if (!item) throw new Error(`#${issue} is not in the plan of ${project.name}. Add it with plan_issue first.`);
+    return item;
+  });
+  const milestone = input.milestone === null ? null : resolveMilestone(milestones, input.milestone, repo);
+  // One issue after another: GitHub spaces its writes, and a failure leaves the issues before it written.
+  for (const item of changes) await github.setMilestone(repo, item.number, milestone?.number ?? null);
+  const set = changes.map((item) => ({ issue: item.number, kind: item.kind ?? null, title: item.title, from: item.milestone ? { number: item.milestone.number, title: item.milestone.title } : null }));
+  const summary = set.map((s) => `#${s.issue} ${s.title}: ${s.from?.title ?? "none"} to ${milestone?.title ?? "none"}`).join("; ");
+  return { milestone, set, summary };
 }
 
 /**

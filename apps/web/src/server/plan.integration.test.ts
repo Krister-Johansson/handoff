@@ -1,5 +1,5 @@
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { afterAll, beforeEach, expect, test } from "vitest";
+import { afterAll, beforeEach, expect, test, vi } from "vitest";
 import { eq, projects, runs } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { ProjectsAccessError } from "@handoff/github";
@@ -342,4 +342,61 @@ test("loadPlan reads an organization's plan in Flow and in Timeline mode", async
   expect(timeline.project.owner).toBe("Organization");
   expect(timeline.flow).toBeUndefined();
   expect(timeline.timeline?.items.find((i) => i.number === first)?.planned).toMatchObject({ start: "2026-10-05" });
+});
+
+test("loadPlan reads the repository's milestones once and gives each item its milestone, own or inherited, with each milestone's tasks", async () => {
+  const { github, plan, project, issue, status } = await planned();
+  github.milestones.set(1, { number: 1, title: "0.9", dueOn: "2026-10-20" });
+  github.milestones.set(2, { number: 2, title: "0.8", state: "closed" });
+  const epic = await issue("Project management", ["epic"]);
+  const story = await issue("Plan read model", ["story"], epic);
+  const first = await issue("Add the column", ["task"], story);
+  const second = await issue("Read the column", ["task"], story);
+  const loose = await issue("Loose task", ["task"]);
+  github.issues.get(epic)!.milestone = 1;
+  github.issues.get(second)!.milestone = 2;
+  status(first, "Ready");
+  github.issues.get(second)!.state = "closed";
+  const reads = vi.spyOn(github, "listMilestones");
+
+  const view = await loadPlan(db, github, plan, project.id);
+  if ("error" in view) throw new Error(view.error);
+  expect(reads).toHaveBeenCalledTimes(1);
+  expect(view.epics[0]!.milestone).toEqual({ number: 1, title: "0.9" });
+  expect(view.epics[0]!.stories[0]!.milestone).toEqual({ number: 1, title: "0.9", inherited: { kind: "epic", issue: epic } });
+  expect(view.epics[0]!.stories[0]!.tasks.map((t) => [t.number, t.milestone])).toEqual([
+    [first, { number: 1, title: "0.9", inherited: { kind: "epic", issue: epic } }],
+    [second, { number: 2, title: "0.8" }],
+  ]);
+  expect(view.unparented.map((t) => [t.number, t.milestone])).toEqual([[loose, undefined]]);
+  expect(view.board.Ready.map((t) => [t.number, t.milestone?.number])).toEqual([[first, 1]]);
+  // Open and closed milestones, in the port's order, each with its tasks and the Flow's place of its last one.
+  expect(view.milestones?.map((m) => ({ number: m.number, state: m.state, done: m.progress.done, total: m.progress.total, flow: m.progress.flow }))).toEqual([
+    { number: 1, state: "open", done: 0, total: 1, flow: { last: { issue: first, place: 1 }, skipped: [] } },
+    { number: 2, state: "closed", done: 1, total: 1, flow: { last: undefined, skipped: [] } },
+  ]);
+  expect(view.noMilestone).toMatchObject({ done: 0, total: 1 });
+});
+
+test("loadPlan judges each milestone of an organization's plan in Timeline mode against its due date", async () => {
+  const { github, plan, project, issue } = await planned({ organization: true });
+  await db.update(projects).set({ planMode: "timeline" }).where(eq(projects.id, project.id));
+  github.milestones.set(1, { number: 1, title: "Redesign beta", dueOn: "2026-10-03" });
+  const epic = await issue("Redesign", ["epic"]);
+  const story = await issue("New board", ["story"], epic);
+  const dated = await issue("Draw the board", ["task"], story);
+  const undated = await issue("Document it", ["task"], story);
+  github.issues.get(story)!.milestone = 1;
+  Object.assign(plan.itemsOf(repo).get(dated)!, { start: "2026-10-01", target: "2026-10-04" });
+
+  const view = await loadPlan(db, github, plan, project.id, { now: new Date(2026, 9, 1, 12) });
+  if ("error" in view) throw new Error(view.error);
+  expect(view.project.owner).toBe("Organization");
+  expect(view.epics[0]!.milestone).toBeUndefined();
+  expect(view.epics[0]!.stories[0]!.tasks.map((t) => t.milestone)).toEqual([
+    { number: 1, title: "Redesign beta", inherited: { kind: "story", issue: story } },
+    { number: 1, title: "Redesign beta", inherited: { kind: "story", issue: story } },
+  ]);
+  expect(view.milestones?.[0]?.progress).toMatchObject({ done: 0, total: 2, timeline: { ends: "2026-10-04", daysPastDue: 1, undated: [undated] } });
+  expect(view.milestones?.[0]?.progress.flow).toBeUndefined();
 });
