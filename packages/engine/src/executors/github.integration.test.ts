@@ -6,7 +6,7 @@ import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
 import { and, eq, nodeExecutions, projects, screenshots, wakeByKey, webhookDeliveries } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
-import type { PlanStatus } from "@handoff/github";
+import type { CheckContext, PlanStatus, PrSnapshot } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { cancelRun } from "../operations.ts";
 import { createRun } from "../runs.ts";
@@ -659,6 +659,108 @@ describe("external reviewers", () => {
     const { github, run } = await reviewed({ waitForReviewers: ["copilot-pull-request-reviewer[bot]"], reviewTimeoutMinutes: 0 });
     expect(github.merged).toEqual([1]);
     expect((await inspect(db, run.id)).types).toContain("github.reviewers_timeout");
+  });
+});
+
+describe("a reviewer's own check", () => {
+  const graph = (prConfig: Record<string, unknown>) => ({
+    attributes: { startNode: "planner" },
+    nodes: [
+      { key: "planner", attributes: { type: "planner", x: 0, y: 0 } },
+      { key: "coder", attributes: { type: "coder", x: 0, y: 0 } },
+      { key: "pr", attributes: { type: "pr", config: prConfig, x: 0, y: 0 } },
+      { key: "merge", attributes: { type: "merge", x: 0, y: 0 } },
+    ],
+    edges: [
+      { key: "planner->coder", source: "planner", target: "coder", attributes: { port: "done" } },
+      { key: "coder->pr", source: "coder", target: "pr", attributes: { port: "done" } },
+      { key: "pr->merge", source: "pr", target: "merge", attributes: { port: "ready" } },
+      { key: "pr->coder", source: "pr", target: "coder", attributes: { port: "fix", input: "feedback" } },
+    ],
+  });
+  const ci = (conclusion: string | null): CheckContext => ({ name: "test", status: conclusion ? "COMPLETED" : "IN_PROGRESS", conclusion, url: "https://ci/7", checkRunId: 7 });
+  const coderabbit = (conclusion: string | null): CheckContext => ({ name: "CodeRabbit", status: conclusion ? "COMPLETED" : "IN_PROGRESS", conclusion, url: "https://coderabbit.ai", checkRunId: 8 });
+
+  /** A run whose PR node waits on GitHub, with the head commit's checks as given. */
+  async function checked(prConfig: Record<string, unknown>, checks: NonNullable<PrSnapshot["checks"]>) {
+    const origin = createOriginRepo();
+    const github = new FakeGitHub();
+    github.origin = origin;
+    const { project, graphVersion } = await seedGraph(db, graph(prConfig), { localClonePath: origin });
+    const run = await createRun(db, { projectId: project.id, graphVersionId: graphVersion.id, task: "Add a CHANGELOG.md" });
+    const deps = engineDeps(db, { planner, coder, pr: prNodeExecutor({ github }), merge: mergeNodeExecutor({ github }) }, {
+      workdirs: new GitWorktreeProvider({ root: mkdtempSync(join(tmpdir(), "handoff-home-")) }),
+    });
+    await drain(deps);
+    github.jobLogs.set(8, "CodeRabbit review failed");
+    github.prs.get(1)!.checks = checks;
+    const wake = async () => {
+      await wakeByKey(db, "gh:pr:42:1", { reason: "webhook" });
+      await drain(deps);
+    };
+    /** Moves the PR node's push back in time, as though it had been waiting that long. */
+    const pushedAgo = async (minutes: number) => {
+      await db
+        .update(nodeExecutions)
+        .set({ startedAt: new Date(Date.now() - minutes * 60_000) })
+        .where(and(eq(nodeExecutions.runId, run.id), eq(nodeExecutions.nodeKey, "pr"), eq(nodeExecutions.status, "waiting")));
+    };
+    const pr = async () => (await inspect(db, run.id)).executions.filter((e) => e.nodeKey === "pr").at(-1)!;
+    const lastCi = async () => (await inspect(db, run.id)).events.filter((e) => e.type === "github.pr").at(-1)?.payload;
+    await wake();
+    return { github, run, wake, pushedAgo, pr, lastCi };
+  }
+
+  test("a pending check named after a listed reviewer is not CI pending: the PR node waits for the review until the time limit, then goes on", async () => {
+    const { github, run, wake, pushedAgo, pr, lastCi } = await checked(
+      { waitForReviewers: ["coderabbitai[bot]"], reviewTimeoutMinutes: 5 },
+      { state: "PENDING", contexts: [ci("SUCCESS"), coderabbit(null)] },
+    );
+    expect((await pr()).status).toBe("waiting");
+    expect(await lastCi()).toMatchObject({ ci: "success" });
+    // It wakes at the review time limit, not at the ten-minute reconcile.
+    expect((await pr()).waitDeadlineAt!.getTime() - Date.now()).toBeLessThanOrEqual(5 * 60_000 + 1_000);
+    expect((await inspect(db, run.id)).events.find((e) => e.type === "github.reviewers")?.payload).toMatchObject({ waitingFor: ["coderabbitai[bot]"], timedOut: false });
+
+    await pushedAgo(6);
+    await wake();
+    expect(github.merged).toEqual([1]);
+    expect((await inspect(db, run.id)).types).toContain("github.reviewers_timeout");
+  });
+
+  test("a pending check not named after a reviewer still holds the PR as CI pending", async () => {
+    const { github, wake, pushedAgo, pr, lastCi } = await checked(
+      { waitForReviewers: ["coderabbitai[bot]"], reviewTimeoutMinutes: 5 },
+      { state: "PENDING", contexts: [ci(null), coderabbit("SUCCESS")] },
+    );
+    github.reviewOnHead(1, "coderabbitai[bot]", { state: "COMMENTED" });
+    await pushedAgo(60);
+    await wake();
+    expect((await pr()).status).toBe("waiting");
+    expect(await lastCi()).toMatchObject({ ci: "pending" });
+    expect(github.merged).toEqual([]);
+  });
+
+  test("a failed or cancelled reviewer check is not a CI failure sent to the coder", async () => {
+    const { github, run, wake } = await checked(
+      { waitForReviewers: ["coderabbitai[bot]"], reviewTimeoutMinutes: 5 },
+      { state: "FAILURE", contexts: [ci("SUCCESS"), coderabbit("CANCELLED")] },
+    );
+    github.reviewOnHead(1, "coderabbitai[bot]", { state: "COMMENTED" });
+    await wake();
+    expect(github.merged).toEqual([1]);
+    const { executions, run: row } = await inspect(db, run.id);
+    expect(executions.filter((e) => e.nodeKey === "coder")).toHaveLength(1);
+    expect(row.state).toMatchObject({ feedback: { ci: { status: "success", failedJobs: [] } } });
+  });
+
+  test("without the reviewer in waitForReviewers, its check counts as CI as before", async () => {
+    const { github, wake, pushedAgo, pr, lastCi } = await checked({}, { state: "PENDING", contexts: [ci("SUCCESS"), coderabbit(null)] });
+    await pushedAgo(60);
+    await wake();
+    expect((await pr()).status).toBe("waiting");
+    expect(await lastCi()).toMatchObject({ ci: "pending" });
+    expect(github.merged).toEqual([]);
   });
 });
 

@@ -1,7 +1,7 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { FeedbackSchema } from "@handoff/core";
-import { toFeedback } from "./feedback.ts";
-import type { PrSnapshot } from "./types.ts";
+import { toFeedback, withoutChecks } from "./feedback.ts";
+import type { CheckContext, PrSnapshot } from "./types.ts";
 
 const base: PrSnapshot = {
   number: 7,
@@ -96,4 +96,35 @@ test("toFeedback leaves out handoff's own PR comments, so the Coder is not fed i
     [],
   );
   expect(f.review.comments.map((c) => c.body)).toEqual(["Please add a test."]);
+});
+
+describe("withoutChecks", () => {
+  const check = (name: string, conclusion: string | null): CheckContext => ({ name, status: conclusion ? "COMPLETED" : "IN_PROGRESS", conclusion, url: `https://ci/${name}`, checkRunId: name.length });
+  const bot = (c: CheckContext) => c.name === "CodeRabbit";
+
+  test("works out the rollup again from the checks that are left", () => {
+    const pending = withoutChecks({ ...base, checks: { state: "PENDING", contexts: [check("test", "SUCCESS"), check("CodeRabbit", null)] } }, bot);
+    expect(pending.checks).toEqual({ state: "SUCCESS", contexts: [check("test", "SUCCESS")] });
+    const failed = withoutChecks({ ...base, checks: { state: "FAILURE", contexts: [check("test", "SUCCESS"), check("CodeRabbit", "CANCELLED")] } }, bot);
+    expect(toFeedback(failed, []).ci).toEqual({ status: "success", failedJobs: [] });
+    const stillPending = withoutChecks({ ...base, checks: { state: "FAILURE", contexts: [check("test", null), check("CodeRabbit", "FAILURE")] } }, bot);
+    expect(stillPending.checks?.state).toBe("PENDING");
+    const stillFailing = withoutChecks({ ...base, checks: { state: "PENDING", contexts: [check("test", "FAILURE"), check("CodeRabbit", null)] } }, bot);
+    expect(stillFailing.checks?.state).toBe("FAILURE");
+  });
+
+  test("keeps a rollup that waits for a required check that has not reported", () => {
+    const expected = withoutChecks({ ...base, checks: { state: "EXPECTED", contexts: [check("test", "SUCCESS"), check("CodeRabbit", null)] } }, bot);
+    expect(expected.checks?.state).toBe("EXPECTED");
+  });
+
+  test("leaves the head commit with no checks when only left-out checks reported", () => {
+    expect(withoutChecks({ ...base, checks: { state: "PENDING", contexts: [check("CodeRabbit", null)] } }, bot).checks).toBeNull();
+  });
+
+  test("returns a snapshot with nothing to leave out as it is", () => {
+    const snapshot: PrSnapshot = { ...base, checks: { state: "PENDING", contexts: [check("test", "SUCCESS")] } };
+    expect(withoutChecks(snapshot, bot)).toBe(snapshot);
+    expect(withoutChecks({ ...base, checks: null }, bot).checks).toBeNull();
+  });
 });

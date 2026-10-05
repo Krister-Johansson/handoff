@@ -3,7 +3,7 @@ import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
-import { prKey, REVIEWER_NOTES_MARKER, reviewRequestMarker, toFeedback, type GitHubPort, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
+import { prKey, REVIEWER_NOTES_MARKER, reviewRequestMarker, toFeedback, withoutChecks, type GitHubPort, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, sql, webhookDeliveries, type Db } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
@@ -11,7 +11,7 @@ import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
-import { externalReview, reviewerStarted, reviewRequest, reviewSettings, withFindings, type ReviewRequest } from "./external-review.ts";
+import { externalReview, reviewerCheck, reviewerStarted, reviewRequest, reviewSettings, withFindings, type ReviewRequest } from "./external-review.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -278,15 +278,20 @@ export function prNodeExecutor(deps: {
       const snapshot = await deps.github.getPrSnapshot(repo, number);
       if (snapshot.state === "closed") return { kind: "failed", error: { code: "pr_closed", message: `PR #${number} was closed without merging` } };
 
-      const failedJobs = (snapshot.checks?.contexts ?? []).filter((c) => c.checkRunId !== undefined && c.conclusion === "FAILURE");
+      // External reviewers (review bots such as CodeRabbit or Copilot, or people) the node waits for.
+      const settings = reviewSettings(ctx.node.config);
+      // A check named after one of them (CodeRabbit's "CodeRabbit") is its review in progress, not CI: the
+      // review wait below covers it, up to the review time limit, and it never goes to the coder as a CI failure.
+      const ci = withoutChecks(snapshot, reviewerCheck(settings));
+      const failedJobs = (ci.checks?.contexts ?? []).filter((c) => c.checkRunId !== undefined && c.conclusion === "FAILURE");
       const logs = await Promise.all(
         failedJobs.map(async (c) => ({ jobId: c.checkRunId!, log: (await deps.github.getJobLogTail(repo, c.checkRunId!)) ?? "" })),
       );
-      let feedback = toFeedback(snapshot, logs);
+      let feedback = toFeedback(ci, logs);
       // A repository without CI never gets a check; after a while, stop waiting for one and treat CI as passed.
       const sincePush = Date.now() - (ctx.execution.startedAt ?? new Date()).getTime();
       const noChecksMs = (typeof ctx.node.config.noChecksAfterMinutes === "number" ? ctx.node.config.noChecksAfterMinutes : 10) * 60_000;
-      const noChecks = requireChecks && snapshot.checks === null && snapshot.state === "open";
+      const noChecks = requireChecks && ci.checks === null && snapshot.state === "open";
       // A repository with no workflows and no required checks will never get one: there is nothing to wait for.
       const noCi = noChecks && !(await deps.github.expectsChecks(repo, ctx.run.baseBranch).catch(() => true));
       if (noChecks && (noCi || sincePush >= noChecksMs)) {
@@ -299,8 +304,7 @@ export function prNodeExecutor(deps: {
       const awaitingApproval =
         requireApproval && feedback.review.decision === "none" && feedback.ci.status !== "failure" && snapshot.state === "open";
 
-      // External reviewers (review bots such as CodeRabbit or Copilot, or people) on the head commit.
-      const settings = reviewSettings(ctx.node.config);
+      // Where the external reviewers stand on the head commit.
       const handled = new Set(Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
       const waitingForMs = sincePush;
       const external = externalReview(snapshot, settings, handled, waitingForMs);
