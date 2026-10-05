@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { SendIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldTitle } from "@/components/ui/field";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { firstSentence, shortLocationOf, type Finding } from "@/lib/findings";
-import { countOf, reviewRefusal, sendReview, sendsBack, type ReviewOption, type SentComment } from "./send-review";
+import { countOf, reviewRefusal, sendReview, type ReviewOption, type SentComment } from "./send-review";
 
 /** What goes back: the Fix now findings when the review has findings, else only the comments. */
 const sentWhat = (findings: boolean) => (findings ? "the Fix now findings and your comments" : "your comments");
@@ -110,6 +110,64 @@ function NotSent({ count }: { count: number }) {
   );
 }
 
+/**
+ * The overall comment. It is optional until a send-back answer has nothing else to send; then it is
+ * required, and the line under it says why instead of what goes back.
+ */
+function OverallComment({ note, setNote, target, refusal, line, optional }: { note: string; setNote: (note: string) => void; target: string; refusal: string | undefined; line: ReactNode; optional: string }) {
+  const required = refusal !== undefined;
+  const under = refusal ?? line;
+  return (
+    <Field className="gap-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <FieldLabel htmlFor="review-note" className="text-[13px]">
+          Overall comment
+        </FieldLabel>
+        {required && <span className="text-xs font-medium text-attention">Required</span>}
+      </div>
+      <Textarea
+        id="review-note"
+        rows={3}
+        value={note}
+        required={required}
+        onChange={(e) => setNote(e.target.value)}
+        placeholder={required ? `Say what ${target} should change.` : optional}
+        className="bg-subtle"
+      />
+      {under && <FieldDescription className="text-xs">{under}</FieldDescription>}
+    </Field>
+  );
+}
+
+/** The line under the overall comment: what goes back with findings, else how many comments go with it. */
+function noteLine(withFindings: { option: ReviewOption | undefined; target: string; findings: number } | undefined, comments: number, note: string): ReactNode {
+  if (withFindings) return sentLine(withFindings.option, withFindings.target, withFindings.findings, comments, note.trim() !== "");
+  return comments > 0 ? `${countOf(comments, "comment")} will be sent with it.` : undefined;
+}
+
+/** The answers the review offers, one card each. */
+function ReviewChoices({ choices, option, setOption, target, findings }: { choices: typeof CHOICES; option: ReviewOption | undefined; setOption: (option: ReviewOption) => void; target: string; findings: boolean }) {
+  return (
+    <RadioGroup value={option ?? ""} onValueChange={(value) => setOption(value as ReviewOption)} aria-label="Review result" className="gap-1.5">
+      {choices.map((choice) => (
+        <FieldLabel
+          key={choice.value}
+          htmlFor={`review-${choice.value}`}
+          className="has-data-checked:border-input has-data-checked:bg-muted *:data-[slot=field]:px-3 *:data-[slot=field]:py-2.5 dark:has-data-checked:border-input dark:has-data-checked:bg-muted"
+        >
+          <Field orientation="horizontal" className="gap-2.5">
+            <RadioGroupItem value={choice.value} id={`review-${choice.value}`} />
+            <FieldContent>
+              <FieldTitle className="text-[13px]">{choice.title}</FieldTitle>
+              <FieldDescription className="text-xs">{choice.describe(target, findings)}</FieldDescription>
+            </FieldContent>
+          </Field>
+        </FieldLabel>
+      ))}
+    </RadioGroup>
+  );
+}
+
 export function SubmitReview({ questionId, runId, target, comments, note, setNote, findings, onSending, onFailed, options }: SubmitProps) {
   const offered = options?.length ? options : DEFAULT_OPTIONS;
   const choices = CHOICES.filter((choice) => offered.includes(choice.value));
@@ -120,7 +178,6 @@ export function SubmitReview({ questionId, runId, target, comments, note, setNot
   const unsent = option === "approve" ? fixNow.length : 0;
   // A send-back answer with nothing to send needs the overall comment, so the field says so before Send.
   const refusal = option ? reviewRefusal({ option, note, comments, findings: findings?.map((f) => f.index) }) : undefined;
-  const required = sendsBack(option) && refusal !== undefined;
 
   const send = () => {
     if (!option) return;
@@ -133,48 +190,16 @@ export function SubmitReview({ questionId, runId, target, comments, note, setNot
 
   return (
     <div className="flex flex-col gap-3">
-      <Field className="gap-1.5">
-        <div className="flex items-baseline justify-between gap-2">
-          <FieldLabel htmlFor="review-note" className="text-[13px]">
-            Overall comment
-          </FieldLabel>
-          {required && <span className="text-xs font-medium text-attention">Required</span>}
-        </div>
-        <Textarea
-          id="review-note"
-          rows={3}
-          value={note}
-          required={required}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder={required ? `Say what ${target} should change.` : findings ? "Optional. Sent with the findings and your comments." : "Optional. Sent with your comments."}
-          className="bg-subtle"
-        />
-        {refusal ? (
-          <FieldDescription className="text-xs">{refusal}</FieldDescription>
-        ) : findings ? (
-          <FieldDescription className="text-xs">{sentLine(option, target, fixNow.length, comments.length, note.trim() !== "")}</FieldDescription>
-        ) : (
-          comments.length > 0 && <FieldDescription className="text-xs">{`${countOf(comments.length, "comment")} will be sent with it.`}</FieldDescription>
-        )}
-      </Field>
+      <OverallComment
+        note={note}
+        setNote={setNote}
+        target={target}
+        refusal={refusal}
+        line={noteLine(findings ? { option, target, findings: fixNow.length } : undefined, comments.length, note)}
+        optional={findings ? "Optional. Sent with the findings and your comments." : "Optional. Sent with your comments."}
+      />
       {fixNow.length > 0 && option !== "approve" && <GoesBack target={target} findings={fixNow} />}
-      <RadioGroup value={option ?? ""} onValueChange={(value) => setOption(value as ReviewOption)} aria-label="Review result" className="gap-1.5">
-        {choices.map((choice) => (
-          <FieldLabel
-            key={choice.value}
-            htmlFor={`review-${choice.value}`}
-            className="has-data-checked:border-input has-data-checked:bg-muted *:data-[slot=field]:px-3 *:data-[slot=field]:py-2.5 dark:has-data-checked:border-input dark:has-data-checked:bg-muted"
-          >
-            <Field orientation="horizontal" className="gap-2.5">
-              <RadioGroupItem value={choice.value} id={`review-${choice.value}`} />
-              <FieldContent>
-                <FieldTitle className="text-[13px]">{choice.title}</FieldTitle>
-                <FieldDescription className="text-xs">{choice.describe(target, findings !== undefined)}</FieldDescription>
-              </FieldContent>
-            </Field>
-          </FieldLabel>
-        ))}
-      </RadioGroup>
+      <ReviewChoices choices={choices} option={option} setOption={setOption} target={target} findings={findings !== undefined} />
       {unsent > 0 && <NotSent count={unsent} />}
       {error && <FieldError>{error}</FieldError>}
       <Button type="button" disabled={!option || refusal !== undefined || pending} onClick={send}>
