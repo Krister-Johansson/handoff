@@ -106,6 +106,22 @@ test("a failed step shows why it failed, and its repair can allow files outside 
   expect([form.get("executionId"), form.get("allowPaths")]).toEqual(["x2", "notes.txt"]);
 });
 
+test("a failed run on an older graph version can be repaired on the latest one, and the choice is off until ticked", async () => {
+  render(<FailedRunCard compact item={{ ...run, executionId: "x3", nodeKey: "coder", attempt: 1, error: null, latestGraphVersion: 3 }} />);
+  const latest = screen.getByRole("checkbox", { name: "Use the latest graph version (v3)" });
+  expect(latest).not.toBeChecked();
+  fireEvent.click(latest);
+  fireEvent.click(screen.getByRole("button", { name: "Repair coder" }));
+  await waitFor(() => expect(actions.repairAction).toHaveBeenCalled());
+  const form = actions.repairAction.mock.calls[0]![1] as FormData;
+  expect([form.get("executionId"), form.get("latestGraph")]).toEqual(["x3", "on"]);
+});
+
+test("a failed run already on its graph's latest version offers no version choice", () => {
+  render(<FailedRunCard compact item={{ ...run, executionId: "x4", nodeKey: "coder", attempt: 1, error: null }} />);
+  expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+});
+
 test("a run stuck on a loop asks for a decision and sends it", async () => {
   render(<StuckRunCard item={{ ...run, nodeKey: "reviewer", loop: "reviewer->coder", attempts: 3, finishedAt: null }} />);
   expect(screen.getByText("ran out of rounds")).toBeInTheDocument();

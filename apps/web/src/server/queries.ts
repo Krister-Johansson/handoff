@@ -1,4 +1,4 @@
-import { and, asc, desc, edgeTraversals, eq, graphs, gt, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, type DbExecutor } from "@handoff/db";
+import { and, asc, desc, edgeTraversals, eq, graphs, gt, graphVersions, inArray, isNull, listEventsAfter, nodeExecutions, projects, questions, runs, sql, type DbExecutor } from "@handoff/db";
 import { loopEdgeKeys } from "../lib/sent-back.ts";
 import type { StreamedEvent } from "./events-stream";
 
@@ -89,7 +89,12 @@ export async function getRunDetail(db: DbExecutor, runId: string) {
       .orderBy(asc(nodeExecutions.createdAt)),
     listEventsAfter(db, runId, 0, 1000),
     db
-      .select({ document: graphVersions.document, version: graphVersions.version, name: graphs.name })
+      .select({
+        document: graphVersions.document,
+        version: graphVersions.version,
+        name: graphs.name,
+        latestVersion: sql<number>`(select max(gv.version) from graph_versions gv where gv.graph_id = ${graphVersions.graphId})`,
+      })
       .from(graphVersions)
       .innerJoin(graphs, eq(graphs.id, graphVersions.graphId))
       .where(eq(graphVersions.id, run.run.graphVersionId)),
