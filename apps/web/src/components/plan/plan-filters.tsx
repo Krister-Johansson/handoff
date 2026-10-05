@@ -24,6 +24,8 @@ import { planPath } from "@/lib/paths";
 import { PLAN_STATUSES, type AssigneeFilter, type PlanFilters as Filters, type RunFilter } from "@/lib/plan/filters";
 import type { PlanViewName } from "@/lib/project-tab";
 import { COLUMN_TONE } from "@/lib/plan/task";
+import { dueText } from "@/lib/plan/milestone-text";
+import type { MilestoneTasks, PlanMilestone } from "@/lib/plan/milestones";
 import { cn } from "@/lib/utils";
 
 const RUNS: { value: RunFilter; label: string; text?: string }[] = [
@@ -49,6 +51,8 @@ function FilterButton({ name, value, ...props }: { name: string; value: string |
 /** What the Epic and Assignee filters say they are set to. */
 const epicLabel = (epics: PlanEpic[], n: Filters["epic"]) => (n === "unplanned" ? "Unplanned" : (epics.find((e) => e.number === n)?.title ?? `#${n}`));
 const assigneeLabel = (a: AssigneeFilter) => (a === "me" ? "Me" : a === "none" ? "Unassigned" : a);
+const milestoneLabel = (milestones: PlanMilestone[] | undefined, m: Filters["milestone"]) =>
+  m === "none" ? "No milestone" : (milestones?.find((x) => x.number === m)?.title ?? `#${m}`);
 
 type Props = {
   projectId: string;
@@ -64,10 +68,76 @@ type Props = {
   me?: string | undefined;
   /** Everyone else assigned to a task in the plan, for the Assignee filter. */
   people: string[];
+  /** The repository's milestones, open and closed, for the Milestone filter; without any there is no filter. */
+  milestones?: PlanMilestone[] | undefined;
+  /** The tasks in no milestone, for No milestone's count. */
+  noMilestone?: MilestoneTasks | undefined;
 };
 
-/** The Plan page's filters: Epic, Status, Run and Assignee. Every choice lives in the URL, so a link or a refresh keeps it. */
-export function PlanFilters({ projectId, view, filters, epics, counts, unplanned, me, people }: Props) {
+/**
+ * The Milestone filter: All milestones, the open milestones with their due dates and tasks done, No milestone, and
+ * the closed milestones under Closed.
+ */
+function MilestoneFilter({ filters, milestones, noMilestone, go }: { filters: Filters; milestones: PlanMilestone[]; noMilestone: MilestoneTasks | undefined; go: (next: Partial<Filters>) => void }) {
+  const [open, setOpen] = useState(false);
+  const choose = (milestone: Filters["milestone"]) => {
+    setOpen(false);
+    go({ milestone });
+  };
+  const openOnes = milestones.filter((m) => m.state === "open");
+  const closed = milestones.filter((m) => m.state === "closed");
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <FilterButton name="Milestone" value={filters.milestone === undefined ? undefined : milestoneLabel(milestones, filters.milestone)} />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-72 p-0">
+        <Command>
+          <CommandInput placeholder="Find a milestone" />
+          <CommandList>
+            <CommandEmpty>No milestone matches.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem value="all milestones" data-checked={filters.milestone === undefined ? "true" : undefined} onSelect={() => choose(undefined)}>
+                All milestones
+              </CommandItem>
+              {openOnes.map((m) => (
+                <CommandItem key={m.number} value={`${m.title} #${m.number}`} data-checked={filters.milestone === m.number ? "true" : undefined} onSelect={() => choose(m.number)}>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate">{m.title}</span>
+                    <span className="text-xs text-muted-foreground">{dueText(m)}</span>
+                  </span>
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {m.progress.done} of {m.progress.total} done
+                  </span>
+                </CommandItem>
+              ))}
+              <CommandItem value="no milestone" data-checked={filters.milestone === "none" ? "true" : undefined} onSelect={() => choose("none")}>
+                <span className="flex-1">No milestone</span>
+                <span className="text-xs text-muted-foreground tabular-nums">{noMilestone ? noMilestone.total - noMilestone.done : 0} open</span>
+              </CommandItem>
+            </CommandGroup>
+            {closed.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading="Closed">
+                  {closed.map((m) => (
+                    <CommandItem key={m.number} value={`${m.title} #${m.number} closed`} data-checked={filters.milestone === m.number ? "true" : undefined} onSelect={() => choose(m.number)}>
+                      <span className="min-w-0 flex-1 truncate">{m.title}</span>
+                      <span className="text-xs text-muted-foreground">{dueText(m)}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** The Plan page's filters: Epic, Status, Run, Assignee and Milestone. Every choice lives in the URL, so a link or a refresh keeps it. */
+export function PlanFilters({ projectId, view, filters, epics, counts, unplanned, me, people, milestones, noMilestone }: Props) {
   const router = useRouter();
   const [epicOpen, setEpicOpen] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
@@ -213,18 +283,21 @@ export function PlanFilters({ projectId, view, filters, epics, counts, unplanned
           </RadioGroup>
         </PopoverContent>
       </Popover>
+
+      {milestones && milestones.length > 0 && <MilestoneFilter filters={filters} milestones={milestones} noMilestone={noMilestone} go={go} />}
     </div>
   );
 }
 
 /** With a filter set, a chip per filter that undoes it, and Clear filters for all of them; the search stays. */
-export function FilterChips({ projectId, view, filters, epics }: Pick<Props, "projectId" | "view" | "filters" | "epics">) {
+export function FilterChips({ projectId, view, filters, epics, milestones }: Pick<Props, "projectId" | "view" | "filters" | "epics" | "milestones">) {
   const href = (next: Partial<Filters>) => planPath(projectId, { view, ...filters, ...next });
   const chips = [
     filters.epic !== undefined && { label: `Epic: ${epicLabel(epics, filters.epic)}`, href: href({ epic: undefined }) },
     filters.status.length > 0 && { label: `Status: ${filters.status.join(", ")}`, href: href({ status: [] }) },
     filters.run !== "any" && { label: `Run: ${RUN_LABEL[filters.run]}`, href: href({ run: "any" }) },
     filters.assignee !== "anyone" && { label: `Assignee: ${assigneeLabel(filters.assignee)}`, href: href({ assignee: "anyone" }) },
+    filters.milestone !== undefined && { label: `Milestone: ${milestoneLabel(milestones, filters.milestone)}`, href: href({ milestone: undefined }) },
   ].filter((c): c is { label: string; href: string } => Boolean(c));
   if (chips.length === 0) return null;
   return (

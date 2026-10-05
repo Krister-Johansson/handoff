@@ -25,6 +25,7 @@ import { PlanEmpty } from "./plan-empty";
 import { FlowControls } from "./flow-parts";
 import { PlanFlow } from "./plan-flow";
 import { FilterChips, PlanFilters } from "./plan-filters";
+import { MilestoneStrip } from "./milestone-strip";
 import { PlanRefresher } from "./plan-refresher";
 import { PlanSearchField } from "./plan-search";
 import { PlanTimeline } from "./plan-timeline";
@@ -252,6 +253,15 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
       <SearchQuery value={found.active ? query.trim() : ""}>
       <FlowSelection value={view === "flow" ? selection : undefined}>
         <div className="flex flex-col gap-3">
+          <MilestoneStrip
+            projectId={project.id}
+            repo={`${project.repoOwner}/${project.repoName}`}
+            view={view}
+            mode={mode}
+            filters={current}
+            milestones={plan.milestones}
+            none={plan.noMilestone}
+          />
           <PlanToolbar
             projectId={project.id}
             view={view}
@@ -269,7 +279,20 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
                 className="max-w-90 min-w-36 flex-1 basis-40"
               />
             }
-            filterButtons={<PlanFilters projectId={project.id} view={view} filters={current} epics={plan.epics} counts={counts} unplanned={plan.unplanned.length} me={me} people={people} />}
+            filterButtons={
+              <PlanFilters
+                projectId={project.id}
+                view={view}
+                filters={current}
+                epics={plan.epics}
+                counts={counts}
+                unplanned={plan.unplanned.length}
+                me={me}
+                people={people}
+                milestones={plan.milestones}
+                noMilestone={plan.noMilestone}
+              />
+            }
             controls={
               view === "timeline" ? (
                 <TimelineControls projectId={project.id} filters={current} timeline={timeline} zoom={zoom} narrow={narrow} onToday={() => todayRef.current?.()} />
@@ -278,7 +301,7 @@ export function PlanTab({ activity, me, assign, ...props }: PlanTabProps) {
               )
             }
           />
-          <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} />
+          <FilterChips projectId={project.id} view={view} filters={current} epics={plan.epics} milestones={plan.milestones} />
           <div ref={body} onKeyDown={onBodyKeyDown}>
             <IssuePages projectId={project.id}>
               <PlanBody {...props} filters={current} narrowed={narrowed} found={found} onClearSearch={() => setQuery("")} timeline={timeline} todayRef={todayRef} />

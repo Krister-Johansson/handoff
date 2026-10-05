@@ -1,9 +1,10 @@
-import type { Assignee, PlanItem, PlanProject, PlanStatus } from "@handoff/github";
+import type { Assignee, Milestone, PlanItem, PlanProject, PlanStatus } from "@handoff/github";
 import type { BacklogIssue, BacklogRun } from "@/server/backlog";
 import type { PlanColumn, PlanEpic, PlanProgress, PlanStory, PlanTask, PlanView } from "@/server/plan";
 import { deriveSpans, type TimelineRun } from "@/lib/plan/schedule";
 import { durationOf, type Forecasts } from "@/lib/plan/forecast";
 import type { FlowInput, FlowRun } from "@/lib/plan/flow";
+import { itemMilestones, milestoneProgress, type MilestoneJudge } from "@/lib/plan/milestones";
 import type { SizingControl } from "../plan-context";
 
 export const REPO_URL = "https://github.com/o/r";
@@ -138,3 +139,32 @@ export const sizingOf = (over: Partial<SizingControl> = {}): SizingControl => ({
   spanOf: () => undefined,
   ...over,
 });
+
+/** A milestone of o/r, open and without a due date unless `over` says otherwise. */
+export const milestone = (number: number, title: string, over: Partial<Milestone> = {}): Milestone => ({
+  number,
+  title,
+  description: "",
+  dueOn: undefined,
+  state: "open",
+  openIssues: 0,
+  closedIssues: 0,
+  url: `${REPO_URL}/milestone/${number}`,
+  ...over,
+});
+
+/**
+ * The view as loadPlan gives it with milestones: each epic, story and task carries its milestone, its own (set with
+ * `milestone` on the item) or the one it inherits, and the view has `milestones` with their progress, judged by
+ * `judge`, and `noMilestone`.
+ */
+export function withMilestones(view: PlanView, milestones: Milestone[], judge: MilestoneJudge = {}): PlanView {
+  const items = itemsOfView(view);
+  const of = itemMilestones(items);
+  const mark = <T extends PlanItem>(i: T): T => ({ ...i, milestone: of.get(i.number) });
+  const epics = view.epics.map((e) => ({ ...mark(e), stories: e.stories.map((s) => ({ ...mark(s), tasks: s.tasks.map(mark) })), tasks: e.tasks.map(mark) }));
+  const unparented = view.unparented.map(mark);
+  const board = Object.fromEntries(Object.entries(view.board).map(([c, tasks]) => [c, tasks.map(mark)])) as Record<PlanColumn, PlanTask[]>;
+  const progress = milestoneProgress(milestones, items, judge);
+  return { ...view, epics, unparented, board, milestones: progress.milestones, noMilestone: progress.none };
+}
