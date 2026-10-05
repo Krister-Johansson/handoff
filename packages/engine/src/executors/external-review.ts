@@ -20,6 +20,7 @@ export function reviewSettings(config: Record<string, unknown>): ReviewSettings 
  * coder answers and handoff answers on GitHub; it is off by default, since it posts on GitHub, and it
  * needs review comments sent back. `resolveAfterReview` defaults to `reply`. `summary` names the bot
  * whose summary comment is read for notes and pre-merge checks. `maxPerRound` caps the items one round sends.
+ * `returnOnAnswerOnly`, on by default, sends a round in which the coder only answered straight back to the PR node.
  * `botWaitMs` and `personWaitMs` are how long the PR node waits for a reviewer's next review after an
  * answer, by the reviewer's type: a bot as long as the node waits for a review at all (its review time
  * limit, `reviewTimeoutMinutes`, 30 minutes unless set), and a person `personWaitHours`, 24 unless set.
@@ -29,6 +30,7 @@ export type ReviewThreadsSettings = {
   resolveAfterReview: boolean;
   summary: string | undefined;
   maxPerRound: number;
+  returnOnAnswerOnly: boolean;
   botWaitMs: number;
   personWaitMs: number;
 };
@@ -45,6 +47,7 @@ export function reviewThreadsSettings(config: Record<string, unknown>): ReviewTh
     resolveAfterReview: reply && raw.resolveAfterReview !== false,
     summary,
     maxPerRound,
+    returnOnAnswerOnly: raw.returnOnAnswerOnly !== false,
     botWaitMs: reviewSettings(config).timeoutMs,
     personWaitMs: atLeastZero(raw.personWaitHours, 24) * 3_600_000,
   };

@@ -125,6 +125,23 @@ describe("fan-in joins", () => {
     expect(executions.filter((e) => e.nodeKey === "pr").map((e) => e.status)).toEqual(["passed"]);
     expect(row.status).toBe("succeeded");
   });
+
+  test("a join in any mode runs again when the work comes back to it in a later round", async () => {
+    const { run } = await startRun(db, loopTemplate);
+    const executors = registry({
+      start: startExecutor(),
+      finish: finishExecutor(),
+      demo: scripted(done({ summary: "Skipped", skipped: true, reason: "the change touches no UI path", shots: [] })),
+      // The pull request's CI fails once: the work goes back to the coder and through the demo to the PR node again.
+      pr: scripted(done(outputs.prRed, { prNumber: 1, feedback: outputs.prRed.feedback }), done(outputs.prGreen, { prNumber: 1, feedback: outputs.prGreen.feedback })),
+    });
+    await drain(engineDeps(db, executors));
+    const { run: row, executions } = await inspect(db, run.id);
+    const prs = executions.filter((e) => e.nodeKey === "pr");
+    expect(prs.map((e) => e.status)).toEqual(["passed", "passed"]);
+    expect(prs[1]!.trigger).toMatchObject({ kind: "edge", edgeKey: "demo->pr" });
+    expect(row.status).toBe("succeeded");
+  });
 });
 
 describe("repair and cancel", () => {

@@ -190,6 +190,30 @@ async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv, r
   }
 }
 
+/** A commit on the run's remote branch that handoff did not push, such as a review bot's autofix. */
+type ForeignCommit = { sha: string; author: string; message: string };
+
+/** Whether a git push failed because the remote branch is not where the lease expected it. */
+const pushRejected = (error: unknown) => /\[rejected\]/.test(String((error as { stderr?: unknown }).stderr ?? ""));
+
+/**
+ * The commits on the run's branch on origin that handoff did not push: those the worktree's branch
+ * never had, at its head or anywhere in its reflog. Fetched without moving the remote-tracking branch.
+ */
+async function foreignCommits(cwd: string, branch: string, env: NodeJS.ProcessEnv, retryMs?: number): Promise<ForeignCommit[]> {
+  const run = async (args: string[]) => (await execFileAsync("git", args, { cwd, env })).stdout.trim();
+  await withNetworkRetry(() => run(["fetch", "-q", "--refmap=", "origin", `refs/heads/${branch}`]), retryMs);
+  const ours = (await run(["reflog", "show", "--format=%H", `refs/heads/${branch}`]).catch(() => "")).split("\n").filter(Boolean);
+  const log = await run(["log", "--format=%H%x00%an%x00%s", "FETCH_HEAD", "--not", "HEAD", ...new Set(ours)]);
+  return log
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [sha = "", author = "", message = ""] = line.split("\0");
+      return { sha, author, message };
+    });
+}
+
 /** Sets the run's linked tasks to `status` on the plan and records what happened; never throws. */
 async function movePlan(projects: ProjectsPort | undefined, ctx: ExecutorContext, status: PlanStatus) {
   const written = await writePlanStatus(projects, ctx.project, (ctx.state.issues ?? []).map((i) => i.number), status);
@@ -274,7 +298,34 @@ export function prNodeExecutor(deps: {
         }
         ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged" });
         const cwd = ctx.workdir.path;
-        await withNetworkRetry(() => execFileAsync("git", ["push", "--force-with-lease", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd, env }), deps.gitRetryMs);
+        // The lease refuses the push when origin's branch moved since handoff's last push. --force-if-includes also refuses it when a
+        // fetch in the shared clone (another run starting) moved the remote-tracking branch, which the lease alone would trust.
+        // A rejected push is not a network failure: it is not tried again, and is returned rather than thrown.
+        const rejected = await withNetworkRetry(
+          () =>
+            execFileAsync("git", ["push", "--force-with-lease", "--force-if-includes", "-u", "origin", `HEAD:refs/heads/${ctx.run.branchName}`], { cwd, env }).then(
+              () => undefined,
+              (error: unknown) => {
+                if (pushRejected(error)) return error;
+                throw error;
+              },
+            ),
+          deps.gitRetryMs,
+        );
+        if (rejected) {
+          // Someone else committed on the run's branch, such as a review bot fixing its own findings. A person decides what to keep.
+          const commits = await foreignCommits(cwd, ctx.run.branchName, env, deps.gitRetryMs);
+          if (!commits.length) throw rejected;
+          const listed = commits.map((c) => `${c.sha.slice(0, 7)} by ${c.author}: ${c.message}`).join("; ");
+          return {
+            kind: "failed",
+            error: {
+              code: "foreign_commits",
+              message: `origin/${ctx.run.branchName} has commits handoff did not push, and handoff does not overwrite them: ${listed}. To keep them, pull them into the run's worktree, then repair the run. Turn off review bots that commit to the branch, such as CodeRabbit Autopilot.`,
+              detail: { commits },
+            },
+          };
+        }
         // A Demo step's screenshots go to the assets branch so the description can show them; failing that, the PR opens without them.
         const taken = deps.db ? await latestScreenshots(deps.db, ctx.run.id) : [];
         if (taken.length) {
@@ -386,14 +437,16 @@ export function prNodeExecutor(deps: {
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
-
       // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit.
       const ask = reviewRequest(ctx.node.config);
       const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer);
       if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
 
       // Answers on GitHub wait for their reviewer's next review, which resolves them, up to the reviewer's limit.
-      // New findings, or failed CI, go to the coder first; the items still wait in the step after that round.
+      // This is the one wait for answers, after any round: an answer-only round comes back to this step on the
+      // commit the reviewers already reviewed, and without it the decision from the review the coder answered
+      // would send the round to fix again. New findings, or failed CI, go to the coder first; the items still
+      // wait in the step after that round.
       const awaitingReReview =
         reReviewing.items.length > 0 &&
         snapshot.state === "open" &&
@@ -414,12 +467,12 @@ export function prNodeExecutor(deps: {
         // And when the first answer reaches its reviewer's limit.
         const reReviewAt = awaitingReReview && reReviewing.until !== undefined ? reReviewing.until + 1_000 : Infinity;
         if (awaitingReReview) {
-          // The last event of the look, so the step reports re_review until a later look waits on something else.
+          // The last event of the look, so the step reports waiting_on re_review until a later look waits on something else.
           const reviewers = [...new Set(reReviewing.items.map((i) => i.reviewer))];
-          // `until`: when the first answer reaches its reviewer's limit and a person is asked about it.
+          // `until`: when the first answer reaches its reviewer's limit and a person is asked about it; `due`: each item's limit.
           const until = reReviewing.until !== undefined ? new Date(reReviewing.until).toISOString() : null;
           const due = Object.fromEntries(reReviewing.items.map((i) => [handleOf(i), new Date(i.dueAt).toISOString()]));
-          ctx.emit("github.re_review", { number, reviewers, items: reReviewing.items.map(handleOf), until, due });
+          ctx.emit("github.rereview", { number, waitingFor: reviewers, items: reReviewing.items.map(handleOf), until, due });
         }
         return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt, reReviewAt)) } };
       }

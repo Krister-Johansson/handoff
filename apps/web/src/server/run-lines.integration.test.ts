@@ -72,7 +72,7 @@ test("a run whose PR step waits for a reviewer's next review after handoff's ans
   await db.transaction((tx) =>
     appendEvents(tx, run.id, [
       { type: "github.pr", payload: { number: 9 }, nodeExecutionId: pr.id },
-      { type: "github.re_review", payload: { number: 9, reviewers: ["coderabbitai"], items: ["R1"], until: null, due: {} }, nodeExecutionId: pr.id },
+      { type: "github.rereview", payload: { number: 9, waitingFor: ["coderabbitai"], items: ["R1"], until: null, due: {} }, nodeExecutionId: pr.id },
     ]),
   );
   await db.update(runs).set({ status: "waiting", prNumber: 9 }).where(eq(runs.id, run.id));

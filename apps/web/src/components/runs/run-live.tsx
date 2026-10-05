@@ -20,7 +20,7 @@ import { describeNow, type RunQueue } from "@/lib/run-now";
 import { whoseReview, type ReReviewWait } from "@/lib/reviewers";
 import { MergeButton } from "./merge-button";
 import { runStatusFromEvent, statusFromEvent, type StatusTone } from "@/lib/status";
-import { loopEdgeKeys } from "@/lib/sent-back";
+import { loopEdgeKeys, viaFromEvent } from "@/lib/sent-back";
 import { triggeringEdges } from "@/lib/triggering-edges";
 import { cn } from "@/lib/utils";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
@@ -291,7 +291,7 @@ export function RunLive({
         if (current.some((e) => e.id === event.nodeExecutionId)) return current.map((e) => (e.id === event.nodeExecutionId ? { ...e, ...update } : e));
         return [
           ...current,
-          { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, via: payload.via ?? null, ...update },
+          { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, via: viaFromEvent(payload.via), ...update },
         ];
       });
     },

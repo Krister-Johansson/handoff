@@ -76,7 +76,7 @@ test("a PR step that waits for a reviewer's next review says whose, how many, si
   const until = "2026-10-05T15:01:00.000Z";
   const look = (reReview: boolean) => [
     { type: "github.pr", payload: { number: 9 }, nodeExecutionId: pr.id },
-    ...(reReview ? [{ type: "github.re_review", payload: { number: 9, reviewers: ["coderabbitai"], items: ["R1"], until, due: { R1: until } }, nodeExecutionId: pr.id }] : []),
+    ...(reReview ? [{ type: "github.rereview", payload: { number: 9, waitingFor: ["coderabbitai"], items: ["R1"], until, due: { R1: until } }, nodeExecutionId: pr.id }] : []),
   ];
   await db.transaction((tx) => appendEvents(tx, run.id, look(true)));
 

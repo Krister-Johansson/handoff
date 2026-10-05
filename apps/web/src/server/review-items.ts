@@ -6,17 +6,17 @@ const handle = (n: number | null) => (n === null ? null : `R${n}`);
 
 /**
  * What a PR step waits on after handoff answered review comments, while its latest look ended on
- * github.re_review: the reviewers, how many answered comments wait, since when (the earliest answer), when
+ * github.rereview: the reviewers, how many answered comments wait, since when (the earliest answer), when
  * the first wait ends and a person is asked (`until`), and each item's end (`due`, by handle).
  */
 export type ReReviewState = { nodeExecutionId: string; reviewers: ReReviewer[]; items: number; since: Date; until: Date | null; due: Record<string, string> };
 
-type ReReviewPayload = { reviewers?: unknown; items?: unknown; until?: unknown; due?: unknown };
+type ReReviewPayload = { waitingFor?: unknown; items?: unknown; until?: unknown; due?: unknown };
 
 /**
  * The re-review wait of each run whose PR step waits for a reviewer's next review, keyed by run id. A look
- * at the pull request starts with github.pr and ends with github.re_review when answers hold the step, so
- * the step waits on re-review while its latest github.re_review is newer than its latest github.pr.
+ * at the pull request starts with github.pr and ends with github.rereview when answers hold the step, so
+ * the step waits on re-review while its latest github.rereview is newer than its latest github.pr.
  */
 export async function reReviewWaits(db: DbExecutor, runIds: string[]): Promise<Map<string, ReReviewState>> {
   const waits = new Map<string, ReReviewState>();
@@ -25,10 +25,10 @@ export async function reReviewWaits(db: DbExecutor, runIds: string[]): Promise<M
     .selectDistinctOn([events.nodeExecutionId, events.type], { runId: events.runId, nodeExecutionId: events.nodeExecutionId, type: events.type, seq: events.seq, payload: events.payload, createdAt: events.createdAt })
     .from(events)
     .innerJoin(nodeExecutions, eq(nodeExecutions.id, events.nodeExecutionId))
-    .where(and(inArray(events.runId, runIds), inArray(events.type, ["github.pr", "github.re_review"]), eq(nodeExecutions.status, "waiting"), eq(nodeExecutions.waitKind, "github_pr")))
+    .where(and(inArray(events.runId, runIds), inArray(events.type, ["github.pr", "github.rereview"]), eq(nodeExecutions.status, "waiting"), eq(nodeExecutions.waitKind, "github_pr")))
     .orderBy(events.nodeExecutionId, events.type, desc(events.seq));
   const lastPr = new Map(latest.filter((e) => e.type === "github.pr").map((e) => [e.nodeExecutionId, e.seq]));
-  const looks = latest.filter((e) => e.type === "github.re_review" && e.seq > (lastPr.get(e.nodeExecutionId) ?? 0));
+  const looks = latest.filter((e) => e.type === "github.rereview" && e.seq > (lastPr.get(e.nodeExecutionId) ?? 0));
   if (looks.length === 0) return waits;
   const rows = await db
     .select({ runId: reviewItems.runId, handle: reviewItems.handle, reviewer: reviewItems.reviewer, reviewerBot: reviewItems.reviewerBot, repliedAt: reviewItems.repliedAt })
@@ -37,7 +37,7 @@ export async function reReviewWaits(db: DbExecutor, runIds: string[]): Promise<M
   for (const look of looks) {
     const payload = (look.payload ?? {}) as ReReviewPayload;
     const handles = new Set(Array.isArray(payload.items) ? payload.items.map(String) : []);
-    const logins = Array.isArray(payload.reviewers) ? payload.reviewers.map(String) : [];
+    const logins = Array.isArray(payload.waitingFor) ? payload.waitingFor.map(String) : [];
     const mine = rows.filter((r) => r.runId === look.runId);
     const waiting = mine.filter((r) => handles.has(`R${r.handle}`));
     const answered = waiting.flatMap((r) => (r.repliedAt ? [r.repliedAt.getTime()] : []));

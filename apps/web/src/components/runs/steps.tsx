@@ -6,6 +6,7 @@ import { statusTone, type StatusTone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "./status-badge";
 import { Tag } from "@/components/tag";
+import { ANSWERS_ONLY } from "@/lib/sent-back";
 
 export type StepView = {
   id: string;
@@ -109,7 +110,7 @@ export function Steps({
                     {step.nodeKey}
                   </span>
                   {step.attempt > 1 && <Tag>{`attempt ${step.attempt}`}</Tag>}
-                  {step.via && loopEdges?.has(step.via) && <Tag mono>{`via ${step.via}`}</Tag>}
+                  {step.via && (loopEdges?.has(step.via) || step.via === ANSWERS_ONLY) && <Tag mono>{`via ${step.via}`}</Tag>}
                 </span>
                 {line && <span className={cn("mt-px truncate text-[12.5px]", line.danger ? "text-danger" : "text-muted-foreground")}>{line.text}</span>}
               </span>

@@ -33,6 +33,7 @@ import type { WorktreeState } from "@/lib/worktree-state";
 import { workerHome, worktreeState } from "@/server/worktree";
 import { RunTaskBody } from "@/components/runs/run-task";
 import { taskParts } from "@/lib/run-task";
+import { viaOf } from "@/lib/sent-back";
 
 export const dynamic = "force-dynamic";
 
@@ -280,7 +281,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
           costUsd: e.costUsd,
           durationMs: e.startedAt && e.finishedAt ? e.finishedAt.getTime() - e.startedAt.getTime() : null,
           summary: summarizeOutput(e.output),
-          via: e.trigger?.kind === "edge" ? (e.trigger.edgeKey ?? null) : null,
+          via: viaOf(e.trigger),
           ...(e.status === "failed" && e.error ? { error: `${e.error.code}: ${e.error.message}` } : {}),
         }))}
         labels={nodeLabels(graph?.document)}

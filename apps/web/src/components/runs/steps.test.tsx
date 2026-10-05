@@ -15,6 +15,19 @@ test("a PR step waiting for a reviewer's next review says whose, on how many com
   expect(screen.getByText("waiting on review")).toHaveAttribute("data-tone", "active");
 });
 
+test("a PR step an answer-only round returned to says so, and a forward edge goes unnamed", () => {
+  render(
+    <Steps
+      steps={[step({ id: "e1", status: "passed", via: "answers only" }), step({ id: "e2", nodeKey: "tester", status: "passed", via: "coder->tester" })]}
+      labels={{ pr: "Pull request", tester: "Tester" }}
+      loopEdges={new Set()}
+      onSelect={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("via answers only")).toBeInTheDocument();
+  expect(screen.queryByText("via coder->tester")).not.toBeInTheDocument();
+});
+
 test("a waiting step without a review wait says it waits", () => {
   render(<Steps steps={[step({})]} labels={{ pr: "Pull request" }} onSelect={vi.fn()} />);
   expect(screen.getByText("Waiting…")).toBeInTheDocument();
