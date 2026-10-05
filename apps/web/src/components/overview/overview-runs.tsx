@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { CheckIcon, GitPullRequestIcon, HandIcon, PlayIcon } from "lucide-react";
-import { StatusBadge } from "@/components/runs/status-badge";
+import { RunStatusBadge } from "@/components/runs/status-badge";
 import { StepTrail } from "@/components/runs/step-trail";
 import { TONE_TEXT } from "@/lib/status";
 import { formatAgo, formatCost, formatSince } from "@/lib/format";
@@ -45,7 +45,7 @@ function RunRow({ run, repoUrl, when, aside, children }: { run: OverviewRun; rep
         {run.task}
       </Link>
       <span className="flex justify-end">
-        <StatusBadge status={run.status} />
+        <RunStatusBadge status={run.status} waitingOn={run.line.waitingOn} />
       </span>
       <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[13px]", TONE_TEXT[now.tone])}>
         {now.tone === "success" && <CheckIcon aria-hidden className="size-3.5" />}

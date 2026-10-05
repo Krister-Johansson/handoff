@@ -51,6 +51,7 @@ For a project without a plan, or work too small to shape:
 3. `start_run` with the project and the issue numbers. Leave the task empty to use the issue titles. One run can take several related issues. `start_run` assigns the user (the GitHub user of the dashboard's token) to each issue that has no assignee, and its result says whom it assigned.
 4. `assign` sets who is assigned an issue: give logins, or `me` when the user says they will work on it. It asks the user first and leaves the plan's Status alone.
 5. `get_run` shows where the run stands: each step's state (queued with its place in line, running, or waiting and on what), the pull request once opened, any question, permission prompt or failure, and what the run cost. Share the dashboard link from each result.
+   A run whose step waits for someone to allow a tool call keeps `status` running. `list_runs` and `get_run` then give `waiting_on` on the run, for example `{ "kind": "permission", "step": "coder", "since": "<time>" }`, and `null` otherwise. Tell the user the run waits on their permission, not that it is running.
 
 ## When a run needs the user
 

@@ -236,7 +236,8 @@ export const CATALOG: ToolSpec[] = [
   spec({
     name: "list_runs",
     title: "List runs",
-    description: "Runs, newest first, each with the step it is on, for how long, and its state: queued with its place in line, running, or waiting with waiting_on (permission, question, ci, merge_queue, worker or overlap). status active means queued, running or waiting.",
+    description:
+      "Runs, newest first, each with the step it is on, for how long, and its state: queued with its place in line, running, or waiting with waiting_on (permission, question, ci, merge_queue, worker or overlap). status active means queued, running or waiting. A run whose step waits for a person to allow a tool call keeps status running and has waiting_on { kind: permission, step, since } on the run; otherwise waiting_on is null.",
     input: z.object({ project: z.string().optional().describe("Project name"), status: z.enum(["active", "succeeded", "failed", "cancelled"]).optional() }),
     kind: "data",
     confirm: false,
@@ -247,7 +248,7 @@ export const CATALOG: ToolSpec[] = [
     name: "get_run",
     title: "Show a run",
     description:
-      "Where a run stands: status, cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue or the worker), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, and a stuck loop's last review.",
+      "Where a run stands: status, waiting_on { kind: permission, step, since } while a step waits for a person to allow a tool call (status stays running), cost, steps with their state (queued with its place, running, or waiting on a permission, a question, CI, the merge queue or the worker), start, end, duration and cost, PR, linked issues, open questions (a Try it gate with its app, criteria and the demo's notes), pending permission prompts with the whole command, answered gates, the failed step with its code and Claude's last message, and a stuck loop's last review.",
     input: z.object({ run_id: runId }),
     kind: "data",
     confirm: false,

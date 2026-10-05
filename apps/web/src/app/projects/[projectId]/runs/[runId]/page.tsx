@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ClockIcon, CoinsIcon, GitBranchIcon, GitForkIcon, GitPullRequestIcon, TimerIcon } from "lucide-react";
-import { GraphDocumentSchema, RunStateSchema, summarizeOutput } from "@handoff/core";
+import { describePermission, GraphDocumentSchema, RunStateSchema, summarizeOutput } from "@handoff/core";
+import { permissionWaits } from "@handoff/db";
 import { branchHasWork } from "@handoff/engine/runs";
 import { RunLineage } from "@/components/runs/run-lineage";
 import { Button } from "@/components/ui/button";
@@ -140,7 +141,10 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
   const { run, project, executions, events, graph } = detail;
   const stuck = run.status === "failed" ? await stuckLoop(getDb(), run.id) : undefined;
   const active = run.status === "queued" || run.status === "running" || run.status === "waiting";
-  const [queue, permissions] = active ? await Promise.all([queuePlace(project.id, run.id), pendingPermissions(getDb(), run.id)]) : [undefined, []];
+  const [queue, permissions, waits] = active
+    ? await Promise.all([queuePlace(project.id, run.id), pendingPermissions(getDb(), run.id), permissionWaits(getDb(), [run.id])])
+    : [undefined, [], undefined];
+  const wait = waits?.get(run.id);
   const blockedBy = blockersOf(detail);
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   const worktree = worktreeState(run, workerHome());
@@ -218,6 +222,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         blockedBy={blockedBy}
         initialEvents={events}
         graphDocument={graph?.document}
+        waitingOn={wait && { kind: wait.kind, nodeKey: wait.nodeKey, since: wait.since, action: describePermission(wait.toolName, wait.input).action }}
       >
         <RunAlerts detail={detail} stuck={stuck} permissions={permissions} />
       </RunLive>

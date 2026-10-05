@@ -373,6 +373,21 @@ test("get_run lists a pending permission prompt with the full command", async ()
   expect(permissions).toEqual([{ id, node: "coder", attempt: 1, tool: "Bash", asks: "asks to run a command", detail: command, input: { command }, asked_at: expect.any(String) }]);
 });
 
+test("list_runs and get_run say a run waits on permission, at which step and since when, and keep its status running", async () => {
+  const runId = await startedRun();
+  const quiet = (await call("start_run", { project: "sandbox", task: "Works on its own" })).run_id as string;
+  const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running", waitingOn: "permission" });
+  const asked = new Date("2026-10-05T09:00:00.000Z");
+  await db.insert(permissionRequests).values({ id: "3f6b2a10-0000-4000-8000-000000000006", runId, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "ls" }, createdAt: asked });
+  await db.update(runs).set({ status: "running" }).where(eq(runs.id, runId));
+
+  const listed = Object.fromEntries((await call("list_runs", { project: "sandbox" })).map((r: { id: string }) => [r.id, r]));
+  expect(listed[runId]).toMatchObject({ status: "running", waiting_on: { kind: "permission", step: "coder", since: asked.toISOString() } });
+  expect(listed[quiet]).toMatchObject({ waiting_on: null });
+  expect(await call("get_run", { run_id: runId })).toMatchObject({ status: "running", waiting_on: { kind: "permission", step: "coder", since: asked.toISOString() } });
+  expect(await call("get_run", { run_id: quiet })).toMatchObject({ waiting_on: null });
+});
+
 test("get_run describes a Monitor prompt by its description and command, next to the full input", async () => {
   const runId = await startedRun();
   const coder = await seedExecution(db, runId, { nodeKey: "coder", status: "running", waitingOn: "permission" });

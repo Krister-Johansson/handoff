@@ -1,5 +1,6 @@
 import { describePermission, GraphDocumentSchema } from "@handoff/core";
-import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, nodeExecutions, permissionRequests, questions, runs, type DbExecutor } from "@handoff/db";
+import { and, asc, desc, eq, graphs, graphVersions, inArray, isNull, nodeExecutions, permissionWaits, questions, runs, type DbExecutor } from "@handoff/db";
+import type { RunWaitingOn } from "../components/runs/status-badge";
 import { reviewPath } from "../lib/paths";
 import { describeNow } from "../lib/run-now";
 import type { StatusTone } from "../lib/status";
@@ -17,6 +18,8 @@ export type RunLine = {
   steps: RunStep[];
   /** When the current step began, while one is running, waiting or queued. */
   stepSince: Date | null;
+  /** The step that waits on a person to allow a tool call, while one does; the run's status stays running. */
+  waitingOn?: RunWaitingOn;
 };
 
 export type RunStep = { nodeKey: string; status: string; times: number };
@@ -44,7 +47,7 @@ function nodeLabels(document: unknown): Record<string, string> {
 export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<string, RunLine>> {
   const lines = new Map<string, RunLine>();
   if (runIds.length === 0) return lines;
-  const [rows, executions, open, asking] = await Promise.all([
+  const [rows, executions, open, waits] = await Promise.all([
     db
       .select({
         id: runs.id,
@@ -78,12 +81,7 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
       .from(questions)
       .where(and(inArray(questions.runId, runIds), isNull(questions.answer)))
       .orderBy(asc(questions.createdAt)),
-    db
-      .select({ runId: permissionRequests.runId, nodeKey: nodeExecutions.nodeKey, toolName: permissionRequests.toolName, input: permissionRequests.input })
-      .from(permissionRequests)
-      .innerJoin(nodeExecutions, eq(nodeExecutions.id, permissionRequests.nodeExecutionId))
-      .where(and(inArray(permissionRequests.runId, runIds), eq(permissionRequests.status, "pending")))
-      .orderBy(asc(permissionRequests.createdAt)),
+    permissionWaits(db, runIds),
   ]);
   const versionIds = [...new Set(rows.map((r) => r.versionId))];
   const documents = await db.select({ id: graphVersions.id, document: graphVersions.document }).from(graphVersions).where(inArray(graphVersions.id, versionIds));
@@ -93,6 +91,7 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
     const asked = open.filter((q) => q.runId === run.id);
     const review = asked.find((q) => (q.context as { review?: unknown }).review);
     const current = IN_PROGRESS.has(run.status) ? steps.findLast((e) => IN_PROGRESS.has(e.status)) : undefined;
+    const wait = waits.get(run.id);
     lines.set(run.id, {
       steps: stepsSoFar(steps),
       stepSince: current ? (current.startedAt ?? current.createdAt) : null,
@@ -111,9 +110,10 @@ export async function runLines(db: DbExecutor, runIds: string[]): Promise<Map<st
         prNumber: run.prNumber,
         questions: asked.length,
         reviews: review ? 1 : 0,
-        permissions: asking.filter((p) => p.runId === run.id).map((p) => ({ nodeKey: p.nodeKey, action: describePermission(p.toolName, p.input).action })),
+        permissions: wait ? [{ nodeKey: wait.nodeKey, action: describePermission(wait.toolName, wait.input).action }] : [],
       }),
       ...(review ? { reviewHref: reviewPath(run.projectId, run.id, review.id) } : {}),
+      ...(wait ? { waitingOn: { kind: wait.kind, nodeKey: wait.nodeKey, since: wait.since } } : {}),
     });
   }
   return lines;

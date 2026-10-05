@@ -70,6 +70,7 @@ To look around without GitHub or Claude, `pnpm demo` seeds a demo run with simul
 - **Contracts.** Every node returns structured output that must match its schema, and can have deterministic checks such as "tests pass" or "changes stay within the paths the plan claimed". The engine runs the checks, not the model.
 - **Loops.** An edge can loop back, for example from a failed test run to the Coder, with a maximum number of attempts. The Coder gets the failing output in its context. When a loop runs out, the run asks you in the inbox whether to retry or stop.
 - **Waiting.** A node that waits for CI, a review or your answer holds no process. Webhooks, or the periodic re-check, wake it.
+- **Permission requests.** A Claude step that wants a tool call its allow rules do not cover asks you to allow or deny it, and the run waits until you answer. The run's status stays `running`. `pnpm handoff runs` prints `waiting on permission (coder)` in its place, the dashboard's run lists and the run page show the status as "waiting on permission", and `list_runs` and `get_run` add `waiting_on: { kind: "permission", step: "coder", since: "<time>" }` next to `status` (`null` when the run waits on no request).
 - **Recovery.** A failed node can be repaired in place from the inbox or with `pnpm handoff run repair`. Everything before it is kept. Rate limits are retried automatically with backoff.
 
 ### Several issues in one run

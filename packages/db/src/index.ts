@@ -9,3 +9,4 @@ export { alias } from "drizzle-orm/pg-core";
 export * from "./ops/library.ts";
 export * from "./ops/workers.ts";
 export * from "./ops/projects.ts";
+export * from "./ops/permission-waits.ts";

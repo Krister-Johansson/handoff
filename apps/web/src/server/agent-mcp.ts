@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describePermission, redactSecrets, RunStateSchema } from "@handoff/core";
-import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, planPins, projects, questions, type Db, type QuestionComment } from "@handoff/db";
+import { and, asc, desc, eq, events, graphs, graphVersions, inArray, isNotNull, listLibraryIndex, nodeExecutions, permissionRequests, permissionWaits, planPins, projects, questions, type Db, type PermissionWait, type QuestionComment } from "@handoff/db";
 import { answerQuestion, cancelRun, decidePermission, fixNowByDefault, repairNodeExecution, requestMerge, requestMergeAll, resolveExhaustedLoop, reviewFindingsOf, stuckLoop } from "@handoff/engine/operations";
 import type { GitHubPort, PlanSize, ProjectsPort } from "@handoff/github";
 import { loadPlan, type PlannedItem, type PlanProgress, type PlanTask, type PlanView } from "./plan";
@@ -104,6 +104,9 @@ async function pendingPermissions(db: Db, runId: string) {
     .where(and(eq(permissionRequests.runId, runId), eq(permissionRequests.status, "pending")))
     .orderBy(asc(permissionRequests.createdAt));
 }
+
+/** What a run waits on while its status stays running: a step's open permission request, or null. */
+const waitingOnOf = (wait: PermissionWait | undefined) => (wait ? { kind: wait.kind, step: wait.nodeKey, since: wait.since.toISOString() } : null);
 
 /** What the run's latest Demo step said it did, if one passed. */
 async function latestDemoSummary(db: Db, runId: string): Promise<string | null> {
@@ -222,13 +225,14 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
   const detail = await getRunDetail(deps.db, runId);
   if (!detail) throw new Error(`There is no run ${runId}.`);
   const { run, project, executions, openQuestions, failed, graph } = detail;
-  const [stuck, prompts, demoSummary, answered, states, findings] = await Promise.all([
+  const [stuck, prompts, demoSummary, answered, states, findings, waits] = await Promise.all([
     stuckLoop(deps.db, run.id),
     pendingPermissions(deps.db, run.id),
     latestDemoSummary(deps.db, run.id),
     answeredGates(deps.db, run.id),
     stepStates(deps.db, executions.map((e) => e.id)),
     Promise.all(openQuestions.map((q) => reviewFindingsOf(deps.db, { ...q, runId: run.id }))),
+    permissionWaits(deps.db, [run.id]),
   ]);
   const costs = executions.map((e) => (e.costUsd === null ? null : Number(e.costUsd)));
   return {
@@ -237,6 +241,8 @@ async function runSummary(deps: HandoffMcpDeps, runId: string) {
     graph: graph?.name,
     task: run.task,
     status: run.status,
+    // A step's open permission request leaves the status running; this says the run waits on a person.
+    waiting_on: waitingOnOf(waits.get(run.id)),
     started_by: run.startedBy,
     url: `${deps.baseUrl}${runPath(run.projectId, run.id)}`,
     branch: run.branchName,
@@ -537,7 +543,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
 
     list_runs: async ({ project, status }: { project?: string; status?: "active" | "succeeded" | "failed" | "cancelled" }) => {
       const listed = await listRuns(db, { ...(project ? { project } : {}), ...(status ? { status } : {}) }, 30);
-      const steps = await currentSteps(db, listed.map((r) => r.id));
+      const [steps, waits] = await Promise.all([currentSteps(db, listed.map((r) => r.id)), permissionWaits(db, listed.map((r) => r.id))]);
       const states = await stepStates(db, [...steps.values()].map((s) => s.id));
       return listed.map((r) => {
         const step = steps.get(r.id);
@@ -546,6 +552,7 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
           project: r.project,
           task: r.task,
           status: r.status,
+          waiting_on: waitingOnOf(waits.get(r.id)),
           started_by: r.startedBy,
           current_step: step
             ? {

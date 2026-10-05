@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
-import { appendEvents, eq, graphVersions, nodeExecutions, projects, runs } from "@handoff/db";
-import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { appendEvents, eq, graphVersions, nodeExecutions, permissionRequests, projects, runs } from "@handoff/db";
+import { createTestDb, seedExecution, seedRun, truncateAll } from "@handoff/db/testing";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { runCli } from "./cli.ts";
 
@@ -126,6 +126,22 @@ async function queuedRun(out: (l: string) => void) {
   const [run] = await db.select().from(runs);
   return run!;
 }
+
+test("handoff runs says which step a run waits on a permission request at, and leaves other runs' status as it is", async () => {
+  const { out, lines } = capture();
+  const { run: asking } = await seedRun(db);
+  const coder = await seedExecution(db, asking.id, { nodeKey: "coder", status: "running", waitingOn: "permission" });
+  await db.insert(permissionRequests).values({ id: crypto.randomUUID(), runId: asking.id, nodeExecutionId: coder.id, toolName: "Bash", input: { command: "pnpm test" } });
+  const { run: working } = await seedRun(db);
+  await seedExecution(db, working.id, { nodeKey: "coder", status: "running" });
+
+  await runCli(["runs"], { db, out, github: null });
+
+  expect(lines).toContain(`${asking.id}  waiting on permission (coder)  t`);
+  expect(lines).toContain(`${working.id}  running    t`);
+  const [row] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, asking.id));
+  expect(row?.status).toBe("running");
+});
 
 test("handoff run cancel marks the run cancelled", async () => {
   const { out, lines } = capture();

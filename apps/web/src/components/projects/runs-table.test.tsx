@@ -27,6 +27,25 @@ test("a run row shows its task, what it is doing, graph version, branch, cost, s
   expect(within(row).getByText("running")).toBeInTheDocument();
 });
 
+test("a running run whose step waits on a permission request says so in its status", () => {
+  const lines = new Map([
+    [
+      "r5",
+      {
+        graph: "linear",
+        version: 3,
+        costUsd: 0,
+        now: { tone: "attention" as const, text: "Code asks to run a command" },
+        waitingOn: { kind: "permission" as const, nodeKey: "coder", since: new Date("2026-10-01T11:30:00Z") },
+      },
+    ],
+  ]);
+  render(<RunsTable runs={[{ ...base, id: "r5", task: "Wire the API", status: "running", prNumber: null }]} lines={lines} repoUrl="https://github.com/o/r" now={now} />);
+  const row = screen.getAllByRole("row")[1]!;
+  expect(within(row).getByText("waiting on permission")).toBeInTheDocument();
+  expect(within(row).queryByText("running")).not.toBeInTheDocument();
+});
+
 test("a run the scheduler started carries the Scheduler tag", () => {
   const lines = new Map<string, never>();
   render(

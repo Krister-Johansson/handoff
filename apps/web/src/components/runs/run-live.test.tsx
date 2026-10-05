@@ -60,6 +60,37 @@ test("selecting a step opens what it produced", async () => {
   expect(await screen.findByText("Add a module.")).toBeInTheDocument();
 });
 
+test("while a step waits on a permission request, the status says the run waits on permission and the line says what the step asks", () => {
+  render(
+    <RunLive
+      {...common}
+      initialStatus="running"
+      initialExecutions={[...executions, { id: "e2", nodeKey: "coder", attempt: 1, status: "running", costUsd: null, durationMs: null }]}
+      waitingOn={{ kind: "permission", nodeKey: "coder", since: new Date("2026-10-05T09:00:00Z"), action: "asks to run a command" }}
+    />,
+  );
+  const status = screen.getByRole("status");
+  expect(status).toHaveTextContent("waiting on permission");
+  expect(status).toHaveTextContent("Code asks to run a command");
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 9, type: "run.cancelled", payload: {}, nodeExecutionId: null, createdAt: "2026-10-05T10:00:00Z" }));
+  expect(screen.getByRole("status")).toHaveTextContent("cancelled");
+  expect(screen.getByRole("status")).not.toHaveTextContent("waiting on permission");
+});
+
+test("once the step that asked for permission ends, the run no longer waits on permission", () => {
+  render(
+    <RunLive
+      {...common}
+      initialStatus="running"
+      initialExecutions={[...executions, { id: "e2", nodeKey: "coder", attempt: 1, status: "running", costUsd: null, durationMs: null }]}
+      waitingOn={{ kind: "permission", nodeKey: "coder", since: new Date("2026-10-05T09:00:00Z"), action: "asks to run a command" }}
+    />,
+  );
+  act(() => FakeEventSource.instances[0]!.emit({ seq: 9, type: "node.passed", payload: { nodeKey: "coder", attempt: 1 }, nodeExecutionId: "e2", createdAt: "2026-10-05T10:00:00Z" }));
+  expect(screen.getByRole("status")).toHaveTextContent("running");
+  expect(screen.getByRole("status")).not.toHaveTextContent("waiting on permission");
+});
+
 test("a node pops out of the drawer into a large window with details and activity side by side", async () => {
   render(<RunLive {...common} initialStatus="running" initialExecutions={executions} />);
   fireEvent.click(screen.getByRole("button", { name: /Plan/ }));

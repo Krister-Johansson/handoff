@@ -4,7 +4,7 @@ import { parseArgs } from "node:util";
 import { compileGraph, parseSkillMarkdown, suggestProjectName, type LinkedIssue } from "@handoff/core";
 import { importSkillRepository } from "@handoff/engine/library-import";
 import { moveProject } from "@handoff/engine/move-project";
-import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
+import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, permissionWaits, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
 import { answerQuestion, cancelRun, createRun, GitWorktreeProvider, repairNodeExecution } from "@handoff/engine";
 import { gitHubFromEnv, projectsFromEnv, type GitHubPort, type ProjectsPort } from "@handoff/github";
 import { dashboardAssistantHome, gcAssistantConversations, gcClaudeSessions, gcFailedWorktrees } from "./gc.ts";
@@ -241,7 +241,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
 
   if (command === "runs") {
     const rows = await db.select().from(runs).orderBy(desc(runs.createdAt)).limit(20);
-    for (const r of rows) out(`${r.id}  ${r.status.padEnd(9)}  ${r.task}`);
+    // A run that waits on a person to allow a tool call still has status running; the line says what it waits on.
+    const waits = await permissionWaits(db, rows.map((r) => r.id));
+    for (const r of rows) {
+      const wait = waits.get(r.id);
+      out(`${r.id}  ${(wait ? `waiting on permission (${wait.nodeKey})` : r.status).padEnd(9)}  ${r.task}`);
+    }
     return;
   }
 

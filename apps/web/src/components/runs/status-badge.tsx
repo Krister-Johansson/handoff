@@ -18,3 +18,11 @@ export function StatusBadge({ status, label, size = "default" }: { status: strin
     </span>
   );
 }
+
+/** What a run waits on while its status stays running: a step's open permission request. */
+export type RunWaitingOn = { kind: "permission"; nodeKey: string; since: Date };
+
+/** A run's status. A run whose step waits on a permission request shows that in the attention tone; its status stays running. */
+export function RunStatusBadge({ status, waitingOn, size }: { status: string; waitingOn?: RunWaitingOn | null | undefined; size?: "default" | "sm" }) {
+  return waitingOn ? <StatusBadge status="waiting" label="waiting on permission" size={size} /> : <StatusBadge status={status} size={size} />;
+}

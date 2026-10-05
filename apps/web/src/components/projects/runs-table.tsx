@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { IssueLinks, type IssueLink } from "@/components/runs/issue-links";
-import { StatusBadge } from "@/components/runs/status-badge";
+import { RunStatusBadge } from "@/components/runs/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatAgo, formatCost } from "@/lib/format";
@@ -79,7 +79,7 @@ export function RunsTable({ runs, lines, repoUrl, now = new Date() }: { runs: Pr
                 {formatAgo(run.createdAt, now)}
               </TableCell>
               <TableCell className={cn(TD, "text-right")}>
-                <StatusBadge status={run.status} />
+                <RunStatusBadge status={run.status} waitingOn={line?.waitingOn} />
               </TableCell>
             </TableRow>
           );

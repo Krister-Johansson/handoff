@@ -84,7 +84,15 @@ test("Running now lists each active run with its status, cost, what it does now,
         task: "#70 Speak replies with a Stop control",
         createdAt: minutesAgo(40),
         needsYou: true,
-        line: { graph: "plan-review", version: 11, costUsd: 0.92, now: { tone: "attention", text: "Coder asks to run a command" }, steps: [], stepSince: minutesAgo(2) },
+        line: {
+          graph: "plan-review",
+          version: 11,
+          costUsd: 0.92,
+          now: { tone: "attention", text: "Coder asks to run a command" },
+          steps: [],
+          stepSince: minutesAgo(2),
+          waitingOn: { kind: "permission", nodeKey: "coder", since: minutesAgo(2) },
+        },
       }),
     ],
   });
@@ -99,6 +107,8 @@ test("Running now lists each active run with its status, cost, what it does now,
   const steps = within(first!).getByRole("list", { name: "Steps so far" });
   expect(within(steps).getAllByRole("listitem").map((s) => s.textContent)).toEqual(["planner ×2", "coder"]);
   // A run that waits on a person carries the Needs you chip, which leads to its card above.
+  expect(second).toHaveTextContent("waiting on permission");
+  expect(second).not.toHaveTextContent(/\brunning\b/);
   expect(second).toHaveTextContent("Coder asks to run a command");
   expect(within(second!).getByRole("link", { name: "Needs you" })).toHaveAttribute("href", "#needs-you");
 });
