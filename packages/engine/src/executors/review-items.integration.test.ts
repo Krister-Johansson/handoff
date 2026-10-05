@@ -15,6 +15,7 @@ import type { ExecutorContext, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { withReviewAnswers } from "./cli-node.ts";
 import { mergeNodeExecutor, prNodeExecutor } from "./github.ts";
+import { handleOf, listItems } from "./review-items.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -401,6 +402,187 @@ test("a PR step that restarts after posting does not post the same reply again",
   expect(events.filter((e) => e.type === "github.item_answered").map((e) => e.payload)).toEqual([expect.objectContaining({ item: "R1", found: true, url: repliesIn(github)[0]!.url })]);
 });
 
+/** The run's review items as the PR node recorded them, by handle. */
+const itemsOf = async (runId: string) => Object.fromEntries((await listItems(db, runId)).map((r) => [handleOf(r), r]));
+
+const prStep = async (runId: string, attempt: number) => (await inspect(db, runId)).executions.find((e) => e.nodeKey === "pr" && e.attempt === attempt);
+
+/** CodeRabbit's thread on vitest.config.ts:12, which the coder answers and handoff replies to; the PR step then waits for CodeRabbit's next review. */
+async function declined(prConfig: Record<string, unknown> = replies, github = new FakeGitHub(), coder: NodeExecutor = answeringCoder(decline), setUp?: (github: FakeGitHub) => void) {
+  const run = await opened(prConfig, coder, github);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  setUp?.(github);
+  await run.wake();
+  const thread = () => run.pr().reviewThreads[0]!;
+  return { ...run, thread };
+}
+
+test("a review from the same reviewer after the reply that opens no thread on those lines resolves the thread", async () => {
+  const { github, run, wake, pr, thread } = await declined({ ...replies, reviewRequest: { reviewer: "coderabbitai", afterMinutes: 0 } });
+  expect(repliesIn(github)).toHaveLength(1);
+  expect(thread().isResolved).toBe(false);
+  expect((await prStep(run.id, 2))?.status).toBe("waiting");
+  expect((await itemsOf(run.id)).R1?.state).toBe("awaiting_review");
+
+  // CodeRabbit approves the same commit seconds after the reply, as on northMES/northmes#192.
+  github.reviewOnHead(1, "coderabbitai", { state: "APPROVED" });
+  await wake();
+
+  expect(thread().isResolved).toBe(true);
+  expect(thread().resolvedBy).toBe("octocat");
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "resolved", resolvedBy: "handoff" });
+  const resolved = (await inspect(db, run.id)).events.find((e) => e.type === "github.item_resolved")?.payload;
+  expect(resolved).toMatchObject({ item: "R1", by: "handoff", afterSeconds: expect.any(Number) });
+  expect(github.merged).toEqual([1]);
+  // The declined round asked for no review: the request goes out once per new commit, and this one had it already.
+  expect(pr().comments.filter((c) => c.body.includes("<!-- handoff:review-request"))).toHaveLength(1);
+});
+
+/** A FakeGitHub whose reviewer reviews the pushed commit just before handoff's reply reaches the thread. */
+class QuickReviewer extends FakeGitHub {
+  override async replyToThread(repo: RepoRef, threadId: string, body: string) {
+    this.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+    return super.replyToThread(repo, threadId, body);
+  }
+}
+
+test("a thread is not resolved in the execution that pushed its fix, and not before a review submitted after the reply", async () => {
+  const github = new QuickReviewer();
+  const { run, wake, thread } = await declined(replies, github, answeringCoder(fixing));
+  expect(repliesIn(github)).toHaveLength(1);
+  expect(thread().isResolved).toBe(false);
+  expect((await prStep(run.id, 2))?.status).toBe("waiting");
+
+  // CI news wakes the step; CodeRabbit's only review of the fix came before the reply.
+  await wake();
+  expect(thread().isResolved).toBe(false);
+  expect((await itemsOf(run.id)).R1?.state).toBe("awaiting_review");
+
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+  await wake();
+  expect(thread().isResolved).toBe(true);
+  expect((await itemsOf(run.id)).R1?.state).toBe("resolved");
+  expect(github.merged).toEqual([1]);
+});
+
+test("a thread the reviewer resolved itself is recorded as resolved by the reviewer", async () => {
+  const { github, run, wake, thread } = await declined();
+  github.resolveThreadAs(1, thread().id!, "coderabbitai");
+  await wake();
+
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "resolved", resolvedBy: "coderabbitai" });
+  expect(thread().resolvedBy).toBe("coderabbitai");
+  expect(github.merged).toEqual([1]);
+});
+
+test("a new thread from the reviewer on the same lines marks the old item re-raised and sends the new one to the coder", async () => {
+  const { github, run, wake, pr } = await declined();
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 14, body: "The integration project still never runs in CI." }] });
+  await wake();
+
+  const items = await itemsOf(run.id);
+  expect(items.R1).toMatchObject({ state: "reraised", reraisedAs: 2 });
+  expect(items.R2).toMatchObject({ kind: "thread", line: 14 });
+  const packet = (await coderAttempt(run.id, 3))?.contextPacket as { reviewItems?: ReviewItem[] };
+  expect(packet.reviewItems?.map((i) => i.id)).toEqual(["R2"]);
+  expect(pr().reviewThreads[0]!.isResolved).toBe(false);
+  expect((await inspect(db, run.id)).events.find((e) => e.type === "github.item_reraised")?.payload).toMatchObject({ item: "R1", as: "R2" });
+
+  // The coder declines the new thread too; once CodeRabbit lets it be, both threads are resolved.
+  github.reviewOnHead(1, "coderabbitai", { state: "APPROVED" });
+  await wake();
+  expect(pr().reviewThreads.map((t) => t.isResolved)).toEqual([true, true]);
+  expect(Object.values(await itemsOf(run.id)).map((r) => [r.state, r.resolvedBy])).toEqual([
+    ["resolved", "handoff"],
+    ["resolved", "handoff"],
+  ]);
+});
+
+test("an old CHANGES_REQUESTED from a reviewer whose items await its review does not route to fix", async () => {
+  const { github, run, wake } = await declined(replies, new FakeGitHub(), answeringCoder(decline), (gh) => {
+    const pr = gh.prs.get(1)!;
+    pr.reviews.at(-1)!.state = "CHANGES_REQUESTED";
+    pr.reviewDecision = "CHANGES_REQUESTED";
+  });
+  expect((await prStep(run.id, 2))?.status).toBe("waiting");
+
+  // CI news: the decision GitHub reports is still the old one, and the step keeps waiting for CodeRabbit.
+  await wake();
+  expect((await prStep(run.id, 2))?.status).toBe("waiting");
+  expect(await coderAttempt(run.id, 3)).toBeUndefined();
+
+  // CodeRabbit comments without raising the point again. With a ruleset that requires an approving review,
+  // GitHub keeps reporting CHANGES_REQUESTED until CodeRabbit approves a later commit.
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+  await wake();
+  expect(await coderAttempt(run.id, 3)).toBeUndefined();
+  expect((await itemsOf(run.id)).R1?.state).toBe("resolved");
+  expect((await inspect(db, run.id)).events.find((e) => e.type === "github.changes_requested_answered")?.payload).toMatchObject({ reviewers: ["coderabbitai"] });
+  expect(github.merged).toEqual([1]);
+});
+
+test("a summary note that the next summary no longer lists is resolved; a declined one it still lists is not sent again", async () => {
+  const title = { name: "Title check", explanation: "The title names the branch, not the change it makes.", resolution: "Use a title that says what the change does for users." };
+  const note = "The changelog omits the date of the release, which the release workflow reads.";
+  const answer: Answer = (item, ctx) =>
+    item.kind === "summary_note"
+      ? { verdict: "fixed", evidence: "CHANGELOG.md had no date; it has one now.", commit: commitChange(ctx, "Date the release") }
+      : { verdict: "declined", evidence: "The title says what the change does: Add a CHANGELOG.md." };
+  const github = new FakeGitHub();
+  const { run, wake, pr } = await opened(withSummary, answeringCoder(answer), github);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+  github.summaryComment(1, summaryOf(pr().headSha, { note, failed: [title] }));
+  await wake();
+  expect((await itemsOf(run.id)).R1?.state).toBe("awaiting_review");
+
+  // CodeRabbit reviews the fix and edits its summary: the note is gone, the title check is still there.
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+  github.summaryComment(1, summaryOf(pr().headSha, { risk: "⚪ Minimal", note: "The updated changelog has no identified merge-blocking issue.", failed: [title] }));
+  await wake();
+
+  const items = await itemsOf(run.id);
+  expect(items.R1).toMatchObject({ kind: "summary_note", state: "resolved", resolvedBy: "summary_dropped" });
+  expect(items.R2).toMatchObject({ kind: "pre_merge_check", state: "awaiting_review" });
+  expect(await coderAttempt(run.id, 3)).toBeUndefined();
+  expect(github.merged).toEqual([1]);
+});
+
+test("without viewerCanResolve the item keeps its state, an event names the thread, and the merge step's wait lists it", async () => {
+  const github = new FakeGitHub();
+  github.requireResolvedThreads = true;
+  const { run, thread } = await declined(replies, github, answeringCoder(decline), (gh) => {
+    gh.prs.get(1)!.reviewThreads[0]!.viewerCanResolve = false;
+  });
+  const url = thread().comments[0]!.url;
+
+  expect(repliesIn(github)).toHaveLength(1);
+  const { events, executions } = await inspect(db, run.id);
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "awaiting_review", stateReason: expect.stringContaining("may not resolve") });
+  expect(events.find((e) => e.type === "github.thread_resolve_failed")?.payload).toMatchObject({ item: "R1", url });
+  // The PR step stops waiting on it, and the merge step waits for a person to resolve it.
+  expect(executions.find((e) => e.nodeKey === "pr" && e.attempt === 2)?.status).toBe("passed");
+  expect(executions.find((e) => e.nodeKey === "merge")?.status).toBe("waiting");
+  expect(events.find((e) => e.type === "merge.threads_unresolved")?.payload).toMatchObject({ threads: [expect.objectContaining({ url })] });
+});
+
+test("the step reports waiting_on re_review while items wait", async () => {
+  const { run } = await declined();
+  const { events, executions } = await inspect(db, run.id);
+  const step = executions.find((e) => e.nodeKey === "pr" && e.attempt === 2)!;
+  expect(step).toMatchObject({ status: "waiting", waitKind: "github_pr" });
+  // The step's last word on GitHub in its latest look, which the dashboard and get_run read as waiting_on re_review.
+  const mine = events.filter((e) => e.nodeExecutionId === step.id && e.type.startsWith("github."));
+  expect(mine.at(-1)).toMatchObject({ type: "github.rereview", payload: { waitingFor: ["coderabbitai"], items: ["R1"] } });
+});
+
+test("an item its reviewer does not review within the limit is reported and no longer holds the step", async () => {
+  const { github, run } = await declined({ ...replies, reviewThreads: { reply: true, botWaitMinutes: 0 } });
+  const { events } = await inspect(db, run.id);
+  expect(events.find((e) => e.type === "github.items_review_overdue")?.payload).toMatchObject({ items: [expect.objectContaining({ item: "R1", reviewer: "coderabbitai", limitMinutes: 0 })] });
+  expect((await itemsOf(run.id)).R1).toMatchObject({ state: "awaiting_review", stateReason: expect.stringContaining("no review") });
+  expect(github.merged).toEqual([1]);
+});
+
 /** How many times each step between the coder and the PR node ran. */
 async function checkerRuns(runId: string) {
   const { executions } = await inspect(db, runId);
@@ -485,7 +667,7 @@ test("the 33311b09 case: a declined CodeRabbit comment reaches the coder once, a
   // GitHub still reports the old decision, and the step waits for CodeRabbit's next review instead of routing it to fix.
   const back = () => seen.executions.find((e) => e.nodeKey === "pr" && e.attempt === 2);
   expect(back()?.status).toBe("waiting");
-  expect(seen.events.filter((e) => e.type === "github.rereview").at(-1)?.payload).toMatchObject({ waitingFor: ["coderabbitai"], items: ["R1"], timedOut: false });
+  expect(seen.events.filter((e) => e.type === "github.rereview").at(-1)?.payload).toMatchObject({ waitingFor: ["coderabbitai"], items: ["R1"] });
 
   // The reply's own webhook wakes the step; CodeRabbit has not reviewed since, so it keeps waiting.
   await wake();
@@ -502,11 +684,8 @@ test("the 33311b09 case: a declined CodeRabbit comment reaches the coder once, a
   expect(seen.executions.filter((e) => e.nodeKey === "pr").map((e) => e.status)).toEqual(["passed", "passed"]);
   expect(seen.events.filter((e) => e.type === "github.review_findings").map((e) => e.payload)).toEqual([expect.objectContaining({ items: ["R1"] })]);
   expect(github.merged).toEqual([1]);
-  // Step 5 alone leaves the thread open: resolving it after CodeRabbit's review is step 6, and until then a ruleset
-  // that requires resolved conversations holds the merge step. Had CodeRabbit only commented, GitHub would still
-  // report CHANGES_REQUESTED after the wait, and step 5 alone would send the round to fix with no item to answer;
-  // step 6 keeps that old decision from routing to fix.
-  expect(pr().reviewThreads[0]!.isResolved).toBe(false);
+  // CodeRabbit's review after the reply resolved the thread, so a ruleset that requires resolved conversations does not hold the merge.
+  expect(pr().reviewThreads[0]!.isResolved).toBe(true);
 });
 
 test("with returnOnAnswerOnly false the round takes the normal path", async () => {

@@ -42,13 +42,15 @@ export const reviewItems = pgTable(
     fixCommit: text("fix_commit"),
     /** With a duplicate verdict: the handle of the item this one repeats. */
     duplicateOf: integer("duplicate_of"),
+    /** When re-raised: the handle of the item for the reviewer's new thread on the same lines, which this one follows. */
+    reraisedAs: integer("reraised_as"),
     replyCommentId: text("reply_comment_id"),
     replyUrl: text("reply_url"),
     replyHeadSha: text("reply_head_sha"),
     repliedAt: tstz("replied_at"),
     state: reviewItemState("state").notNull().default("open"),
     stateReason: text("state_reason"),
-    /** Who resolved it: handoff, the reviewer, a person's login, or summary_dropped. */
+    /** Who resolved it: handoff, the reviewer, a person's login, summary_dropped, or next_review for a review summary the next review left out. */
     resolvedBy: text("resolved_by"),
     resolvedAt: tstz("resolved_at"),
     questionId: uuid("question_id").references(() => questions.id),

@@ -682,6 +682,23 @@ test("a merge step that waits on unresolved review threads says so and names the
   expect((await call("list_inbox", { project: "sandbox" })).pull_requests).toEqual([expect.objectContaining({ run_id: runId, pr: 9, unresolved_threads: 1 })]);
 });
 
+test("a PR step that waits for a reviewer's next review after handoff answered its comments says re_review, and ci once it waits on CI alone", async () => {
+  const runId = (await call("start_run", { project: "sandbox", task: "Add usage docs" })).run_id as string;
+  await db.update(nodeExecutions).set({ status: "passed" }).where(eq(nodeExecutions.runId, runId));
+  const pr = await seedExecution(db, runId, { nodeKey: "pr", nodeType: "pr", executorKind: "github", status: "waiting", waitKind: "github_pr" });
+  const look = (reReview: boolean) => [
+    { type: "github.pr", payload: { number: 9, ci: "success" }, nodeExecutionId: pr.id },
+    ...(reReview ? [{ type: "github.rereview", payload: { number: 9, waitingFor: ["coderabbitai"], items: ["R1"] }, nodeExecutionId: pr.id }] : []),
+  ];
+  await db.transaction((tx) => appendEvents(tx, runId, look(true)));
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, runId));
+  expect((await call("get_run", { run_id: runId })).steps.at(-1)).toMatchObject({ node: "pr", state: "waiting", waiting_on: "re_review" });
+
+  // A later look that waits on CI only, after the reviewer reviewed again.
+  await db.transaction((tx) => appendEvents(tx, runId, look(false)));
+  expect((await call("get_run", { run_id: runId })).steps.at(-1)).toMatchObject({ node: "pr", state: "waiting", waiting_on: "ci" });
+});
+
 test("answer_permission cannot always allow", async () => {
   expect((await call("answer_permission", { request_id: "x", decision: "always" })).error).toBeDefined();
 });

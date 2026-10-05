@@ -25,17 +25,19 @@ import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
 import {
+  changeRequesters,
   externalReview,
   reviewerCheck,
   reviewerStarted,
   reviewRequest,
   reviewSettings,
   reviewThreadsSettings,
+  sameLogin,
   withFindings,
   type ReviewRequest,
   type SummaryRead,
 } from "./external-review.ts";
-import { awaitingNextReview, handleOf, postAnswers, recordAnswers, sendItems, syncItems, withItems } from "./review-items.ts";
+import { awaitingReview, handleOf, hasUnsent, postAnswers, recordAnswers, reReview, sendItems, syncItems, withItems } from "./review-items.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -49,7 +51,7 @@ const headOf = async (cwd: string) => (await execFileAsync("git", ["rev-parse", 
  */
 async function readSummary(github: GitHubPort, repo: RepoRef, snapshot: PrSnapshot, login: string): Promise<SummaryRead | undefined> {
   const found = findCodeRabbitSummary(snapshot.comments, { author: login }) ?? findCodeRabbitSummary(await github.listIssueComments(repo, snapshot.number).catch(() => []), { author: login });
-  return found ? { comment: { id: found.id, url: found.url, body: found.body }, summary: parseCodeRabbitSummary(found.body) } : undefined;
+  return found ? { comment: { id: found.id, url: found.url, body: found.body, updatedAt: found.updatedAt }, summary: parseCodeRabbitSummary(found.body) } : undefined;
 }
 
 const repoOf = (ctx: ExecutorContext): RepoRef => ({ owner: ctx.project.repoOwner, name: ctx.project.repoName });
@@ -322,11 +324,18 @@ export function prNodeExecutor(deps: {
       const itemsDb = threads.reply && settings.sendBack ? deps.db : undefined;
       // The bot whose summary comment the node reads; it waits for that summary like a listed reviewer.
       const summaryBot = itemsDb ? threads.summary : undefined;
+      const summary = summaryBot ? { login: summaryBot, read: await readSummary(deps.github, repo, snapshot, summaryBot) } : undefined;
+      // The answered thread items the step waits on until their reviewer reviews again.
+      let reReviewing: { items: { handle: number; reviewer: string }[]; until?: number | undefined } = { items: [] };
       if (itemsDb) {
+        const items = { db: itemsDb, github: deps.github };
         await recordAnswers(itemsDb, ctx);
+        // What the reviewers made of the answers already on GitHub; before this step posts any, so none is resolved in the step that answered it.
+        if (threads.resolveAfterReview) await reReview(items, ctx, { repo, snapshot, summary });
         // After the push, so a fixing commit is on GitHub when the reply names it. Threads and comments come from the whole snapshot.
         const headSha = ctx.workdir ? await headOf(ctx.workdir.path).catch(() => snapshot.headSha) : snapshot.headSha;
-        await postAnswers({ db: itemsDb, github: deps.github }, ctx, { repo, snapshot, headSha, resolveAfterReview: threads.resolveAfterReview });
+        await postAnswers(items, ctx, { repo, snapshot, headSha, resolveAfterReview: threads.resolveAfterReview });
+        if (threads.resolveAfterReview) reReviewing = await awaitingReview(items, ctx, { snapshot, settings: threads, now: Date.now() });
       }
 
       // A check named after one of them (CodeRabbit's "CodeRabbit"), or after the summary bot, is its review in
@@ -358,25 +367,27 @@ export function prNodeExecutor(deps: {
       // without them, run state lists the findings already sent.
       const handled = new Set(!itemsDb && Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
       const waitingForMs = sincePush;
-      const summary = summaryBot ? { login: summaryBot, read: await readSummary(deps.github, repo, snapshot, summaryBot) } : undefined;
       const external = externalReview(snapshot, settings, handled, waitingForMs, summary ? { summary } : {});
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
-      // After an answer-only round the head is the commit the reviewers already reviewed: the step waits for the
-      // next review of each reviewer it answered in a thread, up to the review time limit, before it routes on
-      // what GitHub reports. Without that a decision from the review the coder answered would send it round again.
-      const rereview = itemsDb && ctx.execution.trigger?.kind === "returned" ? await awaitingNextReview(itemsDb, ctx.run.id, snapshot) : [];
-      const rereviewTimedOut = rereview.length > 0 && waitingForMs >= settings.timeoutMs;
-      if (rereview.length) ctx.emit("github.rereview", { number, waitingFor: rereview.map((r) => r.reviewer), items: rereview.flatMap((r) => r.items), timedOut: rereviewTimedOut });
-      const awaitingRereview = rereview.length > 0 && !rereviewTimedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
-
       // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit.
       const ask = reviewRequest(ctx.node.config);
       const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer);
       if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
 
-      if (checksPending || awaitingApproval || awaitingReviewers || awaitingRereview) {
+      // Answers on GitHub wait for their reviewer's next review, which resolves them, up to the reviewer's limit.
+      // This is the one wait for answers, after any round: an answer-only round comes back to this step on the
+      // commit the reviewers already reviewed, and without it the decision from the review the coder answered
+      // would send the round to fix again. New findings, or failed CI, go to the coder first; the items still
+      // wait in the step after that round.
+      const awaitingReReview =
+        reReviewing.items.length > 0 &&
+        snapshot.state === "open" &&
+        feedback.ci.status !== "failure" &&
+        !(itemsDb && (await hasUnsent(itemsDb, ctx.run.id, external.findings)));
+
+      if (checksPending || awaitingApproval || awaitingReviewers || awaitingReReview) {
         // Also wake when a PR without checks reaches its limit, so a repository without CI does not wait for the reconcile.
         // Without webhooks (the relay is not running, or the repository has none) the reconcile is the only wake: look sooner.
         const heard = await webhooksSince(deps.db, repoId, ctx.execution.id);
@@ -384,10 +395,17 @@ export function prNodeExecutor(deps: {
         if (!heard) ctx.emit("github.no_webhooks", { number, pollSeconds: Math.round(reconcileMs / 1000) });
         const reconcile = Math.min(Date.now() + reconcileMs, noChecks ? Date.now() + Math.max(0, noChecksMs - sincePush) + 1_000 : Infinity);
         // Wake at the review time limit even without a webhook, so a reviewer who never comes cannot hold the run.
-        const limit = awaitingReviewers || awaitingRereview ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
+        const limit = awaitingReviewers ? Date.now() + Math.max(0, settings.timeoutMs - waitingForMs) + 1_000 : reconcile;
         // Also wake when it is time to ask a reviewer that has not started.
         const askAt = unstarted && sincePush < ask.afterMs ? Date.now() + (ask.afterMs - sincePush) + 1_000 : Infinity;
-        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt)) } };
+        // And when the first answer reaches its reviewer's limit.
+        const reReviewAt = awaitingReReview && reReviewing.until !== undefined ? reReviewing.until + 1_000 : Infinity;
+        if (awaitingReReview) {
+          // The last event of the look, so the step reports waiting_on re_review until a later look waits on something else.
+          const reviewers = [...new Set(reReviewing.items.map((i) => i.reviewer))];
+          ctx.emit("github.rereview", { number, waitingFor: reviewers, items: reReviewing.items.map(handleOf) });
+        }
+        return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt, reReviewAt)) } };
       }
 
       if (summary?.read?.summary.problems.length) {
@@ -402,6 +420,15 @@ export function prNodeExecutor(deps: {
         if (sent.length) {
           routed = withItems(feedback, sent);
           ctx.emit("github.review_findings", { number, findings: sent.length, items: sent.map(handleOf) });
+        } else if (feedback.review.decision === "changes_requested") {
+          // GitHub keeps a reviewer's CHANGES_REQUESTED until it approves (with a ruleset, a later commit). Once
+          // handoff answered everything that reviewer raised, the old decision sends nothing back to the coder.
+          const requesters = changeRequesters(snapshot);
+          const answered = (login: string) => rows.some((r) => sameLogin(r.reviewer, login)) && !rows.some((r) => sameLogin(r.reviewer, login) && (r.state === "open" || r.state === "answered"));
+          if (requesters.length > 0 && requesters.every(answered)) {
+            routed = { ...feedback, review: { ...feedback.review, decision: "none" } };
+            ctx.emit("github.changes_requested_answered", { number, reviewers: requesters });
+          }
         }
       } else if (settings.sendBack && external.findings.length > 0) {
         routed = withFindings(feedback, external.findings);
