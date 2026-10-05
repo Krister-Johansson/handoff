@@ -15,7 +15,37 @@ export function reviewSettings(config: Record<string, unknown>): ReviewSettings 
   return { waitFor, timeoutMs: minutes * 60_000, sendBack };
 }
 
-export type Finding = { id: string; author: string; body: string; path?: string; line?: number; url: string };
+/** A comment that asks a reviewer to review, posted when it has not started on a commit some minutes after the push. */
+export type ReviewRequest = { reviewer: string; comment: string; afterMs: number };
+
+/** The PR node's `reviewRequest` setting, or undefined when it has none. The comment defaults to `@<reviewer> review`, the delay to two minutes. */
+export function reviewRequest(config: Record<string, unknown>): ReviewRequest | undefined {
+  const raw = config.reviewRequest;
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const { reviewer, comment, afterMinutes } = raw as Record<string, unknown>;
+  if (typeof reviewer !== "string" || !reviewer.trim()) return undefined;
+  const text = typeof comment === "string" && comment.trim() ? comment.trim() : `@${reviewer.trim().replace(/\[bot\]$/i, "")} review`;
+  const minutes = typeof afterMinutes === "number" && afterMinutes >= 0 ? afterMinutes : 2;
+  return { reviewer: reviewer.trim(), comment: text, afterMs: minutes * 60_000 };
+}
+
+/** A login or a status name in lower case letters and digits only: coderabbitai[bot] and CodeRabbit become coderabbitai and coderabbit. */
+const plain = (name: string) => name.toLowerCase().replace(/\[bot\]$/, "").replace(/[^a-z0-9]/g, "");
+
+/**
+ * Whether a reviewer has started on the PR's head commit: it reviewed that commit, or a check or status
+ * named after it (CodeRabbit's is "CodeRabbit") is in progress there.
+ */
+export function reviewerStarted(snapshot: PrSnapshot, login: string): boolean {
+  if (snapshot.reviews.some((r) => r.commitSha === snapshot.headSha && sameLogin(r.author, login))) return true;
+  const who = plain(login);
+  return (snapshot.checks?.contexts ?? []).some((c) => {
+    const name = plain(c.name);
+    return c.conclusion === null && name !== "" && (who.startsWith(name) || name.startsWith(who));
+  });
+}
+
+export type Finding ={ id: string; author: string; body: string; path?: string; line?: number; url: string };
 
 /**
  * Where the reviews of the PR's head commit stand: which listed reviewers have not reviewed it yet,

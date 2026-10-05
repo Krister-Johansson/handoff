@@ -452,6 +452,7 @@ const TYPE_FIELDS: Partial<Record<NodeType, z.ZodRawShape>> = {
     waitForReviewers: clearable(z.array(z.string().min(1))),
     reviewTimeoutMinutes: clearable(minutes),
     sendReviewComments: z.boolean(),
+    reviewRequest: clearable(z.strictObject({ reviewer: z.string().min(1), comment: z.string().min(1), afterMinutes: minutes.optional() })),
   },
   merge: { mode: z.enum(["manual", "auto"]), method: z.enum(["squash", "merge", "rebase"]) },
   human_gate: { mode: z.enum(["approval", "question", "try"]), question: clearable(z.string().min(1)), exhaustedGate: z.boolean() },
