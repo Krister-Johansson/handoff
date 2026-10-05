@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { allowedBy, redactSecrets } from "@handoff/core";
+import { allowedBy, PERMISSION_TIMEOUT_MINUTES, redactSecrets } from "@handoff/core";
 import { and, eq, inArray, isNotNull, nodeExecutions, permissionRequests, resumeAfterPermission, waitOnPermission, type Caps, type Db } from "@handoff/db";
 
 /** The MCP tool Claude Code asks for permission through: the `approve` tool of handoff's permission server. */
@@ -10,8 +10,11 @@ export const PERMISSION_TOOL = "mcp__handoff__approve";
 /** The permission server Claude Code starts over stdio, one per step. */
 export const PERMISSION_SERVER = fileURLToPath(new URL("./permission-server.mjs", import.meta.url));
 
-/** How long a request waits for a person before the server denies it and the step goes on. */
-export const PERMISSION_TIMEOUT_MS = 30 * 60_000;
+/**
+ * How long a request waits for a person before the server denies it and the step goes on, unless the
+ * project's permission timeout says otherwise: 10 minutes, the projects column's default.
+ */
+export const PERMISSION_TIMEOUT_MS = PERMISSION_TIMEOUT_MINUTES.default * 60_000;
 
 /** The MCP server entry for a step's permission folder. */
 export const permissionServer = (dir: string, timeoutMs = PERMISSION_TIMEOUT_MS) => ({ command: process.execPath, args: [PERMISSION_SERVER, dir, String(timeoutMs)] });

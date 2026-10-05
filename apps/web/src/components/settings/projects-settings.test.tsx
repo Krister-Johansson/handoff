@@ -94,6 +94,14 @@ test("the open project shows its demo seed command and UI paths, or that the def
   expect(detail("UI paths")).toHaveTextContent("the defaults");
 });
 
+test("the open project shows its permission timeout in minutes", () => {
+  render(<ProjectsSettings projects={[{ ...handoff, permissionTimeoutMinutes: 25 }, { ...shop, permissionTimeoutMinutes: 1 }]} />);
+  fireEvent.click(screen.getByRole("button", { name: "Show handoff" }));
+  expect(detail("Permission timeout")).toHaveTextContent("25 minutes");
+  fireEvent.click(screen.getByRole("button", { name: "Show example-shop" }));
+  expect(detail("Permission timeout")).toHaveTextContent("1 minute");
+});
+
 test("Add project opens the add form", async () => {
   const { unmount } = render(<ProjectsSettings projects={[handoff]} />);
   fireEvent.click(screen.getByRole("button", { name: "Add project" }));

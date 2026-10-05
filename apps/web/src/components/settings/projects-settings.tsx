@@ -3,6 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { ArrowRightLeftIcon, CheckIcon, ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import { PERMISSION_TIMEOUT_MINUTES } from "@handoff/core";
 import { unlinkPlanAction } from "@/app/projects/actions";
 import { SetUpPlanDialog } from "@/components/plan/set-up-plan-dialog";
 import { AddFieldsButton } from "@/components/projects/add-fields";
@@ -44,6 +45,8 @@ export type ProjectRow = {
   agentNotes?: string | null;
   demoSeedCommand?: string | null;
   uiPaths?: string[] | null;
+  /** Minutes a step waits for an answer to a permission request; the default when missing. */
+  permissionTimeoutMinutes?: number;
   isDemo: boolean;
   /** How the project plans: a Flow project has sizes and no dates or estimates. */
   planMode: PlanModeName;
@@ -184,7 +187,7 @@ function PlanOnGitHub({ project }: { project: ProjectRow }) {
 }
 
 /**
- * What Settings, Projects manages for one project: name, repository, default branch, setup and teardown commands, agent notes, demo settings and plan,
+ * What Settings, Projects manages for one project: name, repository, default branch, setup and teardown commands, agent notes, demo settings, permission timeout and plan,
  * and where its estimates are: capacity, forecasts and the plan budget, or in a Flow project the plan budget only.
  */
 function ProjectDetails({ project }: { project: ProjectRow }) {
@@ -213,6 +216,7 @@ function ProjectDetails({ project }: { project: ProjectRow }) {
           <span className="text-[13px] text-muted-foreground">the defaults: routes, pages, components and styles</span>
         )}
       </Detail>
+      <Detail term="Permission timeout">{plural(project.permissionTimeoutMinutes ?? PERMISSION_TIMEOUT_MINUTES.default, "minute")}</Detail>
       <Detail term="Plan on GitHub">
         <PlanOnGitHub project={project} />
       </Detail>

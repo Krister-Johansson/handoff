@@ -70,6 +70,7 @@ To look around without GitHub or Claude, `pnpm demo` seeds a demo run with simul
 - **Contracts.** Every node returns structured output that must match its schema, and can have deterministic checks such as "tests pass" or "changes stay within the paths the plan claimed". The engine runs the checks, not the model.
 - **Loops.** An edge can loop back, for example from a failed test run to the Coder, with a maximum number of attempts. The Coder gets the failing output in its context. When a loop runs out, the run asks you in the inbox whether to retry or stop.
 - **Waiting.** A node that waits for CI, a review or your answer holds no process. Webhooks, or the periodic re-check, wake it.
+- **Permissions.** When a Claude step calls a tool its allow rules do not cover, the inbox asks you to allow or deny the call. Always allow covers the node's matching calls for the rest of the run. While the request waits, the step gives up its Claude slot to other steps. If nobody answers within the project's permission timeout, the call is denied and the step goes on without it. The timeout is 10 minutes by default; change it, from 1 to 120 minutes, with Edit in **Settings, Projects**.
 - **Recovery.** A failed node can be repaired in place from the inbox or with `pnpm handoff run repair`. Everything before it is kept. Rate limits are retried automatically with backoff.
 
 ### Several issues in one run

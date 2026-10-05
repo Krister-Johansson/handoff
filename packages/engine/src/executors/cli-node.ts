@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { brief, contractRegistry, DEFAULT_REVIEW_LEVEL, describePermission, isContractName, renderContextPacket, runPath, verdictOf, type NodeType, type ReviewerOutput } from "@handoff/core";
 import type { Caps, Db } from "@handoff/db";
-import { PERMISSION_TIMEOUT_MS, PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
+import { PERMISSION_TOOL, permissionServer, watchPermissions, type PermissionWatch } from "../permissions/broker.ts";
 import type { CliExecutor, CliRunOptions, CliRunRequest, CliRunResult, CliSession } from "@handoff/cli-adapter";
 import { heldApproval, recordApproval } from "../approvals.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
@@ -13,7 +13,7 @@ import { runIdentity } from "../workdir/setup.ts";
 /**
  * model and effort are the worker's defaults; a node's config.model and config.effort override them.
  * With `permissions`, a tool call the step's allow rules do not cover waits for a person to allow or
- * deny it (up to `timeoutMs`), instead of being denied at once.
+ * deny it, for up to the project's permission timeout, instead of being denied at once.
  */
 export type CliNodeOptions = {
   cli: CliExecutor;
@@ -23,7 +23,7 @@ export type CliNodeOptions = {
   model?: string;
   effort?: string;
   /** Permission prompts go to a person; `caps` are the worker's, which a step fits in again before its answer goes back. */
-  permissions?: { db: Db; timeoutMs?: number; caps?: Partial<Caps> };
+  permissions?: { db: Db; caps?: Partial<Caps> };
 };
 
 const PROMPTS: Partial<Record<NodeType, string>> = {
@@ -216,15 +216,17 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
       let permissionWatch: PermissionWatch | undefined;
       if (options.permissions && !ctx.workdir.container) {
         const dir = join(ctx.stagingDir, "permissions");
+        // The project says how long a request waits for a person before the server denies it.
+        const timeoutMs = ctx.project.permissionTimeoutMinutes * 60_000;
         const servers = mcpConfigPath ? (JSON.parse(readFileSync(mcpConfigPath, "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers : {};
         mcpConfigPath = join(ctx.stagingDir, "mcp-permissions.json");
-        writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: { ...servers, handoff: permissionServer(dir, options.permissions.timeoutMs ?? PERMISSION_TIMEOUT_MS) } }, null, 2), { mode: 0o600 });
+        writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers: { ...servers, handoff: permissionServer(dir, timeoutMs) } }, null, 2), { mode: 0o600 });
         requiredServers = [...requiredServers, "handoff"];
         permissionWatch = watchPermissions(options.permissions.db, {
           runId: ctx.run.id,
           executionId: ctx.execution.id,
           dir,
-          timeoutMs: options.permissions.timeoutMs ?? PERMISSION_TIMEOUT_MS,
+          timeoutMs,
           ...(options.permissions.caps ? { caps: options.permissions.caps } : {}),
           onRequest: async (request) => {
             ctx.emit("permission.requested", request);

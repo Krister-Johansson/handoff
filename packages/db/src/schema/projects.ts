@@ -64,11 +64,14 @@ export const projects = pgTable(
      * plan in Timeline; a project added after it starts in Flow.
      */
     planMode: text("plan_mode").$type<PlanMode>().notNull().default("flow"),
+    /** How long a step waits for an answer to a permission request before it is denied and the step goes on, in minutes. */
+    permissionTimeoutMinutes: integer("permission_timeout_minutes").notNull().default(10),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     check("projects_plan_hours_per_day_check", sql`${t.planHoursPerDay} between 1 and 24`),
     check("projects_plan_mode_check", sql`${t.planMode} in ('flow', 'timeline')`),
+    check("projects_permission_timeout_minutes_check", sql`${t.permissionTimeoutMinutes} between 1 and 120`),
   ],
 );
