@@ -4,7 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { parsePlanFilters } from "@/lib/plan/filters";
 import { PlanTimeline } from "./plan-timeline";
 import { Sizing } from "./plan-context";
-import { epic, planView, PROJECT, REPO_URL, sizedTimelineOf, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
+import { epic, milestone, planView, PROJECT, REPO_URL, sizedTimelineOf, sizingOf, story, task, timelineOf, withMilestones } from "./testing/plan-fixtures";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }) }));
 const actions = vi.hoisted(() => ({
@@ -186,4 +186,44 @@ test("under 640 px a task shows its size and a Start field whose Target follows 
   expect(within(item(/Task #141/)).getByRole("button", { name: "Size S, forecast 25m. Change the size or estimate of #141" })).toBeInTheDocument();
   expect(within(item(/Task #141/)).queryByRole("button", { name: /^Start of/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: /^Task #/ })).not.toBeInTheDocument();
+});
+
+test("under 640 px filtered to a milestone, each task that ends after its due date says so", () => {
+  const view = planView([
+    epic(
+      120,
+      "Refined product redesign",
+      [
+        story(128, "Restyle the task page", 120, [
+          task(143, "Restyle the sidebar", "Ready", { start: "2026-10-02", target: "2026-10-03" }),
+          task(148, "Restyle the task page", "Shaping", { start: "2026-10-03", target: "2026-10-04" }),
+        ]),
+      ],
+      [],
+      { milestone: { number: 1, title: "Redesign beta" } },
+    ),
+  ]);
+  const timeline = timelineOf(view, [], NOW);
+  const plan = withMilestones(view, [milestone(1, "Redesign beta", { dueOn: "2026-10-03" })], { timeline });
+  render(
+    <PlanTimeline
+      projectId="p1"
+      repoUrl={REPO_URL}
+      project={{ ...PROJECT, dateFields: { start: "s", target: "t" } }}
+      epics={plan.epics}
+      unparented={[]}
+      timeline={timeline}
+      zoom={undefined}
+      filters={parsePlanFilters({ milestone: "1" })}
+      milestone={plan.milestones![0]}
+      needsYou={[]}
+      graphs={["loop"]}
+      graphName="loop"
+      readAt={NOW.getTime()}
+    />,
+    { wrapper: TooltipProvider },
+  );
+  const list = within(screen.getByRole("list", { name: "Timeline" }));
+  expect(within(list.getByRole("listitem", { name: /Task #148/ })).getByText("Ends after Oct 3")).toBeInTheDocument();
+  expect(within(list.getByRole("listitem", { name: /Task #143/ })).queryByText("Ends after Oct 3")).not.toBeInTheDocument();
 });

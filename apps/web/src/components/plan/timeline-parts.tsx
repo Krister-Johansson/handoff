@@ -26,6 +26,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { planPath } from "@/lib/paths";
 import type { Timeline, TimelineItem } from "@/lib/plan/schedule";
 import type { PlanFilters } from "@/lib/plan/filters";
+import type { PlanMilestone } from "@/lib/plan/milestones";
 import { formatDuration } from "@/lib/plan/duration";
 import { BAR_TONE, taskColumn } from "@/lib/plan/task";
 import type { TimelineFieldsGap } from "@/lib/plan/timeline-rows";
@@ -49,6 +50,8 @@ export type TimelineProps = StartRunContext & {
   /** The zoom from ?zoom=; undefined picks one from the visible range. */
   zoom: Zoom | undefined;
   filters: PlanFilters;
+  /** The milestone the filter names, with its progress: the chart draws its due date. */
+  milestone?: PlanMilestone | undefined;
   needsYou: string[];
   /** When the page read GitHub, in epoch milliseconds: the Today line. */
   readAt: number;

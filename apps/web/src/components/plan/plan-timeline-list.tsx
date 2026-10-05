@@ -2,10 +2,11 @@
 
 import { use, useId, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarIcon, InfoIcon, LockIcon } from "lucide-react";
+import { CalendarIcon, InfoIcon, LockIcon, MilestoneIcon } from "lucide-react";
 import type { PlanItem } from "@handoff/github";
 import type { PlanTask } from "@/server/plan";
 import { moveItemAction } from "@/app/projects/actions";
+import { Tag } from "@/components/tag";
 import { Button } from "@/components/ui/button";
 import { Field, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -159,10 +160,9 @@ function StartField({ projectId, task, ctx, notes }: { projectId: string; task: 
 /**
  * The timeline under 640 px: one row per item in the tree's order with a mini bar, the dates as text
  * and the latest run's dates. Nothing drags; a sized task has its size chip and a Start field instead. There are no arrows; the warning icon after a task's title says what it
- * waits on, and whether it is late or overdue.
-
+ * waits on, and whether it is late or overdue. Filtered to a milestone, a task that ends after its due date says so.
  */
-export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, readAt, needsYou }: TimelineProps) {
+export function PlanTimelineList({ projectId, project, epics, unparented, timeline, zoom, readAt, needsYou, milestone }: TimelineProps) {
   const sizing = use(Sizing);
   const [scheduling, setScheduling] = useState<PlanItem>();
   const entries = useMemo(() => new Map(timeline.items.map((i) => [i.number, i])), [timeline.items]);
@@ -184,6 +184,8 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
           const span = entry.planned ?? entry.derived;
           const progress = progressOf(row.item);
           const latest = entry.actual[0];
+          const due = milestone?.dueOn;
+          const endsAfter = due !== undefined && row.task !== undefined && (entry.planned?.end ?? "") > due;
           return (
             <li
               key={row.item.number}
@@ -198,6 +200,12 @@ export function PlanTimelineList({ projectId, project, epics, unparented, timeli
               <MiniBar row={row} entry={entry} scale={scale} todayX={todayX} />
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <span className="text-foreground tabular-nums">{span ? spanText(span) : "No dates"}</span>
+                {endsAfter && (
+                  <Tag tone="danger">
+                    <MilestoneIcon aria-hidden />
+                    Ends after {shortDay(due)}
+                  </Tag>
+                )}
                 {progress && (
                   <span>
                     {progress.done} of {progress.total} done

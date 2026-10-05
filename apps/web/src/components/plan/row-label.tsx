@@ -10,6 +10,7 @@ import { taskColumn } from "@/lib/plan/task";
 import { cn } from "@/lib/utils";
 import { KindBadge, StatusPill } from "./plan-status";
 import { IssueTitle } from "./plan-task-parts";
+import { OwnMilestoneChip } from "./milestone-chip";
 
 function Chevron({ expanded, label, onToggle }: { expanded: boolean; label: string; onToggle: () => void }) {
   return (
@@ -113,6 +114,7 @@ export function RowLabel({ row, lead, onToggle, flag, aside, menu, below, width 
         {item ? <IssueTitle item={item} className={cn("text-xs", !task && "font-medium")} /> : <span className="text-[13px] font-medium">Unparented</span>}
         {flag}
         <span className="ml-auto flex shrink-0 items-center gap-1">
+          {item && <OwnMilestoneChip item={item} />}
           {aside}
           {menu}
         </span>

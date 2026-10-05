@@ -18,6 +18,7 @@ import { taskColumn } from "@/lib/plan/task";
 import { AssigneeButton } from "./assignee-button";
 import { SizeChip, SizeSum } from "./size-chip";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
+import { OwnMilestoneChip } from "./milestone-chip";
 
 import { matchesQuery } from "@/lib/plan/search";
 import { useSearchQuery } from "./plan-context";
@@ -132,6 +133,7 @@ function TaskRow({ task, outside, ...ctx }: { task: PlanTask; outside?: boolean 
 
         <TaskTags task={task} skipped={ctx.skipped?.[task.number]} />
         <NextTag place={ctx.next?.[task.number]} />
+        <OwnMilestoneChip item={task} />
         {outside && task.parent !== undefined && <Tag>parent #{task.parent} is not in the plan</Tag>}
         {column !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={ctx.repoUrl} />}
       </span>
@@ -166,6 +168,7 @@ function StoryRow({ story, expanded, onToggle, ...ctx }: { story: PlanStory; exp
         <Chevron expanded={expanded} onToggle={onToggle} label={label} />
         <KindBadge kind="story" />
         <IssueTitle item={story} className="font-medium" />
+        <OwnMilestoneChip item={story} />
         {story.tasks.some((t) => taskColumn(t) !== "Done" && t.blockedBy.length > 0) && (
           <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
             <LockIcon aria-hidden className="size-3" />
@@ -323,6 +326,7 @@ export function PlanTree({ epics, unparented, unplanned, hidden, hiddenBy = "fil
                   <Chevron expanded={open(key)} onToggle={() => rows.toggle(key)} label={label} />
                   <KindBadge kind="epic" />
                   <IssueTitle item={epic} className="text-sm font-semibold" />
+                  <OwnMilestoneChip item={epic} />
                 </span>
                 <span className={RIGHT}>
                   <SizeSum tasks={[...epic.stories.flatMap((s) => s.tasks), ...epic.tasks]} />

@@ -60,13 +60,13 @@ export function timelineFieldsGap(project: PlanProject): TimelineFieldsGap | und
 /** "Oct 6 to Oct 17", or one day alone. */
 export const spanText = (span: DaySpan) => (span.start === span.end ? shortDay(span.start) : `${shortDay(span.start)} to ${shortDay(span.end)}`);
 
-/** The days the chart shows: every planned or derived span and every run strip, around today. */
-export function chartRange(timeline: Timeline): DaySpan {
+/** The days the chart shows: every planned or derived span, every run strip and the `days` given, such as a due date, around today. */
+export function chartRange(timeline: Timeline, days: readonly string[] = []): DaySpan {
   const spans = timeline.items.flatMap((i) => [
     ...[i.planned ?? i.derived].filter((s) => s !== undefined),
     ...i.actual.map((a) => ({ start: dayOfInstant(a.start), end: dayOfInstant(a.end) })),
   ]);
-  return visibleRange(spans, timeline.today);
+  return visibleRange([...spans, ...days.map((day) => ({ start: day, end: day }))], timeline.today);
 }
 
 /** Every epic, story and task of the plan as shown, by number. */

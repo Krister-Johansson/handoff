@@ -2,7 +2,7 @@
 
 import { startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useRouter } from "next/navigation";
-import { CheckIcon, HandIcon, LockIcon, TriangleAlertIcon } from "lucide-react";
+import { CheckIcon, HandIcon, LockIcon, MilestoneIcon, TriangleAlertIcon } from "lucide-react";
 import { toast } from "sonner";
 import type { PlanItem } from "@handoff/github";
 import type { PlanEpic, PlanTask } from "@/server/plan";
@@ -13,6 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { layoutFlow, reorderFlow, type Flow, type FlowCard, type FlowInput } from "@/lib/plan/flow";
 import { moveTo, ruleBreaks } from "@/lib/plan/flow-order";
+import { flowLineText } from "@/lib/plan/milestone-text";
+import { itemMilestones, milestoneProgress, type PlanMilestone } from "@/lib/plan/milestones";
+import { shortDay } from "@/lib/plan/timeline-scale";
 import { matchesQuery } from "@/lib/plan/search";
 import { chainPlace, thenPath } from "@/lib/plan/story-order";
 import { optimize } from "@/lib/plan/optimize";
@@ -28,6 +31,7 @@ import { PinButton, PinnedTag, PinSquare, RowTag, SizeBox, SlotSquare } from "./
 import { PriorityOrderDialog } from "./priority-order-dialog";
 import { RuleBreakDialog, type BreakChoice, type RuleBreakDrop } from "./rule-break-dialog";
 import { ItemMenu, RowLabel } from "./row-label";
+import { MilestoneTag } from "./milestone-chip";
 import { useNarrow } from "./timeline-parts";
 import { placeMove, useCardDrag, type CardMove, type CardPlace } from "./use-card-drag";
 import { useRowsOpen } from "./use-collapsed";
@@ -45,6 +49,8 @@ export type FlowProps = StartRunContext & {
   scheduler?: SchedulerBrief | undefined;
   /** During a search, the rows it opens; the collapse store's rows otherwise. */
   searchOpen?: Set<string> | undefined;
+  /** The milestone the filter names: a dashed line follows its last card in the order. */
+  milestone?: PlanMilestone | undefined;
 };
 
 /** The left column is wider than the Timeline's for the tags under a task's title. */
@@ -504,6 +510,7 @@ function FlowRowLabel({
   tags,
   tick,
   was,
+  last,
   projectId,
   start,
   onToggle,
@@ -512,6 +519,8 @@ function FlowRowLabel({
   row: TimelineRow;
   tags: string[];
   tick: Tick | undefined;
+  /** The filtered milestone's title when this task is its last in the order. */
+  last: string | undefined;
   /** In Optimize's preview, the Next place the task moves from. */
   was: number | undefined;
   projectId: string;
@@ -530,9 +539,10 @@ function FlowRowLabel({
       aside={task && <SizeBox task={task} />}
       menu={task ? <TaskActions task={task} projectId={projectId} start={start} compact /> : item && <ItemMenu item={item} />}
       below={
-        shown.length > 0 && (
+        (shown.length > 0 || last) && (
           <div className="flex min-w-0 items-center gap-1 overflow-hidden">
             {shown.map((t) => (t === "Pinned" && task ? <PinnedTag key={t} issue={task.number} onUnpin={onUnpin} /> : <RowTag key={t} text={t} was={t.startsWith("Next ") ? was : undefined} />))}
+            {last && <MilestoneTag title={`The last task of ${last} in the order`}>Last of {last}</MilestoneTag>}
           </div>
         )
       }
@@ -540,8 +550,62 @@ function FlowRowLabel({
   );
 }
 
+/**
+ * Where the filtered milestone ends in the order (issue #602): the tasks in it, the right edge of its card that ends
+ * last on the axis, and the flag's words. Flow has no dates, so the due date is only named in the flag's title.
+ */
+type MilestoneEnd = { title: string; members: ReadonlySet<number>; last: number | undefined; x: number | undefined; text: string | undefined; note: string };
+
+/** The milestone's tasks among the Flow's items, own or inherited, and where the order `flow` ends it, judged again after every local move. */
+function milestoneEnd(milestone: PlanMilestone | undefined, tasks: FlowInput["tasks"], flow: Flow, cards: ReadonlyMap<number, FlowCard>, axis: Axis): MilestoneEnd | undefined {
+  if (!milestone) return undefined;
+  const of = itemMilestones(tasks);
+  const members = new Set(tasks.flatMap((t) => (of.get(t.number)?.number === milestone.number ? [t.number] : [])));
+  const judged = milestoneProgress([milestone], tasks, { flow }).milestones[0]?.progress.flow;
+  // The line goes after the milestone's card that ends last, so none of its cards crosses it; the flag names the last place.
+  const rights = [...members].flatMap((n) => {
+    const card = cards.get(n);
+    return card ? [boxOf(axis, card).left + boxOf(axis, card).width] : [];
+  });
+  const due = milestone.dueOn ? `${milestone.title} is due ${shortDay(milestone.dueOn)}. ` : "";
+  return {
+    title: milestone.title,
+    members,
+    last: judged?.last?.issue,
+    x: judged?.last && rights.length ? Math.max(...rights) : undefined,
+    text: judged && flowLineText(milestone.title, judged),
+    note: `${due}Flow has no dates, so this is where its last task ends in the order, not a day.`,
+  };
+}
+
+/** The room the milestone's flag needs right of its line; with less, it sits on the left. */
+const FLAG_ROOM = 220;
+
+/** The dashed line after the milestone's last card; nothing when no card of it is in the order. */
+function EndLine({ x }: { x: number | undefined }) {
+  if (x === undefined) return null;
+  return <span aria-hidden data-milestone-end className="absolute inset-y-0 z-[4] border-l-2 border-dashed border-foreground/70" style={{ left: x }} />;
+}
+
+/** The milestone's title on its last task's row, for Last of 0.9. */
+const lastOn = (row: TimelineRow, ending: MilestoneEnd | undefined) => (ending && row.task?.number === ending.last ? ending.title : undefined);
+
 /** The header: the lanes named on the left, and on the axis each lane's strip with every card again, Now, and the scheduler's note. */
-function LaneHeader({ flow, axis, order, scheduler, lanes }: { flow: Flow; axis: Axis; order: FlowInput["order"]; scheduler: SchedulerBrief | undefined; lanes: number }) {
+function LaneHeader({
+  flow,
+  axis,
+  order,
+  scheduler,
+  lanes,
+  ending,
+}: {
+  flow: Flow;
+  axis: Axis;
+  order: FlowInput["order"];
+  scheduler: SchedulerBrief | undefined;
+  lanes: number;
+  ending: MilestoneEnd | undefined;
+}) {
   const height = LANE_TOP + flow.lanes.length * LANE_HEIGHT;
   const note = schedulerNote(flow, scheduler);
   // Each lane is a slot of the scheduler, numbered from 1.
@@ -566,10 +630,12 @@ function LaneHeader({ flow, axis, order, scheduler, lanes }: { flow: Flow; axis:
               return (
                 <li
                   key={c.issue}
-                  title={`#${c.issue}, slot ${slot}`}
+                  title={ending && !ending.members.has(c.issue) ? `#${c.issue}, slot ${slot}, not in ${ending.title}` : `#${c.issue}, slot ${slot}`}
+                  data-outside={(ending && !ending.members.has(c.issue)) || undefined}
                   className={cn(
                     "absolute top-0.5 h-2.5 overflow-hidden rounded-[3px] px-1 font-mono text-[8.5px] leading-[10px] whitespace-nowrap text-foreground",
                     c.kind === "running" ? "bg-attention-dot/55" : c.kind === "next" ? "bg-active-dot/35" : "bg-muted-foreground/25",
+                    ending && !ending.members.has(c.issue) && "opacity-30",
                   )}
                   style={{ left, width }}
                 >
@@ -594,6 +660,23 @@ function LaneHeader({ flow, axis, order, scheduler, lanes }: { flow: Flow; axis:
           </Tag>
         )}
         <span className="absolute top-[5px] right-2.5 text-[10.5px] text-muted-foreground">{order === "priority" ? "Priority order" : "Project order"}. Length by size.</span>
+        {ending?.x !== undefined && (
+          <>
+            <EndLine x={ending.x} />
+            <span
+              title={ending.note}
+              className={cn(
+                "absolute top-[3px] z-[6] inline-flex h-[18px] items-center gap-1 rounded-[4px] bg-foreground px-[7px] text-[10px] font-semibold whitespace-nowrap text-background [&_svg]:size-2.5",
+                // Near the axis's right end the flag sits left of the line, so it stays in view.
+                ending.x > axis.width - FLAG_ROOM && "-translate-x-full",
+              )}
+              style={{ left: ending.x > axis.width - FLAG_ROOM ? ending.x - 5 : ending.x + 5 }}
+            >
+              <MilestoneIcon aria-hidden />
+              {ending.text}
+            </span>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1046,7 +1129,7 @@ function blocksOf(blockers: ReadonlyMap<number, readonly number[]>): Map<number,
  * Lengths follow the sizes and only decide which slot frees first. A Ready card drags to a new place in the
  * order (Decisions 8 to 10).
  */
-function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graphs, graphName, searchOpen }: FlowProps) {
+function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graphs, graphName, searchOpen, milestone }: FlowProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const width = usePaneWidth(scroller);
   const rowsOpen = useRowsOpen(projectId, searchOpen);
@@ -1071,6 +1154,8 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
   const tags = new Map(flow.rows.map((r) => [r.issue, r.tags]));
   const breaks = new Map(flow.breaks.map((b) => [b.issue, b.waitsFor]));
   const items = new Map<number, PlanItem>([...input.tasks.map((t) => [t.number, t] as const), ...itemsOf(epics, unparented)]);
+  // The line follows the order on screen: a drag's landing, Optimize's preview, or a move saved until the next read.
+  const ending = milestoneEnd(milestone, input.tasks, flow, cards, axis);
   const { rows, height } = timelineRows(epics, unparented, rowsOpen.isOpen, () => 0);
   const { hover, litPairs, lighting, inChain } = useChainHover(flow, place !== undefined);
   const { arrows, then } = useArrows(flow, placer(rows, cards, axis), breaks, litPairs);
@@ -1106,7 +1191,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
       <div ref={scroller} className="overflow-x-auto overscroll-x-contain">
         <div role="grid" aria-label="Flow" aria-rowcount={rows.length + 1} className="relative text-[13px]" style={{ width: LABEL + axis.width, minWidth: "100%" }}>
           <div role="rowgroup">
-            <LaneHeader flow={flow} axis={axis} order={input.order} scheduler={scheduler} lanes={input.lanes} />
+            <LaneHeader flow={flow} axis={axis} order={input.order} scheduler={scheduler} lanes={input.lanes} ending={ending} />
           </div>
           <div role="rowgroup" className="relative" style={{ height }}>
             {/* Under the rows, so the hatch and the arrows pass behind the cards; the Now line stays on top. */}
@@ -1115,6 +1200,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
               <ArrowLayer arrows={arrows} then={then} lighting={lighting} width={axis.width} height={height} />
               <span className="absolute inset-y-0 z-[3] w-0.5 -translate-x-1/2 bg-foreground/85" style={{ left: axis.now }} />
               {drops.tip && landed && <span data-drop-line className="absolute inset-y-0 z-[4] border-l-[1.5px] border-dashed border-foreground/60" style={{ left: axis.x(landed.start) }} />}
+              <EndLine x={ending?.x} />
             </div>
             {rows.map((row) => (
               <div
@@ -1130,6 +1216,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
                   tags={(row.task && tags.get(row.task.number)) ?? []}
                   tick={tickOf(row)}
                   was={row.task && optimized?.was.get(row.task.number)}
+                  last={lastOn(row, ending)}
                   projectId={projectId}
                   start={{ graphs, graphName }}
                   onToggle={() => rowsOpen.toggle(row.key)}

@@ -38,7 +38,7 @@ export function projectAt(pathname: string): { projectId: string; section?: Proj
  */
 export function planPath(
   projectId: string,
-  opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; assignee?: AssigneeFilter; q?: string; zoom?: Zoom } = {},
+  opts: { view?: PlanViewName; epic?: number | "unplanned"; status?: PlanStatus[]; run?: RunFilter; assignee?: AssigneeFilter; milestone?: number | "none" | undefined; q?: string; zoom?: Zoom } = {},
 ) {
   const view = opts.view ?? (opts.epic === "unplanned" ? "tree" : undefined);
   const query = [
@@ -47,6 +47,7 @@ export function planPath(
     opts.status?.length ? `status=${opts.status.map(encodeURIComponent).join(",")}` : undefined,
     opts.run && opts.run !== "any" ? `run=${opts.run}` : undefined,
     opts.assignee && opts.assignee !== "anyone" ? `assignee=${encodeURIComponent(opts.assignee)}` : undefined,
+    opts.milestone !== undefined ? `milestone=${opts.milestone}` : undefined,
     opts.q ? `q=${encodeURIComponent(opts.q)}` : undefined,
     opts.view === "timeline" && opts.zoom ? `zoom=${opts.zoom}` : undefined,
   ].filter(Boolean);

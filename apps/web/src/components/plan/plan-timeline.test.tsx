@@ -13,7 +13,7 @@ import { PlanTimeline } from "./plan-timeline";
 import { KEY_DELAY } from "./use-bar-drag";
 import { TimelineControls } from "./timeline-parts";
 import { Sizing } from "./plan-context";
-import { epic, planView, PROJECT, REPO_URL, run, sizedTimelineOf, sizingOf, story, task, timelineOf } from "./testing/plan-fixtures";
+import { epic, milestone, planView, PROJECT, REPO_URL, run, sizedTimelineOf, sizingOf, story, task, timelineOf, withMilestones } from "./testing/plan-fixtures";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -962,4 +962,85 @@ test("Arrange is off when no unscheduled task has a size or an estimate", async 
   unmount();
   renderTimeline();
   expect(within(screen.getByRole("region", { name: "Unscheduled" })).queryByRole("button", { name: "Arrange by estimate" })).not.toBeInTheDocument();
+});
+
+/**
+ * The design's Redesign beta, due Saturday Oct 3: epic #120 sets it, so its stories and tasks are in it. #148 and #149
+ * end on Oct 4, a day late; #152 has no dates.
+ */
+const redesign = planView([
+  epic(
+    120,
+    "Refined product redesign",
+    [
+      story(125, "Redesign foundations", 120, [task(141, "Tokens", "Done", { state: "closed", start: "2026-10-01", target: "2026-10-01" }), task(152, "Document the workflow", "Shaping")]),
+      story(128, "Restyle the task page", 120, [
+        task(143, "Restyle the sidebar", "Ready", { start: "2026-10-02", target: "2026-10-03" }),
+        task(148, "Restyle the task page", "Shaping", { start: "2026-10-03", target: "2026-10-04" }),
+        task(149, "Restyle dialogs", "Shaping", { start: "2026-10-04", target: "2026-10-04" }),
+      ]),
+    ],
+    [],
+    { milestone: { number: 1, title: "Redesign beta" } },
+  ),
+]);
+
+function renderRedesign(dueOn: string) {
+  const timeline = timelineOf(redesign, [], NOW);
+  const plan = withMilestones(redesign, [milestone(1, "Redesign beta", { dueOn })], { timeline });
+  return render(
+    <PlanTimeline
+      projectId="p1"
+      repoUrl={REPO_URL}
+      project={PROJECT_WITH_DATES}
+      epics={plan.epics}
+      unparented={[]}
+      timeline={timeline}
+      zoom="days"
+      filters={parsePlanFilters({ milestone: "1" })}
+      milestone={plan.milestones![0]}
+      needsYou={[]}
+      graphs={["loop"]}
+      graphName="loop"
+      readAt={NOW.getTime()}
+    />,
+    { wrapper: TooltipProvider },
+  );
+}
+
+test("filtered to a milestone, the timeline draws its due date as a dashed line with a flag, hatches the days past it and names the tasks that end after it", () => {
+  const { container } = renderRedesign("2026-10-03");
+  const grid = screen.getByRole("grid", { name: "Timeline" });
+  const flag = within(grid).getByText("Redesign beta, due Oct 3");
+  expect(flag).toHaveAttribute("data-late");
+  expect(flag).toHaveAttribute("title", "Redesign beta is due Oct 3. Its last task ends Oct 4.");
+  // The line sits at the end of the due day, where #149's bar on Oct 4 starts; the hatch covers Oct 4.
+  const lines = container.querySelectorAll<HTMLElement>("[data-due-line]");
+  expect(lines).toHaveLength(2);
+  const oct4 = within(row(/Task #149/)).getByRole("link", { name: /^Task #149/ });
+  for (const line of lines) expect(line.style.left).toBe(oct4.style.left);
+  const hatch = container.querySelector<HTMLElement>("[data-past-due]")!;
+  expect(hatch.style.left).toBe(oct4.style.left);
+  expect(hatch.style.width).toBe(oct4.style.width);
+  expect(within(grid).getByText("Ends Oct 4, 1 day late")).toBeInTheDocument();
+
+  expect(within(row(/Task #148/)).getByText("Ends after Oct 3")).toBeInTheDocument();
+  expect(within(row(/Task #149/)).getByText("Ends after Oct 3")).toBeInTheDocument();
+  expect(within(row(/Task #143/)).queryByText("Ends after Oct 3")).not.toBeInTheDocument();
+  expect(within(row(/Task #141/)).queryByText("Ends after Oct 3")).not.toBeInTheDocument();
+});
+
+test("a milestone the plan ends early has its line and flag with no hatch, and without the filter there is no line", () => {
+  const { container, unmount } = renderRedesign("2026-10-07");
+  const flag = screen.getByText("Redesign beta, due Oct 7");
+  expect(flag).not.toHaveAttribute("data-late");
+  expect(flag).toHaveAttribute("title", "Redesign beta is due Oct 7. Its last task ends Oct 4.");
+  expect(container.querySelectorAll("[data-due-line]")).toHaveLength(2);
+  expect(container.querySelector("[data-past-due]")).toBeNull();
+  expect(screen.queryByText(/Ends after/)).not.toBeInTheDocument();
+  unmount();
+
+  const again = renderTimeline({ plan: redesign });
+  expect(again.container.querySelector("[data-due-line]")).toBeNull();
+  expect(screen.queryByText(/due Oct/)).not.toBeInTheDocument();
 });
