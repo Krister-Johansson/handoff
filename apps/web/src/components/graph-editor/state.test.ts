@@ -27,6 +27,15 @@ describe("graph editor state", () => {
     expect(documentOf(state).edges.find((e) => e.key === "reviewer-1->planner")!.attributes).toMatchObject({ port: "changes", input: "feedback" });
   });
 
+  test("a second edge into a node is an issue on that node until it has a join mode", () => {
+    let state = editorReducer(initial(), { type: "connect", source: "planner", target: "pr" });
+    expect(issuesOf(state)).toEqual([
+      { code: "join_mode_required", message: 'pr has 2 incoming edges; set its join mode to "all" (wait for every edge) or "any" (go on at the first)', nodeKey: "pr" },
+    ]);
+    state = editorReducer(state, { type: "updateNode", id: "pr", patch: { config: { join: "all" } } });
+    expect(issuesOf(state)).toEqual([]);
+  });
+
   test("adding a Start to a graph makes it where the run starts and connects it to the old first step; a second Start is not added", () => {
     const state = editorReducer(initial(), { type: "addNode", nodeType: "start", position: { x: 0, y: 0 } });
     expect(state.attributes.startNode).toBe("start-1");

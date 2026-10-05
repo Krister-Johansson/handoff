@@ -34,7 +34,8 @@ export type CompileErrorCode =
   | "invalid_model"
   | "invalid_review_level"
   | "invalid_start"
-  | "invalid_finish";
+  | "invalid_finish"
+  | "join_mode_required";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -121,7 +122,44 @@ function resolvePorts(key: string, attributes: EdgeAttributes, source: CompiledN
   return resolved;
 }
 
+/** How a node fed by several edges starts: once every edge has arrived, or at the first. */
+export const JOIN_MODES = ["all", "any"] as const;
+export type JoinMode = (typeof JOIN_MODES)[number];
+export const isJoinMode = (value: unknown): value is JoinMode => (JOIN_MODES as readonly unknown[]).includes(value);
+
+/** Every node with more than one incoming edge that is not a loop needs a join mode of its own. */
+function joinProblems(graph: DirectedGraph<CompiledNode, CompiledEdge>): CompileError[] {
+  const errors: CompileError[] = [];
+  graph.forEachNode((key, node) => {
+    const incoming = graph.inEdges(key).filter((edge) => !graph.getEdgeAttributes(edge).loop).length;
+    if (incoming > 1 && !isJoinMode(node.config.join)) {
+      errors.push({
+        code: "join_mode_required",
+        message: `${key} has ${incoming} incoming edges; set its join mode to "all" (wait for every edge) or "any" (go on at the first)`,
+        nodeKey: key,
+      });
+    }
+  });
+  return errors;
+}
+
+/**
+ * Compiles a stored graph to run it. The worker compiles the version a run is pinned to with this, so it
+ * holds only the rules every stored version meets; rules added later go in validateGraphForSave.
+ */
 export function compileGraph(input: unknown): CompileResult {
+  return compile(input, { saving: false });
+}
+
+/**
+ * compileGraph and the rules a graph must also meet to be saved as a new version: the editor, graph
+ * import and templates check with this. A version saved before a rule existed still compiles and runs.
+ */
+export function validateGraphForSave(input: unknown): CompileResult {
+  return compile(input, { saving: true });
+}
+
+function compile(input: unknown, rules: { saving: boolean }): CompileResult {
   const secretAt = findSecret(input, "");
   if (secretAt) {
     return { ok: false, errors: [{ code: "secret_in_graph", message: `${secretAt} looks like a credential; reference secrets from the library as \${secret:NAME} instead` }] };
@@ -252,6 +290,8 @@ export function compileGraph(input: unknown): CompileResult {
       });
     }
   }
+
+  if (rules.saving) errors.push(...joinProblems(graph));
 
   if (hasCycle(acyclic)) {
     errors.push({ code: "non_loop_cycle", message: "graph has a cycle that does not go through a loop edge" });

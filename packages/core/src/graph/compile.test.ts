@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import linear from "../fixtures/linear.graph.json" with { type: "json" };
-import { compileGraph, type CompileResult } from "./compile.ts";
+import { compileGraph, validateGraphForSave, type CompileResult } from "./compile.ts";
 
 type Doc = typeof linear;
 const clone = (): Doc => structuredClone(linear);
@@ -181,5 +181,62 @@ describe("library and secrets", () => {
     (doc.nodes[1]!.attributes as Record<string, unknown>).config = { note: "use ghp_abcdefghijklmnopqrstuvwxyz0123456789" };
     const result = compileGraph(doc);
     expect(codes(result)).toContain("secret_in_graph");
+  });
+});
+
+describe("validateGraphForSave", () => {
+  // Two branches from the start meet at report.
+  const fanIn = (config: Record<string, unknown> = {}) => ({
+    attributes: { startNode: "start" },
+    nodes: [
+      { key: "start", attributes: { type: "function" } },
+      { key: "a", attributes: { type: "function" } },
+      { key: "b", attributes: { type: "function" } },
+      { key: "report", attributes: { type: "function", config } },
+    ],
+    edges: [
+      { key: "start->a", source: "start", target: "a" },
+      { key: "start->b", source: "start", target: "b" },
+      { key: "a->report", source: "a", target: "report" },
+      { key: "b->report", source: "b", target: "report" },
+    ],
+  });
+
+  test("a node with two incoming edges and no join mode is refused, naming the node", () => {
+    const result = validateGraphForSave(fanIn());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.errors).toEqual([
+      {
+        code: "join_mode_required",
+        message: 'report has 2 incoming edges; set its join mode to "all" (wait for every edge) or "any" (go on at the first)',
+        nodeKey: "report",
+      },
+    ]);
+  });
+
+  test("a join mode that is neither all nor any is refused", () => {
+    expect(codes(validateGraphForSave(fanIn({ join: "first" })))).toEqual(["join_mode_required"]);
+  });
+
+  test("a node with two incoming edges saves with join mode all or any", () => {
+    expect(validateGraphForSave(fanIn({ join: "all" })).ok).toBe(true);
+    expect(validateGraphForSave(fanIn({ join: "any" })).ok).toBe(true);
+  });
+
+  test("a loop edge back into a node does not count toward its join", () => {
+    const doc = clone();
+    doc.edges.push({ key: "pr->coder", source: "pr", target: "coder", attributes: { loop: true, maxAttempts: 2 } as never });
+    expect(validateGraphForSave(doc).ok).toBe(true);
+  });
+
+  test("a version saved before join modes were required still compiles, so runs pinned to it keep running", () => {
+    expect(compileGraph(fanIn()).ok).toBe(true);
+  });
+
+  test("the join rule is reported alongside the graph's other problems", () => {
+    const doc = fanIn();
+    doc.nodes.push({ key: "stray", attributes: { type: "function", config: {} } });
+    expect(codes(validateGraphForSave(doc)).sort()).toEqual(["join_mode_required", "unreachable_node"]);
   });
 });

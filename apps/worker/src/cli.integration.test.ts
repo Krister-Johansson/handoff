@@ -92,6 +92,17 @@ test("graph import rejects a graph that does not compile and lists the errors", 
   );
 });
 
+test("graph import refuses a node with two incoming edges and no join mode, naming the node", async () => {
+  const { out } = capture();
+  await runCli(["project", "add", "--name", "scratch", "--repo", "octo/sample"], { db, out, github: null });
+  const fanIn = structuredClone(linear);
+  fanIn.edges.push({ ...fanIn.edges[0]!, key: "planner->pr", target: "pr" });
+  await expect(runCli(["graph", "import", "--project", "scratch", "--name", "linear", graphFile(fanIn)], { db, out, github: null })).rejects.toThrow(
+    'join_mode_required: pr has 2 incoming edges; set its join mode to "all" (wait for every edge) or "any" (go on at the first)',
+  );
+  expect(await db.select().from(graphVersions)).toEqual([]);
+});
+
 test("handoff run --issue links issues, and without --task uses their titles", async () => {
   const { out } = capture();
   const github = new FakeGitHub();

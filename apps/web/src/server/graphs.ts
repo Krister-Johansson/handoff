@@ -1,7 +1,7 @@
 import linear from "@handoff/core/templates/linear.graph.json" with { type: "json" };
 import loop from "@handoff/core/templates/loop.graph.json" with { type: "json" };
 import planReview from "@handoff/core/templates/plan-review.graph.json" with { type: "json" };
-import { compileGraph, RunStateSchema, suggestProjectName, type CompileError } from "@handoff/core";
+import { RunStateSchema, suggestProjectName, validateGraphForSave, type CompileError } from "@handoff/core";
 import { and, desc, eq, graphs, graphVersions, inArray, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { cancelRun, splitPartsOf, splitRun, statusesBeforeRun, type SplitIssue } from "@handoff/engine/operations";
 import { branchHasWork, previousRunOf } from "@handoff/engine/runs";
@@ -144,9 +144,9 @@ export async function getGraphVersion(db: Db, projectId: string, name: string, v
 
 export type SaveResult = { ok: true; version: number } | { ok: false; errors: CompileError[] };
 
-/** Validates with compileGraph and stores a new immutable version; runs stay pinned to theirs. */
+/** Validates with validateGraphForSave and stores a new immutable version; runs stay pinned to theirs. */
 export async function saveGraphVersion(db: Db, input: { projectId: string; name: string; document: unknown; createdBy?: string }): Promise<SaveResult> {
-  const compiled = compileGraph(input.document);
+  const compiled = validateGraphForSave(input.document);
   if (!compiled.ok) return { ok: false, errors: compiled.errors };
   const version = await db.transaction(async (tx) => {
     const [graph] = await tx
