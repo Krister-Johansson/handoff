@@ -159,6 +159,36 @@ test("a pull request node waits for review bots or people, and sends their comme
   expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewTimeoutMinutes: 45 } } });
 });
 
+test("a pull request node can ask a reviewer that has not started with a comment", () => {
+  const dispatch = vi.fn();
+  const pr = (config: Record<string, unknown>): FlowGraph => ({ ...graph, nodes: [...graph.nodes, { id: "pr", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "pr", label: "Pull request", isStart: false, config } }] });
+  const waiting = { waitForReviewers: ["octocat", "coderabbitai[bot]"] };
+  const { rerender } = render(<Inspector graph={pr(waiting)} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  const ask = screen.getByRole("switch", { name: "Ask a reviewer that has not started" });
+  expect(ask).not.toBeChecked();
+  expect(screen.queryByLabelText("Comment")).not.toBeInTheDocument();
+  fireEvent.click(ask);
+  // CodeRabbit is asked by default, with its own command.
+  const request = { reviewer: "coderabbitai[bot]", comment: "@coderabbitai review", afterMinutes: 2 };
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewRequest: request } } });
+
+  rerender(<Inspector graph={pr({ ...waiting, reviewRequest: request })} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByRole("switch", { name: "Ask a reviewer that has not started" })).toBeChecked();
+  expect(screen.getByLabelText("Reviewer to ask")).toHaveValue("coderabbitai[bot]");
+  const comment = screen.getByLabelText("Comment");
+  expect(comment).toHaveValue("@coderabbitai review");
+  fireEvent.change(comment, { target: { value: "@coderabbitai full review" } });
+  fireEvent.blur(comment);
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewRequest: { ...request, comment: "@coderabbitai full review" } } } });
+  fireEvent.change(screen.getByLabelText("Ask after (minutes)"), { target: { value: "5" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewRequest: { ...request, afterMinutes: 5 } } } });
+  fireEvent.change(screen.getByLabelText("Reviewer to ask"), { target: { value: "octocat" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewRequest: { ...request, reviewer: "octocat", comment: "@octocat review" } } } });
+
+  fireEvent.click(screen.getByRole("switch", { name: "Ask a reviewer that has not started" }));
+  expect(dispatch).toHaveBeenLastCalledWith({ type: "replaceNodeConfig", id: "pr", config: waiting });
+});
+
 test("a pull request node says how long to wait for CI to start on a repository that may have none", () => {
   const dispatch = vi.fn();
   const pr: FlowGraph = { ...graph, nodes: [...graph.nodes, { id: "pr", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "pr", label: "Pull request", isStart: false, config: {} } }] };

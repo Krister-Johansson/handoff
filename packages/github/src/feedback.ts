@@ -1,9 +1,11 @@
 import type { Feedback } from "@handoff/core";
 import type { PrSnapshot } from "./types.ts";
 
-/** Comments handoff writes on a PR start with a marker like this; they are notes, not feedback. */
+/** Comments handoff writes on a PR carry a marker like this; they are notes or requests, not feedback. */
 export const HANDOFF_COMMENT_PREFIX = "<!-- handoff:";
 export const REVIEWER_NOTES_MARKER = `${HANDOFF_COMMENT_PREFIX}reviewer-notes -->`;
+/** Ends the comment the PR node posts to ask a reviewer for a review of one head commit; the comment starts with the reviewer's command. */
+export const reviewRequestMarker = (headSha: string) => `${HANDOFF_COMMENT_PREFIX}review-request ${headSha} -->`;
 
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
 
@@ -31,7 +33,7 @@ export function toFeedback(snapshot: PrSnapshot, jobLogs: { jobId: number; log: 
       resolved: thread.isResolved,
     })),
   );
-  const issueComments = snapshot.comments.filter((c) => !c.body.startsWith(HANDOFF_COMMENT_PREFIX)).map((c) => ({ author: c.author, body: c.body, url: c.url, resolved: false }));
+  const issueComments = snapshot.comments.filter((c) => !c.body.includes(HANDOFF_COMMENT_PREFIX)).map((c) => ({ author: c.author, body: c.body, url: c.url, resolved: false }));
   return {
     ci: { status, failedJobs },
     review: {
