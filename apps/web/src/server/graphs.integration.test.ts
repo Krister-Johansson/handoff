@@ -73,6 +73,32 @@ describe("projects and graphs", () => {
     expect(await db.select().from(graphVersions)).toEqual([]);
   });
 
+  test("save refuses a node with two incoming edges and no join mode, and saves it with one", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    const fanIn = structuredClone(linear);
+    fanIn.edges.push({ ...fanIn.edges[0]!, key: "planner->pr", target: "pr" });
+    const refused = await saveGraphVersion(db, { projectId: project.id, name: "g", document: fanIn });
+    expect(refused).toEqual({
+      ok: false,
+      errors: [{ code: "join_mode_required", message: 'pr has 2 incoming edges; set its join mode to "all" (wait for every edge) or "any" (go on at the first)', nodeKey: "pr" }],
+    });
+    expect(await db.select().from(graphVersions)).toEqual([]);
+    (fanIn.nodes.find((n) => n.key === "pr")!.attributes as { config?: Record<string, unknown> }).config = { join: "all" };
+    expect(await saveGraphVersion(db, { projectId: project.id, name: "g", document: fanIn })).toEqual({ ok: true, version: 1 });
+  });
+
+  test("a version stored before join modes were required still starts and runs", async () => {
+    const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+    await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+    const [stored] = await db.select().from(graphVersions);
+    const fanIn = structuredClone(linear);
+    fanIn.edges.push({ ...fanIn.edges[0]!, key: "planner->pr", target: "pr" });
+    await db.update(graphVersions).set({ document: fanIn }).where(eq(graphVersions.id, stored!.id));
+    const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "t" });
+    const graph = await loadCompiledGraph(db, run.graphVersionId);
+    expect(graph.inEdges("pr").filter((e) => !e.loop).map((e) => e.key)).toEqual(["coder->pr", "planner->pr"]);
+  });
+
   test("saving creates a new graph version and leaves in-flight runs pinned", async () => {
     const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
     await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });

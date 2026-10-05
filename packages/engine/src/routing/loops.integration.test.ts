@@ -1,6 +1,9 @@
 import { afterAll, beforeEach, describe, expect, test } from "vitest";
 import loop from "@handoff/core/fixtures/loop.graph.json" with { type: "json" };
+import loopTemplate from "@handoff/core/templates/loop.graph.json" with { type: "json" };
+import planTemplate from "@handoff/core/templates/plan-review.graph.json" with { type: "json" };
 import { createTestDb, truncateAll } from "@handoff/db/testing";
+import { finishExecutor, startExecutor } from "../executors/flow.ts";
 import { cancelRun, repairNodeExecution } from "../operations.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
@@ -101,6 +104,25 @@ describe("fan-in joins", () => {
     await drain(engineDeps(db, { function: scripted(done({ ok: true })) }));
     const { run: row, executions } = await inspect(db, run.id);
     expect(executions.filter((e) => e.nodeKey === "join")).toHaveLength(1);
+    expect(row.status).toBe("succeeded");
+  });
+
+  // The demo's skipped port and the Try it gate's approve both lead to the PR node, and only one of them is taken.
+  test.each([
+    ["loop", loopTemplate],
+    ["plan", planTemplate],
+  ])("in the %s template a demo skipped for a change with no UI goes on to the PR node", async (_, template) => {
+    const { run } = await startRun(db, template);
+    const executors = registry({
+      start: startExecutor(),
+      finish: finishExecutor(),
+      human_gate: scripted(done({ option: "approve", answer: "Approve", answeredBy: "dashboard", answeredAt: "2026-10-05T00:00:00Z" })),
+      demo: scripted(done({ summary: "Skipped", skipped: true, reason: "the change touches no UI path", shots: [] })),
+    });
+    await drain(engineDeps(db, executors));
+    const { run: row, executions } = await inspect(db, run.id);
+    expect(executions.filter((e) => e.nodeKey === "try")).toEqual([]);
+    expect(executions.filter((e) => e.nodeKey === "pr").map((e) => e.status)).toEqual(["passed"]);
     expect(row.status).toBe("succeeded");
   });
 });

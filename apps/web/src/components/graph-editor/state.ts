@@ -1,5 +1,5 @@
 import { applyEdgeChanges, applyNodeChanges, type EdgeChange, type NodeChange } from "@xyflow/react";
-import { compileGraph, CUSTOM_HANDLE, fromReactFlow, gateMode, portKind, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
+import { CUSTOM_HANDLE, fromReactFlow, gateMode, portKind, validateGraphForSave, type CompileError, type EdgeAttributes, type FlowEdge, type FlowGraph, type FlowNode, type FlowNodeData, type NodeType } from "@handoff/core";
 
 export const NODE_LABELS: Record<NodeType, string> = {
   start: "Start",
@@ -178,7 +178,7 @@ export function editorReducer(state: FlowGraph, action: EditorAction): FlowGraph
 
 export const documentOf = (state: FlowGraph) => fromReactFlow(state);
 
-/** Compile errors for the current editor state, including schema errors from invalid edits. */
+/** What keeps the current editor state from being saved, including schema errors from invalid edits. */
 export function issuesOf(state: FlowGraph): CompileError[] {
   let doc: unknown;
   try {
@@ -186,7 +186,7 @@ export function issuesOf(state: FlowGraph): CompileError[] {
   } catch (error) {
     return [{ code: "invalid_document", message: (error as Error).message.slice(0, 300) }];
   }
-  const result = compileGraph(doc);
+  const result = validateGraphForSave(doc);
   return result.ok ? [] : result.errors;
 }
 

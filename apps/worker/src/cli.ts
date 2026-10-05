@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { compileGraph, parseSkillMarkdown, suggestProjectName, type LinkedIssue } from "@handoff/core";
+import { parseSkillMarkdown, suggestProjectName, validateGraphForSave, type LinkedIssue } from "@handoff/core";
 import { importSkillRepository } from "@handoff/engine/library-import";
 import { moveProject } from "@handoff/engine/move-project";
 import { and, desc, eq, graphs, graphVersions, listEventsAfter, listLibraryIndex, nodeExecutions, permissionWaits, projects, runs, sql, upsertSkill, type Db } from "@handoff/db";
@@ -99,7 +99,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     const file = positionals[0];
     if (!file) throw new Error(`graph file is required\n${USAGE}`);
     const document = JSON.parse(readFileSync(file, "utf8")) as unknown;
-    const compiled = compileGraph(document);
+    const compiled = validateGraphForSave(document);
     if (!compiled.ok) throw new Error(`graph does not compile:\n${compiled.errors.map((e) => `  ${e.code}: ${e.message}`).join("\n")}`);
     const project = await projectByName(db, need(values, "project"));
     const name = need(values, "name");

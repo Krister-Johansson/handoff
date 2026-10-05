@@ -1,4 +1,4 @@
-import { ConditionSchema, EFFORT_LEVELS,LibrarySelectionSchema, nodeCatalog, NodeTypeSchema, notifyKindsOf, REVIEW_LEVELS, type NodeType } from "@handoff/core";
+import { ConditionSchema, EFFORT_LEVELS, JOIN_MODES, LibrarySelectionSchema, nodeCatalog, NodeTypeSchema, notifyKindsOf, REVIEW_LEVELS, type NodeType } from "@handoff/core";
 import { z } from "zod";
 import type { ToolSpec } from "./catalog";
 
@@ -460,13 +460,14 @@ const TYPE_FIELDS: Partial<Record<NodeType, z.ZodRawShape>> = {
 /**
  * What page_update_node may change on each node type: the inspector's fields for that type and
  * nothing else, so a change the model makes is one a person could make and see. Every node has a label
- * and the notifications its type sends; CLI steps (by their executor in nodeCatalog) have the
- * instructions, model, tools and library fields; some types add their own.
+ * and the notifications its type sends, and every node with an input its join mode; CLI steps (by their
+ * executor in nodeCatalog) have the instructions, model, tools and library fields; some types add their own.
  */
 function patchOf(type: NodeType) {
   const shape: z.ZodRawShape = {
     label: z.string().min(1),
     notify: z.strictObject(Object.fromEntries(notifyKindsOf(type).map((kind) => [kind, z.boolean()]))).partial(),
+    ...(type === "start" ? {} : { join: z.enum(JOIN_MODES) }),
     ...(nodeCatalog[type].executorKind === "cli" ? CLI_FIELDS : {}),
     ...TYPE_FIELDS[type],
   };

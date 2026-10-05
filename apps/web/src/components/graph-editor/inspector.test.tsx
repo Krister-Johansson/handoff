@@ -193,6 +193,28 @@ test("a node lists the edges that reach it and leave it, with each loop's budget
   expect(items.map((li) => li.textContent)).toEqual(["feedback←reviewer.changesmax 3", "passed→reviewer"]);
 });
 
+test("a node that two edges reach asks whether to wait for every edge or go on at the first", () => {
+  const edge = (source: string): FlowGraph["edges"][number] => ({
+    id: `${source}->gate`,
+    source,
+    target: "gate",
+    sourceHandle: "approve",
+    targetHandle: "in",
+    type: "handoff",
+    data: { on: "passed", loop: false, priority: 0, port: "approve", input: "in" },
+  });
+  const joined: FlowGraph = { ...graph, edges: [...graph.edges, edge("reviewer"), edge("planner")] };
+  const dispatch = vi.fn();
+  render(<Inspector graph={joined} selection={{ nodeId: "gate" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByLabelText("Join")).toHaveValue("");
+  fireEvent.change(screen.getByLabelText("Join"), { target: { value: "any" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "gate", patch: { config: { join: "any" } } });
+  cleanup();
+  // The reviewer's feedback edge into the planner loops back, so the planner has nothing to join.
+  render(<Inspector graph={joined} selection={{ nodeId: "planner" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.queryByLabelText("Join")).not.toBeInTheDocument();
+});
+
 const withNode = (id: string, nodeType: string, data: Partial<FlowGraph["nodes"][number]["data"]> = {}): FlowGraph => ({
   ...graph,
   nodes: [...graph.nodes, { id, type: "handoff", position: { x: 0, y: 0 }, data: { nodeType, label: id, isStart: false, config: {}, ...data } }],
