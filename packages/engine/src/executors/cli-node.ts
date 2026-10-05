@@ -195,7 +195,7 @@ async function untouchedSince(cwd: string, sha: string): Promise<boolean> {
  * `answerOnly` is set when the attempt answered the comments a PR step sent it, every answer changes
  * nothing, and the branch is still the commit the PR step pushed. The agent's own answerOnly is dropped.
  */
-async function withReviewAnswers(ctx: ExecutorContext, output: unknown): Promise<{ output: unknown; reviewAnswers?: Record<string, unknown> }> {
+export async function withReviewAnswers(ctx: ExecutorContext, output: unknown): Promise<{ output: unknown; reviewAnswers?: Record<string, unknown> }> {
   const { answerOnly: _, ...own } = output as Record<string, unknown>;
   const sources = reviewSourcesOf(ctx.graph, ctx.node.key);
   const answers = answersOf(own);

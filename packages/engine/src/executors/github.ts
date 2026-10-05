@@ -371,14 +371,16 @@ export function prNodeExecutor(deps: {
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
-
       // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit.
       const ask = reviewRequest(ctx.node.config);
       const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer);
       if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
 
       // Answers on GitHub wait for their reviewer's next review, which resolves them, up to the reviewer's limit.
-      // New findings, or failed CI, go to the coder first; the items still wait in the step after that round.
+      // This is the one wait for answers, after any round: an answer-only round comes back to this step on the
+      // commit the reviewers already reviewed, and without it the decision from the review the coder answered
+      // would send the round to fix again. New findings, or failed CI, go to the coder first; the items still
+      // wait in the step after that round.
       const awaitingReReview =
         reReviewing.items.length > 0 &&
         snapshot.state === "open" &&
@@ -399,9 +401,9 @@ export function prNodeExecutor(deps: {
         // And when the first answer reaches its reviewer's limit.
         const reReviewAt = awaitingReReview && reReviewing.until !== undefined ? reReviewing.until + 1_000 : Infinity;
         if (awaitingReReview) {
-          // The last event of the look, so the step reports re_review until a later look waits on something else.
+          // The last event of the look, so the step reports waiting_on re_review until a later look waits on something else.
           const reviewers = [...new Set(reReviewing.items.map((i) => i.reviewer))];
-          ctx.emit("github.re_review", { number, reviewers, items: reReviewing.items.map(handleOf) });
+          ctx.emit("github.rereview", { number, waitingFor: reviewers, items: reReviewing.items.map(handleOf) });
         }
         return { kind: "waiting", wait: { kind: "github_pr", key, deadlineAt: new Date(Math.min(reconcile, limit, askAt, reReviewAt)) } };
       }
