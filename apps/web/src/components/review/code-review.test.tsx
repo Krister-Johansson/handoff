@@ -155,9 +155,8 @@ test("approve after fixes needs something to fix, then sends fix", async () => {
   render(<CodeReview {...props} />);
   fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
   fireEvent.click(screen.getByRole("radio", { name: /Approve after fixes/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
-  expect(await screen.findByText(/add a comment/i)).toBeInTheDocument();
-  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+  expect(screen.getByText(/add a comment/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send review" })).toBeDisabled();
   fireEvent.change(screen.getByLabelText("Overall comment"), {
     target: { value: "Rename b to value." },
   });
@@ -377,9 +376,8 @@ test("Approve after fixes sends the Fix now findings alone, and says there is no
   fireEvent.click(screen.getByRole("button", { name: "Submit review" }));
   expect(screen.getByRole("dialog")).toHaveTextContent("Nothing will be sent to coder-1 yet.");
   fireEvent.click(screen.getByRole("radio", { name: /Approve after fixes/ }));
-  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
-  expect(await screen.findByText("Pick Fix now on a finding, or add a comment or an overall comment, so there is something to fix.")).toBeInTheDocument();
-  expect(actions.answerReviewAction).not.toHaveBeenCalled();
+  expect(screen.getByText("Pick Fix now on a finding, or add a comment or an overall comment, so there is something to fix.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send review" })).toBeDisabled();
 
   choose("src/b.ts:2", "Fix now");
   expect(screen.getByRole("dialog")).toHaveTextContent("1 finding will be sent to coder-1.");

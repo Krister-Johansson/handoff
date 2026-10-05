@@ -103,6 +103,31 @@ test("approve after fixes sends the comments back with fix", async () => {
   await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "fix", note: "", comments: [{ quote: "add a CLI", body: "A web page." }] }));
 });
 
+test("the overall comment says it is optional, until a send-back answer with nothing to fix makes it required", async () => {
+  render(<PlanReview {...props} />);
+  const note = screen.getByLabelText("Overall comment");
+  expect(note).toHaveAttribute("placeholder", "Optional. Sent with your comments.");
+  expect(screen.queryByText("Required")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("radio", { name: /Approve after fixes/ }));
+  expect(note).toHaveAttribute("placeholder", "Say what planner should change.");
+  expect(note).toBeRequired();
+  expect(screen.getByText("Required")).toBeInTheDocument();
+  expect(screen.getByText("Add a comment or an overall comment first, so there is something to fix.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send review" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("radio", { name: /^Approve Let the run/ }));
+  expect(note).toHaveAttribute("placeholder", "Optional. Sent with your comments.");
+  expect(screen.queryByText("Required")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Send review" })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole("radio", { name: /Request changes/ }));
+  fireEvent.change(note, { target: { value: "Use SQLite." } });
+  expect(screen.queryByText("Add a comment or an overall comment first, so there is something to fix.")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Send review" }));
+  await waitFor(() => expect(actions.answerReviewAction).toHaveBeenCalledWith({ questionId: "q1", runId: "r1", option: "changes", note: "Use SQLite.", comments: [] }));
+});
+
 test("overlapping owned paths are listed with the run that owns them", () => {
   const overlaps = [
     { runId: "r2", href: "/projects/p1/runs/r2", task: "Add tags", branch: "handoff/add-tags-1234abcd", issues: [{ number: 7, title: "Add tags" }], paths: ["src/board.tsx"] },
