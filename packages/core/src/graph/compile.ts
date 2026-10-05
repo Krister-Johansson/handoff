@@ -35,7 +35,8 @@ export type CompileErrorCode =
   | "invalid_review_level"
   | "invalid_start"
   | "invalid_finish"
-  | "join_mode_required";
+  | "join_mode_required"
+  | "review_threads_need_send_back";
 
 export type CompileError = { code: CompileErrorCode; message: string; nodeKey?: string; edgeKey?: string };
 
@@ -67,6 +68,18 @@ export type CompiledGraph = {
 };
 
 export type CompileResult = { ok: true; graph: CompiledGraph } | { ok: false; errors: CompileError[] };
+
+/**
+ * A PR node that replies to review comments (`reviewThreads.reply`) but does not send them back to the
+ * coder, who writes the answers. Sending back defaults on only while the node waits for reviewers.
+ */
+function repliesWithoutSendBack(config: Record<string, unknown>): boolean {
+  const threads = config.reviewThreads as { reply?: unknown } | undefined;
+  if (typeof threads !== "object" || threads === null || threads.reply !== true) return false;
+  const waitsForReviewers = Array.isArray(config.waitForReviewers) && config.waitForReviewers.length > 0;
+  const sendBack = typeof config.sendReviewComments === "boolean" ? config.sendReviewComments : waitsForReviewers;
+  return !sendBack;
+}
 
 /** Token shapes that must never be stored in a graph: GitHub, Anthropic, Slack, AWS, OpenAI. */
 export const SECRET_PATTERN = /\b(gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-ant-[A-Za-z0-9_-]{16,}|xox[abpr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{32,})\b/;
@@ -209,6 +222,13 @@ function compile(input: unknown, rules: { saving: boolean }): CompileResult {
     }
     if (attributes.config.model !== undefined && !isModelName(attributes.config.model)) {
       errors.push({ code: "invalid_model", message: `node ${key}: model must be a Claude Code alias such as opus, or a model id`, nodeKey: key });
+    }
+    if (attributes.type === "pr" && repliesWithoutSendBack(attributes.config)) {
+      errors.push({
+        code: "review_threads_need_send_back",
+        message: `${attributes.label ?? key} replies to review comments only when it sends them back: turn on Send review comments back to the coder`,
+        nodeKey: key,
+      });
     }
     graph.addNode(key, {
       key,

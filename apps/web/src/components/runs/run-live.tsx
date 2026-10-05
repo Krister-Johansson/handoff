@@ -17,9 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCost, formatDuration } from "@/lib/format";
 import { reviewPath, tryPath } from "@/lib/paths";
 import { describeNow, type RunQueue } from "@/lib/run-now";
+import { whoseReview, type ReReviewWait } from "@/lib/reviewers";
 import { MergeButton } from "./merge-button";
 import { runStatusFromEvent, statusFromEvent, type StatusTone } from "@/lib/status";
-import { loopEdgeKeys } from "@/lib/sent-back";
+import { loopEdgeKeys, viaFromEvent } from "@/lib/sent-back";
 import { triggeringEdges } from "@/lib/triggering-edges";
 import { cn } from "@/lib/utils";
 import { usePageTools } from "@/lib/assistant/use-page-tools";
@@ -99,6 +100,8 @@ type Props = {
   awaitsWorktree?: boolean | undefined;
   /** The step that waits on a person to allow a tool call, with what it asks to do, while the run runs. */
   waitingOn?: (RunWaitingOn & { action: string }) | undefined;
+  /** The PR step that waits for a reviewer's next review after handoff answered review comments, while it does. */
+  reReview?: (ReReviewWait & { nodeExecutionId: string; since: Date; until: Date | null }) | undefined;
 };
 
 /**
@@ -108,6 +111,29 @@ type Props = {
 function liveWait(status: string, executions: { nodeKey: string; status: string }[], wait: Props["waitingOn"]) {
   if (status !== "running" || !wait || executions.findLast((e) => e.nodeKey === wait.nodeKey)?.status !== "running") return { waitingOn: undefined, permissions: undefined };
   return { waitingOn: wait, permissions: [{ nodeKey: wait.nodeKey, action: wait.action }] };
+}
+
+/**
+ * The wait for a reviewer's next review after handoff's answers, which holds while the run and its PR step
+ * still wait and nobody was asked: the run's badge for it, and the steps with that step's line.
+ */
+function useReReview(status: string, executions: ExecutionView[], questions: number, wait: Props["reReview"]) {
+  const step = wait && executions.find((e) => e.id === wait.nodeExecutionId);
+  const reReview = status === "waiting" && step?.status === "waiting" && questions === 0 ? wait : undefined;
+  const steps = useMemo(() => {
+    if (!reReview) return executions;
+    const line = { whose: whoseReview(reReview.reviewers), items: reReview.items, since: new Date(reReview.since).toISOString(), until: reReview.until ? new Date(reReview.until).toISOString() : null };
+    return executions.map((e) => (e.id === reReview.nodeExecutionId ? { ...e, reReview: line } : e));
+  }, [executions, reReview]);
+  const waitingOn: RunWaitingOn | undefined = reReview && step ? { kind: "re_review", nodeKey: step.nodeKey, since: reReview.since } : undefined;
+  return { reReview, steps, waitingOn };
+}
+
+/** What the run waits on beyond its status: a step's permission request first, else a reviewer's next review. */
+function useRunWaits(status: string, executions: ExecutionView[], questions: number, permission: Props["waitingOn"], review: Props["reReview"]) {
+  const asked = liveWait(status, executions, permission);
+  const reviewing = useReReview(status, executions, questions, review);
+  return { waitingOn: asked.waitingOn ?? reviewing.waitingOn, permissions: asked.permissions, reReview: reviewing.reReview, steps: reviewing.steps };
 }
 
 /** Events a step sends once it has its workdir: a fast-forward, the project's setup command, or the CLI. */
@@ -208,6 +234,7 @@ export function RunLive({
   children,
   awaitsWorktree = false,
   waitingOn: initialWaitingOn,
+  reReview: initialReReview,
 }: Props) {
   const [status, setStatus] = useState(initialStatus);
   const [prNumber, setPrNumber] = useState(initialPr);
@@ -264,7 +291,7 @@ export function RunLive({
         if (current.some((e) => e.id === event.nodeExecutionId)) return current.map((e) => (e.id === event.nodeExecutionId ? { ...e, ...update } : e));
         return [
           ...current,
-          { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, via: payload.via ?? null, ...update },
+          { id: event.nodeExecutionId!, nodeKey: payload.nodeKey ?? "?", attempt: payload.attempt ?? 1, costUsd: null, durationMs: null, via: viaFromEvent(payload.via), ...update },
         ];
       });
     },
@@ -293,8 +320,8 @@ export function RunLive({
 
   const review = questions.find((q) => q.context?.review);
   const tryIt = questions.find((q) => q.context?.reason === "try");
-  const { waitingOn, permissions } = liveWait(status, executions, initialWaitingOn);
-  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy, permissions, unresolvedThreads });
+  const { waitingOn, permissions, reReview, steps } = useRunWaits(status, executions, questions.length, initialWaitingOn, initialReReview);
+  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy, permissions, unresolvedThreads, reReview });
   const selectedQuestion = questions.find((q) => q.nodeExecutionId === selected?.id);
   const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
   const filter = useMemo(
@@ -389,7 +416,7 @@ export function RunLive({
         <TabsContent value="steps">
           <Card className="py-3">
             <CardContent className="px-3.5">
-              <Steps steps={executions} labels={labels} loopEdges={loopEdges} selectedId={selected?.id} onSelect={setSelectedId} />
+              <Steps steps={steps} labels={labels} loopEdges={loopEdges} selectedId={selected?.id} onSelect={setSelectedId} />
             </CardContent>
           </Card>
         </TabsContent>

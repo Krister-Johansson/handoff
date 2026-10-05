@@ -8,6 +8,7 @@ const actions = vi.hoisted(() => ({
   repairAction: vi.fn(),
   cancelAction: vi.fn(),
   resolveLoopAction: vi.fn(),
+  answerReviewItemsAction: vi.fn(),
 }));
 vi.mock("@/app/inbox/actions", () => actions);
 vi.mock("@/app/projects/actions", () => ({ requestMergeAction: vi.fn() }));
@@ -68,15 +69,15 @@ test("a Try it question opens its own page, where the app and the criteria are",
   expect(screen.queryByRole("button", { name: "approve" })).not.toBeInTheDocument();
 });
 
-test("a question about review comments says so and answers every comment with the option chosen", async () => {
-  const context = { reason: "review_items", items: [{ id: "R1", reviewer: "coderabbitai", why: "disputed" }] };
+test("a question about review comments has its own card, which sends a choice per comment", async () => {
+  const context = { reason: "review_items", items: [{ id: "R1", kind: "thread", reviewer: "coderabbitai", why: "disputed", comment: "Handle the empty list.", conversation: [], verdict: "declined", evidence: "It is handled." }] };
   render(<QuestionCard item={{ ...run, id: "q5", question: "Decide on review comment R1 on PR #9: resolve, send back or leave.", options: ["resolve", "send_back", "leave"], nodeKey: "pr", reason: "review_items", context }} />);
-  expect(screen.getByText("Review comments need a decision")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Decide on review comment R1 on PR #9: resolve, send back or leave." })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "leave" }));
-  await waitFor(() => expect(actions.answerAction).toHaveBeenCalled());
-  const form = actions.answerAction.mock.calls[0]![1] as FormData;
-  expect([form.get("questionId"), form.get("option")]).toEqual(["q5", "leave"]);
+  expect(screen.getByText("Review comments to decide")).toBeInTheDocument();
+  expect(screen.getByText("Handle the empty list.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", { name: "Leave" }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await waitFor(() => expect(actions.answerReviewItemsAction).toHaveBeenCalled());
+  expect(actions.answerReviewItemsAction.mock.calls[0]![0]).toEqual({ questionId: "q5", runId: "r1", items: [{ id: "R1", choice: "leave" }] });
 });
 
 test("a question about files outside the plan offers to allow them, send the work back or fail the step", () => {

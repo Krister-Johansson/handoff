@@ -8,9 +8,11 @@ export type ReviewThreadView = { path: string; line: number | null; outdated: bo
 
 /**
  * A merge that waits on unresolved review threads: each thread with a link to it on GitHub, and the pull
- * request to resolve them on. handoff resolves none itself; the merge goes on once a person has.
+ * request to resolve them on. handoff resolves none itself; the merge goes on once a person has. With
+ * review items on, these are the threads handoff does not manage: `notes` names, by thread URL, the item a
+ * thread belongs to and why it is the person's now ("R16, left to you").
  */
-export function ReviewThreadsCard({ number, url, threads }: { number: number; url: string; threads: ReviewThreadView[] }) {
+export function ReviewThreadsCard({ number, url, threads, notes }: { number: number; url: string; threads: ReviewThreadView[]; notes?: Record<string, string> | undefined }) {
   return (
     <Card className="ring-attention-dot/45">
       <CardHeader>
@@ -18,17 +20,20 @@ export function ReviewThreadsCard({ number, url, threads }: { number: number; ur
           <MessageSquareIcon className="size-4" />
           PR #{number} has {unresolvedThreads(threads.length)}
         </CardTitle>
-        <CardDescription>A rule on the base branch requires resolved conversations before a merge. Resolve them on GitHub and the merge goes on.</CardDescription>
+        <CardDescription>
+          A rule on the base branch requires resolved conversations before a merge.{notes ? " handoff does not manage these threads." : ""} Resolve them on GitHub and the merge goes on.
+        </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         <ul className="flex flex-col gap-2 text-sm">
           {threads.map((t) => (
             <li key={t.url} className="flex min-w-0 flex-col gap-0.5">
-              <span className="flex items-center gap-2">
+              <span className="flex flex-wrap items-center gap-2">
                 <a href={t.url} target="_blank" rel="noreferrer" className="truncate font-mono text-xs hover:underline hover:underline-offset-3">
                   {t.line !== null ? `${t.path}:${t.line}` : t.path}
                 </a>
                 {t.outdated && <Badge variant="outline">outdated</Badge>}
+                {notes?.[t.url] && <Badge variant="outline">{notes[t.url]}</Badge>}
               </span>
               <span className="line-clamp-2 text-muted-foreground">{`${t.author}: ${t.body}`}</span>
             </li>

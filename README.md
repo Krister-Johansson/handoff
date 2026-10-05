@@ -107,7 +107,6 @@ The setting is on the PR node, in the graph JSON:
   "reply": true,
   "resolveAfterReview": true,
   "summary": "coderabbitai",
-  "botWaitMinutes": 30,
   "personWaitHours": 24,
   "maxPerRound": 20,
   "returnOnAnswerOnly": true
@@ -117,7 +116,7 @@ The setting is on the PR node, in the graph JSON:
 - `reply` turns the loop on. It takes effect only when the node also sends review comments back to the coder (`sendReviewComments`, which is on by default when the node waits for reviewers).
 - `resolveAfterReview` is on with `reply` unless set to `false`. It makes the PR node wait for each reviewer's next review after an answer and resolve the thread. Off, handoff answers and never resolves.
 - `summary` names the bot whose summary comment the PR node reads, `coderabbitai` for CodeRabbit. Without it, no summary comment is read.
-- `botWaitMinutes` and `personWaitHours` set how long the PR node waits for a reviewer's next review after an answer: 30 minutes for a bot and 24 hours for a person unless set.
+- `personWaitHours` sets how long the PR node waits for a person's next review after an answer, 24 hours unless set. A bot gets the node's review time limit, `reviewTimeoutMinutes` (Stop waiting after in the inspector), 30 minutes unless set.
 - `maxPerRound` caps the items one round sends to the coder, oldest first, at 20 unless set. The rest go in a later round.
 - `returnOnAnswerOnly` is on unless set to `false`. It sends an answer-only round straight back to the PR node.
 
@@ -142,13 +141,13 @@ Each finding the PR node sends to the coder is a review item, with a handle that
 
 The coder's packet lists the items under "Review comments to answer": each item's handle, kind, reviewer, file and line, link and body, and the thread since the first comment for an item that came back. The prompt tells the coder to treat each comment like a test and check its claim before it acts: run the command the comment names, read the code it points at, or write a failing test when it is about the code's behaviour. The coder answers every item in `answers`, by its handle, with a verdict:
 
-- `fixed`, with the commit that fixes it.
+- `fixed`, with the commit that fixes it. A summary note or pre-merge check fixed without a code change, such as through the pull request's title, needs no commit when the evidence says what changed.
 - `declined`, with the evidence that the comment does not hold.
 - `unclear`, with what is unclear.
 - `duplicate`, with `of` naming the item it repeats, such as a summary note that repeats an inline thread.
 - `settled`, only for an item that came back with the reviewer's reply, when that reply accepts the earlier answer.
 
-The engine checks the answers with the implicit contract check `review_items_answered`, so a graph needs no contract change. The check fails the attempt when an item sent has no answer or two, an answer names an item that was not sent, `fixed` has no commit or a commit that is not on the branch or was already on it when the round started, `declined`, `unclear` or `duplicate` has no evidence, `duplicate` names no other item that was sent, or `settled` answers an item that came back without a reviewer reply. An attempt that the tester or a gate sends back after the coder answered needs no answers. The coder never posts on GitHub; handoff posts its answers.
+The engine checks the answers with the implicit contract check `review_items_answered`, so a graph needs no contract change. The check fails the attempt when an item sent has no answer or two, an answer names an item that was not sent, `fixed` has no commit (except a summary note or pre-merge check whose evidence says what changed) or a commit that is not on the branch or was already on it when the round started, `declined`, `unclear` or `duplicate` has no evidence, `duplicate` names no other item that was sent, or `settled` answers an item that came back without a reviewer reply. An attempt that the tester or a gate sends back after the coder answered needs no answers. The coder never posts on GitHub; handoff posts its answers.
 
 ### Replies and markers
 
@@ -163,7 +162,7 @@ Valid. Fixed in [94c0c6c](https://github.com/owner/repo/commit/94c0c6c...).
 <!-- handoff:item-reply R3 <head sha> -->
 ```
 
-The first line is "Valid. Fixed in <commit>.", "Not changed: the comment does not hold.", "Unclear:" followed by the coder's question, or "Same point as <link to the other item>.". The sentence about resolving is there only while `resolveAfterReview` is on. A `settled` answer posts nothing. Items without a thread (review summaries, summary notes and pre-merge checks) share one new PR comment per round, one paragraph per item, which ends with `<!-- handoff:item-answers <round> <head sha> -->`.
+The first line is "Valid. Fixed in <commit>." ("Valid. Fixed." for a summary item fixed without a commit), "Not changed: the comment does not hold.", "Unclear:" followed by the coder's question, or "Same point as <link to the other item>.". The sentence about resolving is there only while `resolveAfterReview` is on. A `settled` answer posts nothing. Items without a thread (review summaries, summary notes and pre-merge checks) share one new PR comment per round, one paragraph per item, which ends with `<!-- handoff:item-answers <round> <head sha> -->`.
 
 Every comment handoff writes ends with a hidden marker that starts with `<!-- handoff:`. The PR node skips any comment that carries it, so an answer never comes back to the coder as a review comment. The marker also makes posting idempotent per item and head commit: before it posts, the PR node looks for its marker in the thread or among the pull request's comments, and records the comment it finds instead of posting again. A worker that restarts after posting posts nothing twice. A post that fails is an event (`github.item_reply_failed` or `github.items_answer_failed`), the item stays `answered`, and the next look tries again.
 
@@ -200,7 +199,7 @@ An item that came back with the reviewer's reply goes to the coder with the whol
 - `declined` again: the item is disputed, and handoff posts nothing more in the thread.
 - `unclear`: the first time, handoff posts the question to the reviewer and waits. A second `unclear` makes the item disputed.
 
-An item is also disputed when its reviewer does not review again within `botWaitMinutes` or `personWaitHours` of the answer, and when the next summary still lists a fixed summary note or pre-merge check after it went back to the coder once.
+An item is also disputed when its reviewer does not review again within its limit after the answer (`reviewTimeoutMinutes` for a bot, `personWaitHours` for a person), and when the next summary still lists a fixed summary note or pre-merge check after it went back to the coder once.
 
 Once no answered item holds the step on re-review, the PR step asks one question about all its disputed items and waits for the answer. The question is an ordinary handoff question: it notifies once, and the inbox, `list_attention` and `answer_question` handle it. For each item it shows the reviewer's comment, the thread since, the coder's latest verdict and evidence, the fixing commit and handoff's reply, and offers three choices:
 
@@ -209,6 +208,14 @@ Once no answered item holds the step on re-review, the PR step asks one question
 - Leave: the item is `left`. You handle it on GitHub, and handoff does not touch the thread again.
 
 `answer_question` takes `items: [{ id, choice, note? }]`, with `resolve`, `send_back` or `leave` for each item, or `option` alone for every item. It refuses an item the question does not list. While the question waits, the step still wakes on the pull request's webhooks: a disputed thread that someone resolves on GitHub is recorded as resolved, and a question with nothing left to decide is answered by handoff, so the step goes on.
+
+### On the dashboard
+
+The run page shows a Review comments card above its tabs while the run has review items, grouped by threads, review summaries and the bot's summary comment. Each item shows its handle, reviewer, file and line, whether its thread is outdated, the coder's verdict and evidence, the fixing commit, a link to handoff's reply, and its state. The card folds to one line, and the browser keeps the fold per run. The merge step's unresolved threads card stays for the threads handoff does not manage, and names the item a thread belongs to when it is yours now.
+
+The question has its own card on the run page and in the Inbox: both sides of each comment, one choice per item, a note for Resolve and Send back, Resolve all, and one Submit. For an item without a thread, Resolve reads Mark done and posts nothing on GitHub. While the PR step waits for a reviewer's next review, the run's status line, the step list and the runs list read "Waiting for CodeRabbit's next review, 7 comments answered" in blue, waiting on review, because nobody has to act yet.
+
+In the graph editor, the PR node's Answer review comments group sits under Send review comments back. Turning on Reply turns Send back on and keeps it on, and a node that sends comments back without replies shows a hint with a Turn on replies button. The graph refuses `reply` without send back (`review_threads_need_send_back`).
 
 ### CodeRabbit's summary comment
 

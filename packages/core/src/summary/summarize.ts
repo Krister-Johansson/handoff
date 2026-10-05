@@ -35,8 +35,17 @@ export function summarizeOutput(output: unknown): string | undefined {
   }
   const coder = CoderOutputSchema.safeParse(output);
   if (coder.success) {
-    const { status, summary, question, filesChanged } = coder.data;
+    const { status, summary, question, filesChanged, answers, answerOnly } = coder.data;
     if (status === "needs_input" && question) return join(`Asked: ${question.summary ?? question.text}`);
+    if (status === "done" && answers?.length) {
+      const answered = `Answered ${plural(answers.length, "review comment")}`;
+      if (answerOnly) return `${answered}, no commit`;
+      const verdicts = ["fixed", "declined", "unclear", "duplicate", "settled"]
+        .map((v) => [v, answers.filter((a) => a.verdict === v).length] as const)
+        .filter(([, n]) => n > 0)
+        .map(([v, n]) => `${n} ${v}`);
+      return `${answered}: ${verdicts.join(", ")}`;
+    }
     return join(summary || status, filesChanged?.length ? `${plural(filesChanged.length, "file")} changed` : undefined);
   }
   const tester = TesterOutputSchema.safeParse(output);

@@ -189,6 +189,56 @@ test("a pull request node can ask a reviewer that has not started with a comment
   expect(dispatch).toHaveBeenLastCalledWith({ type: "replaceNodeConfig", id: "pr", config: waiting });
 });
 
+const prGraph = (config: Record<string, unknown>): FlowGraph => ({ ...graph, nodes: [...graph.nodes, { id: "pr", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "pr", label: "Pull request", isStart: false, config } }] });
+
+test("turning on Reply to review comments turns on Send review comments back", () => {
+  const dispatch = vi.fn();
+  const { rerender } = render(<Inspector graph={prGraph({})} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  const group = within(screen.getByRole("group", { name: "Answer review comments" }));
+  expect(group.queryByRole("switch", { name: "Resolve after the reviewer's next review" })).not.toBeInTheDocument();
+  fireEvent.click(group.getByRole("switch", { name: "Reply to review comments" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { sendReviewComments: true, reviewThreads: { reply: true } } } });
+
+  const on = { sendReviewComments: true, reviewThreads: { reply: true } };
+  rerender(<Inspector graph={prGraph(on)} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  // Send back stays on while replies are on.
+  expect(screen.getByRole("switch", { name: "Send review comments back to the coder" })).toBeDisabled();
+  expect(screen.getByText("Stays on while Reply to review comments is on.")).toBeInTheDocument();
+  const settings = within(screen.getByRole("group", { name: "Answer review comments" }));
+  expect(settings.getByRole("switch", { name: "Resolve after the reviewer's next review" })).toBeChecked();
+  expect(settings.getByRole("switch", { name: "Return without tests when only answers changed" })).toBeChecked();
+  const summary = settings.getByRole("switch", { name: "Read CodeRabbit's summary comment" });
+  expect(summary).not.toBeChecked();
+  fireEvent.click(summary);
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewThreads: { reply: true, summary: "coderabbitai" } } } });
+  fireEvent.click(settings.getByRole("switch", { name: "Resolve after the reviewer's next review" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewThreads: { reply: true, resolveAfterReview: false } } } });
+  fireEvent.change(settings.getByLabelText("People (hours)"), { target: { value: "8" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewThreads: { reply: true, personWaitHours: 8 } } } });
+  fireEvent.change(settings.getByLabelText("Comments per round"), { target: { value: "10" } });
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewThreads: { reply: true, maxPerRound: 10 } } } });
+  // A bot's next review is waited for as long as the review time limit, which shows with replies on.
+  expect(settings.getByText(/Bots: as long as Stop waiting after \(minutes\)/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Stop waiting after (minutes)")).toBeInTheDocument();
+  expect(settings.queryByLabelText(/Bots/)).not.toBeInTheDocument();
+
+  fireEvent.click(settings.getByRole("switch", { name: "Reply to review comments" }));
+  expect(dispatch).toHaveBeenLastCalledWith({ type: "updateNode", id: "pr", patch: { config: { reviewThreads: { reply: false } } } });
+});
+
+test("a PR node that sends comments back without replies shows the hint, and its button turns replies on", () => {
+  const dispatch = vi.fn();
+  const { rerender } = render(<Inspector graph={prGraph({ waitForReviewers: ["coderabbitai[bot]"] })} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.getByText(/Review comments go to the coder, but nobody answers them on GitHub/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Turn on replies" }));
+  expect(dispatch).toHaveBeenCalledWith({ type: "updateNode", id: "pr", patch: { config: { sendReviewComments: true, reviewThreads: { reply: true } } } });
+
+  rerender(<Inspector graph={prGraph({ waitForReviewers: ["coderabbitai[bot]"], sendReviewComments: false })} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.queryByText(/nobody answers them on GitHub/)).not.toBeInTheDocument();
+  rerender(<Inspector graph={prGraph({ sendReviewComments: true, reviewThreads: { reply: true } })} selection={{ nodeId: "pr" }} library={library} dispatch={dispatch} onSelect={vi.fn()} />);
+  expect(screen.queryByText(/nobody answers them on GitHub/)).not.toBeInTheDocument();
+});
+
 test("a pull request node says how long to wait for CI to start on a repository that may have none", () => {
   const dispatch = vi.fn();
   const pr: FlowGraph = { ...graph, nodes: [...graph.nodes, { id: "pr", type: "handoff", position: { x: 0, y: 0 }, data: { nodeType: "pr", label: "Pull request", isStart: false, config: {} } }] };

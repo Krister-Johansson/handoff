@@ -43,8 +43,8 @@ export const PlannerOutputSchema = z
 
 /**
  * The coder's answer to one review comment, after it checked the comment's claim. The contract check
- * review_items_answered enforces what each verdict needs: a commit made in the round for fixed, and
- * evidence for declined, unclear and duplicate.
+ * review_items_answered enforces what each verdict needs: a commit made in the round for fixed (or, for
+ * a summary note or pre-merge check, evidence of what changed), and evidence for declined, unclear and duplicate.
  */
 export const ReviewAnswerSchema = z.object({
   id: z.string().min(1).describe("The comment's handle, such as R3."),
@@ -54,7 +54,11 @@ export const ReviewAnswerSchema = z.object({
       "fixed: the claim holds and you fixed it. declined: the claim does not hold and you changed nothing for it. unclear: you cannot tell what is meant. duplicate: it repeats another listed comment. settled: the reviewer's reply accepts the earlier answer.",
     ),
   evidence: z.string().describe("What you checked and what it showed: the command and its output, the file and lines, or the test."),
-  commit: z.string().min(1).optional().describe("With fixed: the commit that fixes it."),
+  commit: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("With fixed: the commit that fixes it. A summary note or pre-merge check fixed through the pull request's title or description has none; the evidence says what changed."),
   of: z.string().min(1).optional().describe("With duplicate: the handle of the comment it repeats, such as R2."),
 });
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;

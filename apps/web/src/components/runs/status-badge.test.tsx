@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { expect, test } from "vitest";
-import { StatusBadge } from "./status-badge";
+import { RunStatusBadge, StatusBadge } from "./status-badge";
 
 test.each([
   ["succeeded", "success"],
@@ -25,4 +25,9 @@ test("an unknown status is neutral", () => {
 test("a node that sent work back reads as sent back, in the attention tone", () => {
   render(<StatusBadge status="sent_back" />);
   expect(screen.getByText("sent back")).toHaveAttribute("data-tone", "attention");
+});
+
+test("a run waiting for a reviewer's next review reads as waiting on review, in the active tone, since nobody has to act yet", () => {
+  render(<RunStatusBadge status="waiting" waitingOn={{ kind: "re_review", nodeKey: "pr", since: new Date() }} />);
+  expect(screen.getByText("waiting on review")).toHaveAttribute("data-tone", "active");
 });
