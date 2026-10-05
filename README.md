@@ -24,7 +24,7 @@ pnpm db:migrate
 Then fill in `.env`:
 
 1. **Claude.** Run `claude setup-token` and put the token in `CLAUDE_CODE_OAUTH_TOKEN`. It lasts a year. Do not set `ANTHROPIC_API_KEY`: handoff removes it from the Claude process so runs stay on your subscription.
-2. **GitHub.** For personal use, set `GITHUB_TOKEN` (the output of `gh auth token` works). For a team setup, create a GitHub App instead and set `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH`. The App needs read and write access to contents and pull requests, read access to checks and actions, and the events `pull_request`, `pull_request_review`, `pull_request_review_comment`, `issue_comment`, `check_suite`, `check_run` and `workflow_run`. For the Plan's activity line, also give it read access to issues and the events `issues`, `sub_issues` and `issue_dependencies`. The Plan itself needs `GITHUB_TOKEN` even with an App (see The Plan).
+2. **GitHub.** For personal use, set `GITHUB_TOKEN` (the output of `gh auth token` works). For a team setup, create a GitHub App instead and set `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_PATH`. The App needs read and write access to contents and pull requests, read access to checks and actions, and the events `pull_request`, `pull_request_review`, `pull_request_review_comment`, `pull_request_review_thread`, `issue_comment`, `check_suite`, `check_run` and `workflow_run`. For the Plan's activity line, also give it read access to issues and the events `issues`, `sub_issues` and `issue_dependencies`. The Plan itself needs `GITHUB_TOKEN` even with an App (see The Plan).
 3. **Webhooks.** Set `GITHUB_WEBHOOK_SECRET` to a random string, for example the output of `openssl rand -hex 32`.
 
 The dashboard reads the same `.env` through `apps/web/.env.local`, which is a symlink to it.
@@ -93,6 +93,162 @@ Known limits, to address when a real project needs them:
 - An issue blocked by another issue in the same run is still refused at start, although both would ship in one pull request.
 
 The library holds skills, MCP servers and subagents that nodes enable by name. In the dashboard it is the Library group of **Settings**: Skills, Agents, MCP servers and Groups. A project's graphs are listed in its **Project settings**, under Graphs, and each opens in the graph editor. MCP secrets are written as `${secret:NAME}` and resolved from the worker's environment when a node runs. They are never stored in the database. Git gets the GitHub token through `GIT_CONFIG_*` environment variables, so it does not appear in error messages or the process list, and error messages and command output are scrubbed of token-shaped strings before they are stored.
+
+## Review comments
+
+With review threads on, the PR node answers on GitHub every review comment it sends to the coder, and resolves a thread once the reviewer's next review leaves the point alone. A rule on the base branch that requires resolved conversations then no longer waits for a person to reply and resolve by hand. It is off by default, because it posts on GitHub. Without it, the PR node sends each review comment to the coder once and posts nothing.
+
+### Settings
+
+The setting is on the PR node, in the graph JSON:
+
+```json
+"reviewThreads": {
+  "reply": true,
+  "resolveAfterReview": true,
+  "summary": "coderabbitai",
+  "botWaitMinutes": 30,
+  "personWaitHours": 24,
+  "maxPerRound": 20,
+  "returnOnAnswerOnly": true
+}
+```
+
+- `reply` turns the loop on. It takes effect only when the node also sends review comments back to the coder (`sendReviewComments`, which is on by default when the node waits for reviewers).
+- `resolveAfterReview` is on with `reply` unless set to `false`. It makes the PR node wait for each reviewer's next review after an answer and resolve the thread. Off, handoff answers and never resolves.
+- `summary` names the bot whose summary comment the PR node reads, `coderabbitai` for CodeRabbit. Without it, no summary comment is read.
+- `botWaitMinutes` and `personWaitHours` set how long the PR node waits for a reviewer's next review after an answer: 30 minutes for a bot and 24 hours for a person unless set.
+- `maxPerRound` caps the items one round sends to the coder, oldest first, at 20 unless set. The rest go in a later round.
+- `returnOnAnswerOnly` is on unless set to `false`. It sends an answer-only round straight back to the PR node.
+
+handoff replies and resolves with the credential it runs with, `GITHUB_TOKEN` or the GitHub App. It reads GitHub's `viewerCanReply` and `viewerCanResolve` on each thread instead of assuming either.
+
+### Review items
+
+Each finding the PR node sends to the coder is a review item, with a handle that stays the same for the run: R1, R2 and so on. A finding is an unresolved inline thread, a review summary that is not an approval, or a walkthrough note or failed or warning pre-merge check in CodeRabbit's summary comment. A thread that handoff started, or a comment that carries handoff's marker, is never a finding. The items are rows in the `review_items` table, one per finding per run, and the PR node is the only writer. An item goes to the coder once, and again only when the reviewer replies or a person sends it back. An item is in one of these states:
+
+- `open`: found, and waiting for the coder's answer.
+- `answered`: the coder answered, and handoff has not posted the answer yet, because the round is still in the tester or the gates.
+- `awaiting_review`: the answer is on GitHub, and handoff waits for the reviewer's next review.
+- `resolved`: the thread is resolved, or the next summary no longer lists the finding. `resolved_by` says who or what: `handoff`, the reviewer, a person, `next_review` or `summary_dropped`.
+- `disputed`: a person decides (see Disputes).
+- `reraised`: the reviewer opened a new thread on the same lines, and the item follows the new one.
+- `left`: a person took it over, and handoff does not touch it again.
+- `gone`: the thread or the finding is no longer on GitHub.
+
+`get_run` lists the run's `review_items`, each with `id` (the handle), `kind`, `reviewer`, `path`, `line`, `url`, `verdict`, `evidence`, `commit`, `reply_url`, `state`, `state_reason`, `resolved_by` and `question_id`.
+
+### The coder's answers
+
+The coder's packet lists the items under "Review comments to answer": each item's handle, kind, reviewer, file and line, link and body, and the thread since the first comment for an item that came back. The prompt tells the coder to treat each comment like a test and check its claim before it acts: run the command the comment names, read the code it points at, or write a failing test when it is about the code's behaviour. The coder answers every item in `answers`, by its handle, with a verdict:
+
+- `fixed`, with the commit that fixes it.
+- `declined`, with the evidence that the comment does not hold.
+- `unclear`, with what is unclear.
+- `duplicate`, with `of` naming the item it repeats, such as a summary note that repeats an inline thread.
+- `settled`, only for an item that came back with the reviewer's reply, when that reply accepts the earlier answer.
+
+The engine checks the answers with the implicit contract check `review_items_answered`, so a graph needs no contract change. The check fails the attempt when an item sent has no answer or two, an answer names an item that was not sent, `fixed` has no commit or a commit that is not on the branch or was already on it when the round started, `declined`, `unclear` or `duplicate` has no evidence, `duplicate` names no other item that was sent, or `settled` answers an item that came back without a reviewer reply. An attempt that the tester or a gate sends back after the coder answered needs no answers. The coder never posts on GitHub; handoff posts its answers.
+
+### Replies and markers
+
+The PR node posts the answers after it pushes, so a fixing commit is on GitHub when the reply links it. An item with a thread gets a reply in that thread:
+
+```text
+Valid. Fixed in [94c0c6c](https://github.com/owner/repo/commit/94c0c6c...).
+
+<the coder's evidence, cut at 4,000 characters>
+
+<sub>Answered by handoff run `<run id>`. handoff resolves this thread after the reviewer's next review, unless that review raises it again.</sub>
+<!-- handoff:item-reply R3 <head sha> -->
+```
+
+The first line is "Valid. Fixed in <commit>.", "Not changed: the comment does not hold.", "Unclear:" followed by the coder's question, or "Same point as <link to the other item>.". The sentence about resolving is there only while `resolveAfterReview` is on. A `settled` answer posts nothing. Items without a thread (review summaries, summary notes and pre-merge checks) share one new PR comment per round, one paragraph per item, which ends with `<!-- handoff:item-answers <round> <head sha> -->`.
+
+Every comment handoff writes ends with a hidden marker that starts with `<!-- handoff:`. The PR node skips any comment that carries it, so an answer never comes back to the coder as a review comment. The marker also makes posting idempotent per item and head commit: before it posts, the PR node looks for its marker in the thread or among the pull request's comments, and records the comment it finds instead of posting again. A worker that restarts after posting posts nothing twice. A post that fails is an event (`github.item_reply_failed` or `github.items_answer_failed`), the item stays `answered`, and the next look tries again.
+
+### Answer-only rounds
+
+A round is answer-only when every answer is `declined`, `unclear`, `duplicate` or `settled`, HEAD is still the commit the PR node pushed, and the worktree is clean. The coder executor sets `answerOnly` on the coder's output; an `answerOnly` the agent writes itself is dropped. When such a coder attempt passes, the engine creates the PR node's next execution directly, takes none of the coder's edges, and records `edge.returned` ("answered review comments only; back to pr"). The tester, code review, gates and demo do not run, since the code they checked has not changed. The `fix` edge counted the round when it sent the work to the coder, and the return adds nothing to its loop counter.
+
+A round with a fix, or with fixes and declines, takes the graph's normal path, and the PR node posts every answer when the round reaches it. With `returnOnAnswerOnly: false`, every round takes the normal path.
+
+### Re-review and resolving
+
+After it answers, the PR node waits while answered thread items await their reviewer's next review. `get_run` and `list_runs` report `waiting_on: re_review`, and the event `github.rereview` names the reviewers and items. New findings and failed CI still go to the coder first. On each look at the pull request, before it posts new answers, the PR node checks each waiting thread item in this order:
+
+1. The thread is resolved on GitHub: the item is `resolved`, by whoever resolved it. CodeRabbit resolves its own threads after a fix.
+2. The thread is gone: the item is `gone`.
+3. Someone wrote in the thread after the answer. A person other than the reviewer takes the item over, and it is `left`. A reply by the reviewer sends the item back to the coder with the thread (see Disputes).
+4. The reviewer opened a new thread on the same file within three lines of the item's line or original line: the old item is `reraised`, and the new thread is a new item. The old thread is resolved when the new item is.
+5. The reviewer submitted a review after the answer, on the answered commit or the head: handoff resolves the thread, and the item is `resolved` by `handoff`.
+
+A review submitted before the answer never counts, so handoff never resolves a thread in the step that answered it. An outdated thread counts for nothing on its own: GitHub marks a thread outdated when its lines change, which says nothing about whether the reviewer agrees.
+
+Only thread items hold the step, because items without a thread block nothing on GitHub. A review summary item is resolved (`next_review`) once the reviewer reviews a later commit after the answer without repeating it. A summary note or pre-merge check is resolved (`summary_dropped`) once a summary of the head, edited after the answer, no longer lists it. A declined one that the summary still lists stays as it is and is not sent again. A fixed one that it still lists goes back to the coder once, and then to a person.
+
+GitHub keeps a reviewer's `CHANGES_REQUESTED` decision until that reviewer approves. Once handoff has answered everything a reviewer raised, that decision no longer sends the run back to the coder, and the event `github.changes_requested_answered` names the reviewer. A declined-only round posts no `@coderabbitai review`: Ask a reviewer that has not started asks once per new commit, and the head has not changed.
+
+When the credential may not resolve a thread (`viewerCanResolve` is false), or GitHub refuses, the item stays `awaiting_review` with the reason, `github.thread_resolve_failed` names the thread, and the step stops waiting on it. The merge step's wait on unresolved threads then lists the thread for you to resolve on GitHub.
+
+### Disputes
+
+An item that came back with the reviewer's reply goes to the coder with the whole thread, and the coder answers it again:
+
+- `settled`: handoff posts nothing and resolves the thread at once.
+- `fixed`: the fix takes the normal path, and the item waits for the next review again.
+- `declined` again: the item is disputed, and handoff posts nothing more in the thread.
+- `unclear`: the first time, handoff posts the question to the reviewer and waits. A second `unclear` makes the item disputed.
+
+An item is also disputed when its reviewer does not review again within `botWaitMinutes` or `personWaitHours` of the answer, and when the next summary still lists a fixed summary note or pre-merge check after it went back to the coder once.
+
+Once no answered item holds the step on re-review, the PR step asks one question about all its disputed items and waits for the answer. The question is an ordinary handoff question: it notifies once, and the inbox, `list_attention` and `answer_question` handle it. For each item it shows the reviewer's comment, the thread since, the coder's latest verdict and evidence, the fixing commit and handoff's reply, and offers three choices:
+
+- Resolve: handoff posts "Resolved by <person> in handoff." with your note in the thread and resolves it. If GitHub refuses, the item is `left` and the merge step's wait lists the thread.
+- Send back: the item goes to the coder in the next round with your note, which is also recorded as a binding decision, the way gate decisions are.
+- Leave: the item is `left`. You handle it on GitHub, and handoff does not touch the thread again.
+
+`answer_question` takes `items: [{ id, choice, note? }]`, with `resolve`, `send_back` or `leave` for each item, or `option` alone for every item. It refuses an item the question does not list. While the question waits, the step still wakes on the pull request's webhooks: a disputed thread that someone resolves on GitHub is recorded as resolved, and a question with nothing left to decide is answered by handoff, so the step goes on.
+
+### CodeRabbit's summary comment
+
+CodeRabbit keeps one summary comment per pull request and edits it in place. With `"summary": "coderabbitai"`, the PR node finds that comment by its first line, `<!-- This is an auto-generated comment: summarize by coderabbit.ai -->`, among the pull request's comments by that login. It reads the commit the summary covers from CodeRabbit's hidden markers, and waits for the summary like a listed reviewer until it covers the head commit with no review in progress, up to the review time limit. At the limit, the latest summary counts.
+
+Each walkthrough note and each failed or warning pre-merge check in the summary is a finding. A check in warning mode blocks nothing on GitHub, but it is still a finding. Passed checks are not. Under a Minimal or Low merge risk, a note that only says there is no merge-blocking issue is not a finding. A note is known by its text, so a reworded note is a new item, and a pre-merge check by its name. The parser depends on CodeRabbit's HTML comment markers, which CodeRabbit does not document. A section whose content it cannot read becomes one finding with the section's text, and the PR node records `github.summary_unparsed` with the comment's link, so nothing is dropped without a trace.
+
+### The reviewer's own check
+
+A check or status named after a reviewer the PR node waits for, such as CodeRabbit's `CodeRabbit` check, is that reviewer's progress and not CI (see Reviewers under How a run works). The same holds for a check named after the `summary` bot, even when that bot is not under Reviewers to wait for. A pending one holds the PR node as a review wait, up to the review time limit, and a failed or cancelled one never goes to the coder as a CI failure.
+
+### CodeRabbit Autopilot stays off
+
+CodeRabbit's summary comment offers Autopilot (autofix, `fix_ci` and `resolve_merge_conflict`), which has CodeRabbit commit to the pull request's branch. Keep it off on repositories handoff works on. The PR node pushes the run's branch with `git push --force-with-lease --force-if-includes`, so a commit that someone else pushed to the branch makes the push fail instead of being overwritten. The lease refuses the push when the branch on GitHub moved since handoff's last push. `--force-if-includes` also refuses it when a fetch in the clone that the runs share brought the commit in, which the lease alone would trust.
+
+When the push is refused because the branch has commits handoff did not push, the PR step fails with the code `foreign_commits`. Those are the commits on the remote branch that the run's branch never had, at its head or in its reflog. The error message names each one with its short sha, author and subject, and the error's detail lists them as `commits: [{ sha, author, message }]`. handoff does not overwrite them. To keep them, pull them into the run's worktree, then repair the run.
+
+### Turning it on for a project
+
+1. Add `reviewThreads` to the PR node's `config` in the graph's JSON, and import it as a new version of the same graph with `pnpm handoff graph import --project <project> --name <graph> <file>`. Runs keep the graph version they started on, so runs that are already open behave as before. A failed run moves to the new version only when you repair it on the latest graph.
+2. The PR node must send review comments back: list the reviewers in `waitForReviewers`, or set `sendReviewComments: true`.
+3. A PR node that several edges lead to needs a join mode, as in the loop and plan templates, where the demo's `skipped` edge and the Try it gate both lead to it with `"join": "any"`. `handoff graph import` refuses a graph with such a node and no mode, and names the node.
+4. Keep CodeRabbit Autopilot off on the repository.
+
+A PR node with review threads on, waiting for CodeRabbit and reading its summary:
+
+```json
+{
+  "key": "pr",
+  "attributes": {
+    "type": "pr",
+    "config": {
+      "join": "any",
+      "waitForReviewers": ["coderabbitai[bot]"],
+      "sendReviewComments": true,
+      "reviewThreads": { "reply": true, "summary": "coderabbitai" }
+    }
+  }
+}
+```
 
 ## The Plan
 
