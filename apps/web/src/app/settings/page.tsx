@@ -11,6 +11,7 @@ import { ProjectsSettings } from "@/components/settings/projects-settings";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { VoiceSettingsLoader } from "@/components/settings/voice-settings-loader";
 import { ThemeSetting } from "@/components/settings/theme-setting";
+import { CodeEditorSetting } from "@/components/settings/code-editor-setting";
 import { AssistantSettings } from "@/components/settings/assistant-settings";
 import { WorkerSettings } from "@/components/settings/worker-settings";
 import { lastAgentConnection } from "@/server/agent-endpoint";
@@ -89,9 +90,14 @@ async function openSection({ tab, adding, origin, query }: { tab: SettingsTab; a
       return <ProjectsSettings key={adding ? "adding" : "list"} projects={await projectRows()} adding={adding} />;
     case "appearance":
       return (
-        <Section title="Appearance" description="How the dashboard looks. This browser keeps the choice.">
-          <ThemeSetting />
-        </Section>
+        <>
+          <Section title="Theme" description="Kept in this browser.">
+            <ThemeSetting />
+          </Section>
+          <Section title="Code editor" description="The Open in button on a run page and on a code review opens the run's worktree in this editor. Kept in this browser.">
+            <CodeEditorSetting />
+          </Section>
+        </>
       );
     case "notifications":
       return (
