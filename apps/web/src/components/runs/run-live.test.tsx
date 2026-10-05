@@ -343,6 +343,12 @@ test("a run first in the merge queue can be merged beside its status", async () 
   await waitFor(() => expect(projectActions.requestMergeAction).toHaveBeenCalledWith({ runId: "r1", projectId: "p1" }));
 });
 
+test("a merge waiting on unresolved review threads says so in its status", () => {
+  const merge = { id: "e9", nodeKey: "merge", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
+  render(<RunLive {...common} prNumber={9} initialStatus="waiting" initialExecutions={[merge]} unresolvedThreads={2} />);
+  expect(screen.getByRole("status")).toHaveTextContent("PR #9 has 2 unresolved review threads; the merge goes on once they are resolved");
+});
+
 test("a run further back in the queue has no merge button", () => {
   const merge = { id: "e9", nodeKey: "merge", attempt: 1, status: "waiting", costUsd: null, durationMs: null };
   render(<RunLive {...common} initialStatus="waiting" initialExecutions={[merge]} queue={{ position: 2, requested: false, mode: "manual" }} />);

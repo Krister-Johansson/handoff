@@ -61,6 +61,15 @@ test("list_inbox shows what needs the person in the Inbox's groups, in its order
   expect(within(list).getByRole("link", { name: "Open the Inbox" })).toHaveAttribute("href", `${BASE}/inbox`);
 });
 
+test("a pull request whose merge waits on unresolved review threads says how many and links to resolve them", async () => {
+  const threads = { ...empty, pull_requests: [{ run_id: RUN, project: "sandbox", run: "Docs", pr: 91, pr_url: "https://github.com/octo/sample/pull/91", ci: null, unresolved_threads: 2, url: RUN_URL }] };
+  await mountView(startNeedsYou, { input: {}, result: textResult(threads) });
+  await screen.findByRole("region", { name: "Needs you" });
+  const pulls = group(/^Pull requests/);
+  expect(pulls.getByText("2 unresolved review threads. The merge goes on once they are resolved.")).toBeInTheDocument();
+  expect(pulls.getByRole("link", { name: "Resolve on GitHub" })).toHaveAttribute("href", "https://github.com/octo/sample/pull/91");
+});
+
 test("Allow once asks answer_permission, shows it pending until the result comes back, then says it is allowed", async () => {
   const answer = deferred<ReturnType<typeof textResult>>();
   const { calls } = await mountView(startNeedsYou, { input: {}, result: textResult(inbox), tools: { answer_permission: () => answer.promise } });

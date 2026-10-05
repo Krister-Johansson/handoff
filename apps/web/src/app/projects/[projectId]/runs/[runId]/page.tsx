@@ -14,6 +14,7 @@ import { RunAgainButton } from "@/components/runs/run-again-button";
 import { RunLive, type OpenQuestion } from "@/components/runs/run-live";
 import { projectCrumb, projectRunsCrumb, runCrumb } from "@/server/crumbs";
 import { StuckLoopCard } from "@/components/runs/stuck-loop-card";
+import { ReviewThreadsCard, type ReviewThreadView } from "@/components/runs/review-threads-card";
 import { stuckLoop, type StuckLoop } from "@handoff/engine/operations";
 import { getDb } from "@/lib/db";
 import type { RunQueue } from "@/lib/run-now";
@@ -52,10 +53,10 @@ function questionItems({ run, project, openQuestions }: Detail): OpenQuestion[] 
 }
 
 /**
- * What the run needs from a person: questions to answer here, a decision for a loop that ran out, or a
+ * What the run needs from a person: questions to answer here, review threads to resolve on GitHub, a decision for a loop that ran out, or a
  * repair. A review waiting on a person is opened from the status banner instead.
  */
-function RunAlerts({ detail, stuck, permissions }: { detail: Detail; stuck: StuckLoop | undefined; permissions: PermissionRequestView[] }) {
+function RunAlerts({ detail, stuck, permissions, threads }: { detail: Detail; stuck: StuckLoop | undefined; permissions: PermissionRequestView[]; threads: ReturnType<typeof unresolvedThreadsOf> }) {
   const { run, project, graph, failed } = detail;
   return (
     <>
@@ -67,6 +68,7 @@ function RunAlerts({ detail, stuck, permissions }: { detail: Detail; stuck: Stuc
         .map((q) => (
           <QuestionCard key={q.id} compact item={q} />
         ))}
+      {threads && <ReviewThreadsCard number={threads.number} url={threads.url} threads={threads.threads} />}
       {stuck && <StuckLoopCard runId={run.id} node={nodeLabels(graph?.document)[stuck.nodeKey] ?? stuck.nodeKey} loop={stuck.edgeKey} attempts={stuck.attempts} />}
       {run.status === "failed" && failed && !stuck && (
         <FailedRunCard
@@ -86,6 +88,15 @@ function blockersOf({ run, executions, events }: Detail): number[] | undefined {
     .filter((e) => (e.type === "run.blocked" || e.type === "merge.blocked") && e.nodeExecutionId !== null && waiting.has(e.nodeExecutionId))
     .flatMap((e) => (e.payload as { blockedBy?: number[] }).blockedBy ?? []);
   return blockers.length ? [...new Set(blockers)] : undefined;
+}
+
+/** The pull request and the review threads the merge step named, while it still waits on someone to resolve them. */
+function unresolvedThreadsOf({ run, executions, events }: Detail): { number: number; url: string; threads: ReviewThreadView[] } | undefined {
+  if (run.status !== "waiting") return undefined;
+  const waiting = new Set(executions.filter((e) => e.status === "waiting").map((e) => e.id));
+  const latest = events.findLast((e) => e.type === "merge.threads_unresolved" && e.nodeExecutionId !== null && waiting.has(e.nodeExecutionId));
+  const payload = latest?.payload as { number?: number; url?: string; threads?: ReviewThreadView[] } | undefined;
+  return payload?.number !== undefined && payload.url && payload.threads?.length ? { number: payload.number, url: payload.url, threads: payload.threads } : undefined;
 }
 
 /** The run's place in the scheduler's order, when the scheduler started it. */
@@ -146,6 +157,7 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
     : [undefined, [], undefined];
   const wait = waits?.get(run.id);
   const blockedBy = blockersOf(detail);
+  const threads = unresolvedThreadsOf(detail);
   const totalCost = executions.reduce((sum, e) => sum + Number(e.costUsd ?? 0), 0);
   const worktree = worktreeState(run, workerHome());
   const task = taskParts(run.task);
@@ -220,11 +232,12 @@ export default async function RunPage({ params }: { params: Promise<{ projectId:
         questions={questionItems(detail)}
         queue={queue}
         blockedBy={blockedBy}
+        unresolvedThreads={threads?.threads.length}
         initialEvents={events}
         graphDocument={graph?.document}
         waitingOn={wait && { kind: wait.kind, nodeKey: wait.nodeKey, since: wait.since, action: describePermission(wait.toolName, wait.input).action }}
       >
-        <RunAlerts detail={detail} stuck={stuck} permissions={permissions} />
+        <RunAlerts detail={detail} stuck={stuck} permissions={permissions} threads={threads} />
       </RunLive>
     </main>
   );

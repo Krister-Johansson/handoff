@@ -89,6 +89,8 @@ type Props = {
   queue?: RunQueue | undefined;
   /** Open issues GitHub says block this run's issues, while it waits for them at its start. */
   blockedBy?: number[] | undefined;
+  /** How many review threads the merge step waits on a person to resolve, while it waits on them. */
+  unresolvedThreads?: number | undefined;
   /** The page header the run's status sits in: its trail, title, facts and actions. */
   header?: { crumbs: Crumb[]; title: ReactNode; meta: ReactNode; actions: ReactNode };
   /** Cards between the header and the steps, such as a failed run's way to repair it. */
@@ -201,6 +203,7 @@ export function RunLive({
   questions,
   queue,
   blockedBy,
+  unresolvedThreads,
   header,
   children,
   awaitsWorktree = false,
@@ -291,7 +294,7 @@ export function RunLive({
   const review = questions.find((q) => q.context?.review);
   const tryIt = questions.find((q) => q.context?.reason === "try");
   const { waitingOn, permissions } = liveWait(status, executions, initialWaitingOn);
-  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy, permissions });
+  const now = describeNow({ status, executions, labels, prNumber, questions: questions.length, reviews: review ? 1 : 0, queue, blockedBy, permissions, unresolvedThreads });
   const selectedQuestion = questions.find((q) => q.nodeExecutionId === selected?.id);
   const nodeKeys = [...new Set(executions.map((e) => e.nodeKey))];
   const filter = useMemo(

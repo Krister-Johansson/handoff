@@ -3,18 +3,20 @@ import { z } from "zod";
 import {
   IssueMilestoneRefsDocument,
   IssueParentsDocument,
+  PullRequestReviewThreadsDocument,
   PullRequestSnapshotDocument,
   RepositoryMilestonesDocument,
   SetIssueMilestoneDocument,
   type IssueMilestoneRefsQuery,
   type IssueParentsQuery,
+  type PullRequestReviewThreadsQuery,
   type PullRequestSnapshotQuery,
   type RepositoryMilestonesQuery,
   type SetIssueMilestoneMutation,
 } from "./gql/graphql.ts";
 import { readError } from "./errors.ts";
 import { ancestorsOf, present } from "./projects/lineage.ts";
-import type { Assignable, Assignee, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary } from "./types.ts";
+import type { Assignable, Assignee, CheckContext, GitHubPort, IssueComment, IssueDependencies, IssueDetail, IssueRef, IssueSummary, Milestone, MilestoneRef, PrInfo, PrSnapshot, RepoRef, RepoSummary, ReviewThreadState } from "./types.ts";
 
 type Fetch = typeof globalThis.fetch;
 
@@ -410,6 +412,24 @@ export class OctokitGitHub implements GitHubPort {
       })),
       comments: present(pr.comments.nodes).map((c) => ({ author: c.author?.login ?? "ghost", body: c.body, url: c.url })),
     };
+  }
+
+  async unresolvedReviewThreads(repo: RepoRef, number: number): Promise<ReviewThreadState> {
+    const octokit = await this.clientFor(repo);
+    const { repository } = await octokit.graphql<PullRequestReviewThreadsQuery>(PullRequestReviewThreadsDocument.toString(), {
+      owner: repo.owner,
+      name: repo.name,
+      number,
+    });
+    const pr = repository?.pullRequest;
+    if (!pr) throw new Error(`pull request ${repo.owner}/${repo.name}#${number} not found`);
+    const threads = present(pr.reviewThreads.nodes)
+      .filter((t) => !t.isResolved)
+      .map((t) => {
+        const first = present(t.comments.nodes)[0];
+        return { path: t.path, line: t.line ?? null, outdated: t.isOutdated, author: first?.author?.login ?? "ghost", body: first?.body ?? "", url: first?.url ?? "" };
+      });
+    return { mergeState: pr.mergeStateStatus, threads };
   }
 
   async getFile(repo: RepoRef, path: string, ref: string): Promise<string | undefined> {

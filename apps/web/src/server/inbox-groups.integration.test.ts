@@ -67,6 +67,17 @@ test("the inbox groups what waits on a person by what they must do", async () =>
   expect(groups.count).toBe(5);
 });
 
+test("a merge waiting on unresolved review threads is a pull request to look at, with how many threads", async () => {
+  const { start } = await setUp();
+  const run = await start("Add usage docs");
+  const merge = await seedExecution(db, run.id, { nodeKey: "merge", nodeType: "merge", executorKind: "github", status: "waiting", waitKind: "github_pr" });
+  const thread = { path: "a.ts", line: 3, outdated: false, author: "octocat", body: "Why?", url: "https://github.com/octo/sample/pull/9#r1" };
+  await db.transaction((tx) => appendEvents(tx, run.id, [{ type: "merge.threads_unresolved", payload: { number: 9, url: "https://github.com/octo/sample/pull/9", threads: [thread] }, nodeExecutionId: merge.id }]));
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
+
+  expect((await inboxGroups(db)).pullRequests).toEqual([expect.objectContaining({ runId: run.id, number: 9, url: "https://github.com/octo/sample/pull/9", ci: null, threads: 1 })]);
+});
+
 test("a run stopped by a loop is listed once, as needing a decision rather than a repair", async () => {
   const { start } = await setUp();
   const stuck = await start("Review until done");

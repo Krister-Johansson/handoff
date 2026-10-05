@@ -6,7 +6,7 @@ test("each node type offers what it can notify about", () => {
   expect(notifyKindsOf("start")).toEqual(["started"]);
   expect(notifyKindsOf("finish")).toEqual(["finished"]);
   expect(notifyKindsOf("human_gate")).toEqual(["input", "failed"]);
-  expect(notifyKindsOf("merge")).toEqual(["ready", "merged", "failed"]);
+  expect(notifyKindsOf("merge")).toEqual(["ready", "input", "merged", "failed"]);
   expect(notifyKindsOf("coder")).toEqual(["permission", "failed"]);
   expect(notifyKindsOf("tester")).toEqual(["failed"]);
 });

@@ -10,7 +10,8 @@ export type Inbox = {
   ready_to_merge: (Ref & { run_id: string; pr: number | null })[];
   failed_runs: (Ref & { run_id: string; node: string })[];
   stuck_runs: (Ref & { run_id: string; node: string; loop: string; attempts: number })[];
-  pull_requests: (Ref & { run_id: string; pr: number; pr_url: string | null; ci: string | null })[];
+  /** `unresolved_threads` is set when the merge waits on review threads nobody resolved, rather than on an approving review. */
+  pull_requests: (Ref & { run_id: string; pr: number; pr_url: string | null; ci: string | null; unresolved_threads?: number })[];
 };
 
 export const isInbox = (value: unknown): value is Inbox => typeof value === "object" && value !== null && Array.isArray((value as Inbox).permissions) && Array.isArray((value as Inbox).questions);

@@ -45,6 +45,12 @@ test("a run waiting in the merge queue says where it stands", () => {
   expect(describeNow({ ...waitingToMerge, queue: { position: 3, requested: true, mode: "manual" } }).text).toBe("Merge requested, 3rd in line");
 });
 
+test("a merge waiting on unresolved review threads says how many a person must resolve", () => {
+  const blocked = { ...base, status: "waiting", prNumber: 9, executions: [exec("merge", "waiting")] };
+  expect(describeNow({ ...blocked, unresolvedThreads: 2 })).toEqual({ tone: "attention", text: "PR #9 has 2 unresolved review threads; the merge goes on once they are resolved" });
+  expect(describeNow({ ...blocked, unresolvedThreads: 1 }).text).toBe("PR #9 has 1 unresolved review thread; the merge goes on once it is resolved");
+});
+
 test("a run waiting on GitHub dependencies says which issues it waits for", () => {
   const blocked = { ...base, status: "waiting", executions: [exec("start", "waiting")] };
   expect(describeNow({ ...blocked, blockedBy: [3] })).toEqual({ tone: "attention", text: "Waiting for #3 to close" });

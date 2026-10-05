@@ -203,7 +203,7 @@ export type ProjectAttention = {
   questions: number;
   /** Failed runs waiting for a repair or a cancel. */
   failed: number;
-  /** Pull requests whose checks have finished and that wait for an approving review. */
+  /** Pull requests whose checks have finished and that wait for an approving review, or whose merge waits on unresolved review threads. */
   reviews: number;
   /** Pull requests waiting for CI. */
   waitingOnCi: number;
@@ -217,7 +217,7 @@ const EMPTY: ProjectAttention = { questions: 0, failed: 0, reviews: 0, waitingOn
 export async function projectAttention(db: Db): Promise<Record<string, ProjectAttention>> {
   const latestPrEvent = sql<{ ci?: string } | null>`(
     select e.payload from events e
-    where e.node_execution_id = ${nodeExecutions.id} and e.type = 'github.pr'
+    where e.node_execution_id = ${nodeExecutions.id} and e.type in ('github.pr', 'merge.threads_unresolved')
     order by e.seq desc limit 1
   )`;
   const [open, failed, waitingPrs, busy, all] = await Promise.all([
@@ -245,7 +245,7 @@ export async function projectAttention(db: Db): Promise<Record<string, ProjectAt
   for (const row of open) at(row.projectId).questions = row.n;
   for (const row of failed) at(row.projectId).failed = row.n;
   for (const row of busy) at(row.projectId).running = row.n;
-  // A PR node only keeps waiting after CI finished when the node requires an approving review.
+  // A PR node only keeps waiting after CI finished when the node requires an approving review; a merge step waits on review threads.
   for (const row of waitingPrs) {
     if (!row.pr || row.pr.ci === "pending") at(row.projectId).waitingOnCi += 1;
     else at(row.projectId).reviews += 1;

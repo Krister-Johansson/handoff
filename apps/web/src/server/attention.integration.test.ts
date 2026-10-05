@@ -4,6 +4,7 @@ import { appendEvents, eq, nodeExecutions, permissionRequests, questions, runs, 
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { dismissAttention, listAttention } from "./attention";
 import { createProject, runAgain, saveGraphVersion, startRunFromGraph } from "./graphs";
+import { projectAttention } from "./project-admin";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -57,6 +58,23 @@ test("questions, failed runs and pull requests waiting for review each become on
       { id: `review:${pr.id}:7`, kind: "review", title: "sandbox: PR #7 waits for your review", body: "Add usage docs", href: `/projects/${project.id}/runs/${review.id}`, projectId: project.id },
     ]),
   );
+});
+
+test("a merge step waiting on unresolved review threads is one item that says how many", async () => {
+  const project = await createProject(db, { name: "sandbox", repo: "octo/sample", defaultBranch: "main" });
+  await saveGraphVersion(db, { projectId: project.id, name: "g", document: linear });
+  const run = await startRunFromGraph(db, { projectId: project.id, graphName: "g", task: "Add usage docs" });
+  const merge = await seedExecution(db, run.id, { nodeKey: "merge", nodeType: "merge", executorKind: "github", status: "waiting", waitKind: "github_pr" });
+  const thread = (path: string) => ({ path, line: null, outdated: false, author: "octocat", body: "Why?", url: `https://github.com/octo/sample/pull/9#${path}` });
+  await db.transaction((tx) =>
+    appendEvents(tx, run.id, [{ type: "merge.threads_unresolved", payload: { number: 9, url: "https://github.com/octo/sample/pull/9", threads: [thread("a.ts"), thread("b.ts")] }, nodeExecutionId: merge.id }]),
+  );
+  await db.update(runs).set({ status: "waiting" }).where(eq(runs.id, run.id));
+
+  expect(await listAttention(db)).toEqual([
+    { id: `review:${merge.id}:9`, kind: "review", title: "sandbox: PR #9 has 2 unresolved review threads", body: "Add usage docs", href: `/projects/${project.id}/runs/${run.id}`, projectId: project.id },
+  ]);
+  expect((await projectAttention(db))[project.id]).toMatchObject({ reviews: 1, waitingOnCi: 0 });
 });
 
 test("each item carries its project, and a project id narrows the list to that project's items", async () => {

@@ -3,7 +3,7 @@ import type { NodeType } from "../schema/graph.ts";
 
 /**
  * What a node can tell a person about: the run started (Start) or finished (Finish), the node failed,
- * a gate waits for an answer, a Claude step asks permission for a tool call, a pull request is ready to
+ * a gate or a merge waits for a person, a Claude step asks permission for a tool call, a pull request is ready to
  * merge, or it merged.
  */
 export const NotifyKindSchema = z.enum(["started", "finished", "failed", "input", "permission", "ready", "merged"]);
@@ -24,7 +24,7 @@ export function notifyKindsOf(type: NodeType): NotifyKind[] {
   if (type === "start") return ["started"];
   if (type === "finish") return ["finished"];
   if (type === "human_gate") return ["input", "failed"];
-  if (type === "merge") return ["ready", "merged", "failed"];
+  if (type === "merge") return ["ready", "input", "merged", "failed"];
   if (CLAUDE_STEPS.has(type)) return ["permission", "failed"];
   return ["failed"];
 }

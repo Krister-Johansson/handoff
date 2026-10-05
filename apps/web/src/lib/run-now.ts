@@ -16,6 +16,8 @@ export type NowInput = {
   blockedBy?: number[] | undefined;
   /** Tool calls the run's steps wait for a person to allow, oldest first, each with what it asks to do. */
   permissions?: { nodeKey: string; action: string }[] | undefined;
+  /** How many review threads the merge step waits on a person to resolve, while it waits on them. */
+  unresolvedThreads?: number | undefined;
 };
 
 const andList = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
@@ -31,7 +33,7 @@ function queueText({ position, requested, mode }: RunQueue): string {
 }
 
 /** One line saying what a run is doing now, or how it ended, with the tone to show it in. */
-export function describeNow({ status, executions, labels, prNumber, questions, reviews, queue, blockedBy, permissions }: NowInput): { tone: StatusTone; text: string } {
+export function describeNow({ status, executions, labels, prNumber, questions, reviews, queue, blockedBy, permissions, unresolvedThreads }: NowInput): { tone: StatusTone; text: string } {
   const label = (key: string) => labels[key] ?? key;
   const latest = (s: string) => executions.findLast((e) => e.status === s);
   if (status === "cancelled") return { tone: "muted", text: "Cancelled." };
@@ -50,6 +52,10 @@ export function describeNow({ status, executions, labels, prNumber, questions, r
   if (running) return { tone: "active", text: `${label(running.nodeKey)} is working${running.attempt > 1 ? `, attempt ${running.attempt}` : ""}` };
   const waiting = latest("waiting");
   if (waiting && blockedBy?.length) return { tone: "attention", text: `Waiting for ${andList(blockedBy.map((n) => `#${n}`))} to close` };
+  if (waiting && unresolvedThreads) {
+    const one = unresolvedThreads === 1;
+    return { tone: "attention", text: `PR #${prNumber} has ${unresolvedThreads} unresolved review ${one ? "thread" : "threads"}; the merge goes on once ${one ? "it is" : "they are"} resolved` };
+  }
   if (waiting && queue) return { tone: "attention", text: queueText(queue) };
   if (waiting && reviews > 0) return { tone: "attention", text: `${label(waiting.nodeKey)} waits for your review` };
   if (waiting && questions > 0) return { tone: "attention", text: `Waiting for your answer to ${label(waiting.nodeKey)}` };
