@@ -3,7 +3,20 @@ import { rmSync } from "node:fs";
 import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
-import { findCodeRabbitSummary, parseCodeRabbitSummary, prKey, REVIEWER_NOTES_MARKER, reviewRequestMarker, toFeedback, type GitHubPort, type PlanStatus, type PrSnapshot, type ProjectsPort, type RepoRef } from "@handoff/github";
+import {
+  findCodeRabbitSummary,
+  parseCodeRabbitSummary,
+  prKey,
+  REVIEWER_NOTES_MARKER,
+  reviewRequestMarker,
+  toFeedback,
+  withoutChecks,
+  type GitHubPort,
+  type PlanStatus,
+  type PrSnapshot,
+  type ProjectsPort,
+  type RepoRef,
+} from "@handoff/github";
 import { and, asc, desc, eq, events, screenshots, sql, webhookDeliveries, type Db } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
@@ -11,7 +24,17 @@ import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
-import { externalReview, reviewerStarted, reviewRequest, reviewSettings, reviewThreadsSettings, withFindings, type ReviewRequest, type SummaryRead } from "./external-review.ts";
+import {
+  externalReview,
+  reviewerCheck,
+  reviewerStarted,
+  reviewRequest,
+  reviewSettings,
+  reviewThreadsSettings,
+  withFindings,
+  type ReviewRequest,
+  type SummaryRead,
+} from "./external-review.ts";
 import { handleOf, postAnswers, recordAnswers, sendItems, syncItems, withItems } from "./review-items.ts";
 
 const execFileAsync = promisify(execFile);
@@ -292,27 +315,33 @@ export function prNodeExecutor(deps: {
       const snapshot = await deps.github.getPrSnapshot(repo, number);
       if (snapshot.state === "closed") return { kind: "failed", error: { code: "pr_closed", message: `PR #${number} was closed without merging` } };
 
-      // External reviewers (review bots such as CodeRabbit or Copilot, or people) on the head commit.
+      // External reviewers (review bots such as CodeRabbit or Copilot, or people) the node waits for.
       const settings = reviewSettings(ctx.node.config);
       const threads = reviewThreadsSettings(ctx.node.config);
       // With replies on, what reviewers say becomes review items, which the coder answers and handoff answers on GitHub.
       const itemsDb = threads.reply && settings.sendBack ? deps.db : undefined;
+      // The bot whose summary comment the node reads; it waits for that summary like a listed reviewer.
+      const summaryBot = itemsDb ? threads.summary : undefined;
       if (itemsDb) {
         await recordAnswers(itemsDb, ctx);
-        // After the push, so a fixing commit is on GitHub when the reply names it.
+        // After the push, so a fixing commit is on GitHub when the reply names it. Threads and comments come from the whole snapshot.
         const headSha = ctx.workdir ? await headOf(ctx.workdir.path).catch(() => snapshot.headSha) : snapshot.headSha;
         await postAnswers({ db: itemsDb, github: deps.github }, ctx, { repo, snapshot, headSha, resolveAfterReview: threads.resolveAfterReview });
       }
 
-      const failedJobs = (snapshot.checks?.contexts ?? []).filter((c) => c.checkRunId !== undefined && c.conclusion === "FAILURE");
+      // A check named after one of them (CodeRabbit's "CodeRabbit"), or after the summary bot, is its review in
+      // progress, not CI: the review wait below covers it, up to the review time limit, and it never goes to the
+      // coder as a CI failure.
+      const ci = withoutChecks(snapshot, reviewerCheck({ ...settings, waitFor: summaryBot ? [...settings.waitFor, summaryBot] : settings.waitFor }));
+      const failedJobs = (ci.checks?.contexts ?? []).filter((c) => c.checkRunId !== undefined && c.conclusion === "FAILURE");
       const logs = await Promise.all(
         failedJobs.map(async (c) => ({ jobId: c.checkRunId!, log: (await deps.github.getJobLogTail(repo, c.checkRunId!)) ?? "" })),
       );
-      let feedback = toFeedback(snapshot, logs);
+      let feedback = toFeedback(ci, logs);
       // A repository without CI never gets a check; after a while, stop waiting for one and treat CI as passed.
       const sincePush = Date.now() - (ctx.execution.startedAt ?? new Date()).getTime();
       const noChecksMs = (typeof ctx.node.config.noChecksAfterMinutes === "number" ? ctx.node.config.noChecksAfterMinutes : 10) * 60_000;
-      const noChecks = requireChecks && snapshot.checks === null && snapshot.state === "open";
+      const noChecks = requireChecks && ci.checks === null && snapshot.state === "open";
       // A repository with no workflows and no required checks will never get one: there is nothing to wait for.
       const noCi = noChecks && !(await deps.github.expectsChecks(repo, ctx.run.baseBranch).catch(() => true));
       if (noChecks && (noCi || sincePush >= noChecksMs)) {
@@ -325,10 +354,11 @@ export function prNodeExecutor(deps: {
       const awaitingApproval =
         requireApproval && feedback.review.decision === "none" && feedback.ci.status !== "failure" && snapshot.state === "open";
 
-      // Review items keep what was sent in their table; without them, run state lists the findings already sent.
+      // Where the external reviewers stand on the head commit. Review items keep what was sent in their table;
+      // without them, run state lists the findings already sent.
       const handled = new Set(!itemsDb && Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
       const waitingForMs = sincePush;
-      const summary = itemsDb && threads.summary ? { login: threads.summary, read: await readSummary(deps.github, repo, snapshot, threads.summary) } : undefined;
+      const summary = summaryBot ? { login: summaryBot, read: await readSummary(deps.github, repo, snapshot, summaryBot) } : undefined;
       const external = externalReview(snapshot, settings, handled, waitingForMs, summary ? { summary } : {});
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });

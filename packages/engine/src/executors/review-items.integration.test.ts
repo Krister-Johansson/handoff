@@ -286,6 +286,23 @@ test("a summary note that finds no merge-blocking issue under a Minimal risk is 
   expect(github.merged).toEqual([1]);
 });
 
+test("the summary bot's own check is its review in progress, not CI, and the step waits for the summary instead", async () => {
+  // Not a listed reviewer: only the summary setting names CodeRabbit.
+  const { github, run, wake, pr } = await opened({ sendReviewComments: true, reviewThreads: { reply: true, summary: "coderabbitai" } }, answeringCoder(decline));
+  const running = { name: "CodeRabbit", status: "IN_PROGRESS", conclusion: null, url: "https://coderabbit.ai", checkRunId: 8 };
+  pr().checks = { state: "PENDING", contexts: [{ name: "test", status: "COMPLETED", conclusion: "SUCCESS", url: "https://ci/7", checkRunId: 7 }, running] };
+  await wake();
+  const { executions, events } = await inspect(db, run.id);
+  expect(executions.find((e) => e.nodeKey === "pr")?.status).toBe("waiting");
+  expect(events.filter((e) => e.type === "github.pr").at(-1)?.payload).toMatchObject({ ci: "success" });
+  expect(events.filter((e) => e.type === "github.reviewers").at(-1)?.payload).toMatchObject({ waitingFor: ["coderabbitai summary"], timedOut: false });
+
+  // The summary of the head arrives while CodeRabbit's check still runs: the step goes on.
+  github.summaryComment(1, summaryOf(pr().headSha, { risk: "⚪ Minimal", note: "No merge-blocking issue is identified." }));
+  await wake();
+  expect(github.merged).toEqual([1]);
+});
+
 test("without reviewThreads the PR node sends findings once and posts nothing, as before", async () => {
   const { github, run, wake, pr } = await opened({ waitForReviewers: ["coderabbitai"] }, answeringCoder(decline));
   github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", body: "Actionable comments posted: 1", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });

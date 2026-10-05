@@ -1,5 +1,5 @@
 import type { Feedback } from "@handoff/core";
-import { HANDOFF_COMMENT_PREFIX, summaryCoversHead, type CodeRabbitSummary, type PrSnapshot } from "@handoff/github";
+import { HANDOFF_COMMENT_PREFIX, summaryCoversHead, type CheckContext, type CodeRabbitSummary, type PrSnapshot } from "@handoff/github";
 
 /** A login as GitHub shows it in GraphQL or REST: coderabbitai and coderabbitai[bot] are the same reviewer. */
 export const sameLogin = (a: string, b: string) => a.toLowerCase().replace(/\[bot\]$/, "") === b.toLowerCase().replace(/\[bot\]$/, "");
@@ -76,17 +76,26 @@ export function reviewRequest(config: Record<string, unknown>): ReviewRequest | 
 /** A login or a status name in lower case letters and digits only: coderabbitai[bot] and CodeRabbit become coderabbitai and coderabbit. */
 const plain = (name: string) => name.toLowerCase().replace(/\[bot\]$/, "").replace(/[^a-z0-9]/g, "");
 
+/** Whether a check or status is named after a reviewer: CodeRabbit's check "CodeRabbit" is named after coderabbitai[bot]. */
+export function namedAfter(check: CheckContext, login: string): boolean {
+  const who = plain(login);
+  const name = plain(check.name);
+  return name !== "" && (who.startsWith(name) || name.startsWith(who));
+}
+
+/**
+ * Whether a check belongs to a reviewer the PR node waits for. Such a check shows the reviewer's
+ * progress and is not CI: the node waits for that reviewer's review, up to the review time limit, instead.
+ */
+export const reviewerCheck = (settings: ReviewSettings) => (check: CheckContext) => settings.waitFor.some((login) => namedAfter(check, login));
+
 /**
  * Whether a reviewer has started on the PR's head commit: it reviewed that commit, or a check or status
  * named after it (CodeRabbit's is "CodeRabbit") is in progress there.
  */
 export function reviewerStarted(snapshot: PrSnapshot, login: string): boolean {
   if (snapshot.reviews.some((r) => r.commitSha === snapshot.headSha && sameLogin(r.author, login))) return true;
-  const who = plain(login);
-  return (snapshot.checks?.contexts ?? []).some((c) => {
-    const name = plain(c.name);
-    return c.conclusion === null && name !== "" && (who.startsWith(name) || name.startsWith(who));
-  });
+  return (snapshot.checks?.contexts ?? []).some((c) => c.conclusion === null && namedAfter(c, login));
 }
 
 /** What a finding is on GitHub: an inline thread, a review summary, or a note or a pre-merge check in a review bot's summary comment. */
