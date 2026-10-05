@@ -69,6 +69,7 @@ export function PlanBoard({
   skipped,
   now,
   searching = false,
+  milestone,
   ...start
 }: StartRunContext & {
   board: Record<PlanColumn, PlanTask[]>;
@@ -82,6 +83,8 @@ export function PlanBoard({
   now: number;
   /** Whether a search narrows the cards; an empty column then says No match. */
   searching?: boolean;
+  /** The milestone the filter names, which the cards then do not repeat. */
+  milestone?: number | "none" | undefined;
 }) {
   const [showAllDone, setShowAllDone] = useState(false);
   const eyebrowOf = eyebrows(epics);
@@ -120,6 +123,7 @@ export function PlanBoard({
                       needsYou={needsYou}
                       skipped={skipped?.[task.number]}
                       start={start}
+                      milestoneShown={task.milestone?.number === milestone}
                     />
                   ))}
                 </ul>

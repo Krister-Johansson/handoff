@@ -156,7 +156,7 @@ function PlanBody(props: BodyProps) {
   }
   switch (view) {
     case "board":
-      return <PlanBoard {...shared} project={plan.project} board={shown.board} epics={plan.epics} now={readAt} searching={found.active} />;
+      return <PlanBoard {...shared} project={plan.project} board={shown.board} epics={plan.epics} now={readAt} searching={found.active} milestone={filters.milestone} />;
     case "timeline":
       return (
         <PlanTimeline

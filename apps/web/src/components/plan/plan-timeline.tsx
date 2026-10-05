@@ -528,13 +528,20 @@ function dueMarkOf(milestone: PlanMilestone | undefined, scale: TimeScale): DueM
   };
 }
 
+/** The due day of a filtered milestone, which the chart's range reaches. */
+const dueDays = (milestone: PlanMilestone | undefined) => (milestone?.dueOn ? [milestone.dueOn] : []);
+
+/** The due day when a task's row ends after it, for its Ends after tag. */
+const endsAfterOf = (due: DueMark | undefined, row: TimelineRow, entry: TimelineItem | undefined) => (due && row.task && (entry?.planned?.end ?? "") > due.due ? due.due : undefined);
+
 /** The dashed due-date line, red when the plan ends the milestone after it. */
 function DueLine({ mark }: { mark: DueMark }) {
   return <span aria-hidden data-due-line className={cn("absolute inset-y-0 z-[4] border-l-2 border-dashed", mark.late ? "border-danger-dot" : "border-foreground/70")} style={{ left: mark.x }} />;
 }
 
 /** Under the rows: the days past the due date hatched, the line, and how late the plan ends the milestone. */
-function DueOverlay({ mark }: { mark: DueMark }) {
+function DueOverlay({ mark }: { mark: DueMark | undefined }) {
+  if (!mark) return null;
   return (
     <>
       {mark.past && (
@@ -1159,7 +1166,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
   const [scheduling, setScheduling] = useState<PlanItem>();
   const [hovered, setHovered] = useState<number>();
   // The chart reaches the filtered milestone's due date, so its line is always on it.
-  const range = chartRange(timeline, milestone?.dueOn ? [milestone.dueOn] : []);
+  const range = chartRange(timeline, dueDays(milestone));
   const scale = timeScale(range, zoom ?? defaultZoom(range));
   const todayX = scale.xAt(new Date(readAt).toISOString());
   const due = dueMarkOf(milestone, scale);
@@ -1251,7 +1258,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                     <TimelineRowLabel
                       row={row}
                       entry={entry}
-                      endsAfter={due && row.task && (entry?.planned?.end ?? "") > due.due ? due.due : undefined}
+                      endsAfter={endsAfterOf(due, row, entry)}
                       projectId={projectId}
                       start={{ graphs, graphName }}
                       flags={flags}
@@ -1277,7 +1284,7 @@ function TimelineChart({ projectId, project, epics: planEpics, unparented: planU
                 ))}
                 <ArrowLayer arrows={arrows} width={scale.width} height={height} hovered={hovered} />
                 <span className="absolute inset-y-0 z-[3] w-0.5 -translate-x-1/2 bg-foreground/85" style={{ left: todayX }} />
-                {due && <DueOverlay mark={due} />}
+                <DueOverlay mark={due} />
               </div>
             </div>
           </div>

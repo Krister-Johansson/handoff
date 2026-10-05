@@ -1,5 +1,7 @@
 import type { ComponentProps } from "react";
 import { MilestoneIcon } from "lucide-react";
+import type { PlanItem } from "@handoff/github";
+import { milestoneSource, ownMilestone } from "@/lib/plan/milestone-text";
 import type { ItemMilestone } from "@/lib/plan/milestones";
 import { cn } from "@/lib/utils";
 
@@ -20,8 +22,11 @@ export function MilestoneTag({ dashed, className, children, ...props }: Componen
   );
 }
 
-/** Where an item's milestone comes from, in words: "set on this issue", or "from epic #12". */
-export const milestoneSource = (m: ItemMilestone) => (m.inherited ? `from ${m.inherited.kind} #${m.inherited.issue}` : "set on this issue");
+/** The chip of the milestone a row's item sets on itself, for the views that show its story's and epic's rows too. */
+export function OwnMilestoneChip({ item }: { item: PlanItem }) {
+  const m = ownMilestone(item);
+  return m ? <MilestoneChip milestone={m} /> : null;
+}
 
 /** An item's milestone as a chip: solid when the item sets it, dashed and named "from epic #12" when it inherits it. */
 export function MilestoneChip({ milestone, className }: { milestone: ItemMilestone; className?: string }) {

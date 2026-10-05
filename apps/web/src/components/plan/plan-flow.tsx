@@ -575,10 +575,14 @@ function milestoneEnd(milestone: PlanMilestone | undefined, tasks: FlowInput["ta
   };
 }
 
-/** The dashed line after the milestone's last card. */
-function EndLine({ x }: { x: number }) {
+/** The dashed line after the milestone's last card; nothing when no card of it is in the order. */
+function EndLine({ x }: { x: number | undefined }) {
+  if (x === undefined) return null;
   return <span aria-hidden data-milestone-end className="absolute inset-y-0 z-[4] border-l-2 border-dashed border-foreground/70" style={{ left: x }} />;
 }
+
+/** The milestone's title on its last task's row, for Last of 0.9. */
+const lastOn = (row: TimelineRow, ending: MilestoneEnd | undefined) => (ending && row.task?.number === ending.last ? ending.title : undefined);
 
 /** The header: the lanes named on the left, and on the axis each lane's strip with every card again, Now, and the scheduler's note. */
 function LaneHeader({
@@ -1186,7 +1190,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
               <ArrowLayer arrows={arrows} then={then} lighting={lighting} width={axis.width} height={height} />
               <span className="absolute inset-y-0 z-[3] w-0.5 -translate-x-1/2 bg-foreground/85" style={{ left: axis.now }} />
               {drops.tip && landed && <span data-drop-line className="absolute inset-y-0 z-[4] border-l-[1.5px] border-dashed border-foreground/60" style={{ left: axis.x(landed.start) }} />}
-              {ending?.x !== undefined && <EndLine x={ending.x} />}
+              <EndLine x={ending?.x} />
             </div>
             {rows.map((row) => (
               <div
@@ -1202,7 +1206,7 @@ function FlowChart({ projectId, epics, unparented, flow: given, scheduler, graph
                   tags={(row.task && tags.get(row.task.number)) ?? []}
                   tick={tickOf(row)}
                   was={row.task && optimized?.was.get(row.task.number)}
-                  last={row.task && row.task.number === ending?.last ? ending.title : undefined}
+                  last={lastOn(row, ending)}
                   projectId={projectId}
                   start={{ graphs, graphName }}
                   onToggle={() => rowsOpen.toggle(row.key)}

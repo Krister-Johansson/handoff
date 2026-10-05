@@ -5,6 +5,7 @@ import { TaskActions, type StartRunContext } from "./plan-actions";
 import { taskColumn } from "@/lib/plan/task";
 import { AssigneeButton } from "./assignee-button";
 import { SizeChip } from "./size-chip";
+import { MilestoneChip } from "./milestone-chip";
 import { BlockedChip, IssueTitle, PrLink, RunCell, TaskTags } from "./plan-task-parts";
 
 /** What a card says when a person moved it on GitHub against its run. */
@@ -27,6 +28,7 @@ export function PlanCard({
   needsYou,
   skipped,
   start,
+  milestoneShown = false,
 }: {
   task: PlanTask;
   eyebrow: string | undefined;
@@ -35,6 +37,8 @@ export function PlanCard({
   needsYou: readonly string[];
   skipped?: string | undefined;
   start: StartRunContext;
+  /** The filter shows only the task's milestone, so the card does not repeat it. */
+  milestoneShown?: boolean;
 }) {
   const note = movedNote(task);
   return (
@@ -55,6 +59,7 @@ export function PlanCard({
         {taskColumn(task) !== "Done" && <BlockedChip blockedBy={task.blockedBy} repoUrl={repoUrl} />}
         <RunCell task={task} projectId={projectId} needsYou={needsYou} />
         <PrLink task={task} repoUrl={repoUrl} />
+        {task.milestone && !milestoneShown && <MilestoneChip milestone={task.milestone} />}
         <span className="ml-auto flex items-center gap-1.5 empty:hidden">
           <SizeChip task={task} />
           <AssigneeButton task={task} />
