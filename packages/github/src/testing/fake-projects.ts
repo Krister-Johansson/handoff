@@ -258,7 +258,7 @@ export class FakeProjects implements ProjectsPort {
     await this.setStatus(repo, input.project, number, "Shaping", { add: true });
     if (input.start || input.target) {
       const result = await this.setDates(repo, input.project, number, { ...(input.start ? { start: input.start } : {}), ...(input.target ? { target: input.target } : {}) });
-      if (result !== "set") throw new Error(`Created #${number}, but could not set its dates: ${result}`);
+      if (result !== "set") throw new Error(`Created #${number} (${url}), then failed: could not set its dates: ${result}`);
     }
     return { number, url };
   }

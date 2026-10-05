@@ -228,8 +228,14 @@ export class OctokitProjects implements ProjectsPort {
     if (!target && opts.add) {
       const { project: found } = await this.projectNode(repo.owner, project);
       if (found) {
-        const added = await this.octokit.graphql<AddPlanItemMutation>(AddPlanItemDocument.toString(), { projectId: found.id, contentId: plan.issue.id });
-        const itemId = added.addProjectV2ItemById?.item?.id;
+        const itemId = await this.addItem(found.id, plan.issue.id).catch(async (error: unknown) => {
+          // GitHub's "Auto-add sub-issues to project" workflow can add the issue between the read and the add,
+          // and GitHub then refuses the add instead of answering the item: read the item it added.
+          if (!/already exists/i.test(errorMessageOf(error))) throw error;
+          const again = await this.issuePlan(repo, project, issue);
+          if (!again.item) throw error;
+          return again.item.id;
+        });
         if (itemId) target = { projectId: found.id, itemId, field: found.field };
       }
     }
@@ -323,9 +329,14 @@ export class OctokitProjects implements ProjectsPort {
     });
     const issue = created.createIssue?.issue;
     if (!issue) throw new Error(`creating the issue "${input.title}" returned nothing`);
-    for (const blockingIssueId of blockerIds) await this.octokit.graphql(AddPlanBlockerDocument.toString(), { issueId: issue.id, blockingIssueId });
-    await this.setStatus(repo, input.project, issue.number, "Shaping", { add: true });
-    await this.setNewDates(repo, input, issue.number);
+    try {
+      for (const blockingIssueId of blockerIds) await this.octokit.graphql(AddPlanBlockerDocument.toString(), { issueId: issue.id, blockingIssueId });
+      await this.setStatus(repo, input.project, issue.number, "Shaping", { add: true });
+      await this.setNewDates(repo, input, issue.number);
+    } catch (error) {
+      // The issue exists now: the error names it, so a caller can finish it instead of creating it again.
+      throw new Error(`Created #${issue.number} (${issue.url}), then failed: ${errorMessageOf(error)}`, { cause: error });
+    }
     return { number: issue.number, url: issue.url };
   }
 
@@ -405,12 +416,18 @@ export class OctokitProjects implements ProjectsPort {
     return field.id;
   }
 
-  /** Sets a new issue's Start and Target, once it is an item; throws naming the issue when they cannot be written. */
+  /** Sets a new issue's Start and Target, once it is an item; throws when they cannot be written. */
   private async setNewDates(repo: RepoRef, input: NewPlanIssue, issue: number) {
     const dates = { ...(input.start ? { start: input.start } : {}), ...(input.target ? { target: input.target } : {}) };
     if (!dates.start && !dates.target) return;
     const result = await this.setDates(repo, input.project, issue, dates);
-    if (result !== "set") throw new Error(`Created #${issue}, but could not set its dates: ${result === "no-field" ? "the Project has no Start or Target date field" : "it is not in the Project"}.`);
+    if (result !== "set") throw new Error(`could not set its dates: ${result === "no-field" ? "the Project has no Start or Target date field" : "it is not in the Project"}.`);
+  }
+
+  /** Adds the issue `contentId` to the Project and returns the item's id. */
+  private async addItem(projectId: string, contentId: string): Promise<string | undefined> {
+    const added = await this.octokit.graphql<AddPlanItemMutation>(AddPlanItemDocument.toString(), { projectId, contentId });
+    return added.addProjectV2ItemById?.item?.id;
   }
 
   /** Creates the Start or Target date field on a Project and returns its id. */
@@ -630,6 +647,9 @@ export class OctokitProjects implements ProjectsPort {
     return { issue, item };
   }
 }
+
+/** The message of a thrown value, whatever was thrown. */
+const errorMessageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** The owner of a Project in a sentence: "the organization acme" for an organization, the login alone for a user or an owner GitHub did not name. */
 const ownerName = (login: string, owner: OwnerType | undefined) => (owner === "Organization" ? `the organization ${login}` : login);
