@@ -18,7 +18,8 @@ const readGitTools = ["Bash(git log *)", "Bash(git show *)", "Bash(git diff *)",
  * sed (-i), find (-exec), awk (system) and rg (--pre) stay out. sort (-o) and uniq (a second file name)
  * can write a file, so they come only in fixed forms that read standard input; cut cannot write one.
  * node runs any script, so it comes only as its version check. git branch comes only in forms that cannot
- * create or delete one.
+ * create or delete one. echo prints, `$?` after a check too: Claude Code counts echo as read-only only
+ * without a variable in it, so `echo "exit: $?"` asks a person without this rule.
  */
 const readShellTools = [
   "Bash(cat *)",
@@ -35,6 +36,7 @@ const readShellTools = [
   "Bash(uniq)",
   "Bash(uniq -c)",
   "Bash(cut *)",
+  "Bash(echo *)",
   "Bash(node -v)",
   "Bash(node --version)",
   "Bash(pnpm -v)",
@@ -52,18 +54,35 @@ const readShellTools = [
  */
 export const ALL_TOOLS = ["Read", "Glob", "Grep", "Edit", "Write", "NotebookEdit", "Bash", "WebFetch", "WebSearch", "Agent", "Skill"];
 const coderTools = [...readOnlyTools, "Edit", "Write", "Bash(git *)", "Bash(pnpm *)", "Bash(npm *)", "Bash(npx *)", ...readShellTools];
+/**
+ * pnpm for the steps that plan and review, as the coder has it: they run the tests, the linter and the
+ * type checker to see what they plan or review, and Claude Code asks a person for each pnpm call
+ * otherwise. pnpm runs the repository's scripts, so these steps can change files through it, though they
+ * have no Edit or Write. The demo goes without: it walks through the app handoff started for it.
+ */
+const checkTools = ["Bash(pnpm *)"];
 
 export const nodeCatalog: Record<NodeType, CatalogEntry> = {
   start: { executorKind: "function", contract: "start_output", allowedTools: [] },
   finish: { executorKind: "function", contract: "finish_output", allowedTools: [] },
-  planner: { executorKind: "cli", contract: "planner_output", allowedTools: [...readOnlyTools, ...readGitTools, ...readShellTools] },
+  planner: { executorKind: "cli", contract: "planner_output", allowedTools: [...readOnlyTools, ...readGitTools, ...checkTools, ...readShellTools] },
   coder: { executorKind: "cli", contract: "coder_output", allowedTools: coderTools },
-  reviewer: { executorKind: "cli", contract: "reviewer_output", allowedTools: [...readOnlyTools, ...readGitTools, ...readShellTools] },
-  // Claude Code's code-review skill, run through the Skill tool, reading the branch's diff with git.
+  reviewer: { executorKind: "cli", contract: "reviewer_output", allowedTools: [...readOnlyTools, ...readGitTools, ...checkTools, ...readShellTools] },
+  // Claude Code's code-review skill, run through the Skill tool, reading the branch's diff with git and running checks with pnpm.
   code_review: {
     executorKind: "cli",
     contract: "reviewer_output",
-    allowedTools: [...readOnlyTools, "Skill", "Bash(git diff *)", "Bash(git log *)", "Bash(git show *)", "Bash(git merge-base *)", "Bash(git rev-parse *)", ...readShellTools],
+    allowedTools: [
+      ...readOnlyTools,
+      "Skill",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git merge-base *)",
+      "Bash(git rev-parse *)",
+      ...checkTools,
+      ...readShellTools,
+    ],
   },
   tester: { executorKind: "shell", contract: "tester_output", allowedTools: [] },
   // Walks through the running app in a headless browser (the Playwright MCP server) and takes screenshots.

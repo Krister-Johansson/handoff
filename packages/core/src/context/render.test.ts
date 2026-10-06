@@ -164,6 +164,12 @@ test("the constraints keep agents to the repository's commit conventions, withou
   expect(renderContextPacket(packet)).toContain("- Follow the repository's commit conventions. Add no trailers, such as Co-Authored-By, unless the repository asks for them.");
 });
 
+test("the constraints steer agents away from shell commands Claude Code always asks a person about", () => {
+  expect(renderContextPacket(packet)).toContain(
+    "- Read files with the Read and Grep tools, not sed, and quote globs in shell commands: Claude Code asks a person before it runs sed, or find with an unquoted glob, and the step waits for the answer.",
+  );
+});
+
 test("a reviewer's second look shows its earlier comments, the coder's reply, and the commits to look at", () => {
   const md = renderContextPacket({
     ...packet,

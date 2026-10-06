@@ -402,6 +402,7 @@ export function renderContextPacket(packet: ContextPacket): string {
       ? `- Only change files under: ${packet.constraints.ownedPaths.join(", ")}. If the change needs a file outside these, list it in extraPaths with the reason; any other file outside them fails the step.`
       : "- Only change files under: (no restriction)",
     `- Tools available: ${packet.constraints.allowedTools.join(", ") || "(none)"}`,
+    "- Read files with the Read and Grep tools, not sed, and quote globs in shell commands: Claude Code asks a person before it runs sed, or find with an unquoted glob, and the step waits for the answer.",
     `- Turn budget: ${packet.constraints.maxTurns}`,
     "- Commit your changes with git before finishing. Do not push.",
     "- Follow the repository's commit conventions. Add no trailers, such as Co-Authored-By, unless the repository asks for them.",
