@@ -130,7 +130,7 @@ An item moves through these states:
 
 The coder's packet gets a section "Review comments to answer" in place of the plain list, with each item's handle, kind, reviewer, file and line, link, and the whole conversation for an item that came back with a reply. The coder prompt adds the rule:
 
-> Treat each review comment like a test. Check its claim before you act: run the command it names, read the code it points at, or, when it is about the code's behaviour, write a failing test that shows it. If the claim holds, fix it, commit, and give the commit. If it does not hold, change nothing for it and give the evidence: the command and its output, the file and lines, or the test that passes. If you cannot tell, say what is unclear. Answer every listed comment in `answers`. Do not reply on GitHub; handoff posts your answers.
+> Treat each review comment like a test. Check its claim before you act: run the command it names, read the code it points at, or, when it is about the code's behaviour, write a failing test that shows it. If the claim holds and belongs in this change, fix it, commit, and give the commit. Otherwise change nothing for it and decline it with the reason and the evidence: the claim is wrong, out of scope or already covered, shown by the command and its output, the file and lines, or the test that passes. If you cannot tell, say what is unclear. Answer every listed comment in `answers`. Do not reply on GitHub; handoff posts your answers.
 
 `CoderOutputSchema` gains `answers`:
 

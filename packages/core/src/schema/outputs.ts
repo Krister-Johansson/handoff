@@ -51,7 +51,7 @@ export const ReviewAnswerSchema = z.object({
   verdict: z
     .enum(["fixed", "declined", "unclear", "duplicate", "settled"])
     .describe(
-      "fixed: the claim holds and you fixed it. declined: the claim does not hold and you changed nothing for it. unclear: you cannot tell what is meant. duplicate: it repeats another listed comment. settled: the reviewer's reply accepts the earlier answer.",
+      "fixed: the claim holds and you fixed it. declined: not changed, with the reason and the evidence, such as a claim that is wrong, out of scope or already covered. unclear: you cannot tell what is meant. duplicate: it repeats another listed comment. settled: the reviewer's reply accepts the earlier answer.",
     ),
   evidence: z.string().describe("What you checked and what it showed: the command and its output, the file and lines, or the test."),
   commit: z

@@ -142,7 +142,7 @@ Each finding the PR node sends to the coder is a review item, with a handle that
 The coder's packet lists the items under "Review comments to answer": each item's handle, kind, reviewer, file and line, link and body, and the thread since the first comment for an item that came back. The prompt tells the coder to treat each comment like a test and check its claim before it acts: run the command the comment names, read the code it points at, or write a failing test when it is about the code's behaviour. The coder answers every item in `answers`, by its handle, with a verdict:
 
 - `fixed`, with the commit that fixes it. A summary note or pre-merge check fixed without a code change, such as through the pull request's title, needs no commit when the evidence says what changed.
-- `declined`, with the evidence that the comment does not hold.
+- `declined`: not changed, with the reason and the evidence, such as a claim that is wrong, out of scope or already covered.
 - `unclear`, with what is unclear.
 - `duplicate`, with `of` naming the item it repeats, such as a summary note that repeats an inline thread.
 - `settled`, only for an item that came back with the reviewer's reply, when that reply accepts the earlier answer.

@@ -9,6 +9,7 @@ import {
   PlannerOutputSchema,
   PrConflictOutputSchema,
   PrOutputSchema,
+  prReview,
   ReviewerOutputSchema,
   TesterOutputSchema,
   type CoderOutput,
@@ -189,6 +190,7 @@ function ReviewerView({ data: { verdict, comments } }: { data: ReviewerOutput })
 const CI_LABEL = { success: "CI passing", failure: "CI failing", pending: "CI pending" } as const;
 
 function PrView({ data: { prNumber, prUrl, feedback } }: { data: PrOutput }) {
+  const review = prReview(feedback);
   return (
     <>
       <Section title="Pull request">
@@ -197,7 +199,8 @@ function PrView({ data: { prNumber, prUrl, feedback } }: { data: PrOutput }) {
             #{prNumber}
           </a>
           <Badge variant={feedback.ci.status === "failure" ? "destructive" : "secondary"}>{CI_LABEL[feedback.ci.status]}</Badge>
-          {feedback.review.decision !== "none" && <Badge variant="outline">review: {feedback.review.decision.replace("_", " ")}</Badge>}
+          {review.decision && <Badge variant="outline">review: {review.decision}</Badge>}
+          {review.sentBack && <Badge variant="outline">{review.sentBack}</Badge>}
         </div>
       </Section>
       {feedback.ci.failedJobs.map((job) => (
