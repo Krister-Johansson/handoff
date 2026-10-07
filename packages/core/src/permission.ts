@@ -59,19 +59,16 @@ const WITH_SUBCOMMANDS = new Set(["git", "pnpm", "npm", "npx", "yarn", "bun", "g
 /** Programs that run whatever follows them: a rule for one would allow any command. */
 const NEVER = new Set(["cd", "node", "sh", "bash", "zsh", "env", "eval", "exec", "sudo", "xargs", "python", "python3"]);
 
-/** Claude Code's command separators: it matches each part of a compound command against the rules on its own. */
-const SEPARATORS = /&&|\|\||\|&|[;|&\n]/;
-
 /** A simple command's words, without the variable assignments in front of its program. */
-function wordsOf(command: string): string[] {
-  const words = command.trim().split(/\s+/).filter(Boolean);
-  while (words[0] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
-  return words;
+function withoutAssignments(words: string[]): string[] {
+  let i = 0;
+  while (words[i] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]!)) i++;
+  return words.slice(i);
 }
 
 /** The rule for one simple command: its program, or its program and subcommand, with any arguments. */
-function commandRule(command: string): string | undefined {
-  const [program, subcommand] = wordsOf(command);
+function commandRule(words: string[]): string | undefined {
+  const [program, subcommand] = withoutAssignments(words);
   if (!program || NEVER.has(program)) return undefined;
   if (!WITH_SUBCOMMANDS.has(program)) return `Bash(${program} *)`;
   // An option before the subcommand (git -C dir log) leaves no rule short of every command of the program.
@@ -79,19 +76,20 @@ function commandRule(command: string): string | undefined {
   return `Bash(${program} ${subcommand} *)`;
 }
 
-const isCd = (part: string) => /^cd(\s|$)/.test(part);
-
 /**
  * The allow rule that would cover this call from now on: a command's program with any arguments (its
  * subcommand too, for programs such as git and pnpm), or the tool itself. It goes into the node's allow
  * list in the graph's next version, and the run's own list. Undefined when no rule is safe to offer: for
- * cd, node, a shell or env, which would allow anything, or an option before a subcommand. In a compound
- * command a leading cd needs no rule, and the rule is for the first command after it.
+ * cd, node, a shell or env, which would allow anything, an option before a subcommand, or a command that
+ * cannot be read. A compound command splits the way allowedBy splits it; a leading cd needs no rule, and
+ * the rule is for the first command after it. A redirect to a file does not stop the rule, since Claude
+ * Code checks the file against the Edit rules on its own.
  */
 export function ruleFor(toolName: string, input: Record<string, unknown>): string | undefined {
   if (toolName !== "Bash" || typeof input.command !== "string") return toolName;
-  const parts = input.command.split(SEPARATORS).map((p) => p.trim()).filter(Boolean);
-  const first = parts.find((p) => !isCd(p)) ?? parts[0];
+  const commands = simpleCommands(input.command, { files: true });
+  if (!commands) return undefined;
+  const first = commands.find((words) => words[0] !== "cd") ?? commands[0];
   return first ? commandRule(first) : undefined;
 }
 
@@ -99,8 +97,7 @@ export function ruleFor(toolName: string, input: Record<string, unknown>): strin
 function bashRuleCovers(rule: string, words: string[]): boolean {
   const pattern = /^Bash\((.+)\)$/.exec(rule)?.[1];
   if (!pattern || pattern === "*") return pattern === "*";
-  while (words[0] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words = words.slice(1);
-  const command = words.join(" ");
+  const command = withoutAssignments(words).join(" ");
   if (!pattern.endsWith(" *")) return command === pattern;
   const prefix = pattern.slice(0, -2);
   return command === prefix || command.startsWith(`${prefix} `);
@@ -114,9 +111,10 @@ const noFile = (operator: string, target: string) => target === "/dev/null" || (
  * &&, ||, ;, |, |&, & and newlines, never inside single or double quotes or after a backslash. A
  * redirect to /dev/null or to a file descriptor (2>&1, >&2, <&3) is left out of the words. Undefined
  * when the command cannot be read: unbalanced quotes, an operator with nothing after it, a here-doc or
- * process substitution, or a redirect to a file, which a Bash rule does not cover.
+ * process substitution, or a redirect to a file, which a Bash rule does not cover, unless files is set:
+ * then a redirect to a file is left out of the words too.
  */
-function simpleCommands(command: string): string[][] | undefined {
+function simpleCommands(command: string, { files = false }: { files?: boolean } = {}): string[][] | undefined {
   const commands: string[][] = [];
   let words: string[] = [];
   let word = "";
@@ -200,7 +198,7 @@ function simpleCommands(command: string): string[][] | undefined {
       if (operator === "<<" || command[i + operator.length] === "(") return undefined;
       i += operator.length;
       const target = readTarget();
-      if (target === undefined || !noFile(operator, target)) return undefined;
+      if (target === undefined || (!files && !noFile(operator, target))) return undefined;
     } else if (two === "&&" || two === "||" || two === "|&") {
       if (!endCommand(two)) return undefined;
       i += 2;
