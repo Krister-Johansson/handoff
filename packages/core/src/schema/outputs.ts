@@ -51,7 +51,7 @@ export const ReviewAnswerSchema = z.object({
   verdict: z
     .enum(["fixed", "declined", "unclear", "duplicate", "settled"])
     .describe(
-      "fixed: the claim holds and you fixed it. declined: the claim does not hold and you changed nothing for it. unclear: you cannot tell what is meant. duplicate: it repeats another listed comment. settled: the reviewer's reply accepts the earlier answer.",
+      "fixed: the claim holds and you fixed it. declined: not changed, with the reason and the evidence, such as a claim that is wrong, out of scope or already covered. unclear: you cannot tell what is meant. duplicate: it repeats another listed comment. settled: the reviewer's reply accepts the earlier answer.",
     ),
   evidence: z.string().describe("What you checked and what it showed: the command and its output, the file and lines, or the test."),
   commit: z
@@ -175,6 +175,11 @@ export const FeedbackSchema = z.object({
   }),
   review: z.object({
     decision: z.enum(["none", "approved", "changes_requested", "commented"]),
+    /**
+     * GitHub's review decision, recorded when the PR node sends review comments back to the coder. It
+     * then sets `decision` to changes_requested so the graph's fix edge takes them, whatever GitHub says.
+     */
+    githubDecision: z.enum(["none", "approved", "changes_requested", "commented"]).optional(),
     comments: z.array(
       z.object({
         author: z.string(),

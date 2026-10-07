@@ -7,6 +7,7 @@ import {
   PrOutputSchema,
   ReviewerOutputSchema,
   TesterOutputSchema,
+  type Feedback,
 } from "../schema/outputs.ts";
 
 const MAX = 160;
@@ -61,10 +62,12 @@ export function summarizeOutput(output: unknown): string | undefined {
   }
   const pr = PrOutputSchema.safeParse(output);
   if (pr.success) {
-    const { ci, review } = pr.data.feedback;
-    const ciText = { success: "CI passing", failure: "CI failing", pending: "CI pending" }[ci.status];
-    const reviewText = review.decision === "none" ? "" : `, ${review.decision.replace("_", " ")}`;
-    return `PR #${pr.data.prNumber}, ${ciText}${reviewText}`;
+    const { feedback } = pr.data;
+    const { decision, sentBack } = prReview(feedback);
+    const parts = [`PR #${pr.data.prNumber}`, { success: "CI passing", failure: "CI failing", pending: "CI pending" }[feedback.ci.status]];
+    if (decision) parts.push(decision);
+    if (sentBack) parts.push(sentBack);
+    return parts.join(", ");
   }
   const conflict = PrConflictOutputSchema.safeParse(output);
   if (conflict.success) {
@@ -79,4 +82,22 @@ export function summarizeOutput(output: unknown): string | undefined {
     return merge.data.merged ? (merge.data.sha ? `Merged as ${merge.data.sha.slice(0, 7)}` : "Merged") : "Not merged";
   }
   return undefined;
+}
+
+/**
+ * A PR step's review, in words: GitHub's decision ("approved", "changes requested", "commented"), or
+ * undefined for none, and the review comments the step sent back to the coder, such as "1 review comment
+ * to answer". Sending comments back sets `decision` to changes_requested so the fix edge takes them;
+ * `githubDecision` keeps what GitHub said. Review items are answered one by one; plain findings are for
+ * the coder to address.
+ */
+export function prReview(feedback: Feedback): { decision?: string; sentBack?: string } {
+  const { review } = feedback;
+  const decision = review.githubDecision ?? review.decision;
+  const out: { decision?: string; sentBack?: string } = decision === "none" ? {} : { decision: decision.replace("_", " ") };
+  if (review.githubDecision !== undefined && review.comments.length > 0) {
+    const what = review.comments.some((c) => c.item !== undefined) ? "to answer" : "to address";
+    out.sentBack = `${plural(review.comments.length, "review comment")} ${what}`;
+  }
+  return out;
 }

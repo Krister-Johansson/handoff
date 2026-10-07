@@ -44,6 +44,28 @@ test("a test run, a review, a pull request, a merge and an answer each get one l
   expect(summarizeOutput({ answer: "MIT", answeredBy: "cli", answeredAt: "" })).toBe("Answered: MIT");
 });
 
+test("a pull request sent back for review comments says GitHub's decision and how many comments there are", () => {
+  const pr = (review: Record<string, unknown>, comments: Record<string, unknown>[]) => ({
+    prNumber: 285,
+    prUrl: "u",
+    headSha: "abc",
+    feedback: { ci: { status: "success", failedJobs: [] }, review: { comments, unresolvedThreads: 0, ...review }, updatedAt: "" },
+  });
+  const item = (handle: string) => ({ author: "coderabbitai", body: "b", url: "", resolved: false, item: handle, kind: "pre_merge_check" });
+  const finding = { author: "coderabbitai", body: "b", url: "", resolved: false };
+
+  // As on northMES/northmes#285: CodeRabbit approved, and one pre-merge check went to the coder to answer.
+  expect(summarizeOutput(pr({ decision: "changes_requested", githubDecision: "approved" }, [item("R1")]))).toBe("PR #285, CI passing, approved, 1 review comment to answer");
+  expect(summarizeOutput(pr({ decision: "changes_requested", githubDecision: "none" }, [item("R1"), item("R2")]))).toBe("PR #285, CI passing, 2 review comments to answer");
+  expect(summarizeOutput(pr({ decision: "changes_requested", githubDecision: "changes_requested" }, [item("R1")]))).toBe(
+    "PR #285, CI passing, changes requested, 1 review comment to answer",
+  );
+  // Without review items, the findings go to the coder to address.
+  expect(summarizeOutput(pr({ decision: "changes_requested", githubDecision: "commented" }, [finding]))).toBe("PR #285, CI passing, commented, 1 review comment to address");
+  // A person's or a bot's own request for changes, with nothing handoff sent back.
+  expect(summarizeOutput(pr({ decision: "changes_requested" }, [finding]))).toBe("PR #285, CI passing, changes requested");
+});
+
 test("long text is cut, and unknown output has no summary", () => {
   expect(summarizeOutput({ status: "done", summary: "x".repeat(300) })!.length).toBeLessThanOrEqual(160);
   expect(summarizeOutput({ something: 1 })).toBeUndefined();

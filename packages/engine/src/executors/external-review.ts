@@ -210,13 +210,14 @@ export function externalReview(
   return { missing, timedOut, findings };
 }
 
-/** Feedback that asks for changes with exactly the new findings, so the coder works on what is new. */
+/** Feedback that asks for changes with exactly the new findings, so the coder works on what is new. `githubDecision` keeps what GitHub said. */
 export function withFindings(feedback: Feedback, findings: Finding[]): Feedback {
   return {
     ...feedback,
     review: {
       ...feedback.review,
       decision: "changes_requested",
+      githubDecision: feedback.review.githubDecision ?? feedback.review.decision,
       comments: findings.map((f) => ({ author: f.author, body: f.body, url: f.url, resolved: false, ...(f.path ? { path: f.path } : {}), ...(f.line ? { line: f.line } : {}) })),
     },
   };

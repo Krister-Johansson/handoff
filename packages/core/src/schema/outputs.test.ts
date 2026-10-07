@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { z } from "zod";
 import { CoderOutputSchema, PlannerOutputSchema, ReviewerOutputSchema } from "./outputs.ts";
 
 test("a planner's split has at least two parts, each with a title, a body and its owned paths", () => {
@@ -30,4 +31,11 @@ test("answers accept fixed with a commit, declined with evidence and duplicate w
   const output = CoderOutputSchema.parse({ status: "done", summary: "Answered three comments.", answers });
   expect(output.answers).toEqual(answers);
   expect(CoderOutputSchema.safeParse({ status: "done", summary: "s", answers: [{ id: "R1", verdict: "agreed", evidence: "e" }] }).success).toBe(false);
+});
+
+test("the coder's JSON schema describes declined as not changed, with the reason and the evidence", () => {
+  // On northMES/northmes#285 the coder declined an accurate claim as out of scope: declined is not only for a claim that is wrong.
+  const schema = JSON.stringify(z.toJSONSchema(CoderOutputSchema, { target: "draft-7" }));
+  expect(schema).toContain("declined: not changed, with the reason and the evidence, such as a claim that is wrong, out of scope or already covered.");
+  expect(schema).not.toContain("the claim does not hold");
 });

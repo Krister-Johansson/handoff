@@ -174,8 +174,8 @@ test("a declined answer is posted as a reply in the thread with the evidence and
   const head = pr().headSha;
   expect(repliesIn(github)).toHaveLength(1);
   const reply = repliesIn(github)[0]!.body;
-  expect(reply.split("\n")[0]).toBe("Not changed: the comment does not hold.");
-  expect(reply).toContain("`pnpm test` passes with the integration project; vitest.config.ts:12 lists it.");
+  // The first line says only that nothing changed; the coder's evidence says why, whether the comment is wrong or out of scope.
+  expect(reply.split("\n").slice(0, 3)).toEqual(["Not changed.", "", "`pnpm test` passes with the integration project; vitest.config.ts:12 lists it."]);
   expect(reply).toContain(`Answered by handoff run \`${run.id}\`.`);
   expect(reply.trimEnd().split("\n").at(-1)).toBe(`<!-- handoff:item-reply R1 ${head} -->`);
   expect((await inspect(db, run.id)).events.find((e) => e.type === "github.item_answered")?.payload).toMatchObject({ item: "R1", verdict: "declined", found: false });
@@ -320,7 +320,7 @@ test("review summaries, summary notes and pre-merge checks are answered in one P
   expect(first).toContain(`**Summary note by coderabbitai:** ${note}`);
   expect(first).toContain(`Same point as [the review by coderabbitai](${pr().url}).`);
   expect(first).toContain("**Pre-merge check by coderabbitai:** Title check (warning): The title names the branch, not the change it makes.");
-  expect(first?.match(/^Not changed: the comment does not hold\.$/gm)).toHaveLength(2);
+  expect(first?.match(/^Not changed\.$/gm)).toHaveLength(2);
   expect(first).toContain("Checked pre_merge_check: CHANGELOG.md:1 has the date and the title states the change.");
   expect(second).toContain(`<!-- handoff:item-answers 2 ${head} -->`);
   expect(second).toContain("**Review by coderabbitai:** The heading level is inconsistent.");
@@ -346,6 +346,44 @@ test("a pre-merge check fixed through the title without a commit is answered as 
   expect(said).toContain('The PR title is now "Add a CHANGELOG.md with the release date".');
   expect(said).not.toContain("Fixed in");
   expect((await itemsOf(run.id)).R2).toMatchObject({ verdict: "fixed", fixCommit: null });
+});
+
+test("a pre-merge check whose full details hold HTML entities reaches the coder and the posted answer as plain text", async () => {
+  // As on northMES/northmes#285, where the check's full details had `&amp;&amp;` and handoff's answer quoted it.
+  const linked = {
+    name: "Linked Issues check",
+    explanation: "Issue `#4` requires `check:full` to run e2e. `package.json` defines `check:full` as `pnpm check &amp;&amp; pnpm test:tz`, so it has no e2e leg.",
+    resolution: "Add the e2e leg, or say in the issue that it is deferred.",
+  };
+  const github = new FakeGitHub();
+  const { run, wake, pr } = await opened(withSummary, answeringCoder(decline), github);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED" });
+  github.summaryComment(1, summaryOf(pr().headSha, { risk: "⚪ Minimal", note: "No merge-blocking issue is identified.", failed: [linked] }));
+  await wake();
+
+  const packet = (await coderAttempt(run.id, 2))?.contextPacket as { reviewItems?: ReviewItem[] };
+  expect(packet.reviewItems?.map((i) => i.body)).toEqual([expect.stringContaining("`pnpm check && pnpm test:tz`")]);
+  const said = pr().comments.find((c) => c.body.includes("<!-- handoff:item-answers"))!.body;
+  expect(said).toContain("**Pre-merge check by coderabbitai:** Linked Issues check (warning): Issue `#4` requires `check:full` to run e2e. `package.json` defines `check:full` as `pnpm check && pnpm test:tz`");
+  expect(said).not.toContain("&amp;");
+});
+
+test("a PR step that sends review items back on an approved pull request says approved and how many comments the coder answers", async () => {
+  // As on northMES/northmes#285: CodeRabbit approved the head, and its summary still listed a failed pre-merge check.
+  const linked = { name: "Linked Issues check", explanation: "Issue `#4` requires an e2e leg in `check:full`.", resolution: "Add the e2e leg." };
+  const github = new FakeGitHub();
+  const { run, wake, pr } = await opened(withSummary, answeringCoder(decline), github);
+  github.reviewOnHead(1, "coderabbitai", { state: "APPROVED" });
+  pr().reviewDecision = "APPROVED";
+  github.summaryComment(1, summaryOf(pr().headSha, { risk: "⚪ Minimal", note: "No merge-blocking issue is identified.", failed: [linked] }));
+  await wake();
+
+  const seen = await inspect(db, run.id);
+  const first = seen.executions.find((e) => e.nodeKey === "pr" && e.attempt === 1)!;
+  const passed = seen.events.find((e) => e.type === "node.passed" && e.nodeExecutionId === first.id)?.payload;
+  expect(passed).toMatchObject({ summary: "PR #1, CI passing, approved, 1 review comment to answer" });
+  // The decision that routes the item to the coder is unchanged.
+  expect(first.output).toMatchObject({ feedback: { review: { decision: "changes_requested", githubDecision: "approved" } } });
 });
 
 test("a summary note that finds no merge-blocking issue under a Minimal risk is not sent to the coder", async () => {
@@ -629,7 +667,7 @@ test("a reviewer reply goes to the coder with the thread; settled resolves it", 
       id: "R1",
       body: "The integration project never runs in CI.",
       conversation: [
-        { author: "handoff", body: expect.stringContaining("Not changed: the comment does not hold.") },
+        { author: "handoff", body: expect.stringMatching(/^Not changed\.\n\n/) },
         { author: "coderabbitai", body: "You are right, vitest.config.ts lists the integration project." },
       ],
     }),
@@ -680,7 +718,7 @@ test("a second decline makes the item disputed and asks one question with both s
         why: "disputed",
         comment: "The integration project never runs in CI.",
         conversation: [
-          { author: "handoff", body: expect.stringContaining("Not changed: the comment does not hold.") },
+          { author: "handoff", body: expect.stringMatching(/^Not changed\.\n\n/) },
           { author: "coderabbitai", body: "CI runs `pnpm test:unit` only, so the integration project is skipped." },
         ],
         verdict: "declined",
@@ -931,7 +969,7 @@ test("a mixed round takes the normal path and posts both answers", async () => {
   expect(await checkerRuns(run.id)).toEqual(twice);
   expect((await inspect(db, run.id)).types).not.toContain("edge.returned");
   const firstLines = github.prs.get(1)!.reviewThreads.map((t) => t.comments.slice(1).map((c) => c.body.split("\n")[0]));
-  expect(firstLines).toEqual([[expect.stringMatching(/^Valid\. Fixed in /)], ["Not changed: the comment does not hold."]]);
+  expect(firstLines).toEqual([[expect.stringMatching(/^Valid\. Fixed in /)], ["Not changed."]]);
 });
 
 test("the 33311b09 case: a declined CodeRabbit comment reaches the coder once, and the PR step then waits for CodeRabbit instead of going round again", async () => {

@@ -137,6 +137,39 @@ test("a PR node links the pull request and shows CI and review feedback", () => 
   expect(screen.getByText(/octocat/)).toBeInTheDocument();
 });
 
+test("a PR node that sent review items back shows GitHub's decision and how many comments the coder answers", () => {
+  // As on northMES/northmes#285: CodeRabbit approved, and one pre-merge check went to the coder.
+  const pr = (review: Record<string, unknown>) => ({
+    ...base,
+    nodeType: "pr",
+    output: {
+      prNumber: 285,
+      prUrl: "https://github.com/o/r/pull/285",
+      headSha: "abc",
+      feedback: {
+        ci: { status: "success", failedJobs: [] },
+        review: {
+          decision: "changes_requested",
+          comments: [{ author: "coderabbitai", body: "Linked Issues check (warning): no e2e leg.", url: "u", resolved: false, item: "R1", kind: "pre_merge_check" }],
+          unresolvedThreads: 0,
+          ...review,
+        },
+        updatedAt: "2026-10-07T19:25:51Z",
+      },
+    },
+  });
+  const { unmount } = render(<ExecutionDetails detail={pr({ githubDecision: "approved" })} />);
+  expect(screen.getByText("review: approved")).toBeInTheDocument();
+  expect(screen.getByText("1 review comment to answer")).toBeInTheDocument();
+  expect(screen.queryByText(/changes requested/)).not.toBeInTheDocument();
+  unmount();
+
+  // An output from before GitHub's decision was recorded shows the decision it has.
+  render(<ExecutionDetails detail={pr({})} />);
+  expect(screen.getByText("review: changes requested")).toBeInTheDocument();
+  expect(screen.queryByText(/to answer/)).not.toBeInTheDocument();
+});
+
 test("a PR node that found a conflict with main lists the conflicting files", () => {
   render(<ExecutionDetails detail={{ ...base, nodeType: "pr", output: { sync: "conflict", conflict: { base: "main", baseSha: "abc1234def", files: ["package.json", "README.md"] } } }} />);
   expect(screen.getByText("Conflicts with main")).toBeInTheDocument();

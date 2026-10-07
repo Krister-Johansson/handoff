@@ -142,7 +142,7 @@ Each finding the PR node sends to the coder is a review item, with a handle that
 The coder's packet lists the items under "Review comments to answer": each item's handle, kind, reviewer, file and line, link and body, and the thread since the first comment for an item that came back. The prompt tells the coder to treat each comment like a test and check its claim before it acts: run the command the comment names, read the code it points at, or write a failing test when it is about the code's behaviour. The coder answers every item in `answers`, by its handle, with a verdict:
 
 - `fixed`, with the commit that fixes it. A summary note or pre-merge check fixed without a code change, such as through the pull request's title, needs no commit when the evidence says what changed.
-- `declined`, with the evidence that the comment does not hold.
+- `declined`: not changed, with the reason and the evidence, such as a claim that is wrong, out of scope or already covered.
 - `unclear`, with what is unclear.
 - `duplicate`, with `of` naming the item it repeats, such as a summary note that repeats an inline thread.
 - `settled`, only for an item that came back with the reviewer's reply, when that reply accepts the earlier answer.
@@ -162,7 +162,7 @@ Valid. Fixed in [94c0c6c](https://github.com/owner/repo/commit/94c0c6c...).
 <!-- handoff:item-reply R3 <head sha> -->
 ```
 
-The first line is "Valid. Fixed in <commit>." ("Valid. Fixed." for a summary item fixed without a commit), "Not changed: the comment does not hold.", "Unclear:" followed by the coder's question, or "Same point as <link to the other item>.". The sentence about resolving is there only while `resolveAfterReview` is on. A `settled` answer posts nothing. Items without a thread (review summaries, summary notes and pre-merge checks) share one new PR comment per round, one paragraph per item, which ends with `<!-- handoff:item-answers <round> <head sha> -->`.
+The first line is "Valid. Fixed in <commit>." ("Valid. Fixed." for a summary item fixed without a commit), "Not changed." (the evidence says whether the comment is wrong or out of scope), "Unclear:" followed by the coder's question, or "Same point as <link to the other item>.". The sentence about resolving is there only while `resolveAfterReview` is on. A `settled` answer posts nothing. Items without a thread (review summaries, summary notes and pre-merge checks) share one new PR comment per round, one paragraph per item, which ends with `<!-- handoff:item-answers <round> <head sha> -->`.
 
 Every comment handoff writes ends with a hidden marker that starts with `<!-- handoff:`. The PR node skips any comment that carries it, so an answer never comes back to the coder as a review comment. The marker also makes posting idempotent per item and head commit: before it posts, the PR node looks for its marker in the thread or among the pull request's comments, and records the comment it finds instead of posting again. A worker that restarts after posting posts nothing twice. A post that fails is an event (`github.item_reply_failed` or `github.items_answer_failed`), the item stays `answered`, and the next look tries again.
 
