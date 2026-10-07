@@ -95,32 +95,149 @@ export function ruleFor(toolName: string, input: Record<string, unknown>): strin
   return first ? commandRule(first) : undefined;
 }
 
-/** Whether a Bash rule, such as `Bash(git log *)` or `Bash(pnpm test)`, covers one simple command. */
-function bashRuleCovers(rule: string, part: string): boolean {
+/** Whether a Bash rule, such as `Bash(git log *)` or `Bash(pnpm test)`, covers one simple command's words. */
+function bashRuleCovers(rule: string, words: string[]): boolean {
   const pattern = /^Bash\((.+)\)$/.exec(rule)?.[1];
   if (!pattern || pattern === "*") return pattern === "*";
-  const command = wordsOf(part).join(" ");
+  while (words[0] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words = words.slice(1);
+  const command = words.join(" ");
   if (!pattern.endsWith(" *")) return command === pattern;
   const prefix = pattern.slice(0, -2);
   return command === prefix || command.startsWith(`${prefix} `);
 }
 
+/** A redirect target with no file behind it: /dev/null, or a file descriptor after >& or <& (2>&1, <&3, >&-). */
+const noFile = (operator: string, target: string) => target === "/dev/null" || (/[<>]&$/.test(operator) && /^(\d+|-)$/.test(target));
+
+/**
+ * A command's simple commands, each as its words, the way Claude Code splits a compound command: on
+ * &&, ||, ;, |, |&, & and newlines, never inside single or double quotes or after a backslash. A
+ * redirect to /dev/null or to a file descriptor (2>&1, >&2, <&3) is left out of the words. Undefined
+ * when the command cannot be read: unbalanced quotes, an operator with nothing after it, a here-doc or
+ * process substitution, or a redirect to a file, which a Bash rule does not cover.
+ */
+function simpleCommands(command: string): string[][] | undefined {
+  const commands: string[][] = [];
+  let words: string[] = [];
+  let word = "";
+  // Whether the word under way has any text, also an empty quoted one, and whether all of it is unquoted digits (a file descriptor).
+  let started = false;
+  let digits = true;
+  let operatorPending = false;
+  let i = 0;
+  const endWord = () => {
+    if (started) words.push(word);
+    word = "";
+    started = false;
+    digits = true;
+  };
+  const endCommand = (separator: string): boolean => {
+    endWord();
+    if (words.length > 0) {
+      commands.push(words);
+      words = [];
+      operatorPending = separator !== "\n";
+      return true;
+    }
+    // A newline after an operator, or a blank line, is fine; an operator after nothing is not.
+    if (separator === "\n") return true;
+    return false;
+  };
+  /** Reads one word at i, quotes and escapes included, for a redirect's target. */
+  const readTarget = (): string | undefined => {
+    while (command[i] === " " || command[i] === "\t") i++;
+    const start = i;
+    while (i < command.length && !/[\s;&|<>()]/.test(command[i]!)) {
+      const c = command[i]!;
+      if (c === "\\") {
+        if (i + 1 >= command.length) return undefined;
+        i += 2;
+      } else if (c === "'" || c === '"') {
+        const end = closing(c, i);
+        if (end === undefined) return undefined;
+        i = end + 1;
+      } else i++;
+    }
+    return i > start ? command.slice(start, i) : undefined;
+  };
+  /** The index of the quote that closes the one at start, or undefined when it is never closed. */
+  const closing = (quote: string, start: number): number | undefined => {
+    for (let j = start + 1; j < command.length; j++) {
+      if (quote === '"' && command[j] === "\\") j++;
+      else if (command[j] === quote) return j;
+    }
+    return undefined;
+  };
+  while (i < command.length) {
+    const c = command[i]!;
+    const two = command.slice(i, i + 2);
+    if (c === " " || c === "\t") {
+      endWord();
+      i++;
+    } else if (c === "\\") {
+      if (i + 1 >= command.length) return undefined;
+      // A backslash before a newline joins the lines.
+      if (command[i + 1] !== "\n") {
+        word += two;
+        started = true;
+        digits = false;
+      }
+      i += 2;
+    } else if (c === "'" || c === '"') {
+      const end = closing(c, i);
+      if (end === undefined) return undefined;
+      word += command.slice(i, end + 1);
+      started = true;
+      digits = false;
+      i = end + 1;
+    } else if (c === ">" || c === "<" || two === "&>") {
+      // A word of digits right before > or < is the file descriptor it redirects.
+      if (!(started && digits)) endWord();
+      word = "";
+      started = false;
+      digits = true;
+      const operator = /^(&>>|&>|>>|>&|>\||<&|<<|<>|>|<)/.exec(command.slice(i))![1]!;
+      if (operator === "<<" || command[i + operator.length] === "(") return undefined;
+      i += operator.length;
+      const target = readTarget();
+      if (target === undefined || !noFile(operator, target)) return undefined;
+    } else if (two === "&&" || two === "||" || two === "|&") {
+      if (!endCommand(two)) return undefined;
+      i += 2;
+    } else if (c === ";" || c === "|" || c === "&" || c === "\n") {
+      if (!endCommand(c)) return undefined;
+      i++;
+    } else {
+      word += c;
+      started = true;
+      if (!/\d/.test(c)) digits = false;
+      i++;
+    }
+  }
+  endWord();
+  if (words.length > 0) {
+    commands.push(words);
+    operatorPending = false;
+  }
+  return operatorPending || commands.length === 0 ? undefined : commands;
+}
+
 /**
  * The rule among a run's Always allow rules that covers this call, read the way Claude Code reads its
  * allow rules, or undefined. A rule without parentheses covers every call of its tool. A Bash rule covers
- * a command when it covers each part of it, a cd in front aside; Monitor's commands follow the Bash rules.
- * A command with a command inside it ($() or backticks), or an operator with nothing after it, is never
- * covered: a person looks at it.
+ * a command when it covers each simple command in it, a cd in front aside, without redirects to /dev/null
+ * or a file descriptor; Monitor's commands follow the Bash rules. A command with a command inside it
+ * ($() or backticks), a redirect to a file, or one that cannot be read is never covered: a person looks
+ * at it.
  */
 export function allowedBy(rules: string[], toolName: string, input: Record<string, unknown>): string | undefined {
   const whole = rules.find((rule) => rule === toolName || rule === `${toolName}(*)`);
   if (whole) return whole;
   if ((toolName !== "Bash" && toolName !== "Monitor") || typeof input.command !== "string") return undefined;
   const command = input.command.trim();
-  if (/\$\(|`/.test(command) || /(&&|\|\||[;|&])\s*$/.test(command)) return undefined;
-  const parts = command.split(SEPARATORS).map((p) => p.trim()).filter(Boolean);
-  const run = parts.filter((p) => !isCd(p));
-  if (run.length === 0) return undefined;
-  const covering = run.map((part) => rules.find((rule) => bashRuleCovers(rule, part)));
+  if (/\$\(|`/.test(command)) return undefined;
+  const run = simpleCommands(command)?.filter((words) => words[0] !== "cd");
+  if (!run || run.length === 0) return undefined;
+  const covering = run.map((words) => rules.find((rule) => bashRuleCovers(rule, words)));
   return covering.every(Boolean) ? covering[0] : undefined;
 }

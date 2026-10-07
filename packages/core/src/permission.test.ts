@@ -77,3 +77,44 @@ test("a run's Always allow rules cover a later call the way Claude Code reads th
   expect(allowedBy(["Bash(pnpm test *)"], "Monitor", { command: "pnpm test --watch", description: "tests" })).toBe("Bash(pnpm test *)");
   expect(allowedBy(["WebFetch"], "WebFetch", { url: "https://example.com" })).toBe("WebFetch");
 });
+
+test("Always allow rules leave out a file descriptor redirect such as 2>&1, as Claude Code does", () => {
+  const bash = (command: string, rules: string[]) => allowedBy(rules, "Bash", { command });
+  expect(bash("pnpm exec biome check 2>&1 | tail -30", ["Bash(pnpm *)", "Bash(tail *)"])).toBe("Bash(pnpm *)");
+  expect(bash("ls docs 1>&2", ["Bash(ls *)"])).toBe("Bash(ls *)");
+  expect(bash("cat <&3", ["Bash(cat)"])).toBe("Bash(cat)");
+  expect(bash("pnpm test 2>&1", ["Bash(pnpm test)"])).toBe("Bash(pnpm test)");
+});
+
+test("Always allow rules split a command only on separators outside quotes and escapes", () => {
+  const bash = (command: string, rules: string[]) => allowedBy(rules, "Bash", { command });
+  expect(bash('grep -n "biome\\|turbo" docs/x.md | head -20', ["Bash(grep *)", "Bash(head *)"])).toBe("Bash(grep *)");
+  // The quoted | is not a split: a rule for grep with that exact pattern covers the whole grep.
+  expect(bash('grep -n "biome\\|turbo" docs/x.md', ['Bash(grep -n "biome\\|turbo" docs/x.md)'])).toBe('Bash(grep -n "biome\\|turbo" docs/x.md)');
+  // One command: a rule for rm is never asked for it, and a rule for echo covers it.
+  expect(bash('echo "a; rm -rf /"', ["Bash(echo *)"])).toBe("Bash(echo *)");
+  expect(bash("echo 'a && rm -rf /'", ["Bash(echo *)"])).toBe("Bash(echo *)");
+  expect(bash("echo a\\;rm", ["Bash(echo *)"])).toBe("Bash(echo *)");
+  expect(bash('echo "a" ; rm -rf /', ["Bash(echo *)"])).toBeUndefined();
+});
+
+test("Always allow rules cover a redirect to /dev/null but never one to a file", () => {
+  const bash = (command: string, rules: string[]) => allowedBy(rules, "Bash", { command });
+  expect(bash("cmd > out.txt", ["Bash(cmd *)"])).toBeUndefined();
+  expect(bash("cmd >> out.txt", ["Bash(cmd *)"])).toBeUndefined();
+  expect(bash("cmd 2> err.txt", ["Bash(cmd *)"])).toBeUndefined();
+  expect(bash("cmd >out.txt 2>&1", ["Bash(cmd *)"])).toBeUndefined();
+  expect(bash("cmd < in.txt", ["Bash(cmd *)"])).toBeUndefined();
+  expect(bash("cmd > /dev/null 2>&1", ["Bash(cmd *)"])).toBe("Bash(cmd *)");
+  expect(bash("cmd >/dev/null 2>&1; echo done", ["Bash(cmd *)", "Bash(echo *)"])).toBe("Bash(cmd *)");
+  expect(bash("cmd &> /dev/null", ["Bash(cmd)"])).toBe("Bash(cmd)");
+  // A quoted > is text, not a redirect.
+  expect(bash('echo "a > b"', ["Bash(echo *)"])).toBe("Bash(echo *)");
+});
+
+test("a command that cannot be read matches no Always allow rule", () => {
+  const bash = (command: string) => allowedBy(["Bash(echo *)", "Bash(git log *)", "Bash(cat *)"], "Bash", { command });
+  for (const command of ['echo "a', "echo 'a", "echo a\\", "git log ||", "git log && && echo a", "| git log", "cat <<EOF\nx\nEOF", "cat <(git log)"]) {
+    expect(bash(command), command).toBeUndefined();
+  }
+});
