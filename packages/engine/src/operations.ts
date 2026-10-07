@@ -1,12 +1,12 @@
 import { and, desc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { appendEvents, edgeTraversals, events, graphs, graphVersions, nodeExecutions, permissionRequests, projects as projectRows, questions, runs, wakeByToken, type Db, type DbTx, type QuestionChoice, type QuestionComment } from "@handoff/db";
-import { compileGraph, PlanPartSchema, remember, ReviewerOutputSchema, RunStateSchema, type PlanPart, type ReviewerOutput, type RunState } from "@handoff/core";
+import { compileGraph, PlanPartSchema, remember, ReviewerOutputSchema, RunStateSchema, type PlanPart, type ReviewerOutput } from "@handoff/core";
 import type { GitHubPort, PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { recordPlanStatus } from "./plan-status.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
-import { createExecution } from "./scheduler/complete.ts";
+import { exhaustedLoopEdges, routeLoopDecision } from "./scheduler/complete.ts";
 
 /**
  * Re-runs a failed node execution as a new attempt, keeping every upstream result in run state.
@@ -99,23 +99,36 @@ async function graphUpgrade(tx: DbTx, run: typeof runs.$inferSelect, nodeKey: st
  * (Ready for a task the run started on), unless a newer run links it.
  */
 export async function cancelRun(db: Db, runId: string, opts: { reason?: string; projects?: ProjectsPort | undefined } = {}) {
-  const cancelled = await db.transaction(async (tx) => {
-    const [run] = await tx
-      .update(runs)
-      .set({ status: "cancelled", cancelRequestedAt: sql`now()`, finishedAt: sql`now()` })
-      .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting", "failed"])))
-      .returning();
-    if (!run) throw new Error(`run ${runId} is not active`);
-    await tx
-      .update(nodeExecutions)
-      .set({ status: "failed", error: { code: "cancelled", message: "run was cancelled" }, finishedAt: sql`now()` })
-      .where(and(eq(nodeExecutions.runId, runId), inArray(nodeExecutions.status, ["pending", "waiting"])));
-    await appendEvents(tx, runId, [{ type: "run.cancelled", payload: { reason: opts.reason ?? null } }]);
-    // A cancelled run frees a slot, and a failed one no longer holds the project. Runs held on its paths check again.
-    await nudgeScheduler(tx, run.projectId);
-    await wakeOverlapHeld(tx, run.projectId);
-    return run;
-  });
+  const cancelled = await db.transaction((tx) => cancelIn(tx, runId, opts));
+  await afterCancel(db, cancelled, opts.projects);
+}
+
+/** Who cancelled a run and why; a gate's abort names the gate and the person. */
+type Cancellation = { reason?: string | undefined; gate?: string; by?: string };
+
+/** The part of cancelling a run that commits with the transaction it runs in. */
+async function cancelIn(tx: Tx, runId: string, opts: Cancellation) {
+  const [run] = await tx
+    .update(runs)
+    .set({ status: "cancelled", cancelRequestedAt: sql`now()`, finishedAt: sql`now()` })
+    .where(and(eq(runs.id, runId), inArray(runs.status, ["queued", "running", "waiting", "failed"])))
+    .returning();
+  if (!run) throw new Error(`run ${runId} is not active`);
+  await tx
+    .update(nodeExecutions)
+    .set({ status: "failed", error: { code: "cancelled", message: "run was cancelled" }, finishedAt: sql`now()` })
+    .where(and(eq(nodeExecutions.runId, runId), inArray(nodeExecutions.status, ["pending", "waiting"])));
+  const named = { ...(opts.gate ? { gate: opts.gate } : {}), ...(opts.by ? { by: opts.by } : {}) };
+  await appendEvents(tx, runId, [{ type: "run.cancelled", payload: { reason: opts.reason ?? null, ...named } }]);
+  // A cancelled run frees a slot, and a failed one no longer holds the project. Runs held on its paths check again.
+  await nudgeScheduler(tx, run.projectId);
+  await wakeOverlapHeld(tx, run.projectId);
+  return run;
+}
+
+/** What cancelling a run does once it committed: its apps stop and its tasks go back on the plan. */
+async function afterCancel(db: Db, cancelled: typeof runs.$inferSelect, projects: ProjectsPort | undefined) {
+  const runId = cancelled.id;
   await stopRunPreviews(db, runId);
   const [project] = await db.select().from(projectRows).where(eq(projectRows.id, cancelled.projectId));
   if (!project || project.planProjectNumber === null || cancelled.issues.length === 0) return;
@@ -126,7 +139,7 @@ export async function cancelRun(db: Db, runId: string, opts: { reason?: string; 
     const status = before.get(issue);
     if (status) byStatus.set(status, [...(byStatus.get(status) ?? []), issue]);
   }
-  for (const [status, issues] of byStatus) await recordPlanStatus(db, runId, opts.projects, project, issues, status);
+  for (const [status, issues] of byStatus) await recordPlanStatus(db, runId, projects, project, issues, status);
 }
 
 /**
@@ -279,15 +292,28 @@ export function itemChoices(question: { options: string[]; context: Record<strin
   });
 }
 
-export async function answerQuestion(db: Db, questionId: string, input: Answer) {
+/**
+ * Records a person's answer and wakes the gate. Abort at a gate a loop that ran out reached cancels the
+ * run with the answer, as cancelRun does, so with the Projects port its tasks go back to the Status they
+ * had before it.
+ */
+export async function answerQuestion(db: Db, questionId: string, input: Answer, opts: { projects?: ProjectsPort | undefined } = {}) {
   // Accepting a split opens the later parts' issues first, which needs GitHub: splitRun answers it.
   if (input.option === "split") throw new Error("Split as proposed opens an issue for each later part first; accept a split through the split, not as a plain answer.");
-  return db.transaction(async (tx) => {
+  const { question, cancelled } = await db.transaction(async (tx) => {
     const [asked] = await tx.select({ options: questions.options, context: questions.context }).from(questions).where(eq(questions.id, questionId));
     const choices = asked ? itemChoices(asked, input) : null;
     const { kept, comments } = await pickedFindings(tx, questionId, input);
-    return answerIn(tx, questionId, { ...input, comments: [...comments, ...(input.comments ?? [])], findings: kept }, [], choices);
+    const answered = await answerIn(tx, questionId, { ...input, comments: [...comments, ...(input.comments ?? [])], findings: kept }, [], choices);
+    const { reason, edgeKey } = answered.context as { reason?: string; edgeKey?: string };
+    if (reason !== "loop_exhausted" || answered.option !== "abort") return { question: answered, cancelled: undefined };
+    const [gate] = await tx.select({ nodeKey: nodeExecutions.nodeKey }).from(nodeExecutions).where(eq(nodeExecutions.id, answered.nodeExecutionId));
+    const at = gate?.nodeKey ?? "the gate";
+    const run = await cancelIn(tx, answered.runId, { reason: `${input.answeredBy} chose abort at ${at} after ${edgeKey ?? "a loop"} used all its rounds`, gate: at, by: input.answeredBy });
+    return { question: answered, cancelled: run };
   });
+  if (cancelled) await afterCancel(db, cancelled, opts.projects);
+  return question;
 }
 
 /** Records a person's answer to an open question and wakes the step that waits on it. */
@@ -494,21 +520,15 @@ export async function resolveExhaustedLoop(db: Db, runId: string, action: "retry
   await db.transaction(async (tx) => {
     const [run] = await tx.select().from(runs).where(eq(runs.id, runId)).for("update");
     const graph = await loadCompiledGraph(tx, run!.graphVersionId);
-    const out = graph.outEdges(stuck.nodeKey);
-    const edges = action === "retry" ? out.filter((e) => e.key === stuck.edgeKey) : out.filter((e) => !e.loop);
-    if (edges.length === 0) throw new Error(action === "retry" ? `The graph no longer has ${stuck.edgeKey}.` : `${stuck.nodeKey} has no way forward other than its loops.`);
-    // Another round counts as the loop's first attempt again.
-    const current = run!.state as RunState;
-    const state = action === "retry" ? { ...current, loops: { ...current.loops, [stuck.edgeKey]: { attempts: 1 } } } : current;
-    const created = [];
-    for (const edge of edges) {
-      const exec = await createExecution(tx, graph, runId, edge.target, { kind: "edge", edgeKey: edge.key, from: stuck.nodeKey, fromExecutionId: stuck.executionId });
-      created.push({ type: "node.created", payload: { nodeKey: edge.target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
-    }
-    await tx.update(runs).set({ status: "running", finishedAt: null, state, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, runId));
+    if (exhaustedLoopEdges(graph, stuck, action).length === 0) throw new Error(action === "retry" ? `The graph no longer has ${stuck.edgeKey}.` : `${stuck.nodeKey} has no way forward other than its loops.`);
+    // A gate the loop reached routes the same decision the same way.
+    const routed = await routeLoopDecision(tx, graph, runId, stuck, action, RunStateSchema.parse(run!.state));
+    // Nothing else runs in a stuck run, so a join that does not start now never would.
+    if (routed.created === 0) throw new Error(`Going on from ${stuck.nodeKey} starts no step: its way forward waits at a join for edges that will not arrive.`);
+    await tx.update(runs).set({ status: "running", finishedAt: null, state: routed.state, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, runId));
     // The stuck loop held the project's scheduler.
     await nudgeScheduler(tx, run!.projectId);
-    await appendEvents(tx, runId, [{ type: "loop.resolved", payload: { action, edgeKey: stuck.edgeKey, nodeKey: stuck.nodeKey }, nodeExecutionId: stuck.executionId }, ...created]);
+    await appendEvents(tx, runId, [{ type: "loop.resolved", payload: { action, edgeKey: stuck.edgeKey, nodeKey: stuck.nodeKey }, nodeExecutionId: stuck.executionId }, ...routed.events]);
   });
 }
 

@@ -521,6 +521,30 @@ test("a review gate lists approve, changes and fix, and answer_question refuses 
   expect((await db.select().from(questions).where(eq(questions.id, question!.id)))[0]).toMatchObject({ option: "fix", answeredBy: "claude-code" });
 });
 
+test("a gate a loop that ran out reached lists retry, continue and abort; answer_question takes continue, and abort cancels the run", async () => {
+  const exhaustedGate = async (runId: string) => {
+    const gate = await seedExecution(db, runId, { nodeKey: "plan-ask", nodeType: "human_gate", executorKind: "human", status: "waiting" });
+    const context = { reason: "loop_exhausted", edgeKey: "plan-review->planner", from: "plan-review" };
+    const [question] = await db.insert(questions).values({ runId, nodeExecutionId: gate.id, question: "plan-review sent the work back.", options: ["retry", "continue", "abort"], context }).returning();
+    return question!;
+  };
+  const going = await startedRun();
+  const first = await exhaustedGate(going);
+  expect((await call("get_run", { run_id: going })).questions[0].options).toEqual(["retry", "continue", "abort"]);
+  expect(await call("answer_question", { question_id: first.id, answer: "The plan is fine.", option: "continue" })).toMatchObject({ answered: true });
+  expect((await db.select().from(questions).where(eq(questions.id, first.id)))[0]).toMatchObject({ option: "continue", answeredBy: "claude-code" });
+  expect((await call("get_run", { run_id: going })).status).not.toBe("cancelled");
+
+  // The next run takes the same issue.
+  await call("cancel_run", { run_id: going });
+  const stopping = await startedRun();
+  const second = await exhaustedGate(stopping);
+  expect(await call("answer_question", { question_id: second.id, answer: "abort", option: "abort" })).toMatchObject({ answered: true });
+  expect((await call("get_run", { run_id: stopping })).status).toBe("cancelled");
+  const [event] = await db.select().from(events).where(and(eq(events.runId, stopping), eq(events.type, "run.cancelled")));
+  expect(event?.payload).toMatchObject({ gate: "plan-ask", by: "claude-code" });
+});
+
 test("a code review gate lists the reviewer's findings, and answer_question sends the Fix now ones it names, or every Blocking and Should fix one", async () => {
   const runId = await startedRun();
   const comments = [

@@ -41,6 +41,12 @@ export function summarizeEvent(event: EventLike): string {
     return [turns, cost].filter(Boolean).join(", ");
   }
   if (event.type === "run.failed") return typeof p.nodeKey === "string" ? `at ${p.nodeKey}` : "";
+  if (event.type === "run.cancelled") return typeof p.reason === "string" ? p.reason : "";
+  // A gate the loop reached names itself and the person; resolve_loop names neither.
+  if (event.type === "loop.resolved") {
+    const decided = `${String(p.action)} for ${String(p.edgeKey)}`;
+    return typeof p.gate === "string" ? `${String(p.by ?? "a person")} chose ${String(p.action)} at ${p.gate} for ${String(p.edgeKey)}` : decided;
+  }
   if (event.type === "run.created" && typeof p.branchName === "string") return p.branchName;
   if (event.type === "run.scheduled" && typeof p.place === "number") return `Started by the scheduler, ${ordinal(p.place)} in order: ${settingsText(obj(p.settings))}`;
   if (event.type === "run.overlap_held" && Array.isArray(p.paths)) return `Waiting: shares ${p.paths.join(", ")} with run ${String(p.runId).slice(0, 8)}`;

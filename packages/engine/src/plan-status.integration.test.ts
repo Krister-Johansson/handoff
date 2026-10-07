@@ -3,12 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import { afterAll, beforeEach, expect, test } from "vitest";
-import { appendEvents, eq, nodeExecutions, projects, runs, wakeByKey } from "@handoff/db";
+import { appendEvents, eq, nodeExecutions, projects, questions, runs, wakeByKey } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { ProjectsAccessError, type PlanStatus } from "@handoff/github";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
 import { mergeNodeExecutor, prNodeExecutor } from "./executors/github.ts";
-import { cancelRun, resolveExhaustedLoop } from "./operations.ts";
+import { answerQuestion, cancelRun, resolveExhaustedLoop } from "./operations.ts";
 import { createRun } from "./runs.ts";
 import { startRun } from "./start-run.ts";
 import { createOriginRepo, git } from "./testing/git.ts";
@@ -181,5 +181,19 @@ test("stopping a run whose loop ran out sets its task back to Ready", async () =
     ]),
   );
   await resolveExhaustedLoop(db, stuck.id, "stop", { projects: plan });
+  expect(await statusOf(migration.number)).toBe("Ready");
+});
+
+test("abort at a gate a loop that ran out reached cancels the run and sets its task back to Ready", async () => {
+  const { plan, task, start, statusOf } = await planned();
+  const migration = await task("Add the migration");
+  const stuck = await start([migration]);
+  const [gate] = await db.update(nodeExecutions).set({ nodeKey: "gate", nodeType: "human_gate", executorKind: "human", status: "waiting" }).where(eq(nodeExecutions.runId, stuck.id)).returning();
+  const [question] = await db
+    .insert(questions)
+    .values({ runId: stuck.id, nodeExecutionId: gate!.id, question: "The loop ran out.", options: ["retry", "continue", "abort"], context: { reason: "loop_exhausted", edgeKey: "planner->planner", from: "planner" } })
+    .returning();
+  await answerQuestion(db, question!.id, { answer: "abort", option: "abort", answeredBy: "krister" }, { projects: plan });
+  expect((await inspect(db, stuck.id)).run.status).toBe("cancelled");
   expect(await statusOf(migration.number)).toBe("Ready");
 });

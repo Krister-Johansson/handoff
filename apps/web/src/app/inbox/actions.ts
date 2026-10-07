@@ -31,7 +31,7 @@ export async function answerAction(_: InboxActionState, form: FormData): Promise
   const answer = text || option;
   if (!answer) return { ok: false, error: "Pick an option or write an answer." };
   try {
-    await answerQuestion(getDb(), field(form, "questionId"), { answer, answeredBy: "dashboard", ...(option ? { option } : {}) });
+    await answerQuestion(getDb(), field(form, "questionId"), { answer, answeredBy: "dashboard", ...(option ? { option } : {}) }, { projects: getProjects() });
   } catch (error) {
     return { ok: false, error: (error as Error).message };
   }
