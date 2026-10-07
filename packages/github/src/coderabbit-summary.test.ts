@@ -207,3 +207,24 @@ test("a body without the markers yields no findings and a problem", () => {
   // A first pass that holds only a review in progress block is not a problem.
   expect(parseCodeRabbitSummary(fixture("pr208-first-pass.md")).problems).toEqual([]);
 });
+
+test("HTML entities in the summary's text are decoded once, so a finding holds plain text", () => {
+  // Recorded from northMES/northmes#285 on 2026-10-07, at the summary's edit of 19:57. The Linked Issues
+  // check's table cell has `&&`, but its full details block, which the parser prefers, has `&amp;&amp;`.
+  const summary = parseCodeRabbitSummary(fixture("pr285-reviewed.md"));
+  const [check] = summary.findings.filter((f) => f.kind === "pre_merge_check");
+  expect(check).toMatchObject({ id: "check:Linked Issues check", status: "warning" });
+  expect(check?.explanation).toContain("defines `check:full` as `pnpm check && pnpm test:tz`, so it has no e2e leg.");
+  expect(summary.problems).toEqual([]);
+
+  // The other common entities and numeric forms, in a note and in a check's full details. A decoded
+  // `&amp;lt;` is `&lt;`, not `<`: one pass, never two.
+  const encoded = "Use &lt;Suspense&gt; with &quot;fallback&quot;, don&#39;t nest it &#x2192; see &#8364;5 &amp; &#X40;b; &amp;lt; stays.";
+  const plain = "Use <Suspense> with \"fallback\", don't nest it \u2192 see \u20ac5 & @b; &lt; stays.";
+  const withEntities = fixture("pr208-reviewed.md")
+    .replace("Correct the rationale to reflect the repository’s commit-first requirement.", encoded)
+    .replace("rather than an outcome for users.\n", `rather than an outcome for users. ${encoded}\n`);
+  const parsed = parseCodeRabbitSummary(withEntities);
+  expect(parsed.findings.find((f) => f.kind === "summary_note")).toMatchObject({ text: expect.stringContaining(plain) });
+  expect(parsed.findings.find((f) => f.kind === "pre_merge_check")).toMatchObject({ explanation: expect.stringContaining(plain) });
+});

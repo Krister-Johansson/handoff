@@ -173,7 +173,7 @@ Valid. Fixed in 94c0c6c.
 <!-- handoff:item-reply R3 94c0c6c8a1... -->
 ```
 
-The first line is one of "Valid. Fixed in <commit link>.", "Not changed: the comment does not hold.", "Unclear:" followed by the question, or "Same point as <link to the other item>.". The evidence follows as the coder wrote it, cut at 4,000 characters.
+The first line is one of "Valid. Fixed in <commit link>.", "Not changed." (the evidence says whether the comment is wrong or out of scope), "Unclear:" followed by the question, or "Same point as <link to the other item>.". The evidence follows as the coder wrote it, cut at 4,000 characters.
 
 Items without a thread (review summaries, summary notes, pre-merge checks) are answered together in one new PR comment per round, one paragraph per item with the same first lines, ending with `<!-- handoff:item-answers <round> <head sha> -->`. A new comment per round, not an edit of the last one, so the reviewer sees an answer to its newest findings.
 

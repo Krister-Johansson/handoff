@@ -124,7 +124,8 @@ export function conversationOf(thread: ReviewThread): ThreadEntry[] {
 /**
  * Feedback that asks for changes with exactly these items, each with its handle, for the coder to answer.
  * An item that comes back after an answer carries its thread since the first comment, and `notes` adds to
- * an item's conversation what handoff knows besides, such as a person's decision.
+ * an item's conversation what handoff knows besides, such as a person's decision. `githubDecision` keeps
+ * what GitHub said, which the step's summary reports.
  */
 export function withItems(feedback: Feedback, items: ReviewItemRow[], snapshot?: PrSnapshot, notes: Map<string, ThreadEntry[]> = new Map()): Feedback {
   const conversation = (r: ReviewItemRow): ThreadEntry[] => {
@@ -139,6 +140,7 @@ export function withItems(feedback: Feedback, items: ReviewItemRow[], snapshot?:
     review: {
       ...feedback.review,
       decision: "changes_requested",
+      githubDecision: feedback.review.githubDecision ?? feedback.review.decision,
       comments: items.map((r) => {
         const thread = conversation(r);
         return {
@@ -227,8 +229,9 @@ function itemLink(item: ReviewItemRow): string {
 
 /**
  * An item's answer as handoff posts it: its first line says what the coder found ("Valid. Fixed in
- * <commit>.", or "Valid. Fixed." for a summary item fixed without one, "Not changed: the comment does not hold.", "Unclear: <question>", or "Same point as <link>."),
- * and the evidence follows as the coder wrote it, cut at `limit`.
+ * <commit>.", or "Valid. Fixed." for a summary item fixed without one, "Not changed.", "Unclear: <question>", or "Same point as <link>."),
+ * and the evidence follows as the coder wrote it, cut at `limit`. A declined comment may be wrong or
+ * right but out of scope, so its first line claims neither and the evidence says which.
  */
 export function answerText(item: ReviewItemRow, items: ReviewItemRow[], repo: RepoRef, limit = EVIDENCE_LIMIT): string {
   const evidence = cut(item.evidence ?? "", limit);
@@ -246,7 +249,7 @@ export function answerText(item: ReviewItemRow, items: ReviewItemRow[], repo: Re
       return withEvidence(`Same point as ${other ? itemLink(other) : "another comment"}.`);
     }
     default:
-      return withEvidence("Not changed: the comment does not hold.");
+      return withEvidence("Not changed.");
   }
 }
 

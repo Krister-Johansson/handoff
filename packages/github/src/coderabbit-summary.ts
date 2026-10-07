@@ -124,7 +124,7 @@ export function parseCodeRabbitSummary(body: string): CodeRabbitSummary {
     if (text === null) return;
     const result = reader(text);
     if ("unreadable" in result) {
-      const plain = plainText(text);
+      const plain = decodeEntities(plainText(text));
       findings.push({ kind: "raw", id: `raw:${section}:${hash(plain)}`, section, text: plain });
       problems.push({ section, message: result.unreadable });
     } else {
@@ -167,6 +167,7 @@ function readNotes(section: string): SectionRead {
   if (!marker) return { unreadable: "The final review risk section has no final_review_risk_coverage marker, so its notes cannot be told apart." };
   const findings = paragraphs(section.slice(marker.index + marker[0].length))
     .filter((p) => !p.startsWith("**Merge Risk:**"))
+    .map(decodeEntities)
     .map((text): SummaryFinding => ({ kind: "summary_note", id: `note:${hash(text)}`, text }));
   return { findings };
 }
@@ -198,15 +199,17 @@ function readChecks(section: string): SectionRead {
   }
   if (table.rows.length === 0) return { unreadable: "The failed checks table has no rows." };
   const findings = table.rows.map((cells): SummaryFinding => {
-    const name = normalise(cells[nameAt] ?? "");
-    const details = readFullDetails(section, name);
+    // The full details block is found by the name as the comment writes it; the finding holds it decoded.
+    const written = normalise(cells[nameAt] ?? "");
+    const details = readFullDetails(section, written);
+    const name = decodeEntities(written);
     return {
       kind: "pre_merge_check",
       id: `check:${name}`,
       name,
       status: normalise((cells[statusAt] ?? "").replace(/[^\p{L}\s]/gu, "")).toLowerCase(),
-      explanation: details.explanation ?? normalise(cells[explanationAt] ?? ""),
-      resolution: details.resolution ?? normalise(resolutionAt < 0 ? "" : (cells[resolutionAt] ?? "")),
+      explanation: decodeEntities(details.explanation ?? normalise(cells[explanationAt] ?? "")),
+      resolution: decodeEntities(details.resolution ?? normalise(resolutionAt < 0 ? "" : (cells[resolutionAt] ?? ""))),
     };
   });
   return { findings };
@@ -320,6 +323,22 @@ function plainText(section: string): string {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+const NAMED_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/**
+ * Text with its HTML entities decoded in one pass, so `&amp;lt;` becomes `&lt;`, not `<`. CodeRabbit
+ * writes some parts of the comment as HTML: on northMES/northmes#285 a check's full details had
+ * `&amp;&amp;` where its table cell had `&&`. A finding's text is decoded once here and is plain text
+ * from then on. An entity this does not know stays as written.
+ */
+function decodeEntities(text: string): string {
+  return text.replace(/&(?:#(\d{1,7})|#x([0-9a-f]{1,6})|([a-z]+));/gi, (entity, decimal?: string, hex?: string, name?: string) => {
+    if (name !== undefined) return NAMED_ENTITIES[name.toLowerCase()] ?? entity;
+    const code = decimal !== undefined ? Number.parseInt(decimal, 10) : Number.parseInt(hex!, 16);
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+  });
 }
 
 function normalise(text: string): string {

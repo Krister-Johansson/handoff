@@ -175,6 +175,11 @@ export const FeedbackSchema = z.object({
   }),
   review: z.object({
     decision: z.enum(["none", "approved", "changes_requested", "commented"]),
+    /**
+     * GitHub's review decision, recorded when the PR node sends review comments back to the coder. It
+     * then sets `decision` to changes_requested so the graph's fix edge takes them, whatever GitHub says.
+     */
+    githubDecision: z.enum(["none", "approved", "changes_requested", "commented"]).optional(),
     comments: z.array(
       z.object({
         author: z.string(),

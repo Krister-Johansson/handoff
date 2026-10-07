@@ -62,9 +62,16 @@ export function summarizeOutput(output: unknown): string | undefined {
   const pr = PrOutputSchema.safeParse(output);
   if (pr.success) {
     const { ci, review } = pr.data.feedback;
-    const ciText = { success: "CI passing", failure: "CI failing", pending: "CI pending" }[ci.status];
-    const reviewText = review.decision === "none" ? "" : `, ${review.decision.replace("_", " ")}`;
-    return `PR #${pr.data.prNumber}, ${ciText}${reviewText}`;
+    const parts = [`PR #${pr.data.prNumber}`, { success: "CI passing", failure: "CI failing", pending: "CI pending" }[ci.status]];
+    // Review comments sent back to the coder set the decision to changes_requested; say what GitHub decided and what went back.
+    const decision = review.githubDecision ?? review.decision;
+    if (decision !== "none") parts.push(decision.replace("_", " "));
+    if (review.githubDecision !== undefined && review.comments.length > 0) {
+      // Review items are answered one by one; plain findings are for the coder to address.
+      const what = review.comments.some((c) => c.item !== undefined) ? "to answer" : "to address";
+      parts.push(`${plural(review.comments.length, "review comment")} ${what}`);
+    }
+    return parts.join(", ");
   }
   const conflict = PrConflictOutputSchema.safeParse(output);
   if (conflict.success) {
