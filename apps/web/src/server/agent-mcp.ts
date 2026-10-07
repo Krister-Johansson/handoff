@@ -726,7 +726,12 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         .where(and(eq(nodeExecutions.runId, run_id), eq(nodeExecutions.status, "failed"), node ? eq(nodeExecutions.nodeKey, node) : undefined))
         .orderBy(desc(nodeExecutions.attempt), desc(nodeExecutions.createdAt))
         .limit(1);
-      if (!failed) throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
+      if (!failed) {
+        // A run a loop stopped has no failed step to retry; resolve_loop decides what happens next.
+        const stuck = node ? undefined : await stuckLoop(db, run_id);
+        if (stuck) throw new Error(`Run ${run_id} has no failed step: ${stuck.nodeKey} ran out of rounds on loop ${stuck.edgeKey} after ${stuck.attempts} attempts. Use resolve_loop with continue, retry or stop.`);
+        throw new Error(node ? `No failed ${node} step in run ${run_id}.` : `Run ${run_id} has no failed step.`);
+      }
       const retry = await repairNodeExecution(db, failed.id, { ...(note ? { note } : {}), ...(allow_paths?.length ? { allowPaths: allow_paths } : {}), ...(latest_graph ? { latestGraph: true } : {}) });
       return { node: retry.nodeKey, attempt: retry.attempt, ...(retry.upgrade ? { graph_version: retry.upgrade.to.version } : {}), url: await urlOf(run_id) };
     },

@@ -332,6 +332,10 @@ test("a run stopped by a loop that ran out says so, asks for a decision, and goe
       { type: "run.failed", payload: { reason: "loop_exhausted", nodeKey: "planner", awaiting: "repair" } },
     ]),
   );
+  // Nothing failed, so repair has nothing to retry; it points at resolve_loop instead.
+  expect(await call("repair_run", { run_id })).toEqual({
+    error: `Run ${run_id} has no failed step: planner ran out of rounds on loop planner->planner after 3 attempts. Use resolve_loop with continue, retry or stop.`,
+  });
   expect(await call("list_attention")).toEqual([
     expect.objectContaining({ id: `stuck:${run_id}`, kind: "failed", title: "sandbox: planner ran out of rounds", url: expect.stringMatching(new RegExp(`^${BASE}/projects/[0-9a-f-]+/runs/${run_id}$`)) }),
   ]);
