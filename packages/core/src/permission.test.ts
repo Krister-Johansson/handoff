@@ -55,6 +55,16 @@ test("Always allow offers git show, not git, and nothing for cd or node", () => 
   expect(ruleFor("Monitor", MONITOR_INPUT)).toBe("Monitor");
 });
 
+test("Always allow reads a compound command the way the rules do: separators in quotes and fd redirects are not splits", () => {
+  const bash = (command: string) => ruleFor("Bash", { command });
+  expect(bash('cd "a;b" && git log --oneline')).toBe("Bash(git log *)");
+  expect(bash('FOO="a|b" git diff main')).toBe("Bash(git diff *)");
+  expect(bash("cd apps/web 2>/dev/null && pnpm exec biome check 2>&1 | tail -30")).toBe("Bash(pnpm exec *)");
+  // Claude Code checks a redirect's file against the Edit rules on its own; the rule is for the command.
+  expect(bash("pnpm test > out.log 2>&1")).toBe("Bash(pnpm test *)");
+  expect(bash('echo "a | b" > out.txt')).toBe("Bash(echo *)");
+});
+
 test("a run's Always allow rules cover a later call the way Claude Code reads them, and nothing wider", () => {
   const bash = (command: string, rules: string[]) => allowedBy(rules, "Bash", { command });
   expect(allowedBy(["Monitor"], "Monitor", MONITOR_INPUT)).toBe("Monitor");
