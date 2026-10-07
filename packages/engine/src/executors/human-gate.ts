@@ -147,16 +147,31 @@ async function withCode(ctx: ExecutorContext, review: Review, branchDiff: Branch
   return files.length ? { ...review, kind: "code", files } : review;
 }
 
+/** The choices for a loop that used all its rounds. The engine routes them, whatever ports the gate has. */
+export const EXHAUSTED_OPTIONS = ["retry", "continue", "abort"];
+
+/**
+ * What any gate asks when a loop that used all its rounds reached it: another round, going on as if the
+ * step that sent the work back had approved, or cancelling the run.
+ */
+function exhaustedAsk(ctx: ExecutorContext, trigger: NonNullable<ExecutorContext["execution"]["trigger"]>): Ask {
+  const edgeKey = trigger.edgeKey ?? "";
+  const from = trigger.from ?? "the step";
+  const attempts = ctx.state.loops[edgeKey]?.attempts ?? 0;
+  const target = trigger.from ? (ctx.graph.outEdges(trigger.from).find((e) => e.key === edgeKey)?.target ?? "the earlier step") : "the earlier step";
+  return {
+    question: [
+      `${from} sent the work back to ${target} ${attempts} ${attempts === 1 ? "time" : "times"} on ${edgeKey}, all the rounds the loop allows.`,
+      `Choose retry to give ${target} another round, with the loop's count starting over; continue to go on as if ${from} had approved; or abort to cancel the run.`,
+    ].join(" "),
+    options: EXHAUSTED_OPTIONS,
+    context: { reason: "loop_exhausted", edgeKey: trigger.edgeKey, from: trigger.from },
+  };
+}
+
 async function compose(ctx: ExecutorContext, db: Db, branchDiff: BranchDiff | undefined): Promise<Ask> {
   const trigger = ctx.execution.trigger;
-  if (trigger?.kind === "exhausted") {
-    const attempts = ctx.state.loops[trigger.edgeKey ?? ""]?.attempts ?? 0;
-    return {
-      question: `The loop ${trigger.edgeKey} used all ${attempts} attempts. Retry with another round, or abort the run?`,
-      options: ["retry", "abort"],
-      context: { reason: "loop_exhausted", edgeKey: trigger.edgeKey, from: trigger.from },
-    };
-  }
+  if (trigger?.kind === "exhausted") return exhaustedAsk(ctx, trigger);
   const from = trigger?.from ? ctx.state.nodes[trigger.from]?.output : undefined;
   const asked = (from as { question?: { text?: string; summary?: string; options?: string[] } } | undefined)?.question;
   if (asked?.text) return { question: asked.text, options: asked.options ?? [], context: { reason: "needs_input", from: trigger?.from, ...(asked.summary ? { summary: asked.summary } : {}) } };
@@ -291,7 +306,8 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
     // A Try it gate starts the app from the run's worktree; other gates only read what reached them.
     needsWorkdir: (node) => gateMode(node.config) === "try",
     async execute(ctx): Promise<ExecutorOutcome> {
-      const tryIt = gateMode(ctx.node.config) === "try";
+      // A loop that ran out asks its three choices at any gate, a Try it gate too, without starting the app.
+      const tryIt = gateMode(ctx.node.config) === "try" && ctx.execution.trigger?.kind !== "exhausted";
       let [question] = await deps.db.select().from(questions).where(eq(questions.nodeExecutionId, ctx.execution.id));
       const approvedAfterFixes = obj(ctx.state.approvedAfterFixes);
       const preApproved = approvedAfterFixes[ctx.node.key];
@@ -381,8 +397,15 @@ export function humanGateExecutor(deps: GateDeps): NodeExecutor {
         statePatch.decisions = [...previous, { gate: ctx.node.key, note: `${asker} asked "${question.question}" The answer: ${given}`, comments: [] }];
       }
       const edgeKey = (question.context as { reason?: string; edgeKey?: string }).edgeKey;
-      if ((question.context as { reason?: string }).reason === "loop_exhausted" && edgeKey && question.option !== "abort") {
+      if (reason === "loop_exhausted" && edgeKey && question.option !== "abort") {
         statePatch.loops = { ...ctx.state.loops, [edgeKey]: { attempts: 0 } };
+      }
+      // Going on past the step that sent the work back is a person's decision every later step keeps to.
+      if (reason === "loop_exhausted" && edgeKey && asker && question.option === "continue") {
+        const written = question.answer.trim() !== question.option ? ` Their note: ${question.answer.trim()}` : "";
+        const previous = Array.isArray(ctx.state.decisions) ? ctx.state.decisions : [];
+        const note = `${answer.answeredBy} went on past ${asker} after ${edgeKey} used all its rounds, as if ${asker} had approved.${written}`;
+        statePatch.decisions = [...previous, { gate: ctx.node.key, note, comments: [] }];
       }
       return { kind: "completed", output: answer, statePatch, ...(memory ? { memory } : {}) };
     },

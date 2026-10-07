@@ -48,6 +48,19 @@ test("summarizes an issue unlinked from the run, with who did it and the pull re
   expect(summarizeEvent({ type: "run.issue_unlinked", payload: { issue: 4, by: "cli" } })).toBe("#4 unlinked by cli");
 });
 
+test("summarizes a decision on a loop that ran out, with the gate and the person when a gate took it", () => {
+  const atGate = { action: "continue", edgeKey: "plan-review->planner", nodeKey: "plan-review", gate: "plan-ask", by: "krister" };
+  expect(summarizeEvent({ type: "loop.resolved", payload: atGate })).toBe("krister chose continue at plan-ask for plan-review->planner");
+  expect(summarizeEvent({ type: "loop.resolved", payload: { action: "retry", edgeKey: "reviewer->coder", nodeKey: "reviewer" } })).toBe("retry for reviewer->coder");
+});
+
+test("summarizes a cancelled run by its reason", () => {
+  expect(summarizeEvent({ type: "run.cancelled", payload: { reason: "krister chose abort at plan-ask after plan-review->planner used all its rounds", gate: "plan-ask", by: "krister" } })).toBe(
+    "krister chose abort at plan-ask after plan-review->planner used all its rounds",
+  );
+  expect(summarizeEvent({ type: "run.cancelled", payload: { reason: null } })).toBe("");
+});
+
 test("summarizes a status write on the plan and one that was skipped, with the reason", () => {
   expect(summarizeEvent({ type: "plan.status", payload: { issue: 57, status: "In review" } })).toBe("#57 to In review");
   expect(summarizeEvent({ type: "plan.skipped", payload: { issue: 90, status: "Running", reason: "not-in-project" } })).toBe(

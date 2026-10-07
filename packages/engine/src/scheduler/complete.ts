@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
-import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledGraph, type NodeMemory, type NodeResult, type RunState } from "@handoff/core";
+import { brief, extraPathsOf, matchingEdges, mergeState, notifies, remember, runPath, RunStateSchema, summarizeOutput, type CheckResult, type CompiledEdge, type CompiledGraph, type NodeMemory, type NodeResult, type RunState } from "@handoff/core";
 import { appendEvents, edgeTraversals, nodeExecutions, projects, questions, runs, type DbTx, type NewEvent, type NodeExecutionRow } from "@handoff/db";
 import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { reviewThreadsSettings } from "../executors/external-review.ts";
@@ -89,22 +89,14 @@ async function anyJoinConsumer(tx: DbTx, graph: CompiledGraph, runId: string, ta
   return later ? undefined : existing.id;
 }
 
+/** The step edges leave from: the node, its run and the execution that sends the work on. */
+export type EdgeSource = { runId: string; nodeKey: string; executionId: string };
+
 /**
- * Follows matching out-edges: loop guards (exhaustion routes to the gate), fan-in joins and loop edges
- * recorded in edge_traversals, and a new node execution per edge taken.
+ * Takes the given out-edges of a step: loop guards (exhaustion routes to the gate), fan-in joins and
+ * loop edges recorded in edge_traversals, and a new node execution per edge taken.
  */
-async function route(
-  tx: DbTx,
-  graph: CompiledGraph,
-  row: NodeExecutionRow,
-  outcome: "passed" | "failed",
-  output: unknown,
-  state: RunState,
-): Promise<RouteResult> {
-  const edges = matchingEdges(graph, row.nodeKey, outcome, {
-    state,
-    node: { key: row.nodeKey, status: outcome, attempt: row.attempt, output },
-  });
+export async function takeEdges(tx: DbTx, graph: CompiledGraph, from: EdgeSource, edges: CompiledEdge[], state: RunState): Promise<Omit<RouteResult, "ended">> {
   const events: NewEvent[] = [];
   let created = 0;
   let arrived = 0;
@@ -112,19 +104,19 @@ async function route(
   let next = state;
   for (const edge of edges) {
     let target = edge.target;
-    let trigger: Trigger = { kind: "edge", edgeKey: edge.key, from: row.nodeKey, fromExecutionId: row.id };
+    let trigger: Trigger = { kind: "edge", edgeKey: edge.key, from: from.nodeKey, fromExecutionId: from.executionId };
     if (edge.loop) {
       const attempts = next.loops[edge.key]?.attempts ?? 0;
       // A loop without a limit (a question gate's answers) counts its rounds but never runs out.
       if (edge.maxAttempts !== undefined && attempts >= edge.maxAttempts) {
-        events.push({ type: "edge.exhausted", payload: { edgeKey: edge.key, attempts }, nodeExecutionId: row.id });
+        events.push({ type: "edge.exhausted", payload: { edgeKey: edge.key, attempts }, nodeExecutionId: from.executionId });
         const gate = edge.onExhausted ?? graph.document.attributes.exhaustedGate;
         if (!gate) {
           exhausted = true;
           continue;
         }
         target = gate;
-        trigger = { kind: "exhausted", edgeKey: edge.key, from: row.nodeKey, fromExecutionId: row.id };
+        trigger = { kind: "exhausted", edgeKey: edge.key, from: from.nodeKey, fromExecutionId: from.executionId };
       } else {
         next = { ...next, loops: { ...next.loops, [edge.key]: { attempts: attempts + 1 } } };
       }
@@ -133,18 +125,18 @@ async function route(
     const inbound = graph.inEdges(target).filter((e) => !e.loop);
     if (!edge.loop && trigger.kind === "edge" && inbound.length > 1) {
       arrived++;
-      await tx.insert(edgeTraversals).values({ runId: row.runId, edgeKey: edge.key, fromExecutionId: row.id, toNodeKey: target });
-      events.push({ type: "join.arrived", payload: { nodeKey: target, edgeKey: edge.key, from: row.nodeKey }, nodeExecutionId: row.id });
+      await tx.insert(edgeTraversals).values({ runId: from.runId, edgeKey: edge.key, fromExecutionId: from.executionId, toNodeKey: target });
+      events.push({ type: "join.arrived", payload: { nodeKey: target, edgeKey: edge.key, from: from.nodeKey }, nodeExecutionId: from.executionId });
       const pending = await tx
         .select({ id: edgeTraversals.id, edgeKey: edgeTraversals.edgeKey })
         .from(edgeTraversals)
-        .where(and(eq(edgeTraversals.runId, row.runId), eq(edgeTraversals.toNodeKey, target), isNull(edgeTraversals.consumedByExecutionId)));
+        .where(and(eq(edgeTraversals.runId, from.runId), eq(edgeTraversals.toNodeKey, target), isNull(edgeTraversals.consumedByExecutionId)));
       const mode = graph.node(target).config.join === "any" ? "any" : "all";
       let consumer: string | undefined;
       if (mode === "any") {
-        consumer = await anyJoinConsumer(tx, graph, row.runId, target);
+        consumer = await anyJoinConsumer(tx, graph, from.runId, target);
         if (!consumer) {
-          const exec = await createExecution(tx, graph, row.runId, target, trigger);
+          const exec = await createExecution(tx, graph, from.runId, target, trigger);
           consumer = exec.id;
           created++;
           events.push({ type: "join.fired", payload: { nodeKey: target, mode }, nodeExecutionId: exec.id });
@@ -153,7 +145,7 @@ async function route(
       } else {
         const arrivedKeys = new Set(pending.map((p) => p.edgeKey));
         if (inbound.every((e) => arrivedKeys.has(e.key))) {
-          const exec = await createExecution(tx, graph, row.runId, target, trigger);
+          const exec = await createExecution(tx, graph, from.runId, target, trigger);
           consumer = exec.id;
           created++;
           events.push({ type: "join.fired", payload: { nodeKey: target, mode }, nodeExecutionId: exec.id });
@@ -169,16 +161,76 @@ async function route(
       continue;
     }
 
-    const exec = await createExecution(tx, graph, row.runId, target, trigger);
+    const exec = await createExecution(tx, graph, from.runId, target, trigger);
     created++;
     // A loop edge taken sends the work back; the traversal records that this execution sent it, already consumed.
     if (edge.loop && trigger.kind === "edge") {
-      await tx.insert(edgeTraversals).values({ runId: row.runId, edgeKey: edge.key, fromExecutionId: row.id, toNodeKey: target, consumedByExecutionId: exec.id });
+      await tx.insert(edgeTraversals).values({ runId: from.runId, edgeKey: edge.key, fromExecutionId: from.executionId, toNodeKey: target, consumedByExecutionId: exec.id });
     }
-    events.push({ type: "edge.taken", payload: { edgeKey: edge.key, from: row.nodeKey, to: target }, nodeExecutionId: row.id });
+    events.push({ type: "edge.taken", payload: { edgeKey: edge.key, from: from.nodeKey, to: target }, nodeExecutionId: from.executionId });
     events.push({ type: "node.created", payload: { nodeKey: target, attempt: exec.attempt, via: edge.key }, nodeExecutionId: exec.id });
   }
-  return { events, created, arrived, exhausted, ended: mergedEnd(graph, row, outcome, output), state: next };
+  return { events, created, arrived, exhausted, state: next };
+}
+
+/** A step that wanted another round when its loop had none left. */
+export type StuckStep = { nodeKey: string; edgeKey: string; executionId: string };
+
+/**
+ * The edges a person's decision on a loop that ran out takes from the step that wanted another round:
+ * the loop edge for another round, or the step's ways forward other than its loops to go on as if it
+ * had approved. resolve_loop and a gate the loop reached both route this way.
+ */
+export function exhaustedLoopEdges(graph: CompiledGraph, stuck: Pick<StuckStep, "nodeKey" | "edgeKey">, action: "retry" | "continue"): CompiledEdge[] {
+  const out = graph.outEdges(stuck.nodeKey);
+  return action === "retry" ? out.filter((e) => e.key === stuck.edgeKey) : out.filter((e) => !e.loop);
+}
+
+/**
+ * Takes a person's decision on a loop that ran out: another round counts as the loop's first attempt
+ * again, and continue goes on from the stuck step as if it had approved.
+ */
+export function routeLoopDecision(tx: DbTx, graph: CompiledGraph, runId: string, stuck: StuckStep, action: "retry" | "continue", state: RunState) {
+  const edges = exhaustedLoopEdges(graph, stuck, action);
+  const start = action === "retry" ? { ...state, loops: { ...state.loops, [stuck.edgeKey]: { attempts: 0 } } } : state;
+  return takeEdges(tx, graph, { runId, nodeKey: stuck.nodeKey, executionId: stuck.executionId }, edges, start);
+}
+
+/**
+ * A person's answer at a gate a loop that ran out reached: retry or continue, with the step the loop
+ * left from. Abort never gets here: answering it cancels the run.
+ */
+function loopDecisionAt(graph: CompiledGraph, row: NodeExecutionRow, output: unknown): { action: "retry" | "continue"; stuck: StuckStep } | undefined {
+  const trigger = row.trigger;
+  if (trigger?.kind !== "exhausted" || !trigger.edgeKey || !trigger.from || !trigger.fromExecutionId) return undefined;
+  if (graph.node(row.nodeKey).type !== "human_gate" || !graph.graph.hasEdge(trigger.edgeKey)) return undefined;
+  const option = (output as { option?: unknown } | undefined)?.option;
+  if (option !== "retry" && option !== "continue") return undefined;
+  return { action: option, stuck: { nodeKey: trigger.from, edgeKey: trigger.edgeKey, executionId: trigger.fromExecutionId } };
+}
+
+/**
+ * Follows matching out-edges. A gate a loop that ran out reached routes its answer from the stuck step
+ * instead, whatever ports the gate has.
+ */
+async function route(tx: DbTx, graph: CompiledGraph, row: NodeExecutionRow, outcome: "passed" | "failed", output: unknown, state: RunState): Promise<RouteResult> {
+  const decision = outcome === "passed" ? loopDecisionAt(graph, row, output) : undefined;
+  if (decision) {
+    const routed = await routeLoopDecision(tx, graph, row.runId, decision.stuck, decision.action, state);
+    const by = (output as { answeredBy?: unknown }).answeredBy;
+    const resolved: NewEvent = {
+      type: "loop.resolved",
+      payload: { action: decision.action, edgeKey: decision.stuck.edgeKey, nodeKey: decision.stuck.nodeKey, gate: row.nodeKey, ...(typeof by === "string" ? { by } : {}) },
+      nodeExecutionId: row.id,
+    };
+    return { ...routed, events: [resolved, ...routed.events], ended: false };
+  }
+  const edges = matchingEdges(graph, row.nodeKey, outcome, {
+    state,
+    node: { key: row.nodeKey, status: outcome, attempt: row.attempt, output },
+  });
+  const routed = await takeEdges(tx, graph, { runId: row.runId, nodeKey: row.nodeKey, executionId: row.id }, edges, state);
+  return { ...routed, ended: mergedEnd(graph, row, outcome, output) };
 }
 
 /**

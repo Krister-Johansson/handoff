@@ -124,8 +124,15 @@ test("the handoff skill says repair_run keeps the run's graph version unless lat
   expect(line).toMatch(/refuses/);
 });
 
-test("the plugin is 0.26.0, whose bundled bridge is built with @modelcontextprotocol/sdk 1.32.0", () => {
-  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.26.0");
+test("the handoff skill says a gate a loop that ran out reached takes retry, continue or abort, and that abort cancels the run", () => {
+  const skill = readFileSync(root("plugins/handoff/skills/handoff/SKILL.md"), "utf8");
+  const line = skill.split("\n").find((l) => l.includes("`answer_question`") && l.includes("ran out"));
+  expect(line).toMatch(/retry[^\n]*continue[^\n]*abort/);
+  expect(line).toMatch(/abort[^\n]*cancels the run/);
+});
+
+test("the plugin is 0.27.0, whose bundled bridge is built with @modelcontextprotocol/sdk 1.32.0", () => {
+  expect(json("plugins/handoff/.claude-plugin/plugin.json").version).toBe("0.27.0");
   expect(json("packages/connector/package.json").dependencies["@modelcontextprotocol/sdk"]).toBe("1.32.0");
 });
 

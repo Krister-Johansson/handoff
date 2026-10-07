@@ -178,11 +178,11 @@ describe("approvals hold until the change changes", () => {
   });
 });
 
-test("a gate reached by loop exhaustion asks whether to retry and offers abort", async () => {
+test("a gate reached by loop exhaustion offers retry, continue and abort", async () => {
   const cli = new FakeCliExecutor([{ output: outputs.planner }, ...Array.from({ length: 4 }, () => ({ output: outputs.coderDone }))]);
   const { run } = await startRun(db, loop);
   await drain(engineDeps(db, registry(cli, { tester: scripted(done(outputs.testsFail)) })));
   const [question] = await db.select().from(questions).where(eq(questions.runId, run.id));
   expect(question!.question).toMatch(/tester->coder/);
-  expect(question!.options).toEqual(["retry", "abort"]);
+  expect(question!.options).toEqual(["retry", "continue", "abort"]);
 });

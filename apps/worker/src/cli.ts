@@ -163,7 +163,9 @@ export async function runCli(argv: string[], io: CliIo): Promise<void> {
     const { values, positionals } = parseArgs({ args: [sub ?? "", ...rest], allowPositionals: true, options: { option: { type: "string" } } });
     const [questionId, answer] = positionals;
     if (!questionId || !answer) throw new Error(USAGE);
-    await answerQuestion(db, questionId, { answer, answeredBy: "cli", ...(values.option ? { option: values.option } : {}) });
+    // Abort at a gate a loop that ran out reached cancels the run, and its tasks go back to Ready on the plan.
+    const projects = io.projects === undefined ? projectsFromEnv() : (io.projects ?? undefined);
+    await answerQuestion(db, questionId, { answer, answeredBy: "cli", ...(values.option ? { option: values.option } : {}) }, { projects });
     out(`question ${questionId} answered`);
     return;
   }

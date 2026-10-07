@@ -703,14 +703,20 @@ function handlersFor(deps: HandoffMcpDeps): Handlers {
         return { answered: true, run_id: asked!.runId, url: await urlOf(asked!.runId) };
       }
       // The tool numbers findings from 1, as get_run lists them.
-      const row = await answerQuestion(db, question_id, {
-        answer,
-        ...(option ? { option } : {}),
-        ...(comments?.length ? { comments } : {}),
-        ...(findings ? { findings: findings.map((n) => n - 1) } : {}),
-        ...(items?.length ? { items } : {}),
-        answeredBy: actor,
-      });
+      const row = await answerQuestion(
+        db,
+        question_id,
+        {
+          answer,
+          ...(option ? { option } : {}),
+          ...(comments?.length ? { comments } : {}),
+          ...(findings ? { findings: findings.map((n) => n - 1) } : {}),
+          ...(items?.length ? { items } : {}),
+          answeredBy: actor,
+        },
+        // Abort at a gate a loop that ran out reached cancels the run, and its tasks go back on the plan.
+        { projects: plan },
+      );
       return { answered: true, run_id: row.runId, url: await urlOf(row.runId) };
     },
 
