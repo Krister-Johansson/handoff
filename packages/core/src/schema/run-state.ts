@@ -67,10 +67,19 @@ export const PreviousRunSchema = z.object({
 });
 export type PreviousRun = z.infer<typeof PreviousRunSchema>;
 
+/**
+ * A run that a plan gate split: `issue` is the issue the run was started on, which it keeps building as
+ * part 1, and `parts` are the issues opened for the later parts. Its pull request does not close `issue`;
+ * handoff closes it once every part is closed.
+ */
+export const SplitOfSchema = z.object({ issue: z.number().int(), parts: z.array(z.number().int()) });
+export type SplitOf = z.infer<typeof SplitOfSchema>;
+
 export const RunStateSchema = z
   .object({
     task: z.string(),
     issues: z.array(LinkedIssueSchema).optional(),
+    splitOf: SplitOfSchema.optional(),
     plan: z
       .object({ plan: z.string(), steps: z.array(z.string()), ownedPaths: z.array(z.string()), acceptance: z.array(z.string()).optional(), size: PlanSizeSchema.optional(), parts: z.array(PlanPartSchema).optional() })
       .optional(),

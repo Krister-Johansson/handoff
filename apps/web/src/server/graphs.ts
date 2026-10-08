@@ -5,6 +5,7 @@ import { RunStateSchema, suggestProjectName, validateGraphForSave, type CompileE
 import { and, desc, eq, graphs, graphVersions, inArray, projects, questions, runs, sql, type Db } from "@handoff/db";
 import { cancelRun, splitPartsOf, splitRun, statusesBeforeRun, type SplitIssue } from "@handoff/engine/operations";
 import { branchHasWork, previousRunOf } from "@handoff/engine/runs";
+import { splitOfRun } from "@handoff/engine/split";
 import { startRun, type StartRunInput } from "@handoff/engine/start-run";
 import { PLAN_KINDS, type GitHubPort, type ProjectsPort } from "@handoff/github";
 
@@ -221,9 +222,22 @@ export async function runAgain(db: Db, runId: string, opts: RunAgainOptions = {}
   const issues = RunStateSchema.shape.issues.parse(earlier.state.issues) ?? [];
   const from = opts.from ?? (branchHasWork(earlier) ? "branch" : "scratch");
   const previousRun = from === "branch" ? previousRunOf(earlier) : undefined;
+  // The earlier run's task is part 1 of a split: the new run builds that part too, and its pull request does not close the split issue.
+  const splitOf = await splitOfRun(db, { id: earlier.id, issues, state: earlier.state });
   const again = await startRunFromGraph(
     db,
-    { projectId: earlier.projectId, graphName: earlier.graphName, task: earlier.task, issues, again: true, size: earlier.size, startedBy: opts.startedBy, previousRun, statusesBefore: await statusesBeforeRun(db, runId) },
+    {
+      projectId: earlier.projectId,
+      graphName: earlier.graphName,
+      task: earlier.task,
+      issues,
+      again: true,
+      size: earlier.size,
+      startedBy: opts.startedBy,
+      previousRun,
+      splitOf,
+      statusesBefore: await statusesBeforeRun(db, runId),
+    },
     opts.github,
     opts.projects,
   );

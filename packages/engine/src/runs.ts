@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { CoderOutputSchema, initialRunState, PreviousRunSchema, ReviewerOutputSchema, RunStateSchema, type LinkedIssue, type PreviousRun } from "@handoff/core";
+import { CoderOutputSchema, initialRunState, PreviousRunSchema, ReviewerOutputSchema, RunStateSchema, type LinkedIssue, type PreviousRun, type SplitOf } from "@handoff/core";
 import type { PlanSize } from "@handoff/github";
 import { appendEvents, nodeExecutions, projects, runs, type DbExecutor, type NewEvent } from "@handoff/db";
 import { loadCompiledGraph } from "./graph-cache.ts";
@@ -62,7 +62,7 @@ const slug = (text: string) =>
 /** Creates a queued run pinned to a graph version, with a pending execution for the start node. */
 export async function createRun(
   db: DbExecutor,
-  input: { projectId: string; graphVersionId: string; task: string; baseBranch?: string; branchName?: string; issues?: LinkedIssue[]; startedBy?: string | undefined; size?: PlanSize | undefined; events?: NewEvent[] | undefined; previousRun?: PreviousRun | undefined },
+  input: { projectId: string; graphVersionId: string; task: string; baseBranch?: string; branchName?: string; issues?: LinkedIssue[]; startedBy?: string | undefined; size?: PlanSize | undefined; events?: NewEvent[] | undefined; previousRun?: PreviousRun | undefined; splitOf?: SplitOf | undefined },
 ): Promise<RunRow> {
   const graph = await loadCompiledGraph(db, input.graphVersionId);
   const [project] = await db.select().from(projects).where(eq(projects.id, input.projectId));
@@ -77,7 +77,7 @@ export async function createRun(
         graphVersionId: input.graphVersionId,
         status: "queued",
         task: input.task,
-        state: { ...initialRunState(input.task, input.issues), ...(input.previousRun ? { previousRun: input.previousRun } : {}) },
+        state: { ...initialRunState(input.task, input.issues), ...(input.previousRun ? { previousRun: input.previousRun } : {}), ...(input.splitOf ? { splitOf: input.splitOf } : {}) },
         issues: (input.issues ?? []).map(({ number, title, url }) => ({ number, title, url })),
         baseBranch: input.baseBranch ?? project.defaultBranch,
         branchName: input.branchName ?? `handoff/${slug(input.task)}-${id.slice(0, 8)}`,

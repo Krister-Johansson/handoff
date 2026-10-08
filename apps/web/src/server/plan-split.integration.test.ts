@@ -4,7 +4,7 @@ import { eq, events, projects, questions, runs } from "@handoff/db";
 import { createTestDb, seedExecution, truncateAll } from "@handoff/db/testing";
 import { answerQuestion } from "@handoff/engine/operations";
 import { FakeGitHub, FakeProjects } from "@handoff/github/testing";
-import { createProject, saveGraphVersion, splitPlan, startRunFromGraph } from "./graphs.ts";
+import { createProject, runAgain, saveGraphVersion, splitPlan, startRunFromGraph } from "./graphs.ts";
 import { setupPlan } from "./shaping.ts";
 
 const db = createTestDb();
@@ -69,12 +69,37 @@ test("Split as proposed opens an issue per later part with Depends on links and 
   expect(run!.state).toMatchObject({ task: run!.task });
   expect(run!.state.plan).toBeUndefined();
   expect(run!.issues.map((i) => i.number)).toEqual([11]);
+  // The run builds part 1 of #11, so its pull request names #11 without closing it.
+  expect(run!.state.splitOf).toEqual({ issue: 11, parts: [drag!.number, filter!.number] });
 
   const [answered] = await db.select().from(questions).where(eq(questions.id, gate.questionId));
   expect(answered).toMatchObject({ option: "split", answeredBy: "krister" });
   expect(answered!.answer).toContain(`#${drag!.number} "Drag todos between columns", #${filter!.number} "Filter the board"`);
   const recorded = await db.select().from(events).where(eq(events.runId, gate.runId));
   expect(recorded.find((e) => e.type === "run.split")?.payload).toMatchObject({ issues: opened });
+});
+
+test("a split run run again keeps its split, so the new run's pull request does not close the run's issue either", async () => {
+  const gate = await splitGate();
+  const opened = await splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" });
+  await db.update(runs).set({ status: "failed" }).where(eq(runs.id, gate.runId));
+
+  const again = await runAgain(db, gate.runId, { github, from: "scratch" });
+
+  expect(again.state.splitOf).toEqual({ issue: 11, parts: opened.map((i) => i.number) });
+});
+
+test("a run split before runs kept their split, run again, takes it from its run.split event", async () => {
+  const gate = await splitGate();
+  const opened = await splitPlan({ db, github, projects: plan }, { ...gate, answeredBy: "krister" });
+  const [split] = await db.select().from(runs).where(eq(runs.id, gate.runId));
+  const before = { ...split!.state };
+  delete before.splitOf;
+  await db.update(runs).set({ status: "failed", state: before }).where(eq(runs.id, gate.runId));
+
+  const again = await runAgain(db, gate.runId, { github, from: "scratch" });
+
+  expect(again.state.splitOf).toEqual({ issue: 11, parts: opened.map((i) => i.number) });
 });
 
 test("with a plan, the parts are tasks under the task's story, with its labels, each blocked by the one before", async () => {

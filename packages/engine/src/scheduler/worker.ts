@@ -35,6 +35,7 @@ import type { McpOAuthStore } from "../library/mcp-oauth.ts";
 import { selectContext } from "../context.ts";
 import { itemsToAnswer, reviewSourcesOf } from "../review-answers.ts";
 import { budgetFor, freshIssues, otherWorkOf } from "../planning.ts";
+import { splitOfEvents } from "../split.ts";
 import type { GitHubPort } from "@handoff/github";
 import { runAllowRules } from "../permissions/broker.ts";
 import { loadCompiledGraph } from "../graph-cache.ts";
@@ -322,7 +323,9 @@ async function executeClaimed(deps: EngineDeps, row: NodeExecutionRow, outerSign
       const sentBackTo = graph.outEdges(node.key).filter((e) => e.loop).map((e) => e.target);
       // Every planner attempt reads its issues again, with their comments, and is told its budget and the project's other work.
       if (node.type === "planner" && deps.github && state.issues?.length) fresh = await freshIssues(deps.github, project, state.issues);
-      const seen = fresh ? { ...state, issues: fresh } : state;
+      // A run split before runs kept splitOf in their state has it from its run.split event, so its coder and its pull request leave the split issue open.
+      const splitOf = (node.type === "coder" || node.type === "pr" || node.type === "merge") && !state.splitOf ? await splitOfEvents(db, run) : undefined;
+      const seen = { ...state, ...(fresh ? { issues: fresh } : {}), ...(splitOf ? { splitOf } : {}) };
       const packet = selectContext(node, seen, row, sentBackTo, reviewSourcesOf(graph, node.key));
       if (node.type === "planner") {
         packet.budget = budgetFor(project, graph, node.key);

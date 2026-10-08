@@ -9,6 +9,7 @@
     "./runs": "./src/runs.ts",
     "./launch-test": "./src/preview/launch-test.ts",
     "./start-run": "./src/start-run.ts",
+    "./split": "./src/split.ts",
     "./backlog-scheduler": "./src/backlog-scheduler/index.ts",
     "./candidates": "./src/backlog-scheduler/candidates.ts",
     "./plan-status": "./src/plan-status.ts",

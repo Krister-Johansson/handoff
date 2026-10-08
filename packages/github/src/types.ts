@@ -177,6 +177,8 @@ export interface GitHubPort {
   setAssignees(repo: RepoRef, number: number, logins: string[]): Promise<Assignee[]>;
   /** Records on GitHub that `issue` is blocked by `blocker`. */
   addBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void>;
+  /** Removes GitHub's record that `issue` is blocked by `blocker`. */
+  removeBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void>;
   /** Comments on an issue, then closes it as completed. */
   closeIssue(repo: RepoRef, number: number, comment: string): Promise<void>;
   /** The repository's milestones, open and closed: those with a due date first, by due date, then the others, each run by number. */

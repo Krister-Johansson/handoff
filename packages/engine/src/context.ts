@@ -175,6 +175,7 @@ export function selectContext(node: CompiledNode, state: RunState, execution: No
     ...(decisionsOf(state).length ? { decisions: decisionsOf(state) } : {}),
     ...(suggestionsOf(state, node.key).length ? { suggestions: suggestionsOf(state, node.key) } : {}),
     ...(state.issues?.length ? { issues: state.issues } : {}),
+    ...(state.splitOf ? { splitOf: state.splitOf } : {}),
     ...(acceptance ? { acceptance } : {}),
     ...(REVIEW_TYPES.has(node.type) ? { stage: coderPassed(state) ? ("code" as const) : ("plan" as const) } : {}),
     ...(node.type === "planner" && state.previousRun ? { earlierRun: state.previousRun } : {}),

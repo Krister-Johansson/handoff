@@ -209,6 +209,7 @@ test("the planner is asked for a short plan, and the coder for a PR title and de
   expect(cli.requests[0]!.prompt).toContain("When the linked issues list no acceptance criteria, list in acceptance what a person can check in the running app");
   expect(cli.requests[1]!.prompt).toContain("fill pr with a title and a description of the change for a reviewer");
   expect(cli.requests[1]!.prompt).toContain("Do not restate the plan.");
+  expect(cli.requests[1]!.prompt).toContain('Refer to an issue the pull request must leave open as "Part of #N", and never put a closing keyword');
 });
 
 test("the planner's size reaches run state", async () => {

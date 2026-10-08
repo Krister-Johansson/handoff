@@ -22,6 +22,7 @@ import { nudgeScheduler, wakeOverlapHeld } from "../backlog-scheduler/nudge.ts";
 import { depsKey, wakeDependents } from "../dependencies.ts";
 import { joinQueue, leaveQueue, queueKey, queueTurn } from "../merge-queue.ts";
 import { writePlanStatus } from "../plan-status.ts";
+import { partOfLine, partOneMerged, splitsWithPart, withoutClosing, type SplitGroup } from "../split.ts";
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
 import {
@@ -133,14 +134,40 @@ function screenshotsSection(repo: RepoRef, runId: string, shots: PrShot[]): stri
   return lines;
 }
 
-/** The PR text: the coder's own title and description when it wrote them, the demo's screenshots, then the issues it closes. */
+/** The run's issue a plan gate split, which its pull request builds part of and must not close. */
+const splitIssue = (ctx: ExecutorContext) => ctx.state.splitOf?.issue;
+
+/** The run's linked issues its merge closes: all of them but the issue it split. */
+const closingIssues = (ctx: ExecutorContext) => (ctx.state.issues ?? []).filter((i) => i.number !== splitIssue(ctx));
+
+/**
+ * A split run's pull request description that names the split issue without closing it: no closing
+ * keyword in front of it anywhere (see withoutClosing), and a "Part of" line added when there is none.
+ */
+function partOfOnly(ctx: ExecutorContext, body: string): string {
+  const issue = splitIssue(ctx);
+  if (issue === undefined) return body;
+  const kept = withoutClosing(body, issue, repoOf(ctx));
+  const named = !ctx.state.issues?.some((i) => i.number === issue) || kept.split(/\r?\n/).some((line) => line.trim() === partOfLine(issue));
+  return named ? kept : `${kept.trimEnd()}\n\n${partOfLine(issue)}`;
+}
+
+/**
+ * The PR text: the coder's own title and description when it wrote them, the demo's screenshots, then the
+ * issues it closes. The issue a split run builds part of gets a "Part of" line instead, which GitHub does
+ * not close it for.
+ */
 function prText(ctx: ExecutorContext, shots: PrShot[] = []): { title: string; body: string } {
   const coder = coderOutput(ctx);
+  const issue = splitIssue(ctx);
   const lines = [coder?.pr?.body ?? coder?.summary ?? `Task: ${ctx.state.task}`, "", ...screenshotsSection(repoOf(ctx), ctx.run.id, shots)];
+  if (issue !== undefined && ctx.state.issues?.some((i) => i.number === issue)) lines.push(partOfLine(issue), "");
   // GitHub closes these issues when the pull request merges into the default branch.
-  if (ctx.state.issues?.length) lines.push(...ctx.state.issues.map((i) => `Closes #${i.number}`), "");
+  const closing = closingIssues(ctx);
+  if (closing.length) lines.push(...closing.map((i) => `Closes #${i.number}`), "");
   lines.push(`Opened by handoff run \`${ctx.run.id}\`.`);
-  return { title: coder?.pr?.title ?? title(ctx.state.task), body: lines.join("\n") };
+  const body = lines.join("\n");
+  return { title: coder?.pr?.title ?? title(ctx.state.task), body: issue !== undefined ? withoutClosing(body, issue, repoOf(ctx)) : body };
 }
 
 /** The latest comments of every Reviewer node, as one PR comment body, or undefined when there are none. */
@@ -214,9 +241,9 @@ async function foreignCommits(cwd: string, branch: string, env: NodeJS.ProcessEn
     });
 }
 
-/** Sets the run's linked tasks to `status` on the plan and records what happened; never throws. */
-async function movePlan(projects: ProjectsPort | undefined, ctx: ExecutorContext, status: PlanStatus) {
-  const written = await writePlanStatus(projects, ctx.project, (ctx.state.issues ?? []).map((i) => i.number), status);
+/** Sets the run's linked tasks, or those given, to `status` on the plan and records what happened; never throws. */
+async function movePlan(projects: ProjectsPort | undefined, ctx: ExecutorContext, status: PlanStatus, issues = ctx.state.issues ?? []) {
+  const written = await writePlanStatus(projects, ctx.project, issues.map((i) => i.number), status);
   for (const event of written) ctx.emit(event.type, event.payload);
 }
 
@@ -524,7 +551,7 @@ export function prNodeExecutor(deps: {
 async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, prNumber: number): Promise<number[]> {
   const closedNow: number[] = [];
   const closedHere: number[] = [];
-  for (const { number } of ctx.state.issues ?? []) {
+  for (const { number } of closingIssues(ctx)) {
     try {
       if ((await github.getIssue(repo, number)).state === "open") {
         await github.closeIssue(repo, number, `Fixed by #${prNumber}, merged by handoff run \`${ctx.run.id}\`.`);
@@ -539,11 +566,85 @@ async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo:
   return closedNow;
 }
 
-/** The run's linked issues that are open on GitHub; an issue that cannot be read is left out. */
+/** The run's linked issues its merge closes that are open on GitHub; an issue that cannot be read is left out. */
 async function openLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef): Promise<Set<number>> {
-  const issues = ctx.state.issues ?? [];
+  const issues = closingIssues(ctx);
   const open = await Promise.all(issues.map((i) => github.getIssue(repo, i.number).then((d) => d.state === "open", () => false)));
   return new Set(issues.filter((_, index) => open[index]).map((i) => i.number));
+}
+
+/**
+ * Once a split run's pull request merged, its later parts no longer wait for the split issue, which stays
+ * open until they are done: each part GitHub records as blocked by it (the first, at least) loses that link.
+ * A failure is a `github.unblock_failed` event and never fails the merge.
+ */
+async function unblockParts(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef) {
+  const split = ctx.state.splitOf;
+  if (!split) return;
+  for (const part of split.parts) {
+    try {
+      if (!(await github.openBlockers(repo, part)).includes(split.issue)) continue;
+      await github.removeBlockedBy(repo, part, split.issue);
+      ctx.emit("github.part_unblocked", { issue: part, blocker: split.issue });
+    } catch (error) {
+      ctx.emit("github.unblock_failed", { issue: part, blocker: split.issue, message: (error as Error).message });
+    }
+  }
+}
+
+/**
+ * Closes each split issue whose parts are all closed now, and sets it Done on the plan with the Status it
+ * had. The splits checked are this run's own, and those that list an issue the merge closed among their
+ * parts. A split issue closes once the run that split it merged and every part it lists is closed on GitHub,
+ * however each part closed. Closing one may finish a split that lists it among its parts in turn, so a split
+ * of a split closes level by level. Returns the issues it closed; a failure is a `github.split_close_failed`
+ * event and never fails the merge.
+ */
+async function closeFinishedSplits(
+  github: GitHubPort,
+  projects: ProjectsPort | undefined,
+  db: Db,
+  ctx: ExecutorContext,
+  repo: RepoRef,
+  prNumber: number,
+  finished: number[],
+): Promise<number[]> {
+  const plan = ctx.project.planProjectNumber;
+  const statusOf = async (issue: number) => (projects && plan !== null ? projects.getStatus(repo, plan, issue).catch(() => undefined) : undefined);
+  const listing = async (parts: number[]) => (await Promise.all(parts.map((part) => splitsWithPart(db, ctx.project.id, part)))).flat();
+  const before = new Map<number, PlanStatus | undefined>();
+  const closed: number[] = [];
+  const own: SplitGroup[] = ctx.state.splitOf ? [{ ...ctx.state.splitOf, runId: ctx.run.id }] : [];
+  for (let level = [...own, ...(await listing(finished))]; level.length; ) {
+    const next: number[] = [];
+    for (const split of level) {
+      if (closed.includes(split.issue)) continue;
+      try {
+        // Part 1 is the split run's own pull request, or that of a run that took its place: this one, or one merged before.
+        if (split.runId !== ctx.run.id && !(await partOneMerged(db, split.runId))) continue;
+        const parts = await Promise.all(split.parts.map((part) => github.getIssue(repo, part)));
+        if (parts.some((p) => p.state !== "closed")) continue;
+        if ((await github.getIssue(repo, split.issue)).state !== "open") continue;
+        before.set(split.issue, await statusOf(split.issue));
+        const named = split.parts.map((p) => `#${p}`).join(", ");
+        await github.closeIssue(
+          repo,
+          split.issue,
+          `Finished by its split parts: part 1 by handoff run \`${split.runId}\`, then ${named}, all closed now. Closed by handoff run \`${ctx.run.id}\` after #${prNumber} merged.`,
+        );
+        closed.push(split.issue);
+        next.push(split.issue);
+      } catch (error) {
+        ctx.emit("github.split_close_failed", { issue: split.issue, message: (error as Error).message });
+      }
+    }
+    level = await listing(next);
+  }
+  if (closed.length === 0) return [];
+  ctx.emit("github.splits_closed", { numbers: closed });
+  const written = await writePlanStatus(projects, ctx.project, closed, "Done", before);
+  for (const event of written) ctx.emit(event.type, event.payload);
+  return closed;
 }
 
 /**
@@ -698,6 +799,12 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
       }
       const method = ctx.node.config.method === "merge" || ctx.node.config.method === "rebase" ? ctx.node.config.method : "squash";
       try {
+        // A pull request opened before its run kept the split, or a coder's own description, may still close the split issue.
+        const described = partOfOnly(ctx, snapshot.body);
+        if (described !== snapshot.body) {
+          await deps.github.updatePr(repo, number, { title: snapshot.title, body: described });
+          ctx.emit("github.pr_part_of", { number, issue: splitIssue(ctx) });
+        }
         // Only an issue still open now is one this merge closes; a parent never closes for an issue closed by hand.
         const openBefore = await openLinkedIssues(deps.github, ctx, repo);
         const result = await deps.github.mergePr(repo, number, method);
@@ -705,9 +812,12 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
         ctx.emit("github.merged", { number, sha: result.sha });
         await ctx.notify("merged", { title: `${ctx.project.name}: PR #${number} merged`, body: brief(ctx.run.task), href: runPath(ctx.project.id, ctx.run.id) });
         const closedNow = await closeLinkedIssues(deps.github, ctx, repo, number);
-        // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless.
-        await movePlan(deps.projects, ctx, "Done");
-        await closeFinishedParents(deps.github, deps.projects, ctx, repo, number, closedNow.filter((n) => openBefore.has(n)));
+        // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless. The split issue keeps its Status.
+        await movePlan(deps.projects, ctx, "Done", closingIssues(ctx));
+        await unblockParts(deps.github, ctx, repo);
+        const finished = closedNow.filter((n) => openBefore.has(n));
+        const splitsClosed = db ? await closeFinishedSplits(deps.github, deps.projects, db, ctx, repo, number, finished) : [];
+        await closeFinishedParents(deps.github, deps.projects, ctx, repo, number, [...finished, ...splitsClosed]);
         // Closed issues may unblock other runs of the project waiting at their Start, and tasks the scheduler may start.
         // Runs held on overlap check again, since the merged work is on the base now.
         if (db) {

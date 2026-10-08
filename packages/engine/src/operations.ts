@@ -5,6 +5,7 @@ import type { GitHubPort, PlanStatus, ProjectsPort } from "@handoff/github";
 import { nudgeScheduler, wakeOverlapHeld } from "./backlog-scheduler/nudge.ts";
 import { loadCompiledGraph } from "./graph-cache.ts";
 import { recordPlanStatus } from "./plan-status.ts";
+import { recordedMerge, withoutClosing } from "./split.ts";
 import { stopRunPreviews } from "./preview/preview.ts";
 import { exhaustedLoopEdges, routeLoopDecision } from "./scheduler/complete.ts";
 
@@ -370,7 +371,8 @@ export function splitPartsOf(context: Record<string, unknown>): PlanPart[] | und
  * first part (its task becomes that part, and its plan is dropped for the planner to plan the part
  * again) and the gate is answered "split", which sends the work back to the planner. An issue of the run
  * other than its first whose title a later part repeats leaves the run, so its pull request does not
- * close it, and the answer names it. Records `run.split` with the dropped issues.
+ * close it, and the answer names it. The run's state records `splitOf`, so its pull request names its
+ * own issue as "Part of" without closing it. Records `run.split` with the run's issue and the dropped issues.
  */
 export async function splitRun(db: Db, questionId: string, input: { note?: string | undefined; answeredBy: string; issues: SplitIssue[] }) {
   return db.transaction(async (tx) => {
@@ -393,7 +395,11 @@ export async function splitRun(db: Db, questionId: string, input: { note?: strin
     });
     const kept = (issue: { number: number }) => !dropped.some((d) => d.number === issue.number);
     const { plan: _split, ...rest } = RunStateSchema.parse(run.state);
-    const state = { ...rest, task, ...(rest.issues ? { issues: rest.issues.filter(kept) } : {}) };
+    // The run keeps its first issue for part 1, so its pull request must not close it: the later parts are not built yet.
+    const issue = run.issues[0]?.number;
+    const partIssues = input.issues.map((i) => i.number);
+    const splitOf = issue === undefined ? undefined : { issue, parts: [...new Set([...(rest.splitOf?.parts ?? []), ...partIssues])] };
+    const state = { ...rest, task, ...(rest.issues ? { issues: rest.issues.filter(kept) } : {}), ...(splitOf ? { splitOf } : {}) };
     await tx.update(runs).set({ task, issues: run.issues.filter(kept), state, stateVersion: sql`${runs.stateVersion} + 1` }).where(eq(runs.id, run.id));
     const later = input.issues.map((i) => `#${i.number} "${i.title}"`).join(", ");
     const answer = [
@@ -401,7 +407,7 @@ export async function splitRun(db: Db, questionId: string, input: { note?: strin
       ...dropped.map((d) => `#${d.number} "${d.title}" is no longer part of this run; #${d.heldBy} holds its work.`),
       ...(input.note?.trim() ? [input.note.trim()] : []),
     ].join("\n\n");
-    return answerIn(tx, questionId, { answer, option: "split", answeredBy: input.answeredBy }, [{ type: "run.split", payload: { questionId, task, issues: input.issues, dropped } }]);
+    return answerIn(tx, questionId, { answer, option: "split", answeredBy: input.answeredBy }, [{ type: "run.split", payload: { questionId, task, ...(issue !== undefined ? { issue } : {}), issues: input.issues, dropped } }]);
   });
 }
 
@@ -437,7 +443,7 @@ export async function unlinkIssue(
     const pr = prNumber !== undefined ? await opts.github!.getPrSnapshot(repo, prNumber) : undefined;
     // Merged by hand on GitHub, or by a merge step the run has not recorded yet.
     if (pr?.merged) throw merged();
-    const body = pr?.state === "open" ? withoutClosing(pr.body, issue) : undefined;
+    const body = pr?.state === "open" ? withoutClosing(pr.body, issue, repo) : undefined;
     const edits = pr !== undefined && body !== undefined && body !== pr.body;
     await tx
       .update(runs)
@@ -465,24 +471,6 @@ async function restoreStatus(db: Db, run: typeof runs.$inferSelect, project: typ
   if (!before) return null;
   const written = await recordPlanStatus(db, run.id, projects, project, [issue], before);
   return written.some((e) => e.type === "plan.status") ? before : null;
-}
-
-/** Whether the run's merge step merged its pull request, or found it merged. */
-async function recordedMerge(tx: Tx, runId: string): Promise<boolean> {
-  const [event] = await tx.select({ seq: events.seq }).from(events).where(and(eq(events.runId, runId), eq(events.type, "github.merged"))).limit(1);
-  if (event) return true;
-  const [step] = await tx
-    .select({ id: nodeExecutions.id })
-    .from(nodeExecutions)
-    .where(and(eq(nodeExecutions.runId, runId), eq(nodeExecutions.status, "passed"), sql`${nodeExecutions.output}->>'merged' = 'true'`))
-    .limit(1);
-  return step !== undefined;
-}
-
-/** A pull request description without its lines that close the issue, such as "Closes #4" or "Fixes #4". */
-function withoutClosing(body: string, issue: number): string {
-  const closing = new RegExp(`^[ \\t]*(close[sd]?|fix(e[sd])?|resolve[sd]?):?[ \\t]+#${issue}[ \\t]*\\.?[ \\t]*(\\r?\\n|$)`, "gim");
-  return body.replace(closing, "");
 }
 
 export type StuckLoop = { nodeKey: string; edgeKey: string; attempts: number; executionId: string };
