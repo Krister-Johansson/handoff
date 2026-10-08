@@ -4,13 +4,13 @@ import { afterAll, beforeEach, expect, test } from "vitest";
 import linear from "@handoff/core/fixtures/linear.graph.json" with { type: "json" };
 import type { CliRunOptions, CliRunRequest, CliRunResult } from "@handoff/cli-adapter";
 import { FakeCliExecutor } from "@handoff/cli-adapter/testing";
-import { and, eq, events, nodeExecutions, notifications, permissionRequests, projects, type Caps } from "@handoff/db";
+import { and, eq, events, inArray, nodeExecutions, notifications, permissionRequests, projects, type Caps } from "@handoff/db";
 import { createTestDb, truncateAll } from "@handoff/db/testing";
 import { cliNodeExecutor } from "../executors/cli-node.ts";
 import { decidePermission, repairNodeExecution } from "../operations.ts";
 import { drain, engineDeps, inspect, startRun } from "../testing/harness.ts";
 import { outputs, scripted } from "../testing/scripted.ts";
-import { PERMISSION_TOOL } from "./broker.ts";
+import { PERMISSION_TOOL, runAllowRules } from "./broker.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -201,7 +201,41 @@ test("after Always allow, the step's next matching call is allowed without askin
   // Only the calls a person answered told them.
   expect(await db.select().from(notifications).where(eq(notifications.runId, run.id))).toHaveLength(2);
   const recorded = await db.select().from(events).where(and(eq(events.runId, run.id), eq(events.type, "permission.auto_allowed")));
-  expect(recorded.map((e) => e.payload)).toEqual([{ id: again, toolName: "Monitor", input: { ...MONITOR, description: "e2e run finishing (re-arm 2)" }, rule: "Monitor" }]);
+  expect(recorded.map((e) => e.payload)).toEqual([{ id: again, toolName: "Monitor", input: { ...MONITOR, description: "e2e run finishing (re-arm 2)" }, rule: "Monitor", decidedBy: "always allow" }]);
+});
+
+test("a call the node's own allow list covers in handoff's reading is allowed without asking, and the run records it", async () => {
+  const loop = "3f6b2a10-0000-4000-8000-000000000002";
+  const other = "3f6b2a10-0000-4000-8000-000000000003";
+  const asked: string[] = [];
+  // The planner's list has Bash(echo *), Bash(pnpm *) and Bash(head *), and no rule for rm.
+  const { cli, answers } = askingEach(
+    [
+      { id: ID, toolName: "Bash", input: { command: "echo $X" } },
+      { id: loop, toolName: "Bash", input: { command: "for p in a b; do pnpm view $p time --json | head -5; done" } },
+      { id: other, toolName: "Bash", input: { command: "for p in a b; do rm -rf $p; done" } },
+    ],
+    (id) => {
+      asked.push(id);
+      return decidePermission(db, id, { allow: false, decidedBy: "krister" }).then(() => {});
+    },
+  );
+  const run = await runPlanner(cli);
+  expect(asked).toEqual([other]);
+  expect(answers).toEqual({ [ID]: { behavior: "allow" }, [loop]: { behavior: "allow" }, [other]: { behavior: "deny" } });
+  const rows = await db.select().from(permissionRequests).where(inArray(permissionRequests.id, [ID, loop]));
+  expect(rows.sort((a, b) => a.id.localeCompare(b.id))).toMatchObject([
+    { status: "allowed", rule: "Bash(echo *)", decidedBy: "node allow list" },
+    { status: "allowed", rule: "Bash(pnpm *)", decidedBy: "node allow list" },
+  ]);
+  expect(await db.select().from(notifications).where(eq(notifications.runId, run.id))).toHaveLength(1);
+  const recorded = await db.select().from(events).where(and(eq(events.runId, run.id), eq(events.type, "permission.auto_allowed")));
+  expect(recorded.map((e) => e.payload)).toEqual([
+    { id: ID, toolName: "Bash", input: { command: "echo $X" }, rule: "Bash(echo *)", decidedBy: "node allow list" },
+    { id: loop, toolName: "Bash", input: { command: "for p in a b; do pnpm view $p time --json | head -5; done" }, rule: "Bash(pnpm *)", decidedBy: "node allow list" },
+  ]);
+  // A rule from the node's list is not a person's Always allow.
+  expect(await runAllowRules(db, run.id, "planner")).toEqual([]);
 });
 
 test("a later attempt of the node gets the run's Always allow rules in its allowed tools", async () => {

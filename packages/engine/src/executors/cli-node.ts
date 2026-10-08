@@ -258,6 +258,7 @@ export function cliNodeExecutor(options: CliNodeOptions): NodeExecutor {
           executionId: ctx.execution.id,
           dir,
           timeoutMs,
+          allowedTools: ctx.packet.constraints.allowedTools,
           ...(options.permissions.caps ? { caps: options.permissions.caps } : {}),
           onRequest: async (request) => {
             ctx.emit("permission.requested", request);

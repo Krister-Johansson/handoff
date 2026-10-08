@@ -28,7 +28,11 @@ export function summarizeEvent(event: EventLike): string {
     const error = obj(p.error).message;
     return typeof error === "string" ? `${base}: ${error}` : base;
   }
-  if (event.type === "permission.auto_allowed") return `Allowed by ${String(p.rule)}, chosen earlier in this run: ${describePermission(String(p.toolName), obj(p.input)).summary}`;
+  if (event.type === "permission.auto_allowed") {
+    // Events from before the node's allow list answered requests carry no decidedBy: a person's Always allow covered them.
+    const source = p.decidedBy === "node allow list" ? "in the node's allow list" : "chosen earlier in this run";
+    return `Allowed by ${String(p.rule)}, ${source}: ${describePermission(String(p.toolName), obj(p.input)).summary}`;
+  }
   if (event.type === "edge.taken") return `${String(p.from)} to ${String(p.to)}`;
   if (event.type === "edge.returned") return `${String(p.from)} ${String(p.message)}`;
   if (event.type === "edge.exhausted") return `${String(p.edgeKey)} after ${String(p.attempts)} attempts`;

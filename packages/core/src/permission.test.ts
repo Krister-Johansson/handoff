@@ -118,3 +118,61 @@ test("a command that cannot be read matches no Always allow rule", () => {
     expect(bash(command), command).toBeUndefined();
   }
 });
+
+test("a shell loop is covered when the rules cover every command in its body", () => {
+  const loop = "for p in a b; do pnpm view $p time --json; done";
+  expect(allowedBy(["Bash(pnpm *)"], "Bash", { command: loop })).toBe("Bash(pnpm *)");
+  expect(allowedBy(["Bash(pnpm *)"], "Bash", { command: "for p in a b; do pnpm view $p time --json; rm -rf $p; done" })).toBeUndefined();
+  expect(allowedBy(["Bash(pnpm *)", "Bash(head *)"], "Bash", { command: "for p in a b\ndo\n  pnpm view $p time --json | head -5\ndone" })).toBe("Bash(pnpm *)");
+  // A loop inside a loop, and a loop after a cd and before a pipe.
+  expect(allowedBy(["Bash(cat *)", "Bash(sort)"], "Bash", { command: "cd docs && for a in x y; do for b in 1 2; do cat $a$b; done; done | sort" })).toBe("Bash(cat *)");
+});
+
+test("while, until, if and elif headers are commands a rule must cover, and ! in front is left out", () => {
+  const bash = (command: string, rules: string[]) => allowedBy(rules, "Bash", { command });
+  expect(bash("while read x; do cat $x; done", ["Bash(cat *)"])).toBeUndefined();
+  expect(bash("while read x; do cat $x; done", ["Bash(read *)", "Bash(cat *)"])).toBe("Bash(read *)");
+  expect(bash("if test -f x; then cat x; fi", ["Bash(test *)", "Bash(cat *)"])).toBe("Bash(test *)");
+  expect(bash("if test -f x; then cat x; fi", ["Bash(cat *)"])).toBeUndefined();
+  expect(bash("if test -f x; then cat x; elif test -f y; then cat y; else echo none; fi", ["Bash(test *)", "Bash(cat *)", "Bash(echo *)"])).toBe("Bash(test *)");
+  expect(bash("if test -f x; then cat x; else rm y; fi", ["Bash(test *)", "Bash(cat *)"])).toBeUndefined();
+  expect(bash("if ! grep -q a x; then echo missing; fi", ["Bash(grep *)", "Bash(echo *)"])).toBe("Bash(grep *)");
+  expect(bash("until grep -q done /tmp/e2e.log; do sleep 5; done", ["Bash(grep *)"])).toBeUndefined();
+  expect(bash("until grep -q done /tmp/e2e.log; do sleep 5; done", ["Bash(grep *)", "Bash(sleep *)"])).toBe("Bash(grep *)");
+  // A loop header with a command inside it runs that command.
+  expect(bash("for p in $(ls); do cat $p; done", ["Bash(cat *)", "Bash(ls *)"])).toBeUndefined();
+});
+
+test("case, subshells, braces and functions are never covered", () => {
+  const rules = ["Bash(echo *)", "Bash(cat *)", "Bash(ls *)", "Bash(cd *)"];
+  for (const command of [
+    "case $x in a) echo a;; *) echo b;; esac",
+    "case $x in\n  a) echo a ;;\nesac",
+    "(cd x && ls)",
+    "echo a; (ls)",
+    "{ echo a; cat b; }",
+    "f() { echo a; }; f",
+    "function f { echo a; }",
+    "for ((i = 0; i < 3; i++)); do echo $i; done",
+    "for x y in a; do echo $x; done",
+  ]) {
+    expect(allowedBy(rules, "Bash", { command }), command).toBeUndefined();
+  }
+  // A quoted or escaped parenthesis is text.
+  expect(allowedBy(rules, "Bash", { command: 'echo "(a)" \\(b\\)' })).toBe("Bash(echo *)");
+});
+
+test("Always allow on a loop or a check offers the rule for its first real command, never one for the keyword", () => {
+  const bash = (command: string) => ruleFor("Bash", { command });
+  expect(bash("for p in a b; do pnpm view $p time --json; done")).toBe("Bash(pnpm view *)");
+  expect(bash("for p in a b\ndo\n  cat $p\ndone")).toBe("Bash(cat *)");
+  expect(bash("while read x; do cat $x; done")).toBe("Bash(read *)");
+  expect(bash("until grep -q done /tmp/e2e.log; do sleep 5; done")).toBe("Bash(grep *)");
+  expect(bash("if test -f x; then cat x; fi")).toBe("Bash(test *)");
+  expect(bash("if ! git diff --quiet; then git status; fi")).toBe("Bash(git diff *)");
+  // A cd in the body needs no rule; node and a shell get none.
+  expect(bash("for d in a b; do cd $d; pnpm test; done")).toBe("Bash(pnpm test *)");
+  expect(bash("for f in *.js; do node $f; done")).toBeUndefined();
+  expect(bash("case $x in a) echo a;; esac")).toBeUndefined();
+  expect(bash("{ echo a; }")).toBeUndefined();
+});

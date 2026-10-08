@@ -62,36 +62,67 @@ const NEVER = new Set(["cd", "node", "sh", "bash", "zsh", "env", "eval", "exec",
 /** Claude Code's command separators: it matches each part of a compound command against the rules on its own. */
 const SEPARATORS = /&&|\|\||\|&|[;|&\n]/;
 
-/** A simple command's words, without the variable assignments in front of its program. */
-function wordsOf(command: string): string[] {
-  const words = command.trim().split(/\s+/).filter(Boolean);
-  while (words[0] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();
+/**
+ * Shell keywords in front of a simple command: the words after them are the command that runs. A
+ * while, until, if or elif header is the command it checks, so `while read x` needs a rule for read.
+ */
+const KEYWORDS = new Set(["do", "then", "else", "elif", "!", "while", "until", "if"]);
+
+/** Keywords that end a loop or a check: on their own they run nothing. */
+const CLOSERS = new Set(["done", "fi"]);
+
+/** Words that start shell syntax handoff does not read: a case, a brace group, a function or a select. */
+const UNREADABLE = new Set(["case", "esac", "{", "}", "function", "select", "coproc"]);
+
+const isAssignment = (word: string) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
+
+/**
+ * The command one simple command runs, as its words without the keywords and variable assignments in
+ * front: an empty list when it runs none (a bare done or fi, or a `for NAME in WORDS` header), and
+ * undefined when it is shell syntax handoff does not read.
+ */
+function commandWords(simple: string[]): string[] | undefined {
+  let words = simple;
+  while (words[0] !== undefined && (KEYWORDS.has(words[0]) || isAssignment(words[0]))) words = words.slice(1);
+  const [first] = words;
+  if (first === undefined) return [];
+  if (CLOSERS.has(first)) return words.length === 1 ? [] : undefined;
+  if (first === "for") return /^[A-Za-z_][A-Za-z0-9_]*$/.test(words[1] ?? "") && words[2] === "in" ? [] : undefined;
+  if (UNREADABLE.has(first)) return undefined;
   return words;
 }
 
+/** A simple command's words, without the keywords and variable assignments in front of its program. */
+function wordsOf(command: string): string[] | undefined {
+  return commandWords(command.trim().split(/\s+/).filter(Boolean));
+}
+
 /** The rule for one simple command: its program, or its program and subcommand, with any arguments. */
-function commandRule(command: string): string | undefined {
-  const [program, subcommand] = wordsOf(command);
-  if (!program || NEVER.has(program)) return undefined;
+function commandRule(words: string[]): string | undefined {
+  const [program, subcommand] = words;
+  if (!program || NEVER.has(program) || /[(){}]/.test(program)) return undefined;
   if (!WITH_SUBCOMMANDS.has(program)) return `Bash(${program} *)`;
   // An option before the subcommand (git -C dir log) leaves no rule short of every command of the program.
   if (!subcommand || !/^[A-Za-z][\w:.-]*$/.test(subcommand)) return undefined;
   return `Bash(${program} ${subcommand} *)`;
 }
 
-const isCd = (part: string) => /^cd(\s|$)/.test(part);
-
 /**
  * The allow rule that would cover this call from now on: a command's program with any arguments (its
  * subcommand too, for programs such as git and pnpm), or the tool itself. It goes into the node's allow
  * list in the graph's next version, and the run's own list. Undefined when no rule is safe to offer: for
- * cd, node, a shell or env, which would allow anything, or an option before a subcommand. In a compound
- * command a leading cd needs no rule, and the rule is for the first command after it.
+ * cd, node, a shell or env, which would allow anything, an option before a subcommand, or shell syntax
+ * handoff does not read (case, a subshell, braces). In a compound command a leading cd needs no rule,
+ * and the rule is for the first command after it. A loop or a check gets no rule for its keyword: the
+ * rule is for the first command a `for` loop's body runs, or for the command a while, until or if checks.
  */
 export function ruleFor(toolName: string, input: Record<string, unknown>): string | undefined {
   if (toolName !== "Bash" || typeof input.command !== "string") return toolName;
-  const parts = input.command.split(SEPARATORS).map((p) => p.trim()).filter(Boolean);
-  const first = parts.find((p) => !isCd(p)) ?? parts[0];
+  const parts: (string[] | undefined)[] = input.command
+    .split(SEPARATORS)
+    .map(wordsOf)
+    .filter((words) => words === undefined || words.length > 0);
+  const first = parts.find((words) => words === undefined || words[0] !== "cd") ?? parts[0];
   return first ? commandRule(first) : undefined;
 }
 
@@ -114,7 +145,8 @@ const noFile = (operator: string, target: string) => target === "/dev/null" || (
  * &&, ||, ;, |, |&, & and newlines, never inside single or double quotes or after a backslash. A
  * redirect to /dev/null or to a file descriptor (2>&1, >&2, <&3) is left out of the words. Undefined
  * when the command cannot be read: unbalanced quotes, an operator with nothing after it, a here-doc or
- * process substitution, or a redirect to a file, which a Bash rule does not cover.
+ * process substitution, a parenthesis outside quotes, or a redirect to a file, which a Bash rule does
+ * not cover.
  */
 function simpleCommands(command: string): string[][] | undefined {
   const commands: string[][] = [];
@@ -207,6 +239,9 @@ function simpleCommands(command: string): string[][] | undefined {
     } else if (c === ";" || c === "|" || c === "&" || c === "\n") {
       if (!endCommand(c)) return undefined;
       i++;
+    } else if (c === "(" || c === ")") {
+      // A subshell, a function, a case pattern or arithmetic: shell syntax this does not read.
+      return undefined;
     } else {
       word += c;
       started = true;
@@ -226,9 +261,10 @@ function simpleCommands(command: string): string[][] | undefined {
  * The rule among a run's Always allow rules that covers this call, read the way Claude Code reads its
  * allow rules, or undefined. A rule without parentheses covers every call of its tool. A Bash rule covers
  * a command when it covers each simple command in it, a cd in front aside, without redirects to /dev/null
- * or a file descriptor; Monitor's commands follow the Bash rules. A command with a command inside it
- * ($() or backticks), a redirect to a file, or one that cannot be read is never covered: a person looks
- * at it.
+ * or a file descriptor; Monitor's commands follow the Bash rules. In a loop or a check each command it
+ * runs is matched, the header of a while, until, if or elif too, and a `for NAME in WORDS` header needs
+ * no rule. A command with a command inside it ($() or backticks), a redirect to a file, a case, a
+ * subshell, braces, a function, or one that cannot be read is never covered: a person looks at it.
  */
 export function allowedBy(rules: string[], toolName: string, input: Record<string, unknown>): string | undefined {
   const whole = rules.find((rule) => rule === toolName || rule === `${toolName}(*)`);
@@ -236,8 +272,10 @@ export function allowedBy(rules: string[], toolName: string, input: Record<strin
   if ((toolName !== "Bash" && toolName !== "Monitor") || typeof input.command !== "string") return undefined;
   const command = input.command.trim();
   if (/\$\(|`/.test(command)) return undefined;
-  const run = simpleCommands(command)?.filter((words) => words[0] !== "cd");
-  if (!run || run.length === 0) return undefined;
+  const commands = simpleCommands(command)?.map(commandWords);
+  if (!commands || commands.some((words) => words === undefined)) return undefined;
+  const run = (commands as string[][]).filter((words) => words.length > 0 && words[0] !== "cd");
+  if (run.length === 0) return undefined;
   const covering = run.map((words) => rules.find((rule) => bashRuleCovers(rule, words)));
   return covering.every(Boolean) ? covering[0] : undefined;
 }
