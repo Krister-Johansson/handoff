@@ -1130,6 +1130,80 @@ test("after a fix and handoff's merge of main, the PR step waits for CodeRabbit'
   expect(github.merged).toEqual([]);
 });
 
+/** CodeRabbit's answer to a review request on a head it counts as reviewed, as on northMES/northmes#319 (run ca5874a6). */
+const ALREADY_REVIEWED = [
+  "<!-- This is an auto-generated reply by CodeRabbit -->",
+  "<!-- CodeRabbit review command invocation: v2:ebb337643578e281bd02c5f52f8a658ba39a540cb1b3c66305e2b67330ddf482 -->",
+  "<details>",
+  "<summary>⚠️ Action not completed</summary>",
+  "",
+  "Already reviewed the last commit. Use `@coderabbitai full review` to rerun a review of the entire changeset.",
+  "",
+  "> Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.",
+  "",
+  "</details>",
+].join("\n");
+
+/** handoff's requests for a full review on the pull request. */
+const fullReviews = (github: FakeGitHub) => github.prs.get(1)!.comments.filter((c) => c.body.startsWith("@coderabbitai full review"));
+
+test("the ca5874a6 case: CodeRabbit answers the request after a fix and handoff's merge of main with 'Already reviewed', and the PR step asks once for a full review", async () => {
+  const github = new FakeGitHub();
+  const { origin, run, wake, pr } = await opened(catchingUp, answeringCoder(fixing), github, undefined, withUpdate(graph));
+  const reviewed = pr().headSha;
+  github.reviewOnHead(1, "coderabbitai", { state: "CHANGES_REQUESTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  github.summaryComment(1, summaryOf(reviewed, { risk: "⚪ Minimal", note: "No merge-blocking issue is identified." }));
+  // Main moves while the coder fixes the thread, so the PR step merges main on top of the fix and asks for a review.
+  landOnMain(origin, "OTHER.md", "other\n");
+  await wake();
+  const head = pr().headSha;
+  const synced = (await prEvents(run.id, 2)).find((e) => e.type === "github.synced")?.payload as { merged: boolean; from: string; head: string };
+  expect(synced).toMatchObject({ merged: true, head });
+  expect(synced.from).not.toBe(reviewed);
+  expect(requestsFor(github, head)).toHaveLength(1);
+  expect(fullReviews(github)).toEqual([]);
+
+  // CodeRabbit takes the merge at the head for reviewed and submits no review.
+  github.prComment(1, "coderabbitai", ALREADY_REVIEWED);
+  await wake();
+  expect(fullReviews(github)).toHaveLength(1);
+  expect(fullReviews(github)[0]!.body).toContain(`<!-- handoff:full-review ${head} -->`);
+  const step = await prStep(run.id, 2);
+  expect(step?.status).toBe("waiting");
+  const events = await prEvents(run.id, 2);
+  expect(events.find((e) => e.type === "github.full_review_requested")?.payload).toMatchObject({ number: 1, reviewer: "coderabbitai", headSha: head });
+
+  // Later looks, each by a fresh executor as after a worker restart, do not ask again for the same head.
+  await wake();
+  await wake();
+  expect(fullReviews(github)).toHaveLength(1);
+  expect((await prEvents(run.id, 2)).filter((e) => e.type === "github.full_review_requested")).toHaveLength(1);
+  expect(github.merged).toEqual([]);
+});
+
+test("an 'Already reviewed' answer on a head whose only new commit is handoff's merge of main asks for no full review", async () => {
+  const github = new FakeGitHub();
+  const { origin, run, wake, pr } = await opened(catchingUp, answeringCoder(decline), github, undefined, withUpdate(graph));
+  const reviewed = pr().headSha;
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  github.summaryComment(1, summaryOf(reviewed, { risk: "⚪ Minimal", note: "No merge-blocking issue is identified." }));
+  // The coder declines the thread and commits nothing; the PR step that posts the answer merges main.
+  landOnMain(origin, "OTHER.md", "other\n");
+  await wake();
+  const head = pr().headSha;
+  const events = await prEvents(run.id, 2);
+  expect(events.find((e) => e.type === "github.synced")?.payload).toMatchObject({ merged: true, from: reviewed, head });
+  expect((await prStep(run.id, 2))?.status).toBe("waiting");
+
+  // A review request for the merge (one a person or an older worker posted), answered with "Already reviewed".
+  await github.upsertPrComment({ owner: "octo", name: "sample" }, 1, `<!-- handoff:review-request ${head} -->`, `@coderabbitai review\n\n<!-- handoff:review-request ${head} -->`);
+  github.prComment(1, "coderabbitai", ALREADY_REVIEWED);
+  await wake();
+  await wake();
+  expect(fullReviews(github)).toEqual([]);
+  expect((await inspect(db, run.id)).types).not.toContain("github.full_review_requested");
+});
+
 test("the dd271699 case: summary items answered on an approved head do not hold the PR step after handoff's merge of main", async () => {
   // As on northMES/northmes#305: CodeRabbit approved the head, and its summary listed a note and a failed title check.
   const title = { name: "Title check", explanation: "The title describes the changes, but `feat` is incorrect for test-only work.", resolution: "Use `test(testing):` as the prefix." };

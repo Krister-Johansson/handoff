@@ -184,6 +184,14 @@ export class FakeGitHub implements GitHubPort {
       if (listed) Object.assign(listed, { body, updatedAt: at });
       return existing.id;
     }
+    return this.prComment(number, author, body, { at });
+  }
+
+  /** Adds a comment to a pull request, as a person or a bot would on GitHub; it shows in the snapshot and in listIssueComments. Returns its id. */
+  prComment(number: number, author: string, body: string, opts: { at?: string } = {}) {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    const at = opts.at ?? new Date().toISOString();
     const id = this.comment(number, author, body, { at });
     pr.comments.push({ id, author, body, url: `${pr.url}#issuecomment-${id}`, createdAt: at, updatedAt: at });
     return id;
@@ -358,8 +366,12 @@ export class FakeGitHub implements GitHubPort {
         // The branch is not in the origin (yet): keep the head the PR was opened with.
       }
     }
-    const { reviewThreads, base: _base, files: _files, mergeState: _mergeState, ...rest } = structuredClone(pr);
-    return { ...rest, reviewThreads: reviewThreads.map((t, i) => this.threadOf(number, i, t)) };
+    const { reviewThreads, base: _base, files: _files, mergeState: _mergeState, comments, ...rest } = structuredClone(pr);
+    return {
+      ...rest,
+      reviewThreads: reviewThreads.map((t, i) => this.threadOf(number, i, t)),
+      comments: comments.map((c) => ({ ...c, authorBot: c.authorBot ?? this.isBot(c.author) })),
+    };
   }
 
   /** A thread of the fake as GitHub's snapshot gives it: its first comment and its last ten, with GitHub's defaults. */

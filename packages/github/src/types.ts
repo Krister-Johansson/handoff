@@ -43,8 +43,11 @@ export type PrSnapshot = {
     submittedAt: string | null;
   }[];
   reviewThreads: ReviewThread[];
-  /** The last 50 issue comments, oldest first. `id` is GitHub's database id, the REST comment id. */
-  comments: { id?: number; author: string; body: string; url: string; createdAt: string; updatedAt: string }[];
+  /**
+   * The last 50 issue comments, oldest first. `id` is GitHub's database id, the REST comment id. `authorBot` is
+   * true for a GitHub App such as CodeRabbit and false for a person; GitHub's read always sets it.
+   */
+  comments: { id?: number; author: string; authorBot?: boolean; body: string; url: string; createdAt: string; updatedAt: string }[];
 };
 
 /** A comment in a review thread. `id` is GitHub's database id; `authorBot` is true for a GitHub App such as CodeRabbit. */

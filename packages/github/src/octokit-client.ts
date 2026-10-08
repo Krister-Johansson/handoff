@@ -429,6 +429,7 @@ export class OctokitGitHub implements GitHubPort {
       comments: present(pr.comments.nodes).map((c) => ({
         ...(c.databaseId ? { id: c.databaseId } : {}),
         author: c.author?.login ?? "ghost",
+        authorBot: c.author?.__typename === "Bot",
         body: c.body,
         url: c.url,
         createdAt: c.createdAt,

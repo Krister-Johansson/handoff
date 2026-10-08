@@ -4,7 +4,9 @@ import { basename } from "node:path";
 import { promisify } from "node:util";
 import { brief, CoderOutputSchema, ReviewerOutputSchema, runPath, type CoderOutput } from "@handoff/core";
 import {
+  CODERABBIT_LOGIN,
   findCodeRabbitSummary,
+  fullReviewMarker,
   parseCodeRabbitSummary,
   prKey,
   REVIEWER_NOTES_MARKER,
@@ -26,6 +28,7 @@ import { partOfLine, partOneMerged, splitsWithPart, withoutClosing, type SplitGr
 import type { ExecutorContext, ExecutorOutcome, NodeExecutor } from "../types.ts";
 import { withNetworkRetry } from "../workdir/network.ts";
 import {
+  answeredAlreadyReviewed,
   changeRequesters,
   externalReview,
   reviewerCheck,
@@ -345,6 +348,23 @@ async function requestReview(github: GitHubPort, ctx: ExecutorContext, repo: Rep
 }
 
 /**
+ * Asks CodeRabbit for a full review of the PR's head commit, unless the PR node asked for one already. The
+ * comment ends with a marker naming the commit, so it is posted once per commit, also across worker restarts.
+ * A comment that cannot be posted is an event, not a failure: the PR keeps waiting.
+ */
+async function requestFullReview(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, snapshot: PrSnapshot, reviewer: string) {
+  const marker = fullReviewMarker(snapshot.headSha);
+  if (snapshot.comments.some((c) => c.body.includes(marker))) return;
+  const comment = `@${CODERABBIT_LOGIN} full review`;
+  try {
+    const { created } = await github.upsertPrComment(repo, snapshot.number, marker, `${comment}\n\n${marker}`);
+    if (created) ctx.emit("github.full_review_requested", { number: snapshot.number, reviewer, comment, headSha: snapshot.headSha });
+  } catch (error) {
+    ctx.emit("github.full_review_request_failed", { number: snapshot.number, reviewer, message: (error as Error).message });
+  }
+}
+
+/**
  * Pushes the run branch, opens or reuses its pull request, then reports CI and review state as
  * feedback. Waits (without holding a process) while checks are pending, or while an approval is
  * required and missing. Routing on the output decides between merge and a loop back to the Coder.
@@ -543,6 +563,12 @@ export function prNodeExecutor(deps: {
       const ask = reviewRequest(ctx.node.config);
       const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer, same);
       if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
+      // CodeRabbit answers the request with "Already reviewed the last commit" when the head is a merge it takes for
+      // reviewed, although a fix before it never was. No review of its holds for the head (`unstarted`), so the head
+      // has commits since its last review that are not handoff's catch-up merges: ask for a full review, and keep waiting.
+      if (unstarted && sameLogin(ask.reviewer, CODERABBIT_LOGIN) && answeredAlreadyReviewed(snapshot, ask.reviewer)) {
+        await requestFullReview(deps.github, ctx, repo, snapshot, ask.reviewer);
+      }
 
       // Answers on GitHub wait for their reviewer's next review, which resolves them, up to the reviewer's limit.
       // This is the one wait for answers, after any round: an answer-only round comes back to this step on the

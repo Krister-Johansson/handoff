@@ -6,6 +6,8 @@ export const HANDOFF_COMMENT_PREFIX = "<!-- handoff:";
 export const REVIEWER_NOTES_MARKER = `${HANDOFF_COMMENT_PREFIX}reviewer-notes -->`;
 /** Ends the comment the PR node posts to ask a reviewer for a review of one head commit; the comment starts with the reviewer's command. */
 export const reviewRequestMarker = (headSha: string) => `${HANDOFF_COMMENT_PREFIX}review-request ${headSha} -->`;
+/** Ends the comment the PR node posts to ask CodeRabbit for a full review of one head commit, after it answered the review request with "Already reviewed". */
+export const fullReviewMarker = (headSha: string) => `${HANDOFF_COMMENT_PREFIX}full-review ${headSha} -->`;
 
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
 
