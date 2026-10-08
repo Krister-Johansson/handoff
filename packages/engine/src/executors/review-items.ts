@@ -2,11 +2,22 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { brief, runPath, type Feedback, type RunState } from "@handoff/core";
 import { and, asc, eq, inArray, questions, reviewItems, sql, type Db, type ReviewItemRow } from "@handoff/db";
-import { HANDOFF_COMMENT_PREFIX, summaryCoversHead, type GitHubPort, type PrSnapshot, type RepoRef, type ReviewThread } from "@handoff/github";
+import { HANDOFF_COMMENT_PREFIX, type GitHubPort, type PrSnapshot, type RepoRef, type ReviewThread } from "@handoff/github";
 import { notifyFrom } from "../notify.ts";
 import { recordedAnswers } from "../review-answers.ts";
 import type { ExecutorContext } from "../types.ts";
-import { byHandoff, sameLogin, summaryFindings, threadFinding, type Finding, type ReviewThreadsSettings, type SummaryRead } from "./external-review.ts";
+import {
+  byHandoff,
+  sameCodeAs,
+  sameLogin,
+  summaryCovers,
+  summaryFindings,
+  threadFinding,
+  type Finding,
+  type ReviewThreadsSettings,
+  type SameCode,
+  type SummaryRead,
+} from "./external-review.ts";
 
 /**
  * Review items: the findings a PR node sends to the coder with a handle (`R1`), the coder's answers,
@@ -74,18 +85,60 @@ export async function syncItems(db: Db, runId: string, findings: Finding[], roun
   return listItems(db, runId);
 }
 
+type Sendable = Pick<ReviewItemRow, "key" | "kind" | "reviewer" | "verdict" | "returns" | "state" | "handle">;
+
+const fromSummary = (item: Pick<ReviewItemRow, "kind">) => item.kind === "summary_note" || item.kind === "pre_merge_check";
+
 /**
- * The open items this round sends to the coder: those GitHub still shows among the findings, oldest
- * first, at most `max`, and the open items a person sent back (`also`, by handle), whatever GitHub shows.
- * The rest wait for a later round. Each sent item records the round that sent it.
+ * Whether an open item waits for a round that goes to the coder for something else: a summary note or
+ * pre-merge check the coder has not answered, from a reviewer whose summary items it answered before.
+ * CodeRabbit words its notes anew in every summary, so without this each summary would send the run round
+ * the loop again for a point the coder already answered. An item that came back on its own (a fixed item
+ * the next summary still lists, Decision 7) or that a person sent back does not wait.
  */
-export async function sendItems(db: Db, rows: ReviewItemRow[], findings: Finding[], round: number, max: number, also: ReadonlySet<string> = new Set()): Promise<ReviewItemRow[]> {
+function rides(item: Sendable, items: Sendable[], also: ReadonlySet<string>): boolean {
+  if (!fromSummary(item) || item.verdict !== null || item.returns > 0 || also.has(handleOf(item))) return false;
+  return items.some((o) => o.key !== item.key && fromSummary(o) && o.verdict !== null && sameLogin(o.reviewer, item.reviewer));
+}
+
+/**
+ * The open items a round would send: those GitHub still shows among the findings, and those a person
+ * sent back (`also`, by handle), whatever GitHub shows, with the findings not yet items among them. None
+ * when every one of them waits for other work (see `rides`).
+ */
+function sendable<T extends Sendable>(items: T[], findings: Finding[], also: ReadonlySet<string>): T[] {
   const current = new Set(findings.map((f) => f.key));
-  const sent = rows.filter((r) => r.state === "open" && (current.has(r.key) || also.has(handleOf(r)))).slice(0, max);
+  const open = items.filter((r) => r.state === "open" && (current.has(r.key) || also.has(handleOf(r))));
+  return open.some((r) => !rides(r, items, also)) ? open : [];
+}
+
+/**
+ * The open items this round sends to the coder (see `sendable`), oldest first, at most `max`. The rest
+ * wait for a later round. Each sent item records the round that sent it. A summary item that waits for
+ * other work says so in its reason, and `held` lists the ones that started waiting in this look.
+ */
+export async function sendItems(
+  db: Db,
+  rows: ReviewItemRow[],
+  findings: Finding[],
+  round: number,
+  max: number,
+  also: ReadonlySet<string> = new Set(),
+): Promise<{ sent: ReviewItemRow[]; held: ReviewItemRow[] }> {
+  const sent = sendable(rows, findings, also).slice(0, max);
   if (sent.length) {
     await db.update(reviewItems).set({ round, updatedAt: sql`now()` }).where(inArray(reviewItems.id, sent.map((r) => r.id)));
+    // An item that waited for other work goes with it now.
+    const waited = sent.filter((r) => r.stateReason === SUMMARY_HELD);
+    if (waited.length) await db.update(reviewItems).set({ stateReason: null }).where(inArray(reviewItems.id, waited.map((r) => r.id)));
+    return { sent: sent.map((r) => ({ ...r, round, stateReason: r.stateReason === SUMMARY_HELD ? null : r.stateReason })), held: [] };
   }
-  return sent.map((r) => ({ ...r, round }));
+  const current = new Set(findings.map((f) => f.key));
+  const held = rows.filter((r) => r.state === "open" && current.has(r.key) && r.stateReason !== SUMMARY_HELD && rides(r, rows, also));
+  if (held.length) {
+    await db.update(reviewItems).set({ stateReason: SUMMARY_HELD, updatedAt: sql`now()` }).where(inArray(reviewItems.id, held.map((r) => r.id)));
+  }
+  return { sent: [], held };
 }
 
 /** Records, for each thread item, whether GitHub now shows its thread as outdated, for the run page to mark. */
@@ -96,12 +149,18 @@ export async function recordOutdated(db: Db, runId: string, snapshot: PrSnapshot
   }
 }
 
-/** Whether any finding is new, or an item still open, or one a person sent back (`also`): something a round would send to the coder. */
+/**
+ * Whether a round would send anything to the coder: a new finding, an item still open, or one a person
+ * sent back (`also`), unless all of them are summary items that wait for other work.
+ */
 export async function hasUnsent(db: Db, runId: string, findings: Finding[], also: ReadonlySet<string> = new Set()): Promise<boolean> {
-  const rows = await listItems(db, runId);
-  if (rows.some((r) => r.state === "open" && also.has(handleOf(r)))) return true;
-  const state = new Map(rows.map((r) => [r.key, r.state]));
-  return findings.some((f) => (state.get(f.key) ?? "open") === "open");
+  const rows: Sendable[] = await listItems(db, runId);
+  const known = new Set(rows.map((r) => r.key));
+  // A finding not yet an item is one the coder has not answered.
+  const fresh = findings
+    .filter((f) => !known.has(f.key))
+    .map((f): Sendable => ({ key: f.key, kind: f.kind, reviewer: f.author, verdict: null, returns: 0, state: "open", handle: 0 }));
+  return sendable([...rows, ...fresh], findings, also).length > 0;
 }
 
 /** A line of a review thread as the coder reads it. */
@@ -496,8 +555,13 @@ const normalised = (text: string) => text.replace(/\s+/g, " ").trim();
  * (`summary_dropped`) once a summary of the head, edited after the answer, no longer lists it; one it
  * still lists stays as it is and is not sent again.
  */
-export async function reReview(deps: Deps, ctx: Ctx, input: { repo: RepoRef; snapshot: PrSnapshot; summary?: { login: string; read: SummaryRead | undefined } | undefined }) {
+export async function reReview(
+  deps: Deps,
+  ctx: Ctx,
+  input: { repo: RepoRef; snapshot: PrSnapshot; summary?: { login: string; read: SummaryRead | undefined } | undefined; same?: SameCode },
+) {
   const { repo, snapshot, summary } = input;
+  const same = input.same ?? sameCodeAs(snapshot.headSha);
   const items = await listItems(deps.db, ctx.run.id);
   // A disputed thread that someone resolved on GitHub, or that is gone, needs no decision any more.
   for (const item of items.filter((i) => i.state === "disputed" && i.kind === "thread")) {
@@ -515,7 +579,7 @@ export async function reReview(deps: Deps, ctx: Ctx, input: { repo: RepoRef; sna
       const original = snapshot.reviews.find((r) => r.id === item.githubId);
       const later = snapshot.reviews.filter((r) => sameLogin(r.author, item.reviewer) && time(r.submittedAt) > at && r.commitSha !== null && r.commitSha !== original?.commitSha);
       if (later.length && !later.some((r) => normalised(r.body) === normalised(item.body))) await resolveItem(deps, ctx, repo, snapshot, items, item, "next_review");
-    } else if (summary?.read && summaryCoversHead(summary.read.summary, snapshot.headSha) && time(summary.read.comment.updatedAt) > answeredAt(item, snapshot)) {
+    } else if (summary?.read && summaryCovers(summary.read.summary, snapshot.headSha, same) && time(summary.read.comment.updatedAt) > answeredAt(item, snapshot)) {
       const listed = new Set(summaryFindings(summary.read, summary.login).map((f) => f.key));
       if (!listed.has(item.key)) await resolveItem(deps, ctx, repo, snapshot, items, item, "summary_dropped");
       else if (item.verdict === "fixed" && item.returns === 0) {
@@ -529,6 +593,9 @@ export async function reReview(deps: Deps, ctx: Ctx, input: { repo: RepoRef; sna
     }
   }
 }
+
+/** Why a new summary item waits instead of going to the coder on its own. */
+export const SUMMARY_HELD = "the coder answered this reviewer's summary once; a later summary item goes with the next round that sends other work";
 
 /** Why a fixed summary item went back to the coder, and why it then goes to a person. */
 export const SUMMARY_STILL_LISTS = "the next summary still lists it after the fix";
