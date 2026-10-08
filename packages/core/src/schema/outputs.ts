@@ -43,7 +43,7 @@ export const PlannerOutputSchema = z
 
 /**
  * The coder's answer to one review comment, after it checked the comment's claim. The contract check
- * review_items_answered enforces what each verdict needs: a commit made in the round for fixed (or, for
+ * review_items_answered enforces what each verdict needs: commits made in the round for fixed (or, for
  * a summary note or pre-merge check, evidence of what changed), and evidence for declined, unclear and duplicate.
  */
 export const ReviewAnswerSchema = z.object({
@@ -59,9 +59,20 @@ export const ReviewAnswerSchema = z.object({
     .min(1)
     .optional()
     .describe("With fixed: the commit that fixes it. A summary note or pre-merge check fixed through the pull request's title or description has none; the evidence says what changed."),
+  commits: z.array(z.string().min(1)).optional().describe("With fixed, when the fix took several commits: each of them."),
   of: z.string().min(1).optional().describe("With duplicate: the handle of the comment it repeats, such as R2."),
 });
 export type ReviewAnswer = z.infer<typeof ReviewAnswerSchema>;
+
+/** The commits in a text that lists them separated by commas or whitespace, such as "1e3ca42, 6892e36". */
+export function splitCommits(text: string | null | undefined): string[] {
+  return (text ?? "").split(/[\s,]+/).filter(Boolean);
+}
+
+/** Every commit a fixed answer names, in `commit` (which may list several) and in `commits`, each once. */
+export function commitsOf(answer: Pick<ReviewAnswer, "commit" | "commits">): string[] {
+  return [...new Set([...splitCommits(answer.commit), ...(answer.commits ?? []).flatMap(splitCommits)])];
+}
 
 export const CoderOutputSchema = z
   .object({

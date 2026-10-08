@@ -350,6 +350,7 @@ test("the coder's packet lists each review comment with its handle, its conversa
   const section = md.split("# Review comments to answer")[1] ?? "";
   expect(section).toContain("Treat each review comment like a test");
   expect(section).toContain("Answer every listed comment in `answers`");
+  expect(section).toContain("`fixed` with the commit in `commit`, or each commit in `commits` when the fix took several,");
   // A comment can be right and still not belong in this change, as on northMES/northmes#285.
   expect(section).toContain(
     "Otherwise change nothing for it and decline it with the reason and the evidence: the claim is wrong, out of scope or already covered, shown by the command and its output, the file and lines, or the test that passes.",

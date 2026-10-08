@@ -211,6 +211,23 @@ test("a fixed answer's reply names the commit and is posted after the push", asy
   expect((await inspect(db, run.id)).executions.filter((e) => e.nodeKey === "pr").map((e) => e.attempt)).toEqual([1, 2]);
 });
 
+test("a fixed answer that names two commits replies with both", async () => {
+  const fixes: string[] = [];
+  const fixing: Answer = (_item, ctx) => {
+    fixes.push(commitChange(ctx, "Run the integration project in CI"), commitChange(ctx, "Document the CI job"));
+    return { verdict: "fixed", evidence: "vitest.config.ts:12 runs it now, and the README says so.", commit: fixes.map((f) => f.slice(0, 7)).join(", ") };
+  };
+  const github = new FakeGitHub();
+  const { run, wake } = await opened(replies, answeringCoder(fixing), github);
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  await wake();
+
+  const [a, b] = fixes as [string, string];
+  const link = (sha: string) => `[${sha.slice(0, 7)}](https://github.com/octo/sample/commit/${sha})`;
+  expect(repliesIn(github)[0]!.body.split("\n")[0]).toBe(`Valid. Fixed in ${link(a)} and ${link(b)}.`);
+  expect((await listItems(db, run.id))[0]?.fixCommit).toBe(`${a} ${b}`);
+});
+
 test("a reply handoff posted never comes back as feedback", async () => {
   // The coder fixes the thread and declines the review summary, so handoff answers in the thread and in a PR comment.
   const answer: Answer = (item, ctx) =>

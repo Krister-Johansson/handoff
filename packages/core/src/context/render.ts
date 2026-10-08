@@ -50,7 +50,7 @@ function renderReviewItems(items: ReviewItem[]): string[] {
     "",
     REVIEW_ITEMS_RULE,
     "",
-    "Give one answer per comment, by its handle: `fixed` with the commit, `declined` or `unclear` with the evidence, `duplicate` with the handle it repeats in `of`, or, for a comment that came back with the reviewer's reply, `settled` when that reply accepts the earlier answer.",
+    "Give one answer per comment, by its handle: `fixed` with the commit in `commit`, or each commit in `commits` when the fix took several, `declined` or `unclear` with the evidence, `duplicate` with the handle it repeats in `of`, or, for a comment that came back with the reviewer's reply, `settled` when that reply accepts the earlier answer.",
     "",
   ];
   for (const item of items) {
