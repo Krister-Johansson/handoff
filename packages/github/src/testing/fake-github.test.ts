@@ -112,6 +112,19 @@ test("with closesOnMerge, a merge closes the open issues the pull request's body
   expect(fake.closedIssues).toEqual([]);
 });
 
+test("mergeByHand merges a pull request the way a person does on GitHub: not among handoff's merges, and with checks left as they were", async () => {
+  const fake = github({ 12: "Slugify drops digits" });
+  fake.closesOnMerge = true;
+  const pr = await fake.createPr(repo, { head: "fix", base: "main", title: "Fix", body: "Closes #12" });
+  fake.mergeByHand(pr.number);
+  const snapshot = await fake.getPrSnapshot(repo, pr.number);
+  expect(snapshot).toMatchObject({ state: "merged", merged: true, checks: { state: "PENDING" } });
+  expect(fake.merged).toEqual([]);
+  expect(fake.issues.get(12)!.state).toBe("closed");
+  // An open pull request no longer: handoff's own merge does nothing.
+  expect(await fake.mergePr(repo, pr.number)).toEqual({ merged: false });
+});
+
 test("listMilestones lists the milestones a test set, dated ones by due date first, with counts of the issues in each", async () => {
   const fake = github({ 12: "Slugify drops digits", 14: "Add the column", 16: "Drag and drop" });
   fake.milestones.set(1, { number: 1, title: "Someday" });

@@ -224,8 +224,17 @@ export const PrConflictOutputSchema = z.object({
   conflict: z.object({ base: z.string(), baseSha: z.string(), files: z.array(z.string()) }),
 });
 
-/** What the PR node returns: the pull request's state, or a conflict with the base branch. */
-export const PrNodeOutputSchema = z.union([PrOutputSchema.extend({ sync: z.literal("clean").optional() }), PrConflictOutputSchema]);
+/** The PR node found the pull request merged on GitHub by a person: CI and reviews no longer decide anything. */
+export const PrMergedOutputSchema = z.object({
+  sync: z.literal("clean").optional(),
+  merged: z.literal(true),
+  prNumber: z.number().int(),
+  prUrl: z.string(),
+  headSha: z.string(),
+});
+
+/** What the PR node returns: the pull request's state, a conflict with the base branch, or a merge by hand. */
+export const PrNodeOutputSchema = z.union([PrOutputSchema.extend({ sync: z.literal("clean").optional() }), PrConflictOutputSchema, PrMergedOutputSchema]);
 
 /** `needsUpdate` when GitHub refused the merge because the branch conflicts with the base branch. */
 export const MergeOutputSchema = z.object({ merged: z.boolean(), sha: z.string().optional(), needsUpdate: z.boolean().optional() });

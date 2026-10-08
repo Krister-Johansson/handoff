@@ -30,6 +30,16 @@ test("every template wires the merge node's update port to the PR node", () => {
   }
 });
 
+test("every template sends the PR node on to merge through its ready port, so a pull request merged by hand goes on too", () => {
+  for (const template of [linear, loop, planReview]) {
+    const compiled = compileGraph(template);
+    if (!compiled.ok) throw new Error(compiled.errors.map((e) => e.message).join("; "));
+    const { graph } = compiled;
+    const toMerge = graph.outEdges("pr").filter((e) => graph.node(e.target).type === "merge");
+    expect(toMerge.map((e) => e.port)).toEqual(["ready"]);
+  }
+});
+
 test("the loop and plan templates demo UI changes before a Try it gate, and wire the demo's skipped port past the gate to the PR node", () => {
   for (const template of [loop, planReview]) {
     const compiled = compileGraph(template);

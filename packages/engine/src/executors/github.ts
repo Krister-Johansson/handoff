@@ -293,6 +293,19 @@ async function movePlan(projects: ProjectsPort | undefined, ctx: ExecutorContext
   for (const event of written) ctx.emit(event.type, event.payload);
 }
 
+/** Whether GitHub reports the pull request merged. */
+const isMerged = (snapshot: PrSnapshot) => snapshot.merged || snapshot.state === "merged";
+
+/**
+ * The pull request the run recorded, when a person merged it on GitHub before the PR step passed. GitHub
+ * no longer lists it among the branch's open pull requests, so the step would otherwise open another.
+ */
+async function mergedByHand(github: GitHubPort, repo: RepoRef, recorded: number | null) {
+  if (recorded === null) return undefined;
+  const snapshot = await github.getPrSnapshot(repo, recorded);
+  return isMerged(snapshot) ? { number: recorded } : undefined;
+}
+
 /** Whether the graph sends this node's `port` output anywhere. */
 const routes = (ctx: ExecutorContext, port: string) => ctx.graph.outEdges(ctx.node.key).some((e) => e.port === port);
 
@@ -418,7 +431,10 @@ export function prNodeExecutor(deps: {
 
       let number = ctx.state.prNumber;
       if (number === undefined) {
-        const pr = (await deps.github.findPrByHead(repo, ctx.run.branchName)) ?? (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, ...prText(ctx, shots) }));
+        const pr =
+          (await deps.github.findPrByHead(repo, ctx.run.branchName)) ??
+          (await mergedByHand(deps.github, repo, ctx.run.prNumber)) ??
+          (await deps.github.createPr(repo, { head: ctx.run.branchName, base: ctx.run.baseBranch, ...prText(ctx, shots) }));
         number = pr.number;
         await ctx.recordPrNumber(number);
         // The first time the run knows its pull request, its tasks wait for review. Run state only gets the
@@ -444,6 +460,12 @@ export function prNodeExecutor(deps: {
 
       const snapshot = await deps.github.getPrSnapshot(repo, number);
       if (snapshot.state === "closed") return { kind: "failed", error: { code: "pr_closed", message: `PR #${number} was closed without merging` } };
+      // A person merged it on GitHub: CI and reviews no longer decide anything. The ready port takes it to the
+      // merge step, which goes on as after its own merge.
+      if (isMerged(snapshot)) {
+        ctx.emit("github.merged_by_hand", { number, url: snapshot.url, headSha: snapshot.headSha });
+        return { kind: "completed", output: { sync: "clean", merged: true, prNumber: number, prUrl: snapshot.url, headSha: snapshot.headSha }, statePatch: { prNumber: number } };
+      }
 
       // External reviewers (review bots such as CodeRabbit or Copilot, or people) the node waits for.
       const settings = reviewSettings(ctx.node.config);
@@ -605,13 +627,13 @@ export function prNodeExecutor(deps: {
  * engine closes them itself. A failure here is reported as an event and does not fail the merge.
  * Returns the linked issues that are closed now, by GitHub or by this call.
  */
-async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, prNumber: number): Promise<number[]> {
+async function closeLinkedIssues(github: GitHubPort, ctx: ExecutorContext, repo: RepoRef, prNumber: number, mergedBy: string): Promise<number[]> {
   const closedNow: number[] = [];
   const closedHere: number[] = [];
   for (const { number } of closingIssues(ctx)) {
     try {
       if ((await github.getIssue(repo, number)).state === "open") {
-        await github.closeIssue(repo, number, `Fixed by #${prNumber}, merged by handoff run \`${ctx.run.id}\`.`);
+        await github.closeIssue(repo, number, `Fixed by #${prNumber}, ${mergedBy}.`);
         closedHere.push(number);
       }
       closedNow.push(number);
@@ -710,7 +732,7 @@ async function closeFinishedSplits(
  * are the issues the merge closed. A parent with an open sub-issue, or already closed, is left as it is.
  * A failure is a `github.parent_close_failed` event and never fails the merge.
  */
-async function closeFinishedParents(github: GitHubPort, projects: ProjectsPort | undefined, ctx: ExecutorContext, repo: RepoRef, prNumber: number, finished: number[]) {
+async function closeFinishedParents(github: GitHubPort, projects: ProjectsPort | undefined, ctx: ExecutorContext, repo: RepoRef, prNumber: number, mergedBy: string, finished: number[]) {
   const plan = ctx.project.planProjectNumber;
   // Read before the close: GitHub's "Item closed" workflow may set Done on the item as soon as it closes.
   const statusOf = async (issue: number) => (projects && plan !== null ? projects.getStatus(repo, plan, issue).catch(() => undefined) : undefined);
@@ -728,7 +750,7 @@ async function closeFinishedParents(github: GitHubPort, projects: ProjectsPort |
         if ((await github.listSubIssues(repo, parent)).some((s) => s.state === "open")) continue;
         if ((await github.getIssue(repo, parent)).state !== "open") continue;
         before.set(parent, await statusOf(parent));
-        await github.closeIssue(repo, parent, `Finished by #${prNumber}, merged by handoff run \`${ctx.run.id}\`, which closed #${child}, its last open sub-issue.`);
+        await github.closeIssue(repo, parent, `Finished by #${prNumber}, ${mergedBy}, which closed #${child}, its last open sub-issue.`);
         closed.push(parent);
         next.push(parent);
       } catch (error) {
@@ -741,6 +763,40 @@ async function closeFinishedParents(github: GitHubPort, projects: ProjectsPort |
   ctx.emit("github.parents_closed", { numbers: closed });
   const written = await writePlanStatus(projects, ctx.project, closed, "Done", before);
   for (const event of written) ctx.emit(event.type, event.payload);
+}
+
+/**
+ * What follows a merge of the run's pull request, whether this step merged it or a person merged it on
+ * GitHub (`byHand`): records and tells it, closes the linked issues GitHub left open, sets them Done on the
+ * plan, unblocks a split run's later parts, closes the splits and parents the merge finished, and wakes the
+ * project's runs and scheduler. `openBefore` are the linked issues open just before this step merged; after
+ * a merge by hand nobody knows them, so every linked issue closed now counts as closed by the merge.
+ */
+async function afterMerge(
+  deps: { github: GitHubPort; db?: Db | undefined; projects?: ProjectsPort | undefined },
+  ctx: ExecutorContext,
+  repo: RepoRef,
+  number: number,
+  merge: { sha?: string | undefined; byHand?: boolean; openBefore?: Set<number> },
+) {
+  const { db } = deps;
+  ctx.emit("github.merged", { number, sha: merge.sha, ...(merge.byHand ? { byHand: true } : {}) });
+  await ctx.notify("merged", { title: `${ctx.project.name}: PR #${number} merged`, body: brief(ctx.run.task), href: runPath(ctx.project.id, ctx.run.id) });
+  const mergedBy = merge.byHand ? `merged by hand while handoff run \`${ctx.run.id}\` waited` : `merged by handoff run \`${ctx.run.id}\``;
+  const closedNow = await closeLinkedIssues(deps.github, ctx, repo, number, mergedBy);
+  // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless. The split issue keeps its Status.
+  await movePlan(deps.projects, ctx, "Done", closingIssues(ctx));
+  await unblockParts(deps.github, ctx, repo);
+  const finished = merge.openBefore ? closedNow.filter((n) => merge.openBefore!.has(n)) : closedNow;
+  const splitsClosed = db ? await closeFinishedSplits(deps.github, deps.projects, db, ctx, repo, number, finished) : [];
+  await closeFinishedParents(deps.github, deps.projects, ctx, repo, number, mergedBy, [...finished, ...splitsClosed]);
+  // Closed issues may unblock other runs of the project waiting at their Start, and tasks the scheduler may start.
+  // Runs held on overlap check again, since the merged work is on the base now.
+  if (db) {
+    await wakeDependents(db, ctx.project.id);
+    await nudgeScheduler(db, ctx.project.id);
+    await wakeOverlapHeld(db, ctx.project.id);
+  }
 }
 
 /** Whether this execution already recorded an event of this type, across its waits. */
@@ -778,7 +834,8 @@ const QUEUE_RECHECK_MS = 60_000;
  * auto, asked to merge by a person. At its turn a pull request that conflicts with the base branch or
  * is behind it goes back on the update edge to catch up, keeping its place. One that GitHub reports as
  * blocked while it has unresolved review threads waits, keeping its place, until a person resolves them:
- * the step names the threads and notifies once. Merging wakes the queue.
+ * the step names the threads and notifies once. Merging wakes the queue. A pull request a person merged on
+ * GitHub is found on any look, in the queue or not, and the run goes on as after the step's own merge.
  */
 export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?: ProjectsPort | undefined }): NodeExecutor {
   return {
@@ -788,6 +845,18 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
       if (number === undefined) return { kind: "failed", error: { code: "no_pr", message: "no pull request recorded in run state" } };
       const repo = repoOf(ctx);
       const { db } = deps;
+      const done = async (outcome: ExecutorOutcome) => {
+        if (db) await leaveQueue(db, ctx.run.id, ctx.project.id);
+        return outcome;
+      };
+      // Read before the queue on every look, so a pull request a person merged on GitHub neither waits for a turn
+      // nor holds the queue: the run goes on as after its own merge and gives up its place.
+      const snapshot = await deps.github.getPrSnapshot(repo, number);
+      if (isMerged(snapshot)) {
+        // A step that merged it itself and looks again, after a worker restart, has done the rest already.
+        if (!(db && (await emittedBefore(db, ctx.execution.id, "github.merged")))) await afterMerge(deps, ctx, repo, number, { byHand: true });
+        return done({ kind: "completed", output: { merged: true } });
+      }
       if (db) {
         const mode = ctx.node.config.mode === "auto" ? "auto" : "manual";
         // An issue GitHub records as blocked by an open issue keeps the pull request out of the queue until that closes.
@@ -815,12 +884,6 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
           return { kind: "waiting", wait: { kind: "merge_queue", key, deadlineAt: new Date(Date.now() + QUEUE_RECHECK_MS) } };
         }
       }
-      const done = async (outcome: ExecutorOutcome) => {
-        if (db) await leaveQueue(db, ctx.run.id, ctx.project.id);
-        return outcome;
-      };
-      const snapshot = await deps.github.getPrSnapshot(repo, number);
-      if (snapshot.merged) return done({ kind: "completed", output: { merged: true } });
       // Main moved under the pull request: send it back to catch up, keeping its place in the queue.
       const catchUp = (why: string) =>
         routes(ctx, "update")
@@ -866,22 +929,7 @@ export function mergeNodeExecutor(deps: { github: GitHubPort; db?: Db; projects?
         const openBefore = await openLinkedIssues(deps.github, ctx, repo);
         const result = await deps.github.mergePr(repo, number, method);
         if (!result.merged) return done({ kind: "failed", error: { code: "merge_failed", message: `GitHub did not merge PR #${number}` } });
-        ctx.emit("github.merged", { number, sha: result.sha });
-        await ctx.notify("merged", { title: `${ctx.project.name}: PR #${number} merged`, body: brief(ctx.run.task), href: runPath(ctx.project.id, ctx.run.id) });
-        const closedNow = await closeLinkedIssues(deps.github, ctx, repo, number);
-        // GitHub's "Item closed" workflow usually gets there first; writing Done again is harmless. The split issue keeps its Status.
-        await movePlan(deps.projects, ctx, "Done", closingIssues(ctx));
-        await unblockParts(deps.github, ctx, repo);
-        const finished = closedNow.filter((n) => openBefore.has(n));
-        const splitsClosed = db ? await closeFinishedSplits(deps.github, deps.projects, db, ctx, repo, number, finished) : [];
-        await closeFinishedParents(deps.github, deps.projects, ctx, repo, number, [...finished, ...splitsClosed]);
-        // Closed issues may unblock other runs of the project waiting at their Start, and tasks the scheduler may start.
-        // Runs held on overlap check again, since the merged work is on the base now.
-        if (db) {
-          await wakeDependents(db, ctx.project.id);
-          await nudgeScheduler(db, ctx.project.id);
-          await wakeOverlapHeld(db, ctx.project.id);
-        }
+        await afterMerge(deps, ctx, repo, number, { sha: result.sha, openBefore });
         return done({ kind: "completed", output: { merged: true, ...(result.sha ? { sha: result.sha } : {}) } });
       } catch (error) {
         return done({ kind: "failed", error: { code: "merge_failed", message: (error as Error).message } });
