@@ -66,6 +66,18 @@ test("renderContextPacket lists linked issues after the task, with long bodies c
   expect(md.length).toBeLessThan(9_000);
 });
 
+test("a split run's linked issues say the pull request builds part 1 of the split issue and must refer to it as Part of", () => {
+  const md = renderContextPacket({
+    ...packet,
+    issues: [{ number: 11, title: "Add a board", url: "https://github.com/o/r/issues/11", body: "A board." }],
+    splitOf: { issue: 11, parts: [12, 13] },
+  });
+  const linked = md.split("# Linked issues")[1]!.split("\n## ")[0]!;
+  expect(linked).toContain("This run builds part 1 of #11; #12, #13 hold the later parts.");
+  expect(linked).toContain('Refer to #11 as "Part of #11" and never put a closing keyword');
+  expect(linked).not.toContain("closes them when it merges");
+});
+
 test("a linked issue with a story and an epic renders Part of before its body, story first", () => {
   const md = renderContextPacket({
     ...packet,

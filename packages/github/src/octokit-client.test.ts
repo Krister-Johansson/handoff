@@ -249,6 +249,17 @@ test("addBlockedBy links the blocking issue by its id", async () => {
   expect(calls.at(-1)).toMatchObject({ method: "POST", body: { issue_id: 9003 } });
 });
 
+test("removeBlockedBy removes the blocking issue by its id", async () => {
+  const { fetch, calls } = fakeFetch({
+    "GET /repos/octo/sample/issues/3": () => ({ json: { id: 9003, number: 3, title: "F03", html_url: "u", state: "open" } }),
+    "DELETE /repos/octo/sample/issues/6/dependencies/blocked_by/9003": () => ({ json: { id: 9006 } }),
+  });
+  const gh = OctokitGitHub.withToken("t", { fetch });
+  await gh.removeBlockedBy(repo, 6, 3);
+  expect(calls.at(-1)).toMatchObject({ method: "DELETE" });
+  expect(new URL(calls.at(-1)!.url).pathname).toBe("/repos/octo/sample/issues/6/dependencies/blocked_by/9003");
+});
+
 test("behindBy counts the base branch's commits the head does not have", async () => {
   const { fetch, calls } = fakeFetch({ "GET /repos/octo/sample/compare/.+": () => ({ json: { ahead_by: 2, behind_by: 0 } }) });
   const gh = OctokitGitHub.withToken("t", { fetch });

@@ -223,6 +223,13 @@ export class OctokitGitHub implements GitHubPort {
     await octokit.request("POST /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by", { owner: repo.owner, repo: repo.name, issue_number: issue, issue_id: data.id });
   }
 
+  async removeBlockedBy(repo: RepoRef, issue: number, blocker: number): Promise<void> {
+    const octokit = await this.clientFor(repo);
+    // Like adding one, the endpoint takes the blocking issue's id, not its number.
+    const { data } = await octokit.rest.issues.get({ owner: repo.owner, repo: repo.name, issue_number: blocker });
+    await octokit.request("DELETE /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by/{issue_id}", { owner: repo.owner, repo: repo.name, issue_number: issue, issue_id: data.id });
+  }
+
   async getIssue(repo: RepoRef, number: number, opts: { parents?: boolean } = {}): Promise<IssueDetail> {
     const [{ data }, parents] = await this.clientFor(repo)
       .then((octokit) =>

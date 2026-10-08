@@ -91,6 +91,8 @@ export type ContextPacket = {
   decisions?: { gate: string; note?: string | undefined; comments: ({ quote?: string | undefined; body: string } & Place)[] }[];
   /** Comments reviewers left with an approval earlier in the run: advice, below the person's decisions. */
   suggestions?: { from: string; comments: { path?: string | undefined; line?: number | undefined; body: string }[] }[];
+  /** For a run a plan gate split: the issue it builds part 1 of, which its pull request must not close, and the later parts' issues. */
+  splitOf?: { issue: number; parts: number[] } | undefined;
   /** The linked issues; `lineage` holds each one's parent and grandparent, nearest first, and `comments` are newest first. */
   issues?: {
     number: number;
@@ -229,6 +231,21 @@ function renderWorktree(environment: ContextPacket["environment"]): string[] {
 }
 
 /**
+ * What the linked issues are to the pull request: it closes them when it merges, except the issue a split
+ * run builds part 1 of, which stays open for its later parts.
+ */
+function linkedIntro(issues: { number: number }[], split: ContextPacket["splitOf"]): string[] {
+  if (!split || !issues.some((i) => i.number === split.issue)) return ["The task works on these GitHub issues. The pull request closes them when it merges."];
+  const others = issues.filter((i) => i.number !== split.issue);
+  const parts = split.parts.map((p) => `#${p}`).join(", ");
+  return [
+    `The task works on these GitHub issues. This run builds part 1 of #${split.issue}; ${parts} hold the later parts.`,
+    `The pull request must leave #${split.issue} open. Refer to #${split.issue} as "Part of #${split.issue}" and never put a closing keyword (close, fix, resolve or their other forms) in front of its number.`,
+    ...(others.length ? [`The pull request closes ${others.map((i) => `#${i.number}`).join(", ")} when it merges.`] : []),
+  ];
+}
+
+/**
  * An issue's comments, newest first, as many whole comments as fit in ISSUE_BODY_CHARS, the budget a
  * body has. A newest comment longer than that is cut; the older ones that do not fit are counted.
  */
@@ -340,7 +357,7 @@ export function renderContextPacket(packet: ContextPacket): string {
     out.push("");
   }
   if (packet.issues?.length) {
-    out.push("# Linked issues", "", "The task works on these GitHub issues. The pull request closes them when it merges.", "");
+    out.push("# Linked issues", "", ...linkedIntro(packet.issues, packet.splitOf), "");
     for (const issue of packet.issues) {
       const body = issue.body.trim();
       out.push(`## #${issue.number} ${issue.title}`, "", issue.url, "");

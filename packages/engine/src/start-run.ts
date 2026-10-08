@@ -1,5 +1,5 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import type { LinkedIssue, PreviousRun } from "@handoff/core";
+import type { LinkedIssue, PreviousRun, SplitOf } from "@handoff/core";
 import { graphs, graphVersions, planPins, projects, runs, type Db, type DbExecutor, type NewEvent } from "@handoff/db";
 import type { GitHubPort, PlanItem, PlanSize, ProjectsPort } from "@handoff/github";
 import { assignStarter } from "./assign-starter.ts";
@@ -28,6 +28,8 @@ export type StartRunInput = {
   events?: NewEvent[] | undefined;
   /** The failed run this run continues from its branch: its branch starts there, and its planner is told of it. */
   previousRun?: PreviousRun | undefined;
+  /** For a run started again of a split run: the split, so this run's pull request does not close the split issue either. */
+  splitOf?: SplitOf | undefined;
   /** For a run started again: the Status the earlier run moved each task from, which this run records as its own `from`. */
   statusesBefore?: StatusesBefore | undefined;
 };
@@ -86,7 +88,7 @@ export async function startRun(db: Db, input: StartRunInput, ports: StartRunPort
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`handoff.start:${input.projectId}`}))`);
     await refuseTaken(tx, input.projectId, numbers);
     if (input.maxActive !== undefined) await refuseFull(tx, input.projectId, input.maxActive);
-    const created = await createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events, previousRun: input.previousRun });
+    const created = await createRun(tx, { projectId: input.projectId, graphVersionId: latest.versionId, task, issues, startedBy: input.startedBy, size, events: input.events, previousRun: input.previousRun, splitOf: input.splitOf });
     // A pin keeps a task's place in the Flow's queue; a task with a run has left the queue, so its pin ends.
     if (numbers.length > 0) await tx.delete(planPins).where(and(eq(planPins.projectId, input.projectId), inArray(planPins.issue, numbers)));
     return created;

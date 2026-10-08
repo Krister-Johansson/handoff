@@ -37,7 +37,8 @@ const PROMPTS: Partial<Record<NodeType, string>> = {
     "Set size to S for a change in one place, M for a feature across a few files, L for a change across several areas.",
   coder:
     "Implement the task in the system prompt in this repository, following the plan in the run state. Commit your work with git when done. " +
-    "When you finish, fill pr with a title and a description of the change for a reviewer: what changed and why, what you left out, and how you verified it. Do not restate the plan.",
+    "When you finish, fill pr with a title and a description of the change for a reviewer: what changed and why, what you left out, and how you verified it. Do not restate the plan. " +
+    'Refer to an issue the pull request must leave open as "Part of #N", and never put a closing keyword (close, fix, resolve or their other forms) in front of its number, not even in "does not close #N".',
   demo:
     "Walk through the running app described in the system prompt with the playwright tools, as a person checking the acceptance criteria would. " +
     "Take a screenshot that shows each criterion, and report each one in shots. Do not edit files.",

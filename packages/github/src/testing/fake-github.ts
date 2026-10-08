@@ -129,6 +129,12 @@ export class FakeGitHub implements GitHubPort {
     found.blockedBy = [...new Set([...(found.blockedBy ?? []), blocker])];
   }
 
+  async removeBlockedBy(_repo: RepoRef, issue: number, blocker: number) {
+    const found = this.issues.get(issue);
+    if (!found) throw new Error(`no issue ${issue}`);
+    found.blockedBy = (found.blockedBy ?? []).filter((n) => n !== blocker);
+  }
+
   async getIssue(_repo: RepoRef, number: number, opts: { parents?: boolean } = {}): Promise<IssueDetail> {
     if (this.unreachable) throw new GitHubReadError("unreachable", `GitHub did not answer for #${number}.`);
     const issue = this.issues.get(number);
