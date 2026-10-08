@@ -727,7 +727,7 @@ test("getPrSnapshot maps each thread's id, outdated flag, the viewer's rights, w
   expect(schemaErrors(calls)).toEqual([]);
 });
 
-test("getPrSnapshot tells a bot's review from a person's and gives each PR comment its id and times", async () => {
+test("getPrSnapshot tells a bot's review and PR comment from a person's and gives each PR comment its id and times", async () => {
   const review = (databaseId: number, author: { __typename: string; login: string } | null) => ({ databaseId, state: "COMMENTED", body: "Actionable comments posted: 1", submittedAt: "2026-10-05T16:17:17Z", author, commit: { oid: "abc" } });
   const { fetch, calls } = fakeGraphql({
     PullRequestSnapshot: () => ({
@@ -738,12 +738,14 @@ test("getPrSnapshot tells a bot's review from a person's and gives each PR comme
             nodes: [
               {
                 databaseId: 9001,
-                author: { login: "coderabbitai" },
+                author: { __typename: "Bot", login: "coderabbitai" },
                 body: "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
                 url: "https://github.com/octo/sample/pull/7#issuecomment-9001",
                 createdAt: "2026-10-05T17:59:45Z",
                 updatedAt: "2026-10-05T18:12:37Z",
               },
+              { databaseId: 9002, author: { __typename: "User", login: "ann" }, body: "@coderabbitai review", url: "https://github.com/octo/sample/pull/7#issuecomment-9002", createdAt: "2026-10-05T18:13:00Z", updatedAt: "2026-10-05T18:13:00Z" },
+              { databaseId: 9003, author: null, body: "Old note.", url: "https://github.com/octo/sample/pull/7#issuecomment-9003", createdAt: "2026-10-05T18:14:00Z", updatedAt: "2026-10-05T18:14:00Z" },
             ],
           },
         }),
@@ -762,11 +764,15 @@ test("getPrSnapshot tells a bot's review from a person's and gives each PR comme
     {
       id: 9001,
       author: "coderabbitai",
+      authorBot: true,
       body: "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->",
       url: "https://github.com/octo/sample/pull/7#issuecomment-9001",
       createdAt: "2026-10-05T17:59:45Z",
       updatedAt: "2026-10-05T18:12:37Z",
     },
+    { id: 9002, author: "ann", authorBot: false, body: "@coderabbitai review", url: "https://github.com/octo/sample/pull/7#issuecomment-9002", createdAt: "2026-10-05T18:13:00Z", updatedAt: "2026-10-05T18:13:00Z" },
+    // A deleted account is GitHub's ghost, a person.
+    { id: 9003, author: "ghost", authorBot: false, body: "Old note.", url: "https://github.com/octo/sample/pull/7#issuecomment-9003", createdAt: "2026-10-05T18:14:00Z", updatedAt: "2026-10-05T18:14:00Z" },
   ]);
   expect(schemaErrors(calls)).toEqual([]);
 });

@@ -1056,11 +1056,11 @@ export type PullRequestSnapshotQuery = { repository: { pullRequest: { number: nu
                 | { __typename: 'Organization', login: string }
                 | { __typename: 'User', login: string }
                | null } | null> | null } } | null> | null }, comments: { nodes: Array<{ databaseId: number | null, body: string, url: string, createdAt: string, updatedAt: string, author:
-            | { login: string }
-            | { login: string }
-            | { login: string }
-            | { login: string }
-            | { login: string }
+            | { __typename: 'Bot', login: string }
+            | { __typename: 'EnterpriseUserAccount', login: string }
+            | { __typename: 'Mannequin', login: string }
+            | { __typename: 'Organization', login: string }
+            | { __typename: 'User', login: string }
            | null } | null> | null } } | null } | null };
 
 export type ThreadCommentFragment = { databaseId: number | null, body: string, path: string, line: number | null, url: string, createdAt: string, author:
@@ -2256,6 +2256,7 @@ export const PullRequestSnapshotDocument = new TypedDocumentString(`
         nodes {
           databaseId
           author {
+            __typename
             login
           }
           body

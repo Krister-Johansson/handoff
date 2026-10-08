@@ -1,5 +1,5 @@
 import type { Feedback } from "@handoff/core";
-import { HANDOFF_COMMENT_PREFIX, summaryCoversHead, type CheckContext, type CodeRabbitSummary, type PrSnapshot, type ReviewThread } from "@handoff/github";
+import { HANDOFF_COMMENT_PREFIX, reviewRequestMarker, summaryCoversHead, type CheckContext, type CodeRabbitSummary, type PrSnapshot, type ReviewThread } from "@handoff/github";
 
 /** A login as GitHub shows it in GraphQL or REST: coderabbitai and coderabbitai[bot] are the same reviewer. */
 export const sameLogin = (a: string, b: string) => a.toLowerCase().replace(/\[bot\]$/, "") === b.toLowerCase().replace(/\[bot\]$/, "");
@@ -93,6 +93,24 @@ export function reviewRequest(config: Record<string, unknown>): ReviewRequest | 
   const text = typeof comment === "string" && comment.trim() ? comment.trim() : `@${reviewer.trim().replace(/\[bot\]$/i, "")} review`;
   const minutes = typeof afterMinutes === "number" && afterMinutes >= 0 ? afterMinutes : 2;
   return { reviewer: reviewer.trim(), comment: text, afterMs: minutes * 60_000 };
+}
+
+/**
+ * CodeRabbit's answer to a review request on a commit it counts as reviewed: "Already reviewed the last commit.
+ * Use `@coderabbitai full review` to rerun a review of the entire changeset." Matched loosely, so a small change
+ * of wording still reads as the same answer.
+ */
+const ALREADY_REVIEWED = /\balready\s+(?:been\s+)?reviewed\b/i;
+
+/**
+ * Whether the reviewer's GitHub App answered handoff's review request for the head commit by saying it already
+ * reviewed it. Only a comment by the bot after the request for this head counts: a person's comment, or the
+ * answer to the request for an earlier head, does not.
+ */
+export function answeredAlreadyReviewed(snapshot: PrSnapshot, reviewer: string): boolean {
+  const asked = snapshot.comments.findIndex((c) => c.body.includes(reviewRequestMarker(snapshot.headSha)));
+  if (asked < 0) return false;
+  return snapshot.comments.slice(asked + 1).some((c) => c.authorBot === true && sameLogin(c.author, reviewer) && ALREADY_REVIEWED.test(c.body));
 }
 
 /** A login or a status name in lower case letters and digits only: coderabbitai[bot] and CodeRabbit become coderabbitai and coderabbit. */

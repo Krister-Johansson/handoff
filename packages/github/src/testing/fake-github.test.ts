@@ -246,3 +246,19 @@ test("summaryComment creates a bot's summary comment and then edits it in place,
   expect((await fake.getPrSnapshot(repo, pr.number)).comments).toEqual([expect.objectContaining(summary)]);
   expect(await fake.listIssueComments(repo, pr.number)).toEqual([expect.objectContaining(summary), expect.objectContaining({ author: "ann", body: "Looks fine." })]);
 });
+
+test("prComment adds a comment to the pull request, and the snapshot tells a bot's comment from a person's", async () => {
+  const fake = new FakeGitHub();
+  const pr = await fake.createPr(repo, { head: "fix", base: "main", title: "Fix", body: "" });
+  fake.prComment(pr.number, "ann", "@coderabbitai review");
+  fake.prComment(pr.number, "coderabbitai", "Already reviewed the last commit.");
+  fake.prComment(pr.number, "coderabbitai", "Again.");
+
+  const { comments } = await fake.getPrSnapshot(repo, pr.number);
+  expect(comments.map((c) => [c.author, c.authorBot, c.body])).toEqual([
+    ["ann", false, "@coderabbitai review"],
+    ["coderabbitai", true, "Already reviewed the last commit."],
+    ["coderabbitai", true, "Again."],
+  ]);
+  expect((await fake.listIssueComments(repo, pr.number)).map((c) => c.body)).toEqual(comments.map((c) => c.body));
+});

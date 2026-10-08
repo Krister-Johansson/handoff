@@ -86,6 +86,7 @@ query PullRequestSnapshot($owner: String!, $name: String!, $number: Int!) {
         nodes {
           databaseId
           author {
+            __typename
             login
           }
           body
