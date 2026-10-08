@@ -113,7 +113,10 @@ describe("withPorts", () => {
         const planner = before.graph.graph.source(edge) === "planner" && a.condition === undefined;
         // A PR node's fix now also takes conflicts with main.
         const prFix = before.graph.graph.source(edge) === "pr" && b.port === "fix";
-        const expected = planner ? { neq: ["node.output.status", "needs_input"] } : prFix ? portsOf("pr", {}).outputs.find((p) => p.id === "fix")!.condition : (a.condition ?? null);
+        // And its ready also takes a pull request a person merged on GitHub.
+        const prReady = before.graph.graph.source(edge) === "pr" && b.port === "ready";
+        const prPort = prFix || prReady ? portsOf("pr", {}).outputs.find((p) => p.id === b.port)!.condition : undefined;
+        const expected = planner ? { neq: ["node.output.status", "needs_input"] } : (prPort ?? a.condition ?? null);
         expect({ on: b.on, condition: b.condition ?? null, loop: b.loop }, edge).toEqual({ on: a.on, condition: expected, loop: a.loop });
       }
     }
@@ -188,4 +191,21 @@ test("a planner can ask: needs input next to done, and an old output without a s
   const done = ports.find((p) => p.id === "done")!.condition!;
   expect(evaluateCondition(done, { node: { output: { plan: "p", steps: [], ownedPaths: [] } } } as never)).toBe(true);
   expect(evaluateCondition(done, { node: { output: { status: "needs_input" } } } as never)).toBe(false);
+});
+
+test("a pull request a person merged on GitHub leaves the PR node through ready, whatever CI said, and never through fix", () => {
+  const [ready, fix] = portsOf("pr", {}).outputs;
+  const merged = { sync: "clean", merged: true, prNumber: 292, prUrl: "u", headSha: "abc" };
+  expect(evaluateCondition(ready!.condition!, { node: { output: merged } } as never)).toBe(true);
+  expect(evaluateCondition(fix!.condition!, { node: { output: merged } } as never)).toBe(false);
+  // Still open with CI pending: neither, so the step keeps waiting.
+  const pending = { sync: "clean", prNumber: 292, prUrl: "u", headSha: "abc", feedback: { ci: { status: "pending" }, review: { decision: "approved" } } };
+  expect(evaluateCondition(ready!.condition!, { node: { output: pending } } as never)).toBe(false);
+});
+
+test("a graph saved before a merged pull request went on through ready finds the ready port from its old condition", () => {
+  const ported = withPorts(GraphDocumentSchema.parse(linear));
+  const edge = ported.edges.find((e) => e.key === "pr->merge")!.attributes;
+  expect(edge).toMatchObject({ port: "ready", input: "in" });
+  expect(edge.condition).toBeUndefined();
 });

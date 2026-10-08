@@ -252,22 +252,7 @@
       "target": "merge",
       "attributes": {
         "loop": false,
-        "condition": {
-          "all": [
-            {
-              "eq": [
-                "node.output.feedback.ci.status",
-                "success"
-              ]
-            },
-            {
-              "neq": [
-                "node.output.feedback.review.decision",
-                "changes_requested"
-              ]
-            }
-          ]
-        }
+        "port": "ready"
       }
     },
     {

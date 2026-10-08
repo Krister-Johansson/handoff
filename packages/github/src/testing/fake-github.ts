@@ -520,16 +520,28 @@ export class FakeGitHub implements GitHubPort {
     if (!pr || pr.state !== "open" || pr.mergeable === "CONFLICTING") return { merged: false };
     // GitHub answers 405 when a ruleset blocks the merge.
     if (this.mergeStateOf(pr) === "BLOCKED") throw new Error(`Repository rule violations found. PR #${number} is blocked by the base branch's rules.`);
+    this.land(pr);
+    this.merged.push(number);
+    return { merged: true, sha: `merge-${number}` };
+  }
+
+  /** Merges the pull request, closing the issues its body names with Closes when closesOnMerge is on. */
+  private land(pr: FakePr) {
     pr.state = "merged";
     pr.merged = true;
-    this.merged.push(number);
     if (this.closesOnMerge) {
       for (const [, n] of pr.body.matchAll(/^Closes #(\d+)$/gm)) {
         const issue = this.issues.get(Number(n));
         if (issue) issue.state = "closed";
       }
     }
-    return { merged: true, sha: `merge-${number}` };
+  }
+
+  /** A person merges the pull request on GitHub: it is not among handoff's merges, and its checks stay as they were. */
+  mergeByHand(number: number) {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    this.land(pr);
   }
 
   async upsertPrComment(_repo: RepoRef, number: number, marker: string, body: string) {

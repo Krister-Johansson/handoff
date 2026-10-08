@@ -4,6 +4,7 @@ import {
   MergeOutputSchema,
   PlannerOutputSchema,
   PrConflictOutputSchema,
+  PrMergedOutputSchema,
   PrOutputSchema,
   ReviewerOutputSchema,
   TesterOutputSchema,
@@ -69,6 +70,8 @@ export function summarizeOutput(output: unknown): string | undefined {
     if (sentBack) parts.push(sentBack);
     return parts.join(", ");
   }
+  const byHand = PrMergedOutputSchema.safeParse(output);
+  if (byHand.success) return `PR #${byHand.data.prNumber} merged by hand`;
   const conflict = PrConflictOutputSchema.safeParse(output);
   if (conflict.success) {
     const { base, files } = conflict.data.conflict;

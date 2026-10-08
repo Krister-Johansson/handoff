@@ -37,6 +37,7 @@ test("a test run, a review, a pull request, a merge and an answer each get one l
     }),
   ).toBe("PR #10, CI passing, approved");
   expect(summarizeOutput({ merged: true, sha: "07dc1569861d" })).toBe("Merged as 07dc156");
+  expect(summarizeOutput({ sync: "clean", merged: true, prNumber: 292, prUrl: "u", headSha: "abc" })).toBe("PR #292 merged by hand");
   expect(summarizeOutput({ sync: "conflict", conflict: { base: "main", baseSha: "abc", files: ["package.json", "README.md"] } })).toBe(
     "Conflicts with main in 2 files: package.json, README.md",
   );

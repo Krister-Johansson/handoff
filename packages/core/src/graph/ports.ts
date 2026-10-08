@@ -24,6 +24,9 @@ const out = (id: string, label: string, condition?: Condition, kind: OutputPort[
 /** The node types that run an agent, so they can use what a feedback edge brings. */
 export const FEEDBACK_TARGETS = new Set(["planner", "coder", "reviewer", "code_review"]);
 
+/** A PR node's pull request passed CI and nobody asks for changes. */
+const READY_CHECKS: Condition = { all: [{ eq: ["node.output.feedback.ci.status", "success"] }, { neq: ["node.output.feedback.review.decision", "changes_requested"] }] };
+
 const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, OutputPort[]> = {
   planner: [out("done", "done", { neq: ["node.output.status", "needs_input"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
   coder: [out("done", "done", { eq: ["node.output.status", "done"] }), out("needs_input", "needs input", { eq: ["node.output.status", "needs_input"] })],
@@ -33,7 +36,8 @@ const OUTPUTS: Record<Exclude<NodeType, "human_gate" | "start" | "finish">, Outp
   demo: [out("done", "done", { neq: ["node.output.skipped", true] }), out("skipped", "skipped", { eq: ["node.output.skipped", true] })],
   tester: [out("pass", "pass", { eq: ["node.output.passed", true] }), out("fail", "fail", { eq: ["node.output.passed", false] }, "feedback")],
   pr: [
-    out("ready", "ready", { all: [{ eq: ["node.output.feedback.ci.status", "success"] }, { neq: ["node.output.feedback.review.decision", "changes_requested"] }] }),
+    // On to merge: CI passed and nobody asks for changes, or a person merged the pull request on GitHub.
+    out("ready", "ready", { any: [{ eq: ["node.output.merged", true] }, READY_CHECKS] }),
     // Back to the coder: CI failed, a reviewer asked for changes, or main changed the same lines as the run.
     out(
       "fix",
@@ -84,6 +88,8 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
 const EARLIER_CONDITIONS: { type: string; port: string; condition: Condition }[] = [
   // The PR node's fix port before it also took conflicts with main.
   { type: "pr", port: "fix", condition: { any: [{ eq: ["node.output.feedback.ci.status", "failure"] }, { eq: ["node.output.feedback.review.decision", "changes_requested"] }] } },
+  // The PR node's ready port before a pull request merged by hand also went on through it.
+  { type: "pr", port: "ready", condition: READY_CHECKS },
 ];
 
 /**
