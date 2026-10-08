@@ -9,14 +9,14 @@ import type { RepoRef } from "@handoff/github";
 import { FakeGitHub } from "@handoff/github/testing";
 import { answerQuestion } from "../operations.ts";
 import { createRun } from "../runs.ts";
-import { createOriginRepo, git } from "../testing/git.ts";
+import { createOriginRepo, git, landOnMain } from "../testing/git.ts";
 import { drain, engineDeps, inspect, seedGraph } from "../testing/harness.ts";
 import { done, outputs, scripted } from "../testing/scripted.ts";
 import type { ExecutorContext, NodeExecutor } from "../types.ts";
 import { GitWorktreeProvider } from "../workdir/git-worktree.ts";
 import { withReviewAnswers } from "./cli-node.ts";
 import { mergeNodeExecutor, prNodeExecutor } from "./github.ts";
-import { handleOf, listItems } from "./review-items.ts";
+import { handleOf, listItems, SUMMARY_HELD } from "./review-items.ts";
 
 const db = createTestDb();
 beforeEach(() => truncateAll(db));
@@ -124,7 +124,7 @@ function answeringCoder(answer: Answer, onCall?: (call: number) => void): NodeEx
 }
 
 /** A run whose PR node waits for CI; CI then passes, and `wake` lets the PR node look again. */
-async function opened(prConfig: Record<string, unknown>, coder: NodeExecutor, github = new FakeGitHub(), prExecutor?: NodeExecutor, document = graph) {
+async function opened(prConfig: Record<string, unknown>, coder: NodeExecutor, github = new FakeGitHub(), prExecutor?: NodeExecutor, document: (prConfig: Record<string, unknown>) => unknown = graph) {
   const origin = createOriginRepo();
   github.origin = origin;
   const { project, graphVersion } = await seedGraph(db, document(prConfig), { localClonePath: origin });
@@ -1042,4 +1042,166 @@ test("on a guided graph a second decline returns to the PR node without the chec
   expect(step).toMatchObject({ status: "waiting", waitKind: "human", waitToken: question!.id });
   expect((await itemsOf(run.id)).R1).toMatchObject({ state: "disputed", questionId: question!.id });
   expect(repliesIn(github).map((c) => c.author)).toEqual(["octocat", "coderabbitai"]);
+});
+
+/** A graph with the merge node's update edge back to the PR node, which a pull request behind main takes to catch up. */
+const withUpdate = (document: typeof graph) => (prConfig: Record<string, unknown>) => {
+  const doc = document(prConfig);
+  return { ...doc, edges: [...doc.edges, { key: "merge->pr", source: "merge", target: "pr", attributes: { port: "update", loop: true, maxAttempts: 3 } }] };
+};
+
+/** Waits for CodeRabbit's review and summary, and asks for its review as soon as a commit has none. */
+const catchingUp = { ...withSummary, reviewRequest: { reviewer: "coderabbitai", afterMinutes: 0 } };
+
+/** Another pull request lands on main, and the merge step finds this one behind at its turn. */
+function mainMoves(origin: string, github: FakeGitHub, path = "OTHER.md") {
+  landOnMain(origin, path, `${path}\n`);
+  github.behind.set(1, 1);
+}
+
+/** The events of one PR step, by attempt. */
+async function prEvents(runId: string, attempt: number) {
+  const { events, executions } = await inspect(db, runId);
+  const step = executions.find((e) => e.nodeKey === "pr" && e.attempt === attempt);
+  return events.filter((e) => step !== undefined && e.nodeExecutionId === step.id);
+}
+
+/** handoff's review requests on the pull request for one commit. */
+const requestsFor = (github: FakeGitHub, sha: string) => github.prs.get(1)!.comments.filter((c) => c.body.includes(`<!-- handoff:review-request ${sha}`));
+
+test("after handoff's catch-up merge and no other commit, the PR step counts CodeRabbit's review and summary and asks for no review", async () => {
+  const github = new FakeGitHub();
+  const { origin, run, wake, pr } = await opened(catchingUp, answeringCoder(decline), github, undefined, withUpdate(graph));
+  const reviewed = pr().headSha;
+  github.reviewOnHead(1, "coderabbitai", { state: "APPROVED" });
+  github.summaryComment(1, summaryOf(reviewed, { risk: "⚪ Minimal", note: "No merge-blocking issue is identified." }));
+  mainMoves(origin, github);
+  await wake();
+
+  // The merge step sent the pull request back to catch up, and the PR step pushed handoff's merge of main.
+  const caughtUp = await prStep(run.id, 2);
+  expect(caughtUp?.trigger).toMatchObject({ kind: "edge", edgeKey: "merge->pr" });
+  const head = pr().headSha;
+  expect(head).not.toBe(reviewed);
+  const events = await prEvents(run.id, 2);
+  expect(events.find((e) => e.type === "github.synced")?.payload).toMatchObject({ merged: true, from: reviewed, head });
+  // CodeRabbit does not review a merge-only push, and it answers a review request with "Already reviewed the last commit".
+  expect(caughtUp?.status).toBe("passed");
+  expect(events.map((e) => e.type)).not.toContain("github.reviewers");
+  expect(requestsFor(github, head)).toEqual([]);
+  expect(github.merged).toEqual([1]);
+});
+
+test("after a fix and handoff's merge of main, the PR step waits for CodeRabbit's review of the fix and asks for it, as before", async () => {
+  const github = new FakeGitHub();
+  const { origin, run, wake, pr } = await opened(catchingUp, answeringCoder(fixing), github, undefined, withUpdate(graph));
+  const reviewed = pr().headSha;
+  github.reviewOnHead(1, "coderabbitai", { state: "COMMENTED", threads: [{ path: "vitest.config.ts", line: 12, body: "The integration project never runs in CI." }] });
+  github.summaryComment(1, summaryOf(reviewed, { risk: "⚪ Minimal", note: "No merge-blocking issue is identified." }));
+  // Main moves while the coder fixes the thread, so the PR step merges main on top of the fix.
+  landOnMain(origin, "OTHER.md", "other\n");
+  await wake();
+
+  const step = await prStep(run.id, 2);
+  const events = await prEvents(run.id, 2);
+  const synced = events.find((e) => e.type === "github.synced")?.payload as { merged: boolean; from: string; head: string };
+  expect(synced).toMatchObject({ merged: true, head: pr().headSha });
+  expect(synced.from).not.toBe(reviewed);
+  expect(step?.status).toBe("waiting");
+  expect(events.filter((e) => e.type === "github.reviewers").at(-1)?.payload).toMatchObject({ waitingFor: ["coderabbitai", "coderabbitai summary"] });
+  expect(requestsFor(github, pr().headSha)).toHaveLength(1);
+  expect(github.merged).toEqual([]);
+});
+
+test("the dd271699 case: summary items answered on an approved head do not hold the PR step after handoff's merge of main", async () => {
+  // As on northMES/northmes#305: CodeRabbit approved the head, and its summary listed a note and a failed title check.
+  const title = { name: "Title check", explanation: "The title describes the changes, but `feat` is incorrect for test-only work.", resolution: "Use `test(testing):` as the prefix." };
+  const answer: Answer = (item) =>
+    item.kind === "pre_merge_check"
+      ? { verdict: "fixed", evidence: 'The PR title is now "test(testing): follow NM_TEST_PG_TZ".' }
+      : { verdict: "declined", evidence: "The note says the change is mergeable after normal checks; nothing asks for a change." };
+  const github = new FakeGitHub();
+  const { origin, run, wake, pr } = await opened(catchingUp, answeringCoder(answer), github, undefined, withUpdate(graph));
+  const reviewed = pr().headSha;
+  github.reviewOnHead(1, "coderabbitai", { state: "APPROVED" });
+  pr().reviewDecision = "APPROVED";
+  github.summaryComment(1, summaryOf(reviewed, { note: "The test harness changes are mergeable after normal checks.", failed: [title] }));
+  // Main moved meanwhile: the PR step that posts the answers pushes handoff's merge of main.
+  landOnMain(origin, "OTHER.md", "other\n");
+  await wake();
+
+  const items = await itemsOf(run.id);
+  expect(items.R1).toMatchObject({ kind: "summary_note", verdict: "declined", state: "awaiting_review" });
+  expect(items.R2).toMatchObject({ kind: "pre_merge_check", verdict: "fixed", state: "awaiting_review" });
+  const events = await prEvents(run.id, 2);
+  expect(events.find((e) => e.type === "github.synced")?.payload).toMatchObject({ merged: true, from: reviewed, head: pr().headSha });
+  expect((await prStep(run.id, 2))?.status).toBe("passed");
+  expect(events.map((e) => e.type)).not.toContain("github.reviewers");
+  expect(events.map((e) => e.type)).not.toContain("github.rereview");
+  expect(requestsFor(github, pr().headSha)).toEqual([]);
+  expect(github.merged).toEqual([1]);
+});
+
+/** A FakeGitHub that calls `onHead` the first time a snapshot shows a head commit, as a review bot answering each push. */
+class PushWatchingGitHub extends FakeGitHub {
+  onHead: ((head: string) => void) | undefined;
+  private readonly seen = new Set<string>();
+  override async getPrSnapshot(repo: RepoRef, number: number) {
+    const snapshot = await super.getPrSnapshot(repo, number);
+    if (this.seen.has(snapshot.headSha)) return snapshot;
+    this.seen.add(snapshot.headSha);
+    if (!this.onHead) return snapshot;
+    this.onHead(snapshot.headSha);
+    return super.getPrSnapshot(repo, number);
+  }
+}
+
+test("the ae89840d case: summary notes CodeRabbit rewords on each summary go to the coder with other work only, and the loop does not run out", async () => {
+  // As on northMES/northmes#309: each new summary words the same note about the image scanner differently, and the
+  // Linked Issues check stays failed for the part of the issue a later pull request builds.
+  const linked = { name: "Linked Issues check", explanation: "Rule `#194` is not fully implemented: the web project is missing.", resolution: "Add the web project, or say it is deferred." };
+  const note = (n: number) => `The Postgres image check can miss stale references written in form ${n}.`;
+  let fixes = 0;
+  const answer: Answer = (item, ctx) =>
+    item.kind === "thread"
+      ? { verdict: "fixed", evidence: "The claim held; the fixture covers it now.", commit: commitChange(ctx, `Fix ${++fixes}`) }
+      : item.kind === "pre_merge_check"
+        ? { verdict: "declined", evidence: "The web project is part 2 of #194; this pull request says Part of #194." }
+        : { verdict: "declined", evidence: "The scanner's gaps are the bounded first slice the approved plan leaves to a follow-up." };
+  const github = new PushWatchingGitHub();
+  const { origin, run, wake, pr } = await opened(withSummary, answeringCoder(answer), github, undefined, withUpdate(graph));
+  const reviewed = (n: number, threads: { path: string; line: number; body: string }[]) => {
+    github.reviewOnHead(1, "coderabbitai", threads.length ? { state: "COMMENTED", threads } : { state: "APPROVED" });
+    github.summaryComment(1, summaryOf(pr().headSha, { note: note(n), failed: [linked] }));
+  };
+
+  // Round 1: a thread, the note and the check go to the coder. It fixes the thread and declines the rest.
+  reviewed(1, [{ path: "scripts/lint/pg-image.mjs", line: 31, body: "docker.io/library/postgres is not recognised." }]);
+  await wake();
+  // Round 2: CodeRabbit reviews the fix with a new thread, and its summary words the note anew. The note goes with the thread.
+  reviewed(2, [{ path: "test/meta/collection.test.ts", line: 111, body: "Add dist and node_modules fixtures." }]);
+  await wake();
+  expect((await coderAttempt(run.id, 3))?.contextPacket).toMatchObject({ reviewItems: [expect.objectContaining({ kind: "thread" }), expect.objectContaining({ kind: "summary_note" })] });
+
+  // CodeRabbit approves the second fix and words the note a third time; main moves, so the merge step sends the
+  // pull request back to catch up, and CodeRabbit words the note a fourth time on handoff's merge of main.
+  mainMoves(origin, github);
+  github.onHead = () => github.summaryComment(1, summaryOf(pr().headSha, { note: note(4), failed: [linked] }));
+  reviewed(3, []);
+  await wake();
+
+  const { executions, events, run: row } = await inspect(db, run.id);
+  expect(events.map((e) => e.type)).not.toContain("edge.exhausted");
+  expect(row.state).toMatchObject({ loops: { "pr->coder": { attempts: 2 } } });
+  expect(executions.filter((e) => e.nodeKey === "coder").map((e) => e.attempt)).toEqual([1, 2, 3]);
+  const items = await itemsOf(run.id);
+  // The check the coder declined is not sent again while the summaries list it.
+  expect(items.R3).toMatchObject({ kind: "pre_merge_check", verdict: "declined", state: "awaiting_review" });
+  // The third and fourth wordings are recorded, and wait for a round that goes to the coder for something else.
+  const held = Object.values(items).filter((i) => i.kind === "summary_note" && i.verdict === null);
+  expect(held.map((i) => [i.body, i.state, i.stateReason])).toEqual([
+    [note(3), "open", SUMMARY_HELD],
+    [note(4), "open", SUMMARY_HELD],
+  ]);
+  expect(github.merged).toEqual([1]);
 });

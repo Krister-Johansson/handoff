@@ -112,11 +112,41 @@ export function namedAfter(check: CheckContext, login: string): boolean {
 export const reviewerCheck = (settings: ReviewSettings) => (check: CheckContext) => settings.waitFor.some((login) => namedAfter(check, login));
 
 /**
- * Whether a reviewer has started on the PR's head commit: it reviewed that commit, or a check or status
- * named after it (CodeRabbit's is "CodeRabbit") is in progress there.
+ * Whether a reviewer's review of a commit holds for the PR's head: the commit is the head, or the head
+ * reached it only through handoff's own merges of the base branch, which bring in nothing of the run's.
  */
-export function reviewerStarted(snapshot: PrSnapshot, login: string): boolean {
-  if (snapshot.reviews.some((r) => r.commitSha === snapshot.headSha && sameLogin(r.author, login))) return true;
+export type SameCode = (sha: string | null | undefined) => boolean;
+
+/**
+ * The commits whose reviews hold for `head`: the head, and each commit a chain of handoff's catch-up
+ * merges was made on. `merges` maps each merge commit handoff pushed to bring the base in to the commit
+ * it was made on, as the PR node recorded them; a commit anyone else made ends the chain.
+ */
+export function sameCodeAs(head: string, merges: ReadonlyMap<string, string> = new Map()): SameCode {
+  const lower = (sha: string) => sha.toLowerCase();
+  const byMerge = new Map([...merges].map(([merge, from]) => [lower(merge), lower(from)]));
+  const same = new Set([lower(head)]);
+  for (let at = lower(head), from = byMerge.get(at); from !== undefined && !same.has(from); at = from, from = byMerge.get(at)) same.add(from);
+  return (sha) => typeof sha === "string" && same.has(lower(sha));
+}
+
+/**
+ * Whether a summary counts for the head: it covers the head with no review in progress, or it covers a
+ * commit the head reached only through handoff's merges of the base. The bot does not review such a merge
+ * again, so its summary of the commit before it holds, also while it looks at the merge.
+ */
+export function summaryCovers(summary: CodeRabbitSummary, headSha: string, same: SameCode = sameCodeAs(headSha)): boolean {
+  if (summaryCoversHead(summary, headSha)) return true;
+  const covered = summary.coveredCommit;
+  return covered !== null && covered.toLowerCase() !== headSha.toLowerCase() && same(covered);
+}
+
+/**
+ * Whether a reviewer has started on the PR's head commit: it reviewed that commit, or one whose review
+ * holds for it (`same`), or a check or status named after it (CodeRabbit's is "CodeRabbit") is in progress there.
+ */
+export function reviewerStarted(snapshot: PrSnapshot, login: string, same: SameCode = sameCodeAs(snapshot.headSha)): boolean {
+  if (snapshot.reviews.some((r) => same(r.commitSha) && sameLogin(r.author, login))) return true;
   return (snapshot.checks?.contexts ?? []).some((c) => c.conclusion === null && namedAfter(c, login));
 }
 
@@ -179,20 +209,22 @@ export function changeRequesters(snapshot: PrSnapshot): string[] {
 /**
  * Where the reviews of the PR's head commit stand: which listed reviewers have not reviewed it yet,
  * whether the wait has run out, and what reviewers said that has not been sent back yet (unresolved
- * inline threads, and review summaries that are not approvals).
+ * inline threads, and review summaries that are not approvals). A review or summary of a commit the
+ * head reached only through handoff's merges of the base (`same`) counts as one of the head.
  */
 export function externalReview(
   snapshot: PrSnapshot,
   settings: ReviewSettings,
   handled: ReadonlySet<string>,
   waitingForMs: number,
-  opts: { summary?: { login: string; read: SummaryRead | undefined } } = {},
+  opts: { summary?: { login: string; read: SummaryRead | undefined }; same?: SameCode } = {},
 ) {
-  const onHead = snapshot.reviews.filter((r) => r.commitSha === snapshot.headSha);
+  const same = opts.same ?? sameCodeAs(snapshot.headSha);
+  const onHead = snapshot.reviews.filter((r) => same(r.commitSha));
   const missing = settings.waitFor.filter((login) => !onHead.some((r) => sameLogin(r.author, login)));
   // A summary bot has finished with the head once its summary covers the head with no review in progress.
   const summary = opts.summary;
-  const summaryDone = summary?.read !== undefined && summaryCoversHead(summary.read.summary, snapshot.headSha);
+  const summaryDone = summary?.read !== undefined && summaryCovers(summary.read.summary, snapshot.headSha, same);
   if (summary && !summaryDone) missing.push(`${summary.login} summary`);
   const timedOut = missing.length > 0 && waitingForMs >= settings.timeoutMs;
   const findings: Finding[] = [];

@@ -33,12 +33,32 @@ import {
   reviewRequest,
   reviewSettings,
   reviewThreadsSettings,
+  sameCodeAs,
   sameLogin,
   withFindings,
   type ReviewRequest,
   type SummaryRead,
 } from "./external-review.ts";
-import { applyDecisions, askAboutItems, awaitingReview, closeIfSettled, handleOf, hasUnsent, listItems, postAnswers, questionOf, recordAnswers, recordOutdated, reReview, sendItems, sentBack, settleItems, syncItems, withItems } from "./review-items.ts";
+import {
+  applyDecisions,
+  askAboutItems,
+  awaitingReview,
+  closeIfSettled,
+  handleOf,
+  hasUnsent,
+  listItems,
+  postAnswers,
+  questionOf,
+  recordAnswers,
+  recordOutdated,
+  reReview,
+  sendItems,
+  sentBack,
+  settleItems,
+  SUMMARY_HELD,
+  syncItems,
+  withItems,
+} from "./review-items.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -189,13 +209,17 @@ export function reviewerNotes(ctx: ExecutorContext): string | undefined {
   return [REVIEWER_NOTES_MARKER, "### Reviewer notes", "", ...sections, `Posted by handoff run \`${ctx.run.id}\`. Updated on each attempt.`].join("\n");
 }
 
-type Sync = { status: "up_to_date" | "merged"; baseSha: string } | { status: "conflict"; baseSha: string; files: string[] };
+type Sync =
+  | { status: "up_to_date"; baseSha: string }
+  | { status: "merged"; baseSha: string; from: string; head: string }
+  | { status: "conflict"; baseSha: string; files: string[] };
 
 /**
  * Brings the run's branch up to date with the base branch before it is pushed: fetches the base and
- * merges it in when the branch is behind. On a conflict the merge is undone, the worktree stays as the
- * coder left it, and the conflicting files are reported. The merge commit uses the machine's git
- * identity, or handoff's when none is set.
+ * merges it in when the branch is behind. A merge reports the commit it was made on (`from`) and the
+ * merge commit (`head`). On a conflict the merge is undone, the worktree stays as the coder left it,
+ * and the conflicting files are reported. The merge commit uses the machine's git identity, or
+ * handoff's when none is set.
  */
 async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv, retryMs?: number): Promise<Sync> {
   const run = async (args: string[]) => (await execFileAsync("git", args, { cwd, env })).stdout.trim();
@@ -207,14 +231,36 @@ async function syncWithBase(cwd: string, base: string, env: NodeJS.ProcessEnv, r
   );
   if (!behind) return { status: "up_to_date", baseSha };
   const identity = (await run(["config", "user.email"]).catch(() => "")) ? [] : ["-c", "user.name=handoff", "-c", "user.email=handoff@localhost"];
+  const from = await run(["rev-parse", "HEAD"]);
   try {
     await run([...identity, "merge", "--no-edit", "-m", `Merge ${base} into this branch`, baseSha]);
-    return { status: "merged", baseSha };
+    return { status: "merged", baseSha, from, head: await run(["rev-parse", "HEAD"]) };
   } catch {
     const files = (await run(["diff", "--name-only", "--diff-filter=U"]).catch(() => "")).split("\n").filter(Boolean);
     await run(["merge", "--abort"]).catch(() => undefined);
     return { status: "conflict", baseSha, files };
   }
+}
+
+/**
+ * The merges of the base branch handoff pushed on the run's branch, each merge commit with the commit it
+ * was made on, from the PR node's `github.synced` events, and `current`, this step's own, whose event is
+ * not saved yet. Only handoff's records count: a merge commit anyone else pushed is not among them.
+ */
+async function catchUpMerges(db: Db | undefined, runId: string, current?: { from: string; head: string }): Promise<Map<string, string>> {
+  const merges = new Map<string, string>();
+  if (db) {
+    const rows = await db
+      .select({ payload: events.payload })
+      .from(events)
+      .where(and(eq(events.runId, runId), eq(events.type, "github.synced")));
+    for (const { payload } of rows) {
+      const { merged, from, head } = (payload ?? {}) as { merged?: unknown; from?: unknown; head?: unknown };
+      if (merged === true && typeof from === "string" && typeof head === "string") merges.set(head, from);
+    }
+  }
+  if (current) merges.set(current.head, current.from);
+  return merges;
 }
 
 /** A commit on the run's remote branch that handoff did not push, such as a review bot's autofix. */
@@ -309,6 +355,8 @@ export function prNodeExecutor(deps: {
 
       const pushing = !ctx.execution.wakeReason;
       let shots: PrShot[] = [];
+      // This push's merge of the base, recorded with the run's earlier ones once the step's events are saved.
+      let merged: { from: string; head: string } | undefined;
       if (pushing) {
         if (!ctx.workdir) return { kind: "failed", error: { code: "no_workdir", message: "PR node needs the run worktree to push" } };
         const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", ...(await deps.github.gitAuthEnv(repo)) };
@@ -323,7 +371,9 @@ export function prNodeExecutor(deps: {
           if (deps.db) await leaveQueue(deps.db, ctx.run.id, ctx.project.id);
           return { kind: "completed", output: { sync: "conflict", conflict: { base: ctx.run.baseBranch, baseSha: sync.baseSha, files: sync.files } } };
         }
-        ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged" });
+        // A merge records the commit it was made on and the merge commit, so a later look knows the merge brought in only the base.
+        if (sync.status === "merged") merged = { from: sync.from, head: sync.head };
+        ctx.emit("github.synced", { base: ctx.run.baseBranch, baseSha: sync.baseSha, merged: sync.status === "merged", ...merged });
         const cwd = ctx.workdir.path;
         // The lease refuses the push when origin's branch moved since handoff's last push. --force-if-includes also refuses it when a
         // fetch in the shared clone (another run starting) moved the remote-tracking branch, which the lease alone would trust.
@@ -398,6 +448,8 @@ export function prNodeExecutor(deps: {
       // External reviewers (review bots such as CodeRabbit or Copilot, or people) the node waits for.
       const settings = reviewSettings(ctx.node.config);
       const threads = reviewThreadsSettings(ctx.node.config);
+      // A review of a commit the head reached only through handoff's own merges of the base holds for the head.
+      const same = sameCodeAs(snapshot.headSha, await catchUpMerges(deps.db, ctx.run.id, merged));
       // With replies on, what reviewers say becomes review items, which the coder answers and handoff answers on GitHub.
       const itemsDb = threads.reply && settings.sendBack ? deps.db : undefined;
       // The bot whose summary comment the node reads; it waits for that summary like a listed reviewer.
@@ -414,7 +466,7 @@ export function prNodeExecutor(deps: {
         // A person answered the step's question: their choice for each item comes first.
         if (question?.answer != null) await applyDecisions(items, ctx, { repo, snapshot, question });
         // What the reviewers made of the answers already on GitHub; before this step posts any, so none is resolved in the step that answered it.
-        if (threads.resolveAfterReview) await reReview(items, ctx, { repo, snapshot, summary });
+        if (threads.resolveAfterReview) await reReview(items, ctx, { repo, snapshot, summary, same });
         // A question whose items were all settled on GitHub meanwhile needs no answer.
         if (question) question = await closeIfSettled(itemsDb, ctx, question);
         // An answer that settles a reviewer's reply resolves its thread at once.
@@ -460,13 +512,14 @@ export function prNodeExecutor(deps: {
       // without them, run state lists the findings already sent.
       const handled = new Set(!itemsDb && Array.isArray(ctx.state.prHandledReviews) ? ctx.state.prHandledReviews.map(String) : []);
       const waitingForMs = sincePush;
-      const external = externalReview(snapshot, settings, handled, waitingForMs, summary ? { summary } : {});
+      const external = externalReview(snapshot, settings, handled, waitingForMs, { same, ...(summary ? { summary } : {}) });
       const awaitingReviewers = external.missing.length > 0 && !external.timedOut && feedback.ci.status !== "failure" && snapshot.state === "open";
       if (external.missing.length) ctx.emit("github.reviewers", { number, waitingFor: external.missing, timedOut: external.timedOut });
       if (external.timedOut) ctx.emit("github.reviewers_timeout", { number, missing: external.missing });
-      // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit.
+      // Some reviewers only start when asked (CodeRabbit on a public repository with few stars): ask once per head commit,
+      // but not after a catch-up merge alone, which CodeRabbit answers with "Already reviewed the last commit".
       const ask = reviewRequest(ctx.node.config);
-      const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer);
+      const unstarted = ask !== undefined && snapshot.state === "open" && !reviewerStarted(snapshot, ask.reviewer, same);
       if (unstarted && sincePush >= ask.afterMs) await requestReview(deps.github, ctx, repo, snapshot, ask);
 
       // Answers on GitHub wait for their reviewer's next review, which resolves them, up to the reviewer's limit.
@@ -512,15 +565,19 @@ export function prNodeExecutor(deps: {
       if (itemsDb) {
         // Each finding is an item once; the open ones go to the coder by handle, up to the round's cap.
         const rows = await syncItems(itemsDb, ctx.run.id, external.findings, ctx.execution.attempt);
-        const sent = await sendItems(itemsDb, rows, external.findings, ctx.execution.attempt, threads.maxPerRound, back?.handles);
+        const { sent, held } = await sendItems(itemsDb, rows, external.findings, ctx.execution.attempt, threads.maxPerRound, back?.handles);
+        // Summary items alone do not send the run back once the coder answered that reviewer's summary: they go with the next round.
+        if (held.length) ctx.emit("github.summary_items_held", { number, items: held.map(handleOf) });
         if (sent.length) {
           routed = withItems(feedback, sent, snapshot, back?.notes);
           ctx.emit("github.review_findings", { number, findings: sent.length, items: sent.map(handleOf) });
         } else if (feedback.review.decision === "changes_requested") {
           // GitHub keeps a reviewer's CHANGES_REQUESTED until it approves (with a ruleset, a later commit). Once
           // handoff answered everything that reviewer raised, the old decision sends nothing back to the coder.
+          // A summary item that waits for other work does not count as unanswered here, as it sends nothing back on its own.
           const requesters = changeRequesters(snapshot);
-          const answered = (login: string) => rows.some((r) => sameLogin(r.reviewer, login)) && !rows.some((r) => sameLogin(r.reviewer, login) && (r.state === "open" || r.state === "answered"));
+          const waits = (r: (typeof rows)[number]) => r.state === "answered" || (r.state === "open" && !held.some((h) => h.id === r.id) && r.stateReason !== SUMMARY_HELD);
+          const answered = (login: string) => rows.some((r) => sameLogin(r.reviewer, login)) && !rows.some((r) => sameLogin(r.reviewer, login) && waits(r));
           if (requesters.length > 0 && requesters.every(answered)) {
             routed = { ...feedback, review: { ...feedback.review, decision: "none" } };
             ctx.emit("github.changes_requested_answered", { number, reviewers: requesters });
