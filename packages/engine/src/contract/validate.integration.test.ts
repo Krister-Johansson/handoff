@@ -159,6 +159,31 @@ test("a fixed answer whose commit was on the branch before the round fails", asy
   expect(fixed.passed).toBe(true);
 });
 
+test("a fixed answer that names two commits checks each one and names the ones that do not hold", async () => {
+  // Run fa26ae45 answered R3 fixed with commit "1e3ca42, 6892e36" and failed although both were on the branch.
+  const dir = await worktree();
+  const head = git(dir, "rev-parse", "HEAD");
+  const state = sentItems(head, ["R1"]);
+  const reviewRound = itemsToAnswer(state, ["pr"]);
+  writeFileSync(join(dir, "a.md"), "first part");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-qm", "fix R1, first part");
+  const first = git(dir, "rev-parse", "--short", "HEAD");
+  writeFileSync(join(dir, "a.md"), "second part");
+  git(dir, "commit", "-qam", "fix R1, second part");
+  const second = git(dir, "rev-parse", "--short", "HEAD");
+  const answer = (commit: Record<string, unknown>) => ({ ...coderDone, answers: [{ id: "R1", verdict: "fixed", evidence: "Renamed in two steps.", ...commit }] });
+
+  for (const commit of [{ commit: `${first}, ${second}` }, { commit: `${first} ${second}` }, { commits: [first, second] }]) {
+    const result = await validateContract({ output: "coder_output", checks: [] }, answer(commit), { state, baseBranch: "main", workdir: dir, reviewRound });
+    expect(result.passed).toBe(true);
+  }
+
+  const mixed = await validateContract({ output: "coder_output", checks: [] }, answer({ commit: `${first}, 0000000, ${head.slice(0, 7)}` }), { state, baseBranch: "main", workdir: dir, reviewRound });
+  expect(mixed.passed).toBe(false);
+  expect(mixed.checks[0]?.detail).toBe(`R1: commit 0000000 is not on the branch; R1: commit ${head.slice(0, 7)} was on the branch before this round; commit the fix and give that commit`);
+});
+
 test("a summary note or pre-merge check is fixed without a commit when the evidence says what changed; a thread is not", async () => {
   const dir = await worktree();
   const state = sentItems(git(dir, "rev-parse", "HEAD"), ["R1", "R2", "R3", "R4"], { R2: "pre_merge_check", R3: "summary_note", R4: "review_body" });

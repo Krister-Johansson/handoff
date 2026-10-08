@@ -57,6 +57,14 @@ test("the run page reads each review item with links to its commit, and handles 
   expect(items[2]).toMatchObject({ reraisedAs: "R4", commit: null, commitUrl: null });
 });
 
+test("an item fixed in two commits links the first, not the two as one commit", async () => {
+  const { run } = await seedRun(db, { status: "waiting" });
+  await seedItems(run.id);
+  await db.update(reviewItems).set({ fixCommit: "4e1a9c2d0b 7b3f00e1aa" });
+  const [item] = await runReviewItems(db, run.id, { owner: "o", name: "r" });
+  expect(item).toMatchObject({ commit: "4e1a9c2d0b", commitUrl: "https://github.com/o/r/commit/4e1a9c2d0b" });
+});
+
 test("the merge step's unresolved threads name the item each belongs to and why it is the person's now", async () => {
   const { run } = await seedRun(db, { status: "waiting" });
   await seedItems(run.id);

@@ -41,6 +41,7 @@ export const reviewItems = pgTable(
     round: integer("round").notNull(),
     verdict: reviewItemVerdict("verdict"),
     evidence: text("evidence"),
+    /** With a fixed verdict: the full commits of the fix, separated by spaces. */
     fixCommit: text("fix_commit"),
     /** With a duplicate verdict: the handle of the item this one repeats. */
     duplicateOf: integer("duplicate_of"),

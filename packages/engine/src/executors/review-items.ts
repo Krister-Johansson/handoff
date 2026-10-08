@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { brief, runPath, type Feedback, type RunState } from "@handoff/core";
+import { brief, commitsOf, runPath, splitCommits, type Feedback, type ReviewAnswer, type RunState } from "@handoff/core";
 import { and, asc, eq, inArray, questions, reviewItems, sql, type Db, type ReviewItemRow } from "@handoff/db";
 import { HANDOFF_COMMENT_PREFIX, type GitHubPort, type PrSnapshot, type RepoRef, type ReviewThread } from "@handoff/github";
 import { notifyFrom } from "../notify.ts";
@@ -31,6 +31,9 @@ const execFileAsync = promisify(execFile);
 
 /** The handle the coder and the dashboard know an item by. */
 export const handleOf = (item: Pick<ReviewItemRow, "handle">) => `R${item.handle}`;
+
+/** Handles or commits in a list as a person reads them: R1, R1 and R2, or R1, R2 and R3. */
+const listed = (ids: string[]) => (ids.length <= 1 ? (ids[0] ?? "") : `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}`);
 
 /** Ends handoff's reply in an item's thread: one reply per item and head commit. */
 export const itemReplyMarker = (handle: number, headSha: string) => `${HANDOFF_COMMENT_PREFIX}item-reply R${handle} ${headSha} -->`;
@@ -191,7 +194,7 @@ export function withItems(feedback: Feedback, items: ReviewItemRow[], snapshot?:
     const thread = r.kind === "thread" && r.verdict !== null ? snapshot?.reviewThreads.find((t) => t.id === r.githubId) : undefined;
     // A summary item has no thread: handoff says why it came back.
     const relisted: ThreadEntry[] =
-      r.stateReason === SUMMARY_STILL_LISTS ? [{ author: "handoff", body: `${r.fixCommit ? `Fixed in ${r.fixCommit.slice(0, 7)}.` : "Fixed."} ${r.reviewer}'s summary of the fix still lists this.` }] : [];
+      r.stateReason === SUMMARY_STILL_LISTS ? [{ author: "handoff", body: `${r.fixCommit ? `Fixed in ${listed(splitCommits(r.fixCommit).map((c) => c.slice(0, 7)))}.` : "Fixed."} ${r.reviewer}'s summary of the fix still lists this.` }] : [];
     return [...(thread ? conversationOf(thread) : []), ...relisted, ...(notes.get(handleOf(r)) ?? [])];
   };
   return {
@@ -228,6 +231,13 @@ async function fullCommit(workdir: string | undefined, commit: string): Promise<
   }
 }
 
+/** What `fix_commit` keeps for an answer: the full commits a fixed answer names, separated by spaces, or null. */
+async function fixCommitOf(workdir: string | undefined, answer: ReviewAnswer): Promise<string | null> {
+  const commits = answer.verdict === "fixed" ? commitsOf(answer) : [];
+  if (commits.length === 0) return null;
+  return [...new Set(await Promise.all(commits.map((c) => fullCommit(workdir, c))))].join(" ");
+}
+
 /**
  * Records the coder's answers to the items the PR node's last completed step sent: run state keeps them
  * under `reviewAnswers`, by handle, with the PR step that sent them. An item already answered on GitHub
@@ -252,7 +262,7 @@ export async function recordAnswers(db: Db, ctx: Pick<ExecutorContext, "run" | "
       .set({
         verdict: answer.verdict,
         evidence: answer.evidence,
-        fixCommit: answer.verdict === "fixed" && answer.commit ? await fullCommit(ctx.workdir?.path, answer.commit) : null,
+        fixCommit: await fixCommitOf(ctx.workdir?.path, answer),
         duplicateOf: answer.verdict === "duplicate" && of ? of.handle : null,
         state: disputed ? "disputed" : "answered",
         stateReason: reason,
@@ -288,7 +298,7 @@ function itemLink(item: ReviewItemRow): string {
 
 /**
  * An item's answer as handoff posts it: its first line says what the coder found ("Valid. Fixed in
- * <commit>.", or "Valid. Fixed." for a summary item fixed without one, "Not changed.", "Unclear: <question>", or "Same point as <link>."),
+ * <commit>." naming every commit, as in "Fixed in <a> and <b>.", or "Valid. Fixed." for a summary item fixed without one, "Not changed.", "Unclear: <question>", or "Same point as <link>."),
  * and the evidence follows as the coder wrote it, cut at `limit`. A declined comment may be wrong or
  * right but out of scope, so its first line claims neither and the evidence says which.
  */
@@ -298,8 +308,8 @@ export function answerText(item: ReviewItemRow, items: ReviewItemRow[], repo: Re
   switch (item.verdict) {
     case "fixed": {
       // A summary note or pre-merge check can be fixed without a commit, such as through the title; the evidence says how.
-      const commit = item.fixCommit;
-      return withEvidence(commit ? `Valid. Fixed in [${commit.slice(0, 7)}](https://github.com/${repo.owner}/${repo.name}/commit/${commit}).` : "Valid. Fixed.");
+      const commits = splitCommits(item.fixCommit).map((c) => `[${c.slice(0, 7)}](https://github.com/${repo.owner}/${repo.name}/commit/${c})`);
+      return withEvidence(commits.length ? `Valid. Fixed in ${listed(commits)}.` : "Valid. Fixed.");
     }
     case "unclear":
       return `Unclear: ${evidence}`;
@@ -705,6 +715,8 @@ export const noReviewReason = (reviewer: string, minutes: number) => `${NO_REVIE
 
 function askedItem(item: ReviewItemRow, snapshot: PrSnapshot): AskedItem {
   const thread = item.kind === "thread" ? snapshot.reviewThreads.find((t) => t.id === item.githubId) : undefined;
+  // The question shows one commit: the first the fix names.
+  const [commit] = splitCommits(item.fixCommit);
   return {
     id: handleOf(item),
     kind: item.kind,
@@ -718,13 +730,11 @@ function askedItem(item: ReviewItemRow, snapshot: PrSnapshot): AskedItem {
     conversation: thread ? conversationOf(thread) : [],
     verdict: item.verdict,
     evidence: item.evidence ?? "",
-    ...(item.fixCommit ? { commit: item.fixCommit } : {}),
+    ...(commit ? { commit } : {}),
     ...(item.replyUrl ? { replyUrl: item.replyUrl } : {}),
   };
 }
 
-/** The handles in a list as a person reads them: R1, R1 and R2, or R1, R2 and R3. */
-const listed = (ids: string[]) => (ids.length <= 1 ? (ids[0] ?? "") : `${ids.slice(0, -1).join(", ")} and ${ids.at(-1)}`);
 
 /** The question a PR step asked, if it asked one. One step asks at most one. */
 export async function questionOf(db: Db, executionId: string) {

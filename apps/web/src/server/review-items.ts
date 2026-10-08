@@ -1,3 +1,4 @@
+import { splitCommits } from "@handoff/core";
 import { and, asc, desc, eq, events, inArray, nodeExecutions, reviewItems, type DbExecutor } from "@handoff/db";
 import type { ReviewItemView } from "../lib/review-items";
 import type { ReReviewer } from "../lib/reviewers";
@@ -77,6 +78,8 @@ export async function runReviewItems(db: DbExecutor, runId: string, repo: { owne
   const rows = await db.select().from(reviewItems).where(eq(reviewItems.runId, runId)).orderBy(asc(reviewItems.handle));
   return rows.map((r) => {
     const id = `R${r.handle}`;
+    // fix_commit lists every commit of a fix separated by spaces; the run page links the first.
+    const [commit] = splitCommits(r.fixCommit);
     return {
       id,
       kind: r.kind,
@@ -90,8 +93,8 @@ export async function runReviewItems(db: DbExecutor, runId: string, repo: { owne
       round: r.round,
       verdict: r.verdict,
       evidence: r.evidence,
-      commit: r.fixCommit,
-      commitUrl: r.fixCommit ? `https://github.com/${repo.owner}/${repo.name}/commit/${r.fixCommit}` : null,
+      commit: commit ?? null,
+      commitUrl: commit ? `https://github.com/${repo.owner}/${repo.name}/commit/${commit}` : null,
       duplicateOf: handle(r.duplicateOf),
       replyUrl: r.replyUrl,
       repliedAt: r.repliedAt?.toISOString() ?? null,

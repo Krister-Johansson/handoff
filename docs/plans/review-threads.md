@@ -139,7 +139,8 @@ answers?: {
   id: string;                 // "R3"
   verdict: "fixed" | "declined" | "unclear" | "duplicate" | "settled";
   evidence: string;           // what was checked and what it showed
-  commit?: string;            // with fixed: the commit that fixes it
+  commit?: string;            // with fixed: the commit that fixes it; several may be separated by commas or spaces
+  commits?: string[];         // with fixed, when the fix took several commits: each of them
   of?: string;                // with duplicate: the item it repeats, such as "R2"
 }[]
 ```
@@ -150,7 +151,7 @@ The engine adds a deterministic check, `review_items_answered`, to a coder attem
 
 - an item sent has no answer, or has two;
 - an answer names an item that was not sent;
-- `fixed` has no commit, or the commit is not on the branch, or it was already on the branch when the round started. A summary note or pre-merge check may be `fixed` without a commit when its evidence says what changed, such as the pull request's title; handoff then answers "Valid. Fixed." (approved with step 8);
+- `fixed` has no commit, or a commit it names is not on the branch, or was already on the branch when the round started. Each commit in `commit` and `commits` is checked, and the check names the ones that fail. A summary note or pre-merge check may be `fixed` without a commit when its evidence says what changed, such as the pull request's title; handoff then answers "Valid. Fixed." (approved with step 8);
 - `declined`, `unclear` or `duplicate` has empty evidence, or `duplicate` names an unknown item;
 - `settled` answers an item that came back without a reviewer reply.
 
@@ -173,7 +174,7 @@ Valid. Fixed in 94c0c6c.
 <!-- handoff:item-reply R3 94c0c6c8a1... -->
 ```
 
-The first line is one of "Valid. Fixed in <commit link>.", "Not changed." (the evidence says whether the comment is wrong or out of scope), "Unclear:" followed by the question, or "Same point as <link to the other item>.". The evidence follows as the coder wrote it, cut at 4,000 characters.
+The first line is one of "Valid. Fixed in <commit link>." (with a link to each commit when the fix took several, as in "Fixed in <a> and <b>."), "Not changed." (the evidence says whether the comment is wrong or out of scope), "Unclear:" followed by the question, or "Same point as <link to the other item>.". The evidence follows as the coder wrote it, cut at 4,000 characters.
 
 Items without a thread (review summaries, summary notes, pre-merge checks) are answered together in one new PR comment per round, one paragraph per item with the same first lines, ending with `<!-- handoff:item-answers <round> <head sha> -->`. A new comment per round, not an edit of the last one, so the reviewer sees an answer to its newest findings.
 
@@ -303,7 +304,7 @@ The summary comment offers an Autopilot checkbox that has CodeRabbit fix its fin
 
 ### Data model
 
-- New table `review_items`: `id uuid`, `run_id` (references `runs`, cascade), `handle int` (unique per run), `key text` (unique per run: `thread:<node id>`, `review:<id>`, `note:<hash>`, `check:<name>`), `kind` (`thread`, `review_body`, `summary_note`, `pre_merge_check`), `github_id text`, `reviewer text`, `reviewer_bot boolean`, `path text`, `line int`, `body text`, `url text`, `round int`, `verdict`, `evidence text`, `fix_commit text`, `duplicate_of int`, `reply_comment_id text`, `reply_url text`, `reply_head_sha text`, `replied_at timestamptz`, `state`, `state_reason text`, `resolved_by text`, `resolved_at timestamptz`, `question_id` (references `questions`), `created_at`, `updated_at`. Enums for kind, verdict and state. One migration, generated and reviewed.
+- New table `review_items`: `id uuid`, `run_id` (references `runs`, cascade), `handle int` (unique per run), `key text` (unique per run: `thread:<node id>`, `review:<id>`, `note:<hash>`, `check:<name>`), `kind` (`thread`, `review_body`, `summary_note`, `pre_merge_check`), `github_id text`, `reviewer text`, `reviewer_bot boolean`, `path text`, `line int`, `body text`, `url text`, `round int`, `verdict`, `evidence text`, `fix_commit text` (the full commits of a fix, separated by spaces), `duplicate_of int`, `reply_comment_id text`, `reply_url text`, `reply_head_sha text`, `replied_at timestamptz`, `state`, `state_reason text`, `resolved_by text`, `resolved_at timestamptz`, `question_id` (references `questions`), `created_at`, `updated_at`. Enums for kind, verdict and state. One migration, generated and reviewed.
 - Run state (JSON, no migration): `reviewAnswers` from the coder executor; the PR node's output feedback comments gain `item` (the handle) and `conversation`.
 - `CoderOutputSchema`: `answers`, and the engine-set `answerOnly`.
 - `FeedbackSchema` review comments: optional `item`, `kind` and `conversation`.
