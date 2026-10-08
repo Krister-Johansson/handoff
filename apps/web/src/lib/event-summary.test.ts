@@ -12,6 +12,11 @@ test("summarizes a call an earlier Always allow in the run covered, by what it d
   );
 });
 
+test("summarizes a call the node's own allow list covered as allowed by that list", () => {
+  const payload = { id: "p1", toolName: "Bash", input: { command: "echo $X" }, rule: "Bash(echo *)", decidedBy: "node allow list" };
+  expect(summarizeEvent({ type: "permission.auto_allowed", payload })).toBe("Allowed by Bash(echo *), in the node's allow list: echo $X");
+});
+
 test("summarizes an edge by its endpoints", () => {
   expect(summarizeEvent({ type: "edge.taken", payload: { from: "coder", to: "pr" } })).toBe("coder to pr");
 });
